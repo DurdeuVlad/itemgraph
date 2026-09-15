@@ -48,6 +48,38 @@ Examples:
 
 Observations never claim more than the source actually proves.
 
+### Observation direction convention
+
+Implemented in Phase 4. Each stored observation is a directed flow of one fingerprint at one timestamp:
+
+```text
+node_id  =  ORIGIN       (where the item came FROM)
+target_node_id = DESTINATION  (where the item went TO)
+```
+
+This is ItemGraph's modeling decision, not something GriefLogger states. GriefLogger's `items` table is player-centric — every row records an action a player performed, naming only the player. Recording that literally (origin = player, destination = unset, for every action) loses direction entirely: a drop and the pickup that recovers the same stack would share no node, leaving correlation nothing to join on.
+
+The implemented node types are `PLAYER`, `CONTAINER`, `GROUND`, `ARMOR_STAND`, and `UNKNOWN` (`com.itemgraph.graph.NodeType`), resolved to stable identities by `com.itemgraph.graph.NodeManager`:
+
+| Source | Action | Origin | Destination |
+| --- | --- | --- | --- |
+| items | `DROP_ITEM`, `THROW_ITEM`, `SHOOT_ITEM` | player | ground |
+| items | `PICKUP_ITEM` | ground | player |
+| items | `ADD_ITEM`, `ADD_ITEM_ENDER`, `CRAFT_ITEM` | unknown | player |
+| items | `REMOVE_ITEM`, `REMOVE_ITEM_ENDER`, `BREAK_ITEM`, `CONSUME_ITEM` | player | unknown |
+| items | unrecognized action id | player | *(none — no direction claimed)* |
+| containers | any | container | interacting player, if known |
+
+`GROUND` nodes are keyed by dimension plus the block coordinate the logged position floors into, so a drop and a later pickup at the same block resolve to the same node. That shared node is what makes the MVP chain traversable:
+
+```text
+Chest A -> Player A -> Ground -> Player B -> Chest B
+```
+
+`UNKNOWN` is a real, queryable sentinel node (one per dimension, carrying no coordinates), not a null. It marks an endpoint that genuinely cannot be determined from the source — the materials consumed by a craft, the destination of a consumed item — and keeps *"the item left the player, destination unevidenced"* distinct from *"this row makes no topological claim"*. It is an explicit unresolved, never a guess.
+
+`ARMOR_STAND` identities exist and are tested, but nothing produces them yet: GriefLogger has zero armor stand event coverage (Phase 0 recon), so wiring them needs the Phase 8 supplemental hooks.
+
 ### Inferred edges
 
 An inferred edge represents a plausible transfer or transformation derived from observations.
