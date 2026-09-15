@@ -19,7 +19,8 @@ public class MigrationRunner {
             new V2__DeduplicationConstraint(),
             new V3__ResetForCanonicalization(),
             new V4__ItemFlowTopology(),
-            new V5__ContainerFlowTopology()
+            new V5__ContainerFlowTopology(),
+            new V6__CorrelationState()
     );
 
     public static int runMigrations(Connection conn) throws SQLException {

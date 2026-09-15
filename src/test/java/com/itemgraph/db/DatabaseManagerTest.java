@@ -32,7 +32,7 @@ class DatabaseManagerTest {
 
         assertTrue(dbManager.isInitialized());
         assertTrue(dbManager.isConnected());
-        assertEquals(5, dbManager.getCurrentSchemaVersion());
+        assertEquals(6, dbManager.getCurrentSchemaVersion());
         assertTrue(Files.exists(dbPath));
 
         Connection conn = dbManager.getConnection();
@@ -74,9 +74,27 @@ class DatabaseManagerTest {
             assertEquals(0, affected);
         }
 
+        // V6 adds the correlation bookkeeping column the engine's incremental scan is
+        // driven by; a fresh observation must start life unevaluated (NULL).
+        List<String> observationColumns = new ArrayList<>();
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("PRAGMA table_info(ig_observations)")) {
+            while (rs.next()) {
+                observationColumns.add(rs.getString("name"));
+            }
+        }
+        assertTrue(observationColumns.contains("correlated_at"), "ig_observations.correlated_at must exist");
+
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT correlated_at FROM ig_observations")) {
+            assertTrue(rs.next());
+            rs.getLong("correlated_at");
+            assertTrue(rs.wasNull(), "a newly ingested observation must not be marked correlated");
+        }
+
         // Verify re-initializing does not fail and migrations are idempotent
         dbManager.close();
         dbManager.initialize(dbPath);
-        assertEquals(5, dbManager.getCurrentSchemaVersion());
+        assertEquals(6, dbManager.getCurrentSchemaVersion());
     }
 }
