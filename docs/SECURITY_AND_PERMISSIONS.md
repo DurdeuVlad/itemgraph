@@ -1,0 +1,121 @@
+# Security and Permissions
+
+## Threat model
+
+ItemGraph can expose highly sensitive server information:
+
+- hidden player locations
+- base coordinates
+- private container contents
+- faction storage
+- player behavior timelines
+- movement of valuable items
+
+For that reason, ItemGraph is not merely a convenience command. It is a privileged moderation system.
+
+## Default policy
+
+**Default deny.**
+
+No sensitive graph access should be granted unless a permission explicitly allows it.
+
+## Suggested permission structure
+
+Exact permission integration depends on the server's permission system.
+
+Conceptual permissions:
+
+```text
+itemgraph.admin
+itemgraph.trace.item
+itemgraph.trace.player
+itemgraph.trace.container
+itemgraph.event.view
+itemgraph.explain
+itemgraph.status
+itemgraph.export
+```
+
+Potential restricted sub-permissions:
+
+```text
+itemgraph.view.coordinates
+itemgraph.view.player_inventory
+itemgraph.view.faction_storage
+itemgraph.view.names
+```
+
+## Player-facing mode
+
+A future player-facing mode may be useful for disputes, but it must be designed separately.
+
+Possible safe rules:
+
+- only show the player's own inventory events
+- only show containers the player is currently authorized to inspect
+- hide unrelated player identity
+- hide coordinates outside currently authorized areas
+- do not expose destination after an item leaves authorized scope
+
+Example:
+
+```text
+14:31 You removed 1x named helmet from your chest
+14:52 1x named helmet left your inventory
+16:03 1x named helmet returned to your inventory
+```
+
+Not:
+
+```text
+14:52 Bob carried it to SecretBase at X 431 Z -882
+```
+
+## Faction-aware access
+
+Do not implement faction permissions generically until the actual faction/team mod is identified.
+
+Integration should use the mod's real ownership/membership API where possible.
+
+## Audit of ItemGraph usage
+
+Because ItemGraph itself is sensitive, admin queries should eventually be auditable.
+
+Potential fields:
+
+- moderator UUID
+- command/query
+- timestamp
+- result scope
+- export action
+
+This protects both players and moderators.
+
+## Database security
+
+ItemGraph's own database may contain sensitive historical information.
+
+Recommendations:
+
+- keep database files outside public web roots
+- do not expose DB ports unnecessarily
+- use least-privilege credentials if using client/server DB
+- do not log credentials
+- redact secrets from diagnostics
+- avoid storing arbitrary full NBT if it may contain unrelated secrets unless required
+
+## Command safety
+
+Queries should have:
+
+- bounded default time windows
+- result count limits
+- permission checks before resolving sensitive nodes
+- pagination
+- rate limits if necessary
+
+## Privacy-aware explanation
+
+`/ig explain` should show enough evidence for moderation without automatically revealing unrelated sensitive data.
+
+Permission filtering must apply at every layer, not only to the final formatted output.
