@@ -210,6 +210,154 @@ class IngestionServiceTest {
         }
     }
 
+    /**
+     * Resolves the ig_nodes row id for a node type at a block position, so the tests
+     * assert against real node identities rather than assumed autoincrement ids.
+     */
+    private long nodeIdAt(Connection conn, String nodeType, int x, int y, int z) throws Exception {
+        try (java.sql.PreparedStatement pstmt = conn.prepareStatement(
+                "SELECT id FROM ig_nodes WHERE node_type = ? AND level_id = 'minecraft:overworld' AND x = ? AND y = ? AND z = ?")) {
+            pstmt.setString(1, nodeType);
+            pstmt.setDouble(2, x);
+            pstmt.setDouble(3, y);
+            pstmt.setDouble(4, z);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                assertTrue(rs.next(), nodeType + " node at " + x + "," + y + "," + z + " should exist");
+                return rs.getLong("id");
+            }
+        }
+    }
+
+    private long playerNodeId(Connection conn) throws Exception {
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT id FROM ig_nodes WHERE node_type = 'PLAYER'")) {
+            assertTrue(rs.next(), "player node should exist");
+            return rs.getLong("id");
+        }
+    }
+
+    /**
+     * Phase 4 direction convention: node_id = origin, target_node_id = destination.
+     * A drop moves the item player -> ground; the pickup that recovers it moves the
+     * item ground -> player, through the SAME ground node. That shared node is what
+     * Phase 5 correlation joins on.
+     */
+    @Test
+    void testDropAndPickupShareGroundNodeInOppositeDirections() throws Exception {
+        // PICKUP_ITEM (action 3) of the same material at the same block the drop landed on
+        try (Connection glConn = DriverManager.getConnection("jdbc:sqlite:" + griefLoggerDbPath.toAbsolutePath());
+             Statement stmt = glConn.createStatement()) {
+            stmt.execute("INSERT INTO items (time, user, level, x, y, z, type, amount, action) " +
+                    "VALUES (1789330500000, 1, 1, 1646, 78, -1475, 1, 1, 3);");
+        }
+
+        IngestionResult result = ingestionService.runIngestion();
+        assertTrue(result.success());
+        assertEquals(2, result.itemsIngested());
+
+        Connection conn = dbManager.getConnection();
+        long player = playerNodeId(conn);
+        long ground = nodeIdAt(conn, "GROUND", 1646, 78, -1475);
+        assertNotEquals(player, ground);
+
+        // DROP_ITEM: player -> ground
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT node_id, target_node_id FROM ig_observations WHERE action_type = 'DROP_ITEM'")) {
+            assertTrue(rs.next());
+            assertEquals(player, rs.getLong("node_id"), "DROP_ITEM origin must be the player");
+            assertEquals(ground, rs.getLong("target_node_id"), "DROP_ITEM destination must be the ground");
+            assertFalse(rs.next());
+        }
+
+        // PICKUP_ITEM: ground -> player
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT node_id, target_node_id FROM ig_observations WHERE action_type = 'PICKUP_ITEM'")) {
+            assertTrue(rs.next());
+            assertEquals(ground, rs.getLong("node_id"), "PICKUP_ITEM origin must be the ground");
+            assertEquals(player, rs.getLong("target_node_id"), "PICKUP_ITEM destination must be the player");
+            assertFalse(rs.next());
+        }
+
+        // Exactly one ground node backs both halves of the drop/pickup pair.
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_nodes WHERE node_type = 'GROUND'")) {
+            assertTrue(rs.next());
+            assertEquals(1, rs.getLong(1));
+        }
+    }
+
+    /**
+     * Actions whose other endpoint is not evidenced by the items table must anchor to
+     * the per-level UNKNOWN sentinel rather than a NULL, so "left the player, we don't
+     * know where to" stays distinguishable from "no topological claim".
+     */
+    @Test
+    void testUnresolvedEndpointsUseUnknownSentinel() throws Exception {
+        try (Connection glConn = DriverManager.getConnection("jdbc:sqlite:" + griefLoggerDbPath.toAbsolutePath());
+             Statement stmt = glConn.createStatement()) {
+            // CRAFT_ITEM (4): unknown -> player
+            stmt.execute("INSERT INTO items (time, user, level, x, y, z, type, amount, action) " +
+                    "VALUES (1789330600000, 1, 1, 10, 64, 10, 1, 1, 4);");
+            // CONSUME_ITEM (6): player -> unknown
+            stmt.execute("INSERT INTO items (time, user, level, x, y, z, type, amount, action) " +
+                    "VALUES (1789330700000, 1, 1, 11, 64, 11, 2, 1, 6);");
+        }
+
+        assertTrue(ingestionService.runIngestion().success());
+
+        Connection conn = dbManager.getConnection();
+        long player = playerNodeId(conn);
+
+        long unknown;
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT id FROM ig_nodes WHERE node_type = 'UNKNOWN'")) {
+            assertTrue(rs.next(), "an UNKNOWN sentinel node should exist");
+            unknown = rs.getLong("id");
+            assertFalse(rs.next(), "there must be exactly one UNKNOWN node for this level");
+        }
+
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT node_id, target_node_id FROM ig_observations WHERE action_type = 'CRAFT_ITEM'")) {
+            assertTrue(rs.next());
+            assertEquals(unknown, rs.getLong("node_id"), "CRAFT_ITEM materials are an unresolved origin");
+            assertEquals(player, rs.getLong("target_node_id"));
+        }
+
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT node_id, target_node_id FROM ig_observations WHERE action_type = 'CONSUME_ITEM'")) {
+            assertTrue(rs.next());
+            assertEquals(player, rs.getLong("node_id"));
+            assertEquals(unknown, rs.getLong("target_node_id"), "CONSUME_ITEM has an unresolved destination");
+        }
+    }
+
+    /**
+     * The containers-table branch is unchanged by Phase 4: node_id stays the container
+     * block, target_node_id the interacting player.
+     */
+    @Test
+    void testContainerDirectionUnchanged() throws Exception {
+        try (Connection glConn = DriverManager.getConnection("jdbc:sqlite:" + griefLoggerDbPath.toAbsolutePath());
+             Statement stmt = glConn.createStatement()) {
+            stmt.execute("INSERT INTO containers (time, user, level, x, y, z, type, amount, action) " +
+                    "VALUES (1789331000000, 1, 1, 100, 64, -200, 2, 5, 0);");
+        }
+
+        assertTrue(ingestionService.runIngestion().success());
+
+        Connection conn = dbManager.getConnection();
+        long player = playerNodeId(conn);
+        long container = nodeIdAt(conn, "CONTAINER", 100, 64, -200);
+
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(
+                     "SELECT node_id, target_node_id FROM ig_observations WHERE source_event_id = 10000000001")) {
+            assertTrue(rs.next());
+            assertEquals(container, rs.getLong("node_id"));
+            assertEquals(player, rs.getLong("target_node_id"));
+        }
+    }
+
     @Test
     void testGracefulFailureWhenGriefLoggerMissing() {
         Path missing = tempDir.resolve("nonexistent.db");
