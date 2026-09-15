@@ -15,7 +15,8 @@ public class MigrationRunner {
     private static final Logger LOGGER = LoggerFactory.getLogger(MigrationRunner.class);
 
     private static final List<SchemaMigration> MIGRATIONS = List.of(
-            new V1__InitialSchema()
+            new V1__InitialSchema(),
+            new V2__DeduplicationConstraint()
     );
 
     public static int runMigrations(Connection conn) throws SQLException {

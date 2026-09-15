@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,7 +32,7 @@ class DatabaseManagerTest {
 
         assertTrue(dbManager.isInitialized());
         assertTrue(dbManager.isConnected());
-        assertEquals(1, dbManager.getCurrentSchemaVersion());
+        assertEquals(2, dbManager.getCurrentSchemaVersion());
         assertTrue(Files.exists(dbPath));
 
         Connection conn = dbManager.getConnection();
@@ -54,9 +55,28 @@ class DatabaseManagerTest {
         assertTrue(tables.contains("ig_inferred_edges"), "ig_inferred_edges table must exist");
         assertTrue(tables.contains("ig_edge_evidence"), "ig_edge_evidence table must exist");
 
+        // Verify unique constraint on ig_observations(source_type, source_event_id)
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO ig_nodes (id, node_type, level_id) VALUES (1, 'PLAYER', 'minecraft:overworld')");
+            stmt.execute("INSERT INTO ig_item_fingerprints (id, item_id, fingerprint_hash) VALUES (1, 'minecraft:diamond', 'hash123')");
+            stmt.execute("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount) " +
+                    "VALUES ('GRIEFLOGGER', 100, 1000, 1, 1, 'DROP_ITEM', 1)");
+
+            // Attempting duplicate insert should fail due to unique constraint
+            assertThrows(SQLException.class, () -> {
+                stmt.execute("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount) " +
+                        "VALUES ('GRIEFLOGGER', 100, 2000, 1, 1, 'DROP_ITEM', 1)");
+            });
+
+            // INSERT OR IGNORE should succeed without error
+            int affected = stmt.executeUpdate("INSERT OR IGNORE INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount) " +
+                    "VALUES ('GRIEFLOGGER', 100, 2000, 1, 1, 'DROP_ITEM', 1)");
+            assertEquals(0, affected);
+        }
+
         // Verify re-initializing does not fail and migrations are idempotent
         dbManager.close();
         dbManager.initialize(dbPath);
-        assertEquals(1, dbManager.getCurrentSchemaVersion());
+        assertEquals(2, dbManager.getCurrentSchemaVersion());
     }
 }
