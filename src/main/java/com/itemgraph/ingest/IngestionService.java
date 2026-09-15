@@ -226,18 +226,11 @@ public class IngestionService {
                             long nodeId;
                             Long targetNodeId = null;
 
-                            if (isContainerTable) {
-                                // For containers, node_id is the container block location
-                                nodeId = nodeManager.getOrCreateContainerNode(igConn, event.levelName(), event.x(), event.y(), event.z());
-                                // target_node_id is the player interacting with the container if available
-                                if (event.userUuid() != null || event.userName() != null) {
-                                    targetNodeId = nodeManager.getOrCreatePlayerNode(igConn, event.userUuid(), event.userName(), event.levelName(), event.x(), event.y(), event.z());
-                                }
-                            } else {
-                                ItemEndpoints endpoints = resolveItemEndpoints(igConn, event, actionType);
-                                nodeId = endpoints.nodeId();
-                                targetNodeId = endpoints.targetNodeId();
-                            }
+                            FlowEndpoints endpoints = isContainerTable
+                                    ? resolveContainerEndpoints(igConn, event, actionType)
+                                    : resolveItemEndpoints(igConn, event, actionType);
+                            nodeId = endpoints.nodeId();
+                            targetNodeId = endpoints.targetNodeId();
 
                             pstmt.setString(1, SOURCE_TYPE_GRIEFLOGGER);
                             pstmt.setLong(2, sourceEventId);
@@ -294,7 +287,7 @@ public class IngestionService {
     }
 
     /** Resolved (origin, destination) node pair for a single observation. */
-    private record ItemEndpoints(long nodeId, Long targetNodeId) {
+    private record FlowEndpoints(long nodeId, Long targetNodeId) {
     }
 
     /**
@@ -339,28 +332,28 @@ public class IngestionService {
      * "we know the item left the player but not to where" distinct from "this row makes
      * no topological claim", which the forensic-integrity rules require.
      */
-    private ItemEndpoints resolveItemEndpoints(Connection conn, GriefLoggerRawEvent event, String actionType) throws SQLException {
+    private FlowEndpoints resolveItemEndpoints(Connection conn, GriefLoggerRawEvent event, String actionType) throws SQLException {
         long player = nodeManager.getOrCreatePlayerNode(
                 conn, event.userUuid(), event.userName(), event.levelName(), event.x(), event.y(), event.z());
 
         return switch (actionType) {
             // Item leaves the player into the world at the logged position.
-            case "DROP_ITEM", "THROW_ITEM", "SHOOT_ITEM" -> new ItemEndpoints(
+            case "DROP_ITEM", "THROW_ITEM", "SHOOT_ITEM" -> new FlowEndpoints(
                     player,
                     nodeManager.getOrCreateGroundNode(conn, event.levelName(), event.x(), event.y(), event.z()));
 
             // Item enters the player from the world at the logged position.
-            case "PICKUP_ITEM" -> new ItemEndpoints(
+            case "PICKUP_ITEM" -> new FlowEndpoints(
                     nodeManager.getOrCreateGroundNode(conn, event.levelName(), event.x(), event.y(), event.z()),
                     player);
 
             // Item enters the player from a source this table does not name.
-            case "ADD_ITEM", "ADD_ITEM_ENDER", "CRAFT_ITEM" -> new ItemEndpoints(
+            case "ADD_ITEM", "ADD_ITEM_ENDER", "CRAFT_ITEM" -> new FlowEndpoints(
                     nodeManager.getOrCreateUnknownNode(conn, event.levelName()),
                     player);
 
             // Item leaves the player with no further evidence of a destination.
-            case "REMOVE_ITEM", "REMOVE_ITEM_ENDER", "BREAK_ITEM", "CONSUME_ITEM" -> new ItemEndpoints(
+            case "REMOVE_ITEM", "REMOVE_ITEM_ENDER", "BREAK_ITEM", "CONSUME_ITEM" -> new FlowEndpoints(
                     player,
                     nodeManager.getOrCreateUnknownNode(conn, event.levelName()));
 
@@ -369,7 +362,66 @@ public class IngestionService {
             default -> {
                 LOGGER.debug("No direction mapping for item action '{}' (GriefLogger rowid {}); recording without a target node.",
                         actionType, event.rowid());
-                yield new ItemEndpoints(player, null);
+                yield new FlowEndpoints(player, null);
+            }
+        };
+    }
+
+    /**
+     * Direction resolution for the GriefLogger <b>containers</b> table (Phase 5).
+     *
+     * <p>Same convention as {@link #resolveItemEndpoints}: {@code node_id} = ORIGIN,
+     * {@code target_node_id} = DESTINATION. Phases 2-4 wrote every containers-table row
+     * as {@code container -> player} regardless of the action, which is correct for a
+     * withdrawal and backwards for a deposit: when a player puts an item into a chest
+     * the item flows {@code player -> container}. That error made a deposit and a
+     * withdrawal indistinguishable in the graph and pointed the MVP chain's last hop
+     * (Player B -> Chest B) the wrong way.
+     *
+     * <p>Per-action mapping, derived from ItemActionMapping's ADD/REMOVE semantics as
+     * they apply to the container, which is the subject of a containers-table row:
+     * <ul>
+     *   <li>ADD_ITEM, ADD_ITEM_ENDER: the container GAINED the item, so the player is
+     *       the origin and the container the destination.</li>
+     *   <li>REMOVE_ITEM, REMOVE_ITEM_ENDER: the container LOST the item, so the
+     *       container is the origin and the player the destination.</li>
+     *   <li>Any other action id: kept at the pre-Phase-5 {@code container -> player}
+     *       default. This is an UNVERIFIED default — GriefLogger's
+     *       {@code ContainerTransactionManager} is only known to emit ADD/REMOVE pairs
+     *       on menu close (Phase 0 recon recorded 0 container rows on staging, so no
+     *       other action id has ever been observed here), and guessing a direction for
+     *       an action we have never seen would be inference dressed up as evidence.</li>
+     * </ul>
+     *
+     * <p>If GriefLogger named no user for the row, no player endpoint exists at all and
+     * the observation is anchored to the container with a NULL target: no direction is
+     * claimed, rather than a direction being invented.
+     */
+    private FlowEndpoints resolveContainerEndpoints(Connection conn, GriefLoggerRawEvent event, String actionType) throws SQLException {
+        long container = nodeManager.getOrCreateContainerNode(
+                conn, event.levelName(), event.x(), event.y(), event.z());
+
+        if (event.userUuid() == null && event.userName() == null) {
+            LOGGER.debug("Container action '{}' (GriefLogger rowid {}) names no user; recording without a target node.",
+                    actionType, event.rowid());
+            return new FlowEndpoints(container, null);
+        }
+
+        long player = nodeManager.getOrCreatePlayerNode(
+                conn, event.userUuid(), event.userName(), event.levelName(), event.x(), event.y(), event.z());
+
+        return switch (actionType) {
+            // Deposit: the item left the player and entered the container.
+            case "ADD_ITEM", "ADD_ITEM_ENDER" -> new FlowEndpoints(player, container);
+
+            // Withdrawal: the item left the container and entered the player.
+            case "REMOVE_ITEM", "REMOVE_ITEM_ENDER" -> new FlowEndpoints(container, player);
+
+            // Unverified default: no other action id has been observed on this table.
+            default -> {
+                LOGGER.debug("No verified direction mapping for container action '{}' (GriefLogger rowid {}); using the container -> player default.",
+                        actionType, event.rowid());
+                yield new FlowEndpoints(container, player);
             }
         };
     }

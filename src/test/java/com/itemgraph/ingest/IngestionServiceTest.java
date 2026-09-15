@@ -332,13 +332,14 @@ class IngestionServiceTest {
     }
 
     /**
-     * The containers-table branch is unchanged by Phase 4: node_id stays the container
-     * block, target_node_id the interacting player.
+     * A withdrawal empties the container into the player: container -> player.
+     * This direction was already correct before Phase 5 and must stay that way.
      */
     @Test
-    void testContainerDirectionUnchanged() throws Exception {
+    void testContainerRemoveFlowsContainerToPlayer() throws Exception {
         try (Connection glConn = DriverManager.getConnection("jdbc:sqlite:" + griefLoggerDbPath.toAbsolutePath());
              Statement stmt = glConn.createStatement()) {
+            // action 0 = REMOVE_ITEM
             stmt.execute("INSERT INTO containers (time, user, level, x, y, z, type, amount, action) " +
                     "VALUES (1789331000000, 1, 1, 100, 64, -200, 2, 5, 0);");
         }
@@ -353,8 +354,51 @@ class IngestionServiceTest {
              ResultSet rs = stmt.executeQuery(
                      "SELECT node_id, target_node_id FROM ig_observations WHERE source_event_id = 10000000001")) {
             assertTrue(rs.next());
-            assertEquals(container, rs.getLong("node_id"));
-            assertEquals(player, rs.getLong("target_node_id"));
+            assertEquals(container, rs.getLong("node_id"), "REMOVE_ITEM origin must be the container");
+            assertEquals(player, rs.getLong("target_node_id"), "REMOVE_ITEM destination must be the player");
+        }
+    }
+
+    /**
+     * Phase 5 regression: a deposit flows player -> container. Phases 2-4 wrote every
+     * containers-table row as container -> player regardless of the action, which
+     * pointed every deposit backwards (and reversed the MVP chain's last hop,
+     * Player B -> Chest B).
+     */
+    @Test
+    void testContainerAddFlowsPlayerToContainer() throws Exception {
+        try (Connection glConn = DriverManager.getConnection("jdbc:sqlite:" + griefLoggerDbPath.toAbsolutePath());
+             Statement stmt = glConn.createStatement()) {
+            // action 1 = ADD_ITEM
+            stmt.execute("INSERT INTO containers (time, user, level, x, y, z, type, amount, action) " +
+                    "VALUES (1789331000000, 1, 1, 100, 64, -200, 2, 5, 1);");
+            // action 9 = ADD_ITEM_ENDER, same deposit semantics
+            stmt.execute("INSERT INTO containers (time, user, level, x, y, z, type, amount, action) " +
+                    "VALUES (1789331100000, 1, 1, 101, 64, -200, 2, 1, 9);");
+        }
+
+        assertTrue(ingestionService.runIngestion().success());
+
+        Connection conn = dbManager.getConnection();
+        long player = playerNodeId(conn);
+        long container = nodeIdAt(conn, "CONTAINER", 100, 64, -200);
+        long enderContainer = nodeIdAt(conn, "CONTAINER", 101, 64, -200);
+
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(
+                     "SELECT node_id, target_node_id FROM ig_observations WHERE action_type = 'ADD_ITEM'")) {
+            assertTrue(rs.next());
+            assertEquals(player, rs.getLong("node_id"), "ADD_ITEM origin must be the depositing player");
+            assertEquals(container, rs.getLong("target_node_id"), "ADD_ITEM destination must be the container");
+            assertFalse(rs.next());
+        }
+
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(
+                     "SELECT node_id, target_node_id FROM ig_observations WHERE action_type = 'ADD_ITEM_ENDER'")) {
+            assertTrue(rs.next());
+            assertEquals(player, rs.getLong("node_id"), "ADD_ITEM_ENDER origin must be the depositing player");
+            assertEquals(enderContainer, rs.getLong("target_node_id"), "ADD_ITEM_ENDER destination must be the ender chest");
         }
     }
 
