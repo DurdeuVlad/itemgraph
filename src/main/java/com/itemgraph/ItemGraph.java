@@ -1,0 +1,20 @@
+package com.itemgraph;
+
+import com.itemgraph.config.ItemGraphConfig;
+import com.mojang.logging.LogUtils;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import org.slf4j.Logger;
+
+@Mod(ItemGraph.MOD_ID)
+public class ItemGraph {
+    public static final String MOD_ID = "itemgraph";
+    public static final Logger LOGGER = LogUtils.getLogger();
+
+    public ItemGraph(IEventBus modEventBus, ModContainer modContainer) {
+        LOGGER.info("ItemGraph initializing...");
+        modContainer.registerConfig(ModConfig.Type.SERVER, ItemGraphConfig.SPEC);
+    }
+}
