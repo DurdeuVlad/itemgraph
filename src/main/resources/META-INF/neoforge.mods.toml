@@ -23,3 +23,14 @@ description='''${mod_description}'''
     versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
+
+# ItemGraph's own SQLite JDBC driver is NOT bundled (see build.gradle comment) -
+# it relies on GriefLogger's bundled copy being present on the module path at
+# runtime, in addition to being ItemGraph's primary evidence source.
+[[dependencies.${mod_id}]]
+    modId="grieflogger"
+    type="required"
+    reason="ItemGraph reads GriefLogger's evidence database and relies on its bundled sqlite-jdbc on the module path"
+    versionRange="[1.2.10,)"
+    ordering="AFTER"
+    side="BOTH"
