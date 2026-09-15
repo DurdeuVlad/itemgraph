@@ -34,9 +34,11 @@ public class ItemGraph {
 
     private void onServerStarting(ServerStartingEvent event) {
         DatabaseManager.getInstance().initialize();
+        com.itemgraph.ingest.IngestionService.getInstance().start();
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
+        com.itemgraph.ingest.IngestionService.getInstance().stop();
         DatabaseManager.getInstance().close();
     }
 }
