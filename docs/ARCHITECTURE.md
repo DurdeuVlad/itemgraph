@@ -68,7 +68,11 @@ The implemented node types are `PLAYER`, `CONTAINER`, `GROUND`, `ARMOR_STAND`, a
 | items | `ADD_ITEM`, `ADD_ITEM_ENDER`, `CRAFT_ITEM` | unknown | player |
 | items | `REMOVE_ITEM`, `REMOVE_ITEM_ENDER`, `BREAK_ITEM`, `CONSUME_ITEM` | player | unknown |
 | items | unrecognized action id | player | *(none — no direction claimed)* |
-| containers | any | container | interacting player, if known |
+| containers | `REMOVE_ITEM`, `REMOVE_ITEM_ENDER` | container | interacting player |
+| containers | `ADD_ITEM`, `ADD_ITEM_ENDER` | interacting player | container |
+| containers | unrecognized action id | container | interacting player |
+
+The containers-table split was corrected in Phase 5. Phases 2–4 wrote *every* containers row as container → player regardless of the action, which is only correct for a withdrawal. A deposit flows the other way, so every deposit in the database pointed backwards and was topologically indistinguishable from a withdrawal — including the final hop of the MVP chain (`Player B -> Chest B`), which is precisely the hop an admin asking *"where did my item end up"* cares about. Migration V5 clears observations and checkpoints so every containers row is re-read through the corrected mapping; the direction is recomputed from the source action rather than patched in place.
 
 `GROUND` nodes are keyed by dimension plus the block coordinate the logged position floors into, so a drop and a later pickup at the same block resolve to the same node. That shared node is what makes the MVP chain traversable:
 
@@ -103,6 +107,92 @@ evidence: [184, 185]
 ```
 
 The edge remains an inference.
+
+## Correlation: ground bridging (Phase 5)
+
+Implemented by `com.itemgraph.correlation.CorrelationEngine`.
+
+### Scope decision: only the ground bridge is an inference
+
+`docs/IMPLEMENTATION_PLAN.md` lists four patterns for Phase 5:
+
+1. container remove → player gain
+2. player drop → item entity
+3. item entity → player pickup
+4. player remove → container add
+
+After the Phase 4 item-flow topology and the Phase 5 container-direction fix above, **three of those four are already a single fully-evidenced `ig_observations` row**:
+
+| Plan pattern | Reality after direction fixes |
+| --- | --- |
+| container remove → player gain | one row, `CONTAINER -> PLAYER` |
+| player remove → container add | one row, `PLAYER -> CONTAINER` |
+| player drop → item entity | one row, `PLAYER -> GROUND` |
+| item entity → player pickup | **not a single row** — see below |
+
+Re-deriving those three as "inferred edges" would blur the evidence/inference boundary the project exists to preserve: `ig_observations` *is* the observed evidence, and `ig_inferred_edges` is specifically for claims no single row evidences. Emitting an inference with a confidence score for a fact GriefLogger states outright would misrepresent directly observed data as reconstruction.
+
+Only the fourth link genuinely needs inference, and only because `GROUND` is an **ephemeral node**. A drop names the player who put an item there; a pickup names the player who took one away; **nothing in GriefLogger states they are the same item** — the `ItemEntity` UUID is not logged (Phase 0 recon). Connecting a drop to a pickup is therefore a claim about two separate observations: it needs a confidence, it needs an explanation, and it is what this engine produces. Every long-lived node (container, player) keeps its own identity across observations, so no bridging is required for them.
+
+### Matching rules
+
+For a `DROP_ITEM` / `THROW_ITEM` / `SHOOT_ITEM` observation, a candidate `PICKUP_ITEM` must:
+
+- originate at the **same `GROUND` node** (same dimension + block),
+- carry the **same `fingerprint_id`** (exact canonical metadata equality),
+- carry the **same `amount`** — Phase 5 has no split/merge model, so a partial pickup is deliberately left unmatched rather than guessed at; matching partial quantities without a conservation model would manufacture quantity, which the charter forbids (deferred to Phase 7),
+- be **strictly later** than the drop and within the configured window (`correlation.ground_bridge_max_seconds`, default 300s) — a later observation may explain an earlier event, never the reverse,
+- **not already be cited as evidence** for another accepted bridge. One dropped stack can only be picked up once, so allowing a pickup to support two bridges would attribute the same items to two different flows.
+
+The temporally closest admissible pickup wins. Competing candidates are not discarded silently — they reduce confidence.
+
+### Confidence formula
+
+Deterministic and fully reproducible from the stored observations. No model, no tuning, no randomness; the same inputs always produce the same number.
+
+```text
+confidence = round4( BASE x proximity(dt) x ambiguity(nPickups, forwardGap)
+                                          x ambiguity(nDrops,   reverseGap) )
+
+BASE              = 0.95
+window            = ground_bridge_max_seconds x 1000
+
+proximity(dt)     = 1 - 0.25 x clamp(dt / window, 0, 1)
+
+ambiguity(n, gap) = 1                                                    if n <= 1
+                  = 1/n + (1 - 1/n) x min(0.9, clamp(gap / window, 0, 1)) if n >  1
+
+dt          = pickup.timestamp - drop.timestamp
+nPickups    = admissible pickups for this drop
+forwardGap  = runner-up pickup timestamp - chosen pickup timestamp   (0 if nPickups == 1)
+nDrops      = admissible drops for the chosen pickup (including this one)
+reverseGap  = |nearest competing drop timestamp - this drop timestamp| (0 if nDrops == 1)
+```
+
+Each factor is a documented evidentiary statement:
+
+- **BASE = 0.95** — the ceiling for a perfect, unopposed match. Not 1.0, and never 1.0: without the `ItemEntity` UUID this is always circumstantial evidence (same place, same item, same amount, right order), so certainty is not available. The headroom is reserved for Phase 8, where a supplemental hook can log the entity UUID and support a genuinely stronger claim.
+- **proximity** — an instant pickup scores 1.0; a pickup at the far edge of the window scores 0.75. Linear in elapsed time, so the penalty scales with the configured window instead of being a magic constant. A long delay weakens but does not refute the link, hence the modest 0.25 weight.
+- **ambiguity** — with `n` equally admissible candidates and no discriminator, the honest prior in favour of the chosen one is `1/n`. Temporal proximity *is* a discriminator, so the score recovers toward 1.0 in proportion to how far the runner-up is, measured as a fraction of the window. Recovery is capped at 0.9: a demonstrated alternative explanation never fully disappears, so an ambiguous match can never score as high as an unambiguous one.
+- The **reverse direction uses the identical function** — if several drops could equally explain the chosen pickup, that ambiguity is just as real and reduces confidence just as much.
+
+Worked example (300s window): A drops 1 netherite chestplate, B picks it up 60s later, nothing competes.
+`0.95 x (1 - 0.25 x 0.2) x 1 x 1 = 0.95 x 0.95 = 0.9025`.
+
+Add a second, unrelated pickup of an identical stack 60s after B's, and the same bridge becomes
+`0.95 x 0.95 x (0.5 + 0.5 x 0.2) = 0.5415`.
+
+The exact factor values, candidate counts, both observation IDs, both player names, the block, both timestamps and the arithmetic are written into the edge's `explanation` column, so an admin asking *"why does ItemGraph think this transfer happened?"* gets a complete answer without re-running the engine.
+
+### Incrementality and scheduling
+
+`ig_observations.correlated_at` (migration V6, nullable epoch-millis) is the bookkeeping column. Every pass is driven by `correlated_at IS NULL` and bounded by `MAX_OBSERVATIONS_PER_PASS = 500`; the table is never fully scanned.
+
+- A **pickup** is stamped as soon as it is seen — it is matched from the drop side, and candidate lookup deliberately ignores `correlated_at`, so a drop ingested later can still cite an already-stamped pickup.
+- A **drop** is stamped once it produces an edge, or once its window has closed with no match (a recorded negative result).
+- A drop whose window is **still open is left pending on purpose**: the pickup that explains it may simply not have been ingested yet — ingestion runs every 60s while the window is minutes long. That deferral is what stops the engine from permanently writing off drops purely for arriving near a cycle boundary.
+
+Correlation runs on the **existing ingestion worker thread**, from the same scheduled executor, immediately after each ingestion cycle completes (`IngestionService.runIngestionSafely`). That gives newly ingested observations a correlation pass without waiting an extra cycle, and guarantees correlation never overlaps ingestion on the shared connection. `/ig ingest now` queues a pass onto that worker rather than running one inline, because candidate search must never happen on the server thread. GriefLogger's database is not touched by correlation at all: it reads and writes only ItemGraph's own tables, and each accepted bridge writes the edge, its two evidence rows and the drop's stamp in a single transaction, so an edge can never exist without its evidence.
 
 ## Layered architecture
 
