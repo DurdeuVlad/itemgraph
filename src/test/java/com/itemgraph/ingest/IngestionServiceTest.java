@@ -133,12 +133,16 @@ class IngestionServiceTest {
             assertEquals(-1475, rs.getDouble("z"));
         }
 
-        // Verify fingerprint normalized to minecraft:diamond_ore
+        // Verify fingerprint normalized to minecraft:diamond_ore, canonicalized
+        // via ItemCanonicalizer (Phase 3) rather than Phase 2's bare-id hash
         try (Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT * FROM ig_item_fingerprints")) {
             assertTrue(rs.next());
             assertEquals("minecraft:diamond_ore", rs.getString("item_id"));
-            assertEquals(IngestionService.sha256Hex("minecraft:diamond_ore"), rs.getString("fingerprint_hash"));
+            var expected = com.itemgraph.canon.ItemCanonicalizer.canonicalize("minecraft:diamond_ore", null);
+            assertEquals(expected.fingerprintHash(), rs.getString("fingerprint_hash"));
+            assertNull(rs.getString("custom_name"));
+            assertNull(rs.getString("component_summary"));
         }
 
         // Verify checkpoint

@@ -16,7 +16,8 @@ public class MigrationRunner {
 
     private static final List<SchemaMigration> MIGRATIONS = List.of(
             new V1__InitialSchema(),
-            new V2__DeduplicationConstraint()
+            new V2__DeduplicationConstraint(),
+            new V3__ResetForCanonicalization()
     );
 
     public static int runMigrations(Connection conn) throws SQLException {

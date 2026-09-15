@@ -4,9 +4,6 @@ import com.itemgraph.db.DatabaseManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -213,7 +210,7 @@ public class IngestionService {
                     for (GriefLoggerRawEvent event : events) {
                         try {
                             long sourceEventId = isContainerTable ? (CONTAINER_EVENT_ID_OFFSET + event.rowid()) : event.rowid();
-                            long fingerprintId = getOrCreateFingerprint(igConn, event.materialName());
+                            long fingerprintId = getOrCreateFingerprint(igConn, event.materialName(), event.rawData());
 
                             long nodeId;
                             Long targetNodeId = null;
@@ -322,9 +319,10 @@ public class IngestionService {
         }
     }
 
-    public long getOrCreateFingerprint(Connection conn, String materialName) throws SQLException {
-        String itemId = normalizeItemId(materialName);
-        String hash = sha256Hex(itemId);
+    public long getOrCreateFingerprint(Connection conn, String materialName, byte[] rawData) throws SQLException {
+        com.itemgraph.canon.CanonicalItem canonical = com.itemgraph.canon.ItemCanonicalizer.canonicalize(materialName, rawData);
+        String itemId = canonical.itemId();
+        String hash = canonical.fingerprintHash();
 
         Long cached = fingerprintCache.get(hash);
         if (cached != null) {
@@ -343,10 +341,13 @@ public class IngestionService {
             }
         }
 
-        String insertSql = "INSERT OR IGNORE INTO ig_item_fingerprints (item_id, fingerprint_hash) VALUES (?, ?)";
+        String insertSql = "INSERT OR IGNORE INTO ig_item_fingerprints (item_id, fingerprint_hash, custom_name, rarity, component_summary) VALUES (?, ?, ?, ?, ?)";
         try (PreparedStatement pstmt = conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
             pstmt.setString(1, itemId);
             pstmt.setString(2, hash);
+            pstmt.setString(3, canonical.customName());
+            pstmt.setString(4, canonical.rarity());
+            pstmt.setString(5, canonical.componentSummary());
             pstmt.executeUpdate();
             try (ResultSet keys = pstmt.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -506,30 +507,4 @@ public class IngestionService {
         return 0;
     }
 
-    public static String normalizeItemId(String materialName) {
-        if (materialName == null || materialName.isBlank()) {
-            return "minecraft:air";
-        }
-        materialName = materialName.trim();
-        if (materialName.contains(":")) {
-            return materialName;
-        }
-        return "minecraft:" + materialName;
-    }
-
-    public static String sha256Hex(String input) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hexString = new StringBuilder();
-            for (byte b : hash) {
-                String hex = Integer.toHexString(0xff & b);
-                if (hex.length() == 1) hexString.append('0');
-                hexString.append(hex);
-            }
-            return hexString.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 algorithm unavailable", e);
-        }
-    }
 }
