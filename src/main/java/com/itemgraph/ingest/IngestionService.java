@@ -1,6 +1,7 @@
 package com.itemgraph.ingest;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.graph.NodeManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,10 +32,9 @@ public class IngestionService {
 
     private final GriefLoggerAdapter adapter;
     private final DatabaseManager dbManager;
+    private final NodeManager nodeManager;
 
     private final Map<String, Long> fingerprintCache = new ConcurrentHashMap<>();
-    private final Map<String, Long> playerNodeCache = new ConcurrentHashMap<>();
-    private final Map<String, Long> containerNodeCache = new ConcurrentHashMap<>();
 
     private ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -47,12 +47,21 @@ public class IngestionService {
     }
 
     public IngestionService(GriefLoggerAdapter adapter, DatabaseManager dbManager) {
+        this(adapter, dbManager, new NodeManager());
+    }
+
+    public IngestionService(GriefLoggerAdapter adapter, DatabaseManager dbManager, NodeManager nodeManager) {
         this.adapter = adapter;
         this.dbManager = dbManager;
+        this.nodeManager = nodeManager;
     }
 
     public static IngestionService getInstance() {
         return INSTANCE;
+    }
+
+    public NodeManager getNodeManager() {
+        return nodeManager;
     }
 
     public GriefLoggerAdapter getAdapter() {
@@ -212,22 +221,23 @@ public class IngestionService {
                             long sourceEventId = isContainerTable ? (CONTAINER_EVENT_ID_OFFSET + event.rowid()) : event.rowid();
                             long fingerprintId = getOrCreateFingerprint(igConn, event.materialName(), event.rawData());
 
+                            String actionType = ItemActionMapping.getActionName(event.actionId());
+
                             long nodeId;
                             Long targetNodeId = null;
 
                             if (isContainerTable) {
                                 // For containers, node_id is the container block location
-                                nodeId = getOrCreateContainerNode(igConn, event.levelName(), event.x(), event.y(), event.z());
+                                nodeId = nodeManager.getOrCreateContainerNode(igConn, event.levelName(), event.x(), event.y(), event.z());
                                 // target_node_id is the player interacting with the container if available
                                 if (event.userUuid() != null || event.userName() != null) {
-                                    targetNodeId = getOrCreatePlayerNode(igConn, event.userUuid(), event.userName(), event.levelName(), event.x(), event.y(), event.z());
+                                    targetNodeId = nodeManager.getOrCreatePlayerNode(igConn, event.userUuid(), event.userName(), event.levelName(), event.x(), event.y(), event.z());
                                 }
                             } else {
-                                // For items, node_id is the player performing the action
-                                nodeId = getOrCreatePlayerNode(igConn, event.userUuid(), event.userName(), event.levelName(), event.x(), event.y(), event.z());
+                                ItemEndpoints endpoints = resolveItemEndpoints(igConn, event, actionType);
+                                nodeId = endpoints.nodeId();
+                                targetNodeId = endpoints.targetNodeId();
                             }
-
-                            String actionType = ItemActionMapping.getActionName(event.actionId());
 
                             pstmt.setString(1, SOURCE_TYPE_GRIEFLOGGER);
                             pstmt.setLong(2, sourceEventId);
@@ -281,6 +291,87 @@ public class IngestionService {
         }
 
         return ingestedCount;
+    }
+
+    /** Resolved (origin, destination) node pair for a single observation. */
+    private record ItemEndpoints(long nodeId, Long targetNodeId) {
+    }
+
+    /**
+     * Direction convention for ig_observations (Phase 4).
+     *
+     * <p><b>node_id = ORIGIN (where the item came FROM), target_node_id = DESTINATION
+     * (where the item went TO).</b> Every observation is read as a directed
+     * {@code node_id -> target_node_id} flow of one fingerprint at one timestamp.
+     *
+     * <p>This is a modeling decision, not something GriefLogger states. GriefLogger's
+     * items table is player-centric: every row records an action a player performed,
+     * with the player as the only named party. Phases 2-3 mirrored that literally
+     * (node_id = the acting player, target_node_id = NULL for every action), which
+     * loses direction entirely — a DROP_ITEM and the PICKUP_ITEM that later recovers
+     * the same stack shared no node, so correlation had nothing to join on. Naming the
+     * implied second endpoint is what makes the MVP chain
+     * (chest -> player -> ground -> player -> chest) traversable.
+     *
+     * <p>Per-action mapping, derived from ItemActionMapping's ADD/REMOVE semantics:
+     * <ul>
+     *   <li>DROP_ITEM, THROW_ITEM, SHOOT_ITEM: player -> GROUND. The item leaves the
+     *       player into the world at the logged coordinates, where a later PICKUP_ITEM
+     *       at the same block can pick it back up.</li>
+     *   <li>PICKUP_ITEM: GROUND -> player. The mirror image of a drop, and the join
+     *       that closes the drop/pickup pair.</li>
+     *   <li>ADD_ITEM, ADD_ITEM_ENDER: UNKNOWN -> player. The item entered the player's
+     *       (or their ender chest's) inventory, but the items table alone names no
+     *       physical source, so the origin is explicitly unresolved rather than guessed.
+     *       The containers table supplies the real source for container-sourced adds;
+     *       Phase 5 correlation is what links the two.</li>
+     *   <li>CRAFT_ITEM: UNKNOWN -> player. Only the crafted output is this event's
+     *       concern; the consumed materials are a transformation (Phase 9), not a
+     *       transfer from a known node.</li>
+     *   <li>REMOVE_ITEM, REMOVE_ITEM_ENDER, BREAK_ITEM, CONSUME_ITEM: player -> UNKNOWN.
+     *       The item left the player's inventory or ceased to exist, with no further
+     *       evidence in this table about where it went.</li>
+     *   <li>Any unrecognized action id: player -> NULL. No direction is claimed at all,
+     *       because we cannot honestly infer one.</li>
+     * </ul>
+     *
+     * <p>UNKNOWN is a real, queryable sentinel node per level, not a NULL. That keeps
+     * "we know the item left the player but not to where" distinct from "this row makes
+     * no topological claim", which the forensic-integrity rules require.
+     */
+    private ItemEndpoints resolveItemEndpoints(Connection conn, GriefLoggerRawEvent event, String actionType) throws SQLException {
+        long player = nodeManager.getOrCreatePlayerNode(
+                conn, event.userUuid(), event.userName(), event.levelName(), event.x(), event.y(), event.z());
+
+        return switch (actionType) {
+            // Item leaves the player into the world at the logged position.
+            case "DROP_ITEM", "THROW_ITEM", "SHOOT_ITEM" -> new ItemEndpoints(
+                    player,
+                    nodeManager.getOrCreateGroundNode(conn, event.levelName(), event.x(), event.y(), event.z()));
+
+            // Item enters the player from the world at the logged position.
+            case "PICKUP_ITEM" -> new ItemEndpoints(
+                    nodeManager.getOrCreateGroundNode(conn, event.levelName(), event.x(), event.y(), event.z()),
+                    player);
+
+            // Item enters the player from a source this table does not name.
+            case "ADD_ITEM", "ADD_ITEM_ENDER", "CRAFT_ITEM" -> new ItemEndpoints(
+                    nodeManager.getOrCreateUnknownNode(conn, event.levelName()),
+                    player);
+
+            // Item leaves the player with no further evidence of a destination.
+            case "REMOVE_ITEM", "REMOVE_ITEM_ENDER", "BREAK_ITEM", "CONSUME_ITEM" -> new ItemEndpoints(
+                    player,
+                    nodeManager.getOrCreateUnknownNode(conn, event.levelName()));
+
+            // Unrecognized action id (e.g. a GriefLogger version added a new action):
+            // record the observation anchored to the player but claim no direction.
+            default -> {
+                LOGGER.debug("No direction mapping for item action '{}' (GriefLogger rowid {}); recording without a target node.",
+                        actionType, event.rowid());
+                yield new ItemEndpoints(player, null);
+            }
+        };
     }
 
     public SourceCheckpoint getCheckpoint(Connection conn, String sourceName) throws SQLException {
@@ -373,124 +464,17 @@ public class IngestionService {
         throw new SQLException("Failed to resolve or create fingerprint for " + itemId);
     }
 
+    /**
+     * Delegates to {@link NodeManager}. Kept on IngestionService so existing callers
+     * and tests keep working; all node identity logic now lives in the graph package.
+     */
     public long getOrCreatePlayerNode(Connection conn, String uuid, String name, String level, double x, double y, double z) throws SQLException {
-        String levelId = (level != null && !level.isBlank()) ? level : "minecraft:overworld";
-        String customLabel = (name != null && !name.isBlank()) ? name : "unknown";
-
-        String cacheKey = (uuid != null && !uuid.isBlank()) ? uuid : ("name:" + customLabel);
-        Long cached = playerNodeCache.get(cacheKey);
-        if (cached != null) {
-            return cached;
-        }
-
-        if (uuid != null && !uuid.isBlank()) {
-            String selectSql = "SELECT id FROM ig_nodes WHERE node_type = 'PLAYER' AND owner_uuid = ? LIMIT 1";
-            try (PreparedStatement pstmt = conn.prepareStatement(selectSql)) {
-                pstmt.setString(1, uuid);
-                try (ResultSet rs = pstmt.executeQuery()) {
-                    if (rs.next()) {
-                        long id = rs.getLong("id");
-                        playerNodeCache.put(cacheKey, id);
-                        return id;
-                    }
-                }
-            }
-
-            String insertSql = "INSERT INTO ig_nodes (node_type, owner_uuid, level_id, x, y, z, custom_label) VALUES ('PLAYER', ?, ?, ?, ?, ?, ?)";
-            try (PreparedStatement pstmt = conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
-                pstmt.setString(1, uuid);
-                pstmt.setString(2, levelId);
-                pstmt.setDouble(3, x);
-                pstmt.setDouble(4, y);
-                pstmt.setDouble(5, z);
-                pstmt.setString(6, customLabel);
-                pstmt.executeUpdate();
-                try (ResultSet keys = pstmt.getGeneratedKeys()) {
-                    if (keys.next()) {
-                        long id = keys.getLong(1);
-                        playerNodeCache.put(cacheKey, id);
-                        return id;
-                    }
-                }
-            }
-        } else {
-            String selectSql = "SELECT id FROM ig_nodes WHERE node_type = 'PLAYER' AND custom_label = ? LIMIT 1";
-            try (PreparedStatement pstmt = conn.prepareStatement(selectSql)) {
-                pstmt.setString(1, customLabel);
-                try (ResultSet rs = pstmt.executeQuery()) {
-                    if (rs.next()) {
-                        long id = rs.getLong("id");
-                        playerNodeCache.put(cacheKey, id);
-                        return id;
-                    }
-                }
-            }
-
-            String insertSql = "INSERT INTO ig_nodes (node_type, owner_uuid, level_id, x, y, z, custom_label) VALUES ('PLAYER', NULL, ?, ?, ?, ?, ?)";
-            try (PreparedStatement pstmt = conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
-                pstmt.setString(1, levelId);
-                pstmt.setDouble(2, x);
-                pstmt.setDouble(3, y);
-                pstmt.setDouble(4, z);
-                pstmt.setString(5, customLabel);
-                pstmt.executeUpdate();
-                try (ResultSet keys = pstmt.getGeneratedKeys()) {
-                    if (keys.next()) {
-                        long id = keys.getLong(1);
-                        playerNodeCache.put(cacheKey, id);
-                        return id;
-                    }
-                }
-            }
-        }
-
-        throw new SQLException("Failed to create player node for " + customLabel);
+        return nodeManager.getOrCreatePlayerNode(conn, uuid, name, level, x, y, z);
     }
 
+    /** Delegates to {@link NodeManager}. */
     public long getOrCreateContainerNode(Connection conn, String level, double x, double y, double z) throws SQLException {
-        String levelId = (level != null && !level.isBlank()) ? level : "minecraft:overworld";
-        int ix = (int) Math.floor(x);
-        int iy = (int) Math.floor(y);
-        int iz = (int) Math.floor(z);
-        String cacheKey = levelId + ":" + ix + ":" + iy + ":" + iz;
-
-        Long cached = containerNodeCache.get(cacheKey);
-        if (cached != null) {
-            return cached;
-        }
-
-        String selectSql = "SELECT id FROM ig_nodes WHERE node_type = 'CONTAINER' AND level_id = ? AND x = ? AND y = ? AND z = ? LIMIT 1";
-        try (PreparedStatement pstmt = conn.prepareStatement(selectSql)) {
-            pstmt.setString(1, levelId);
-            pstmt.setDouble(2, ix);
-            pstmt.setDouble(3, iy);
-            pstmt.setDouble(4, iz);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    long id = rs.getLong("id");
-                    containerNodeCache.put(cacheKey, id);
-                    return id;
-                }
-            }
-        }
-
-        String insertSql = "INSERT INTO ig_nodes (node_type, level_id, x, y, z) VALUES ('CONTAINER', ?, ?, ?, ?)";
-        try (PreparedStatement pstmt = conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
-            pstmt.setString(1, levelId);
-            pstmt.setDouble(2, ix);
-            pstmt.setDouble(3, iy);
-            pstmt.setDouble(4, iz);
-            pstmt.executeUpdate();
-            try (ResultSet keys = pstmt.getGeneratedKeys()) {
-                if (keys.next()) {
-                    long id = keys.getLong(1);
-                    containerNodeCache.put(cacheKey, id);
-                    return id;
-                }
-            }
-        }
-
-        throw new SQLException("Failed to create container node at " + cacheKey);
+        return nodeManager.getOrCreateContainerNode(conn, level, x, y, z);
     }
 
     public long getTotalObservationsCount() {
