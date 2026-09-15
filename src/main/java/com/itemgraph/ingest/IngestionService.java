@@ -1,5 +1,7 @@
 package com.itemgraph.ingest;
 
+import com.itemgraph.correlation.CorrelationEngine;
+import com.itemgraph.correlation.CorrelationResult;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.graph.NodeManager;
 import org.slf4j.Logger;
@@ -33,6 +35,7 @@ public class IngestionService {
     private final GriefLoggerAdapter adapter;
     private final DatabaseManager dbManager;
     private final NodeManager nodeManager;
+    private final CorrelationEngine correlationEngine;
 
     private final Map<String, Long> fingerprintCache = new ConcurrentHashMap<>();
 
@@ -51,9 +54,15 @@ public class IngestionService {
     }
 
     public IngestionService(GriefLoggerAdapter adapter, DatabaseManager dbManager, NodeManager nodeManager) {
+        this(adapter, dbManager, nodeManager, new CorrelationEngine(dbManager));
+    }
+
+    public IngestionService(GriefLoggerAdapter adapter, DatabaseManager dbManager, NodeManager nodeManager,
+                            CorrelationEngine correlationEngine) {
         this.adapter = adapter;
         this.dbManager = dbManager;
         this.nodeManager = nodeManager;
+        this.correlationEngine = correlationEngine;
     }
 
     public static IngestionService getInstance() {
@@ -96,7 +105,8 @@ public class IngestionService {
         running.set(true);
         // Schedule every 60 seconds, with an initial delay of 5 seconds
         executor.scheduleWithFixedDelay(this::runIngestionSafely, 5, 60, TimeUnit.SECONDS);
-        LOGGER.info("ItemGraph ingestion service started (scheduled every 60s).");
+        LOGGER.info("ItemGraph ingestion service started (ingest + correlate every 60s, ground bridge window {}s).",
+                correlationEngine.getWindowSeconds());
     }
 
     /**
@@ -124,12 +134,56 @@ public class IngestionService {
         return running.get();
     }
 
+    /**
+     * One scheduled tick of the worker: ingest, then correlate.
+     *
+     * <p>Correlation runs on this same single-threaded executor, immediately after the
+     * ingestion cycle it depends on, so newly ingested observations are correlated
+     * without waiting a full cycle and correlation can never overlap ingestion on the
+     * shared database connection.
+     */
     private void runIngestionSafely() {
         try {
             runIngestion();
         } catch (Throwable t) {
             LOGGER.error("Unexpected error in ItemGraph scheduled ingestion cycle", t);
         }
+        runCorrelationSafely();
+    }
+
+    private void runCorrelationSafely() {
+        try {
+            runCorrelation();
+        } catch (Throwable t) {
+            LOGGER.error("Unexpected error in ItemGraph scheduled correlation pass", t);
+        }
+    }
+
+    /**
+     * Runs one correlation pass. Synchronized on the same monitor as
+     * {@link #runIngestion()}, so a pass can never interleave with an ingestion cycle —
+     * including a manual {@code /ig ingest now} issued from the server thread.
+     */
+    public synchronized CorrelationResult runCorrelation() {
+        return correlationEngine.runCorrelation();
+    }
+
+    /**
+     * Queues a correlation pass onto the ingestion worker. Used by the command layer so
+     * a manually triggered ingest still produces inferred edges without doing candidate
+     * search on the server thread. No-op when the service is not running.
+     */
+    public boolean requestCorrelationAsync() {
+        ScheduledExecutorService current = executor;
+        if (!running.get() || current == null) {
+            return false;
+        }
+        current.execute(this::runCorrelationSafely);
+        return true;
+    }
+
+    public CorrelationEngine getCorrelationEngine() {
+        return correlationEngine;
     }
 
     /**

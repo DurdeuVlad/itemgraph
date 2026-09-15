@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import com.itemgraph.ItemGraph;
+import com.itemgraph.correlation.CorrelationResult;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.ingest.IngestionResult;
 import com.itemgraph.ingest.IngestionService;
@@ -72,6 +73,16 @@ public final class ItemGraphCommands {
         }
         final String checkpointsSummaryFinal = checkpointsSummary;
 
+        CorrelationResult lastCorrelation = ingestion.getCorrelationEngine().getLastResult();
+        source.sendSuccess(() -> Component.literal(
+                "[ItemGraph] correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s" +
+                " lastPass=" + (lastCorrelation == null ? "never run yet" :
+                    (lastCorrelation.success() ? "OK" : "ERROR (" + lastCorrelation.errorMessage() + ")") +
+                    " (" + lastCorrelation.observationsFinalised() + " evaluated, " +
+                    lastCorrelation.edgesCreated() + " bridges inferred, " +
+                    lastCorrelation.deferred() + " deferred, " + lastCorrelation.durationMs() + "ms)")
+        ), false);
+
         source.sendSuccess(() -> Component.literal(
                 "[ItemGraph] ingestion: running=" + ingestion.isRunning() +
                 " totalObservations=" + totalObservations +
@@ -90,9 +101,14 @@ public final class ItemGraphCommands {
         IngestionResult result = IngestionService.getInstance().runIngestion();
 
         if (result.success()) {
+            // Correlation is queued onto the ingestion worker rather than run here:
+            // candidate search must never happen on the server thread.
+            boolean queued = IngestionService.getInstance().requestCorrelationAsync();
             source.sendSuccess(() -> Component.literal(
                     "[ItemGraph] Ingestion cycle complete: " + result.itemsIngested() + " new item observations, " +
-                    result.containersIngested() + " new container observations (" + result.durationMs() + "ms)."
+                    result.containersIngested() + " new container observations (" + result.durationMs() + "ms). " +
+                    (queued ? "Correlation pass queued on the ingestion worker."
+                            : "Ingestion service is stopped; correlation not queued.")
             ), false);
         } else {
             source.sendFailure(Component.literal("[ItemGraph] Ingestion cycle failed: " + result.errorMessage()));
