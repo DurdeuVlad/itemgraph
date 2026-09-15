@@ -43,7 +43,15 @@ repositories {
 dependencies {
     implementation 'org.xerial:sqlite-jdbc:3.46.1.0'
     jarJar 'org.xerial:sqlite-jdbc:3.46.1.0'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}
+
 
 tasks.withType(ProcessResources).configureEach {
     var replaceProperties = [
