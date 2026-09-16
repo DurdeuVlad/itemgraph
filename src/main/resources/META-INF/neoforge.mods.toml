@@ -8,6 +8,12 @@ modId="${mod_id}"
 version="${mod_version}"
 displayName="${mod_name}"
 authors="${mod_authors}"
+# Path is absolute from the resource root (src/main/resources), per NeoForge's
+# neoforge.mods.toml reference. logoBlur=false forces nearest-neighbour scaling
+# on the mods list screen - the icon is hand-placed pixel art and the default
+# (true, linear filtering) would smear it.
+logoFile="itemgraph_icon.png"
+logoBlur=false
 description='''${mod_description}'''
 
 [[dependencies.${mod_id}]]
