@@ -17,123 +17,71 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Phase 5 correlation: bridges a player's drop to a later player's pickup across the
- * ephemeral GROUND node.
+ * Phase 7 correlation: reconstructs item type, metadata, and quantity flow across the
+ * ephemeral GROUND node using stack-aware quantity conservation.
  *
  * <h2>Why only ground bridging</h2>
  *
- * <p>The Phase 5 plan lists four patterns to support: container-remove -> player-gain,
- * player-drop -> item-entity, item-entity -> player-pickup, and player-remove ->
- * container-add. After the Phase 4 item-flow topology and the Phase 5 container
- * direction fix, <b>three of those four are already a single {@code ig_observations}
- * row</b>: a container withdrawal is one row reading container -> player, a container
- * deposit is one row reading player -> container, and a drop is one row reading
- * player -> ground. Those are directly observed facts, and re-deriving them as
- * "inferred edges" would blur the evidence/inference boundary this project is built
- * to preserve — {@code ig_observations} IS the observed evidence,
- * {@code ig_inferred_edges} is specifically for claims no single row evidences.
+ * <p>After the Phase 4 item-flow topology and the Phase 5 container direction fix,
+ * three of the four core transitions are already a single {@code ig_observations} row:
+ * a container withdrawal is {@code CONTAINER -> PLAYER}, a container deposit is
+ * {@code PLAYER -> CONTAINER}, and a drop is {@code PLAYER -> GROUND}. Those are directly
+ * observed facts. Re-deriving them as "inferred edges" would blur the evidence/inference
+ * boundary this project is built to preserve.
  *
- * <p>Only the fourth link genuinely needs inference. GROUND is an ephemeral node: a
- * drop names the player who put an item there, a pickup names the player who took one
- * away, and <b>nothing in GriefLogger states they are the same item</b> — the
- * {@code ItemEntity} UUID is not logged (Phase 0 recon). Connecting them is a claim
- * about two separate observations, so it is an inference, it needs a confidence, and
- * it needs an explanation. That is the whole job of this class.
+ * <p>Only the ground transition genuinely needs inference. GROUND is an ephemeral node:
+ * a drop names the player who put an item there, a pickup names the player who took one
+ * away, and nothing in GriefLogger states they are the same item — the {@code ItemEntity}
+ * UUID is not logged (Phase 0 recon). Connecting them is a claim about two separate
+ * observations, so it is an inference, needs a deterministic confidence, and needs a
+ * complete, explainable narrative.
  *
- * <h2>Matching rules</h2>
+ * <h2>Phase 7 Quantity Conservation & Allocation Ledger</h2>
  *
- * <p>For a DROP-type observation (DROP_ITEM / THROW_ITEM / SHOOT_ITEM, player -> ground),
- * a candidate pickup must:
+ * <p>Phase 5 enforced strict 1-to-1 quantity equality (drop amount == pickup amount).
+ * Phase 7 replaces this with a deterministic capacity ledger ({@code ig_edge_allocations}):
  * <ul>
- *   <li>be a PICKUP_ITEM observation whose origin is the <em>same</em> GROUND node,</li>
- *   <li>carry the <em>same</em> fingerprint id (exact canonical metadata equality),</li>
- *   <li>carry the <em>same</em> amount — Phase 5 has no split/merge model, so a partial
- *       pickup is deliberately not matched rather than guessed at. Known limitation,
- *       deferred to Phase 7 (quantity flow); matching partial quantities without a
- *       conservation model would manufacture quantity, which the charter forbids,</li>
- *   <li>be strictly later than the drop (a later observation may explain an earlier
- *       event, never the reverse), and within the configured window,</li>
- *   <li>not already be cited as evidence for another accepted bridge. One dropped stack
- *       can only be picked up once, so allowing a pickup to support two bridges would
- *       attribute the same items to two different flows.</li>
+ *   <li><b>Conservation invariant:</b> for every source observation {@code D},
+ *       {@code sum(source allocations) <= D.amount}. For every destination observation {@code P},
+ *       {@code sum(destination allocations) <= P.amount}. Quantity is never manufactured.</li>
+ *   <li><b>Stack splitting:</b> a drop of 64 iron can be split across multiple pickups
+ *       (e.g. 20 to Bob, 44 to Chris) with each transfer recorded as an inferred edge
+ *       backed by the corresponding quantity allocations.</li>
+ *   <li><b>Stack merging:</b> multiple drops (e.g. 20 from Alice, 30 from Bob) can merge into
+ *       a single pickup (50 to Chris), with destination capacity respected.</li>
+ *   <li><b>Partial & unresolved transfers:</b> unallocated residual quantity remains eligible
+ *       for future matching until the correlation window closes, after which it is marked
+ *       {@code CLOSED_UNRESOLVED}. No phantom edges are ever invented.</li>
  * </ul>
  *
- * <h2>Confidence</h2>
+ * <h2>Confidence & Ambiguity</h2>
  *
- * <p>Deterministic and fully reproducible from the stored observations — no model, no
- * tuning, no randomness. The same inputs always produce the same number:
- *
+ * <p>Deterministic and fully reproducible from the stored observations:
  * <pre>
  *   confidence = BASE
  *              x proximity(dt)
  *              x ambiguity(competing pickups for this drop)
  *              x ambiguity(competing drops for that pickup)
- *
- *   proximity(dt)         = 1 - PROXIMITY_WEIGHT * dt / window
- *   ambiguity(n, gap)     = 1                        if n == 1
- *                         = p + (1 - p) * separation if n &gt;  1
- *       where p          = 1 / n
- *             separation = min(SEPARATION_CAP, gap / window)
  * </pre>
- *
- * <p>Each factor is a documented evidentiary statement:
- * <ul>
- *   <li><b>BASE = {@value #BASE_CONFIDENCE}</b> — the ceiling for a perfect, unopposed
- *       match. Not 1.0, and never 1.0: without the ItemEntity UUID this is always
- *       circumstantial evidence (same place, same item, same amount, right order), so
- *       certainty is not available. The headroom is reserved for Phase 8, where a
- *       supplemental hook can log the entity UUID and support a genuinely stronger
- *       claim.</li>
- *   <li><b>proximity</b> — an instant pickup scores 1.0; a pickup at the very edge of
- *       the window scores {@code 1 - PROXIMITY_WEIGHT}. Linear in elapsed time, so the
- *       penalty scales with the window instead of being a magic constant. A long delay
- *       weakens but does not refute the link, hence a modest weight.</li>
- *   <li><b>ambiguity</b> — with {@code n} equally admissible candidates and no
- *       discriminator, the honest prior in favour of the chosen one is {@code 1/n}.
- *       Temporal proximity IS a discriminator, so the score recovers towards 1.0 in
- *       proportion to how far the runner-up is from the chosen candidate, measured as a
- *       fraction of the window. The recovery is capped at {@value #SEPARATION_CAP}: a
- *       demonstrated alternative explanation never fully disappears, so an ambiguous
- *       match can never score as high as an unambiguous one.</li>
- *   <li>The reverse direction uses the identical function: if several drops could also
- *       explain the chosen pickup, that ambiguity is just as real and reduces confidence
- *       just as much.</li>
- * </ul>
- *
- * <p>The exact factor values are written into the edge's {@code explanation}, so an
- * admin asking "why does ItemGraph think this transfer happened" gets the observations,
- * the candidate counts, and the arithmetic.
- *
- * <h2>Incrementality</h2>
- *
- * <p>Every pass is driven by {@code correlated_at IS NULL} and bounded by
- * {@link #MAX_OBSERVATIONS_PER_PASS}; the table is never fully scanned. A pickup is
- * stamped as soon as it is seen (it is matched from the drop side, not the pickup side).
- * A drop is stamped once it produces an edge, or once its window has closed with no
- * match. A drop whose window is still open is deliberately left pending, because the
- * pickup that explains it may simply not have been ingested yet — ingestion cycles run
- * every 60s while the window is minutes long. That deferral is what stops the engine
- * from permanently writing off drops purely for arriving near a cycle boundary.
+ * Competing candidates on either side reduce confidence rather than being discarded silently.
  *
  * <h2>Threading</h2>
  *
- * <p>Runs on the existing ItemGraph ingestion worker thread, after an ingestion cycle
- * completes — never on the server thread, and never concurrently with ingestion (see
- * {@code IngestionService.runCorrelation}). GriefLogger's database is not touched here
- * at all: correlation reads and writes only ItemGraph's own tables.
+ * <p>Runs on the ItemGraph ingestion worker thread after each ingestion cycle.
+ * GriefLogger's database is treated as strictly read-only and is never written to.
  */
 public class CorrelationEngine {
     private static final Logger LOGGER = LoggerFactory.getLogger(CorrelationEngine.class);
 
-    /** Actions that put an item on the ground (Phase 4 topology: player -> GROUND). */
+    /** Actions that put an item on the ground (player -> GROUND). */
     private static final Set<String> DROP_ACTIONS = Set.of("DROP_ITEM", "THROW_ITEM", "SHOOT_ITEM");
 
-    /** The action that takes an item off the ground (Phase 4 topology: GROUND -> player). */
+    /** The action that takes an item off the ground (GROUND -> player). */
     private static final String PICKUP_ACTION = "PICKUP_ITEM";
 
     private static final String GROUND_NODE_TYPE = "GROUND";
 
-    /** Ceiling confidence for a perfect, unopposed ground bridge. See class javadoc. */
+    /** Ceiling confidence for a perfect, unopposed ground bridge. */
     public static final double BASE_CONFIDENCE = 0.95;
 
     /** Share of confidence that elapsed-time distance can erode across the full window. */
@@ -158,18 +106,11 @@ public class CorrelationEngine {
         this(dbManager, resolveWindowSecondsFromConfig());
     }
 
-    /**
-     * @param windowSeconds maximum drop-to-pickup gap considered a possible bridge.
-     */
     public CorrelationEngine(DatabaseManager dbManager, long windowSeconds) {
         this.dbManager = dbManager;
         this.windowSeconds = windowSeconds;
     }
 
-    /**
-     * Reads the configured window, falling back to the documented default when the
-     * NeoForge config spec is not loaded (unit tests, or very early startup).
-     */
     private static long resolveWindowSecondsFromConfig() {
         try {
             if (ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS != null) {
@@ -217,35 +158,68 @@ public class CorrelationEngine {
 
             for (PendingObservation obs : pending) {
                 if (PICKUP_ACTION.equals(obs.actionType())) {
-                    // Pickups are evidence for the drop-side search, not a search of their
-                    // own: stamping one here only records that correlation has seen it.
-                    // Candidate lookup deliberately ignores correlated_at, so a drop
-                    // ingested later can still cite an already-stamped pickup.
-                    markCorrelated(conn, obs.id(), startTime);
+                    // Pickups are evidence for the drop-side search. Stamping records that
+                    // correlation has evaluated the pickup. Candidate lookup evaluates residual
+                    // capacity against ig_edge_allocations, so a drop evaluated later can still
+                    // cite an already-stamped pickup if it has residual capacity.
+                    int pickupAllocated = getDestinationAllocated(conn, obs.id());
+                    String status = pickupAllocated >= obs.amount()
+                            ? "FULLY_ALLOCATED"
+                            : (pickupAllocated > 0 ? "PARTIALLY_ALLOCATED" : "PENDING");
+                    if (startTime - obs.timestampMs() > windowMs() && pickupAllocated < obs.amount()) {
+                        status = "CLOSED_UNRESOLVED";
+                    }
+                    markObservationStatus(conn, obs.id(), status, startTime);
                     finalised++;
                     continue;
                 }
 
                 if (!DROP_ACTIONS.contains(obs.actionType()) || obs.targetNodeId() == null) {
-                    // A GROUND-touching observation that is neither a drop nor a pickup
-                    // makes no bridging claim. Stamp it so it stops being rescanned.
-                    markCorrelated(conn, obs.id(), startTime);
+                    // Non-drop ground observation makes no bridging claim.
+                    markObservationStatus(conn, obs.id(), "CLOSED_UNRESOLVED", startTime);
                     finalised++;
                     continue;
                 }
 
-                Bridge bridge = findBridge(conn, obs);
-                if (bridge != null) {
+                int dropAllocated = getSourceAllocated(conn, obs.id());
+                if (dropAllocated > obs.amount()) {
+                    throw new IllegalStateException("Data integrity violation: observation " + obs.id()
+                            + " has allocated " + dropAllocated + " which exceeds original amount " + obs.amount());
+                }
+
+                int dropRemaining = obs.amount() - dropAllocated;
+                if (dropRemaining <= 0) {
+                    markObservationStatus(conn, obs.id(), "FULLY_ALLOCATED", startTime);
+                    finalised++;
+                    continue;
+                }
+
+                boolean createdEdgeForDrop = false;
+                while (dropRemaining > 0) {
+                    Bridge bridge = findNextBridge(conn, obs, dropRemaining);
+                    if (bridge == null) {
+                        break;
+                    }
+
                     persistBridge(conn, obs, bridge, startTime);
                     edges++;
+                    createdEdgeForDrop = true;
+                    dropRemaining -= bridge.allocatedAmount();
+                }
+
+                if (dropRemaining == 0) {
+                    // Fully allocated
+                    markObservationStatus(conn, obs.id(), "FULLY_ALLOCATED", startTime);
                     finalised++;
                 } else if (startTime - obs.timestampMs() > windowMs()) {
-                    // Window closed with no candidate: the item was never recovered, or
-                    // was recovered outside the window. Record the negative result.
-                    markCorrelated(conn, obs.id(), startTime);
+                    // Correlation window closed with unallocated residual quantity
+                    markObservationStatus(conn, obs.id(), "CLOSED_UNRESOLVED", startTime);
                     finalised++;
                 } else {
-                    // Window still open: the explaining pickup may not be ingested yet.
+                    // Window still open: unallocated remainder is eligible for future pickups
+                    if (createdEdgeForDrop || dropAllocated > 0) {
+                        updateObservationStatusOnly(conn, obs.id(), "PARTIALLY_ALLOCATED");
+                    }
                     deferred++;
                 }
             }
@@ -279,16 +253,23 @@ public class CorrelationEngine {
             long fingerprintId,
             int amount,
             String actionType
-    ) {
+    ) {}
+
+    /** A candidate observation with original and allocated quantity accounting. */
+    public record Candidate(long id, long timestampMs, Long playerNodeId, int originalAmount, int allocatedAmount) {
+        public int remainingCapacity() {
+            return originalAmount - allocatedAmount;
+        }
     }
 
-    /** A candidate observation on the other side of a ground node. */
-    private record Candidate(long id, long timestampMs, Long playerNodeId) {
-    }
-
-    /** An accepted drop -> pickup bridge together with its scoring breakdown. */
+    /** An accepted drop -> pickup bridge with full residual and ambiguity breakdown. */
     private record Bridge(
             Candidate pickup,
+            int allocatedAmount,
+            int dropResidualBefore,
+            int dropResidualAfter,
+            int pickupResidualBefore,
+            int pickupResidualAfter,
             double confidence,
             double proximityFactor,
             double pickupAmbiguityFactor,
@@ -297,8 +278,7 @@ public class CorrelationEngine {
             int dropCandidates,
             long forwardGapMs,
             long reverseGapMs
-    ) {
-    }
+    ) {}
 
     private List<PendingObservation> loadPendingGroundObservations(Connection conn) throws SQLException {
         String sql = """
@@ -320,8 +300,6 @@ public class CorrelationEngine {
             pstmt.setInt(3, MAX_OBSERVATIONS_PER_PASS);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
-                    // wasNull() reflects the most recent read, so resolve the nullable
-                    // column into a Long before reading anything else.
                     long rawTarget = rs.getLong("target_node_id");
                     Long targetNodeId = rs.wasNull() ? null : rawTarget;
                     pending.add(new PendingObservation(
@@ -340,23 +318,26 @@ public class CorrelationEngine {
     }
 
     /**
-     * Finds the best pickup that can explain {@code drop}, or null if none is admissible.
-     * The temporally closest candidate wins; competing candidates on either side reduce
-     * the resulting confidence rather than being silently discarded.
+     * Finds the next best admissible pickup bridge for the remaining quantity of {@code drop}.
+     * Returns null if no eligible candidate exists.
      */
-    private Bridge findBridge(Connection conn, PendingObservation drop) throws SQLException {
+    private Bridge findNextBridge(Connection conn, PendingObservation drop, int dropRemaining) throws SQLException {
         List<Candidate> pickups = findCandidatePickups(conn, drop);
         if (pickups.isEmpty()) {
             return null;
         }
 
-        // Ordered by timestamp ascending, so the first candidate is the temporally closest.
         Candidate chosen = pickups.get(0);
         if (chosen.playerNodeId() == null) {
-            // A pickup with no destination node names nobody to attribute the item to.
             return null;
         }
 
+        int pickupRemaining = chosen.remainingCapacity();
+        if (pickupRemaining <= 0) {
+            return null;
+        }
+
+        int allocAmount = Math.min(dropRemaining, pickupRemaining);
         long dt = chosen.timestampMs() - drop.timestampMs();
 
         long forwardGapMs = pickups.size() > 1
@@ -380,25 +361,40 @@ public class CorrelationEngine {
         double pickupAmbiguity = ambiguityFactor(pickups.size(), forwardGapMs);
         double dropAmbiguity = ambiguityFactor(competingDrops.size(), reverseGapMs);
 
-        // Rounded so the stored value is exactly reproducible from the printed factors.
         double confidence = round4(BASE_CONFIDENCE * proximity * pickupAmbiguity * dropAmbiguity);
 
-        return new Bridge(chosen, confidence, proximity, pickupAmbiguity, dropAmbiguity,
-                pickups.size(), competingDrops.size(), forwardGapMs, reverseGapMs);
+        int dropResidualBefore = dropRemaining;
+        int dropResidualAfter = dropRemaining - allocAmount;
+        int pickupResidualBefore = pickupRemaining;
+        int pickupResidualAfter = pickupRemaining - allocAmount;
+
+        return new Bridge(
+                chosen, allocAmount,
+                dropResidualBefore, dropResidualAfter,
+                pickupResidualBefore, pickupResidualAfter,
+                confidence, proximity, pickupAmbiguity, dropAmbiguity,
+                pickups.size(), competingDrops.size(), forwardGapMs, reverseGapMs
+        );
     }
 
     private List<Candidate> findCandidatePickups(Connection conn, PendingObservation drop) throws SQLException {
         String sql = """
-            SELECT o.id, o.timestamp_ms, o.target_node_id
+            SELECT o.id, o.timestamp_ms, o.target_node_id, o.amount,
+                   COALESCE(alloc.allocated, 0) AS allocated_amount
             FROM ig_observations o
+            LEFT JOIN (
+                SELECT observation_id, SUM(amount) AS allocated
+                FROM ig_edge_allocations
+                WHERE allocation_role = 'DESTINATION'
+                GROUP BY observation_id
+            ) alloc ON alloc.observation_id = o.id
             WHERE o.action_type = ?
               AND o.node_id = ?
               AND o.fingerprint_id = ?
-              AND o.amount = ?
               AND o.timestamp_ms > ?
               AND o.timestamp_ms <= ?
               AND o.target_node_id IS NOT NULL
-              AND o.id NOT IN (SELECT observation_id FROM ig_edge_evidence)
+              AND (o.amount - COALESCE(alloc.allocated, 0)) > 0
             ORDER BY o.timestamp_ms ASC, o.id ASC
         """;
 
@@ -406,38 +402,37 @@ public class CorrelationEngine {
             pstmt.setString(1, PICKUP_ACTION);
             pstmt.setLong(2, drop.targetNodeId());
             pstmt.setLong(3, drop.fingerprintId());
-            pstmt.setInt(4, drop.amount());
-            pstmt.setLong(5, drop.timestampMs());
-            pstmt.setLong(6, drop.timestampMs() + windowMs());
+            pstmt.setLong(4, drop.timestampMs());
+            pstmt.setLong(5, drop.timestampMs() + windowMs());
             return readCandidates(pstmt, "target_node_id");
         }
     }
 
-    /**
-     * Drops that could equally explain {@code pickup} (including {@code drop} itself).
-     * This is the reverse ambiguity: if the picked-up stack has several plausible
-     * origins, attributing it to one of them is correspondingly less certain.
-     */
     private List<Candidate> findCompetingDrops(Connection conn, PendingObservation drop, Candidate pickup) throws SQLException {
         String sql = """
-            SELECT o.id, o.timestamp_ms, o.node_id
+            SELECT o.id, o.timestamp_ms, o.node_id, o.amount,
+                   COALESCE(alloc.allocated, 0) AS allocated_amount
             FROM ig_observations o
+            LEFT JOIN (
+                SELECT observation_id, SUM(amount) AS allocated
+                FROM ig_edge_allocations
+                WHERE allocation_role = 'SOURCE'
+                GROUP BY observation_id
+            ) alloc ON alloc.observation_id = o.id
             WHERE o.action_type IN ('DROP_ITEM', 'THROW_ITEM', 'SHOOT_ITEM')
               AND o.target_node_id = ?
               AND o.fingerprint_id = ?
-              AND o.amount = ?
               AND o.timestamp_ms < ?
               AND o.timestamp_ms >= ?
-              AND o.id NOT IN (SELECT observation_id FROM ig_edge_evidence)
+              AND (o.amount - COALESCE(alloc.allocated, 0)) > 0
             ORDER BY o.timestamp_ms ASC, o.id ASC
         """;
 
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, drop.targetNodeId());
             pstmt.setLong(2, drop.fingerprintId());
-            pstmt.setInt(3, drop.amount());
-            pstmt.setLong(4, pickup.timestampMs());
-            pstmt.setLong(5, pickup.timestampMs() - windowMs());
+            pstmt.setLong(3, pickup.timestampMs());
+            pstmt.setLong(4, pickup.timestampMs() - windowMs());
             return readCandidates(pstmt, "node_id");
         }
     }
@@ -446,14 +441,16 @@ public class CorrelationEngine {
         List<Candidate> candidates = new ArrayList<>();
         try (ResultSet rs = pstmt.executeQuery()) {
             while (rs.next()) {
-                // wasNull() reflects the most recent read, so resolve the nullable
-                // column into a Long before reading anything else.
                 long rawPlayer = rs.getLong(playerColumn);
                 Long playerNodeId = rs.wasNull() ? null : rawPlayer;
+                int originalAmount = rs.getInt("amount");
+                int allocatedAmount = rs.getInt("allocated_amount");
                 candidates.add(new Candidate(
                         rs.getLong("id"),
                         rs.getLong("timestamp_ms"),
-                        playerNodeId
+                        playerNodeId,
+                        originalAmount,
+                        allocatedAmount
                 ));
             }
         }
@@ -470,17 +467,7 @@ public class CorrelationEngine {
     }
 
     /**
-     * Competing-candidate penalty.
-     *
-     * <p>{@code n} admissible candidates with no discriminator would justify no more
-     * than a {@code 1/n} prior for the chosen one. Temporal separation from the
-     * runner-up is a real discriminator, so the score recovers towards 1.0 in
-     * proportion to that separation as a fraction of the window — capped at
-     * {@link #SEPARATION_CAP}, because an alternative explanation that demonstrably
-     * exists never becomes as good as no alternative at all.
-     *
-     * @param candidateCount total admissible candidates, including the chosen one
-     * @param gapMs          time between the chosen candidate and the runner-up
+     * Competing-candidate penalty with temporal separation discriminator.
      */
     double ambiguityFactor(int candidateCount, long gapMs) {
         if (candidateCount <= 1) {
@@ -496,12 +483,36 @@ public class CorrelationEngine {
     }
 
     // ---------------------------------------------------------------------
+    // Capacity Ledger Helpers
+    // ---------------------------------------------------------------------
+
+    public int getSourceAllocated(Connection conn, long observationId) throws SQLException {
+        String sql = "SELECT COALESCE(SUM(amount), 0) FROM ig_edge_allocations WHERE observation_id = ? AND allocation_role = 'SOURCE'";
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, observationId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+    }
+
+    public int getDestinationAllocated(Connection conn, long observationId) throws SQLException {
+        String sql = "SELECT COALESCE(SUM(amount), 0) FROM ig_edge_allocations WHERE observation_id = ? AND allocation_role = 'DESTINATION'";
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, observationId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Persistence
     // ---------------------------------------------------------------------
 
     /**
-     * Writes the inferred edge, its two evidence rows, and the drop's correlation stamp
-     * in a single transaction, so an edge can never exist without its evidence.
+     * Writes the inferred edge, its evidence rows, the source and destination quantity
+     * allocations, and updates observation lifecycle state atomically in a single transaction.
      */
     private void persistBridge(Connection conn, PendingObservation drop, Bridge bridge, long nowMs) throws SQLException {
         boolean originalAutoCommit = conn.getAutoCommit();
@@ -518,12 +529,10 @@ public class CorrelationEngine {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
             try (PreparedStatement pstmt = conn.prepareStatement(insertEdgeSql, Statement.RETURN_GENERATED_KEYS)) {
-                // The edge bridges OVER the ground node: the ground node is evidence for
-                // the transfer, not one of its endpoints.
                 pstmt.setLong(1, drop.nodeId());
                 pstmt.setLong(2, bridge.pickup().playerNodeId());
                 pstmt.setLong(3, drop.fingerprintId());
-                pstmt.setInt(4, drop.amount());
+                pstmt.setInt(4, bridge.allocatedAmount());
                 pstmt.setLong(5, drop.timestampMs());
                 pstmt.setLong(6, bridge.pickup().timestampMs());
                 pstmt.setDouble(7, bridge.confidence());
@@ -538,7 +547,8 @@ public class CorrelationEngine {
                 }
             }
 
-            String insertEvidenceSql = "INSERT INTO ig_edge_evidence (edge_id, observation_id) VALUES (?, ?)";
+            // Link evidence
+            String insertEvidenceSql = "INSERT OR IGNORE INTO ig_edge_evidence (edge_id, observation_id) VALUES (?, ?)";
             try (PreparedStatement pstmt = conn.prepareStatement(insertEvidenceSql)) {
                 pstmt.setLong(1, edgeId);
                 pstmt.setLong(2, drop.id());
@@ -549,7 +559,33 @@ public class CorrelationEngine {
                 pstmt.executeBatch();
             }
 
-            markCorrelated(conn, drop.id(), nowMs);
+            // Record exact quantity allocations in the ledger
+            String insertAllocSql = "INSERT INTO ig_edge_allocations (edge_id, observation_id, allocation_role, amount) VALUES (?, ?, ?, ?)";
+            try (PreparedStatement pstmt = conn.prepareStatement(insertAllocSql)) {
+                pstmt.setLong(1, edgeId);
+                pstmt.setLong(2, drop.id());
+                pstmt.setString(3, "SOURCE");
+                pstmt.setInt(4, bridge.allocatedAmount());
+                pstmt.addBatch();
+
+                pstmt.setLong(1, edgeId);
+                pstmt.setLong(2, bridge.pickup().id());
+                pstmt.setString(3, "DESTINATION");
+                pstmt.setInt(4, bridge.allocatedAmount());
+                pstmt.addBatch();
+
+                pstmt.executeBatch();
+            }
+
+            // Update destination observation lifecycle status
+            String pickupStatus = bridge.pickupResidualAfter() == 0 ? "FULLY_ALLOCATED" : "PARTIALLY_ALLOCATED";
+            try (PreparedStatement pstmt = conn.prepareStatement(
+                    "UPDATE ig_observations SET correlation_status = ?, correlated_at = ? WHERE id = ?")) {
+                pstmt.setString(1, pickupStatus);
+                pstmt.setLong(2, nowMs);
+                pstmt.setLong(3, bridge.pickup().id());
+                pstmt.executeUpdate();
+            }
 
             conn.commit();
         } catch (SQLException e) {
@@ -561,10 +597,20 @@ public class CorrelationEngine {
         }
     }
 
-    private void markCorrelated(Connection conn, long observationId, long nowMs) throws SQLException {
+    private void markObservationStatus(Connection conn, long observationId, String status, long nowMs) throws SQLException {
         try (PreparedStatement pstmt = conn.prepareStatement(
-                "UPDATE ig_observations SET correlated_at = ? WHERE id = ?")) {
-            pstmt.setLong(1, nowMs);
+                "UPDATE ig_observations SET correlation_status = ?, correlated_at = ? WHERE id = ?")) {
+            pstmt.setString(1, status);
+            pstmt.setLong(2, nowMs);
+            pstmt.setLong(3, observationId);
+            pstmt.executeUpdate();
+        }
+    }
+
+    private void updateObservationStatusOnly(Connection conn, long observationId, String status) throws SQLException {
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "UPDATE ig_observations SET correlation_status = ? WHERE id = ?")) {
+            pstmt.setString(1, status);
             pstmt.setLong(2, observationId);
             pstmt.executeUpdate();
         }
@@ -574,13 +620,6 @@ public class CorrelationEngine {
     // Explanation
     // ---------------------------------------------------------------------
 
-    /**
-     * Builds the human-readable justification stored on the edge. It names both players,
-     * both observation ids, the place, both timestamps, the elapsed time, the candidate
-     * counts on both sides, and the arithmetic that produced the confidence — everything
-     * an admin needs to answer "why does ItemGraph think this transfer happened?"
-     * without re-running the engine.
-     */
     private String buildExplanation(Connection conn, PendingObservation drop, Bridge bridge) throws SQLException {
         String dropper = describeNode(conn, drop.nodeId());
         String picker = describeNode(conn, bridge.pickup().playerNodeId());
@@ -588,13 +627,37 @@ public class CorrelationEngine {
         String item = describeFingerprint(conn, drop.fingerprintId());
         long dtMs = bridge.pickup().timestampMs() - drop.timestampMs();
 
+        boolean isSplit = bridge.dropResidualBefore() > bridge.allocatedAmount()
+                || bridge.dropResidualAfter() > 0
+                || drop.amount() > bridge.allocatedAmount();
+        boolean isMerge = bridge.pickupResidualBefore() > bridge.allocatedAmount()
+                || bridge.pickup().originalAmount() > bridge.allocatedAmount();
+
+        String flowType;
+        if (isSplit && isMerge) {
+            flowType = "many-to-many flow";
+        } else if (isSplit) {
+            flowType = "stack split";
+        } else if (isMerge) {
+            flowType = "stack merge";
+        } else {
+            flowType = "exact transfer";
+        }
+
         StringBuilder sb = new StringBuilder();
         sb.append(String.format(Locale.ROOT,
-                "Ground bridge: %s dropped %dx %s at %s on %s (observation %d); %s picked up an identical stack there %s later, on %s (observation %d). ",
+                "Ground bridge (%s): %s dropped %dx %s at %s on %s (observation %d); %s picked up %dx there %s later, on %s (observation %d). ",
+                flowType,
                 dropper, drop.amount(), item, place, formatTime(drop.timestampMs()), drop.id(),
-                picker, formatDuration(dtMs), formatTime(bridge.pickup().timestampMs()), bridge.pickup().id()));
+                picker, bridge.allocatedAmount(), formatDuration(dtMs), formatTime(bridge.pickup().timestampMs()), bridge.pickup().id()));
 
-        sb.append("Matched on exact item fingerprint and exact amount, same ground block, pickup strictly after the drop, within the ")
+        sb.append(String.format(Locale.ROOT,
+                "Allocated %d unit%s (drop: %d/%d allocated, residual %d; pickup: %d/%d allocated, residual %d). ",
+                bridge.allocatedAmount(), bridge.allocatedAmount() == 1 ? "" : "s",
+                (drop.amount() - bridge.dropResidualAfter()), drop.amount(), bridge.dropResidualAfter(),
+                (bridge.pickup().originalAmount() - bridge.pickupResidualAfter()), bridge.pickup().originalAmount(), bridge.pickupResidualAfter()));
+
+        sb.append("Matched on exact item fingerprint and available quantity capacity, same ground block, pickup strictly after the drop, within the ")
                 .append(windowSeconds).append("s correlation window. ");
 
         sb.append(String.format(Locale.ROOT,
@@ -621,7 +684,6 @@ public class CorrelationEngine {
         return sb.toString();
     }
 
-    /** Renders a node as something an admin recognises, without inventing detail. */
     private String describeNode(Connection conn, long nodeId) throws SQLException {
         try (PreparedStatement pstmt = conn.prepareStatement(
                 "SELECT node_type, custom_label, level_id, x, y, z FROM ig_nodes WHERE id = ?")) {

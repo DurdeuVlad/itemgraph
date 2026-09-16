@@ -34,6 +34,7 @@ final class ObservationQueries {
                    o.action_type AS o_action_type,
                    o.amount AS o_amount,
                    o.correlated_at AS o_correlated_at,
+                   o.correlation_status AS o_correlation_status,
                    o.node_id AS origin_id,
                    origin.node_type AS origin_type,
                    origin.custom_label AS origin_label,
@@ -73,6 +74,8 @@ final class ObservationQueries {
         long correlatedAt = rs.getLong("o_correlated_at");
         Long correlated = rs.wasNull() ? null : correlatedAt;
 
+        String correlationStatus = rs.getString("o_correlation_status");
+
         return new ObservationDetail(
                 rs.getLong("o_id"),
                 rs.getString("o_source_type"),
@@ -83,7 +86,8 @@ final class ObservationQueries {
                 fingerprint,
                 rs.getString("o_action_type"),
                 rs.getInt("o_amount"),
-                correlated
+                correlated,
+                correlationStatus
         );
     }
 

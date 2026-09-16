@@ -20,7 +20,8 @@ public class MigrationRunner {
             new V3__ResetForCanonicalization(),
             new V4__ItemFlowTopology(),
             new V5__ContainerFlowTopology(),
-            new V6__CorrelationState()
+            new V6__CorrelationState(),
+            new V7__QuantityFlowLedger()
     );
 
     public static int runMigrations(Connection conn) throws SQLException {

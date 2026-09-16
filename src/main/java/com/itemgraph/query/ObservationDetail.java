@@ -30,8 +30,24 @@ public record ObservationDetail(
         FingerprintRef fingerprint,
         String actionType,
         int amount,
-        Long correlatedAtMs
+        Long correlatedAtMs,
+        String correlationStatus
 ) {
+
+    public ObservationDetail(
+            long id,
+            String sourceType,
+            Long sourceEventId,
+            long timestampMs,
+            NodeRef origin,
+            NodeRef destination,
+            FingerprintRef fingerprint,
+            String actionType,
+            int amount,
+            Long correlatedAtMs
+    ) {
+        this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint, actionType, amount, correlatedAtMs, null);
+    }
 
     /** Always {@code OBSERVED}. See the class javadoc. */
     public String kindLabel() {

@@ -1,6 +1,7 @@
 package com.itemgraph.canon;
 
 import io.netty.buffer.Unpooled;
+import net.minecraft.SharedConstants;
 import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.component.DataComponentPatch;
@@ -9,6 +10,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.armortrim.ArmorTrim;
@@ -251,9 +253,28 @@ public class ItemCanonicalizer {
         return "minecraft:" + materialName;
     }
 
+    private static volatile boolean bootstrapped = false;
+
+    public static void ensureBootstrapped() {
+        if (!bootstrapped) {
+            synchronized (ItemCanonicalizer.class) {
+                if (!bootstrapped) {
+                    try {
+                        SharedConstants.tryDetectVersion();
+                        Bootstrap.bootStrap();
+                    } catch (Throwable ignored) {
+                        // Expected outside a real game launch in test environments
+                    }
+                    bootstrapped = true;
+                }
+            }
+        }
+    }
+
     public static String resolveRegistryId(String rawItemId) {
         String normalized = normalizeItemId(rawItemId);
         try {
+            ensureBootstrapped();
             ResourceLocation loc = ResourceLocation.tryParse(normalized);
             if (loc != null && BuiltInRegistries.ITEM != null && BuiltInRegistries.ITEM.containsKey(loc)) {
                 Item item = BuiltInRegistries.ITEM.get(loc);
