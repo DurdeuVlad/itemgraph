@@ -242,22 +242,23 @@ with:
 
 A stack split/merge scenario with no per-item UUIDs and correct conservation.
 
-## Automated coverage as of Phase 6
+## Automated coverage as of Phase 7
 
-Run with `./gradlew test`. All suites use a real SQLite file in a JUnit `@TempDir` with
-the real migrations applied — no mocked database, because a projection that drops a row on
-a LEFT-vs-INNER join mistake is exactly the class of bug these tests exist to catch.
+Run with `./gradlew test` (or `java -jar gradle/wrapper/gradle-wrapper.jar test`). All suites use a real SQLite file in a JUnit `@TempDir` with the real migrations applied — no mocked database, because a projection that drops a row on a LEFT-vs-INNER join mistake is exactly the class of bug these tests exist to catch.
 
 | Suite | Covers |
 | --- | --- |
-| `ItemCanonicalizerTest` | fingerprint determinism (Phase 3) |
+| `QuantityFlowTest` | Phase 7 stack-aware quantity flow: 1-to-many splits, many-to-1 merges, partial transfers, open/closed window semantics, over-capacity protections, competing candidate penalties, idempotency, restart continuity, and rollback atomicity (16 tests) |
+| `CorrelationEngineTest` | ground bridging, scoring, temporal ordering, the MVP chain end to end (Phase 5/7) |
+| `ItemCanonicalizerTest` | fingerprint determinism and DataComponent decoding (Phase 3) |
 | `NodeManagerTest` | node identity resolution (Phase 4) |
 | `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction (Phases 2, 4, 5) |
-| `CorrelationEngineTest` | ground bridging, scoring, temporal ordering, the MVP chain end to end (Phase 5) |
-| `DatabaseManagerTest` | migrations, dedup constraint, read-only query connection |
+| `DatabaseManagerTest` | migrations (V1–V7), dedup constraint, read-only query connection |
 | `EventQueryServiceTest` | found/not-found, dangling references rendering as "no such row", OBSERVED labelling |
 | `ExplainQueryServiceTest` | evidence resolved back to observation detail, no cross-edge evidence leakage, unjustifiable edges reported, evidence cap |
 | `TraceQueryServiceTest` | OBSERVED/INFERRED merge order, limit capping, truncation keeping the earliest hops, window containment vs edge overlap, per-line provenance |
+
+Total automated test count: 93 tests, 100% passing.
 
 Not covered by automated tests: the Brigadier handlers themselves, which need a running
 server. They are deliberately thin wrappers over `com.itemgraph.query`, so the logic they

@@ -8,6 +8,15 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- Phase 7: Stack-aware quantity-flow reconstruction and allocation ledger.
+  - Migration `V7__QuantityFlowLedger` adding `ig_edge_allocations` table (`edge_id`, `observation_id`, `allocation_role`, `amount`) and explicit observation lifecycle states in `ig_observations.correlation_status` (`PENDING`, `PARTIALLY_ALLOCATED`, `FULLY_ALLOCATED`, `CLOSED_UNRESOLVED`).
+  - Stack splitting: supports 1-to-many flows (e.g. drop 64 -> pickup 20 + pickup 44) without per-item UUIDs.
+  - Stack merging: supports many-to-1 flows (e.g. drop 20 + drop 30 -> pickup 50).
+  - Partial transfers: strict quantity conservation ($\sum \text{allocated} \le \text{evidenced capacity}$) with unrecovered units preserved as residual capacity.
+  - Dynamic capacity accounting and window closure semantics: observations with unallocated residual quantity transition to `CLOSED_UNRESOLVED` once the candidate window expires.
+  - Atomic single-transaction persistence for inferred edges, evidence citations, allocations, and observation status updates.
+  - Enhanced explanation narratives documenting flow classification (`stack split`, `stack merge`, `exact transfer`), allocated units, residuals before/after, candidate counts, and factor breakdown.
+  - Automated test suite: `QuantityFlowTest` covering all 16 stack-aware flow scenarios (93 total project tests, 100% passing).
 - Phase 6: the three forensic query commands, all gated at permission level 2 like the
   rest of the `/itemgraph` (alias `/ig`) tree.
 

@@ -65,7 +65,43 @@ Example:
 Chest A -5 emeralds
 ```
 
-with no plausible destination event.
+with no plausible destination event. In Phase 7, this is formally tracked as `CLOSED_UNRESOLVED` once the candidate correlation window expires.
+
+### 5. Quantity-Flow Evidence and Ledgers (Phase 7)
+
+ItemGraph reconstructs stack flows without permanent item UUIDs by tracking exact quantity capacities and allocations:
+
+- **Stack Split (1-to-many)**:
+  ```text
+  Observation 101: Alice drops 64x diamond at Ground
+  Observation 102: Bob picks up 20x diamond at Ground
+  Observation 103: Chris picks up 44x diamond at Ground
+
+  -> Inferred Edge 1: Alice -> Bob   (20x diamonds, alloc 20/64)
+  -> Inferred Edge 2: Alice -> Chris (44x diamonds, alloc 44/64)
+  ```
+  Both pickups are `FULLY_ALLOCATED`. Drop is `FULLY_ALLOCATED`. Total 64 conserved.
+
+- **Stack Merge (many-to-1)**:
+  ```text
+  Observation 201: Alice drops 20x iron at Ground
+  Observation 202: Bob drops 30x iron at Ground
+  Observation 203: Chris picks up 50x iron at Ground
+
+  -> Inferred Edge 1: Alice -> Chris (20x iron)
+  -> Inferred Edge 2: Bob   -> Chris (30x iron)
+  ```
+  Chris picked up 50 units across two distinct drops. Total 50 conserved.
+
+- **Partial Transfer & Residual Capacity**:
+  ```text
+  Observation 301: Alice drops 64x gold at Ground
+  Observation 302: Bob picks up 20x gold at Ground
+
+  -> Inferred Edge 1: Alice -> Bob (20x gold)
+  ```
+  - While correlation window remains open: Alice's drop is `PARTIALLY_ALLOCATED` with residual capacity of 44 units available for future pickups.
+  - When correlation window expires: Alice's drop transitions to `CLOSED_UNRESOLVED` for the 44 unrecovered units. Quantity is never manufactured.
 
 ## Observation fields
 

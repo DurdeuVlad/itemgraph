@@ -140,11 +140,40 @@ For a `DROP_ITEM` / `THROW_ITEM` / `SHOOT_ITEM` observation, a candidate `PICKUP
 
 - originate at the **same `GROUND` node** (same dimension + block),
 - carry the **same `fingerprint_id`** (exact canonical metadata equality),
-- carry the **same `amount`** — Phase 5 has no split/merge model, so a partial pickup is deliberately left unmatched rather than guessed at; matching partial quantities without a conservation model would manufacture quantity, which the charter forbids (deferred to Phase 7),
+- have **available quantity capacity** — Phase 7 replaces binary matching with a durable quantity-allocation ledger (`ig_edge_allocations`), supporting stack splits, stack merges, and partial transfers with strict quantity conservation ($\sum \text{allocated} \le \text{evidenced capacity}$).
 - be **strictly later** than the drop and within the configured window (`correlation.ground_bridge_max_seconds`, default 300s) — a later observation may explain an earlier event, never the reverse,
-- **not already be cited as evidence** for another accepted bridge. One dropped stack can only be picked up once, so allowing a pickup to support two bridges would attribute the same items to two different flows.
+- have **remaining unallocated residual capacity** ($R_{pickup} = \text{amount} - \sum \text{allocated} > 0$). A pickup may receive allocations across multiple drops (many-to-1 merge), but total allocated quantity can never exceed the evidenced pickup amount.
 
-The temporally closest admissible pickup wins. Competing candidates are not discarded silently — they reduce confidence.
+The temporally closest admissible pickup with available residual capacity is selected. Competing candidates are not discarded silently — they reduce confidence.
+
+### Quantity-flow ledger and lifecycle (Phase 7)
+
+Phase 7 implements stack-aware reconstruction without per-item UUIDs:
+
+1. **Durable Ledger (`ig_edge_allocations`)**:
+   Tracks the exact quantity attributed from/to each observation:
+   - `edge_id`: reference to `ig_inferred_edges.id`
+   - `observation_id`: reference to `ig_observations.id`
+   - `allocation_role`: `'SOURCE'` (for the drop) or `'DESTINATION'` (for the pickup)
+   - `amount`: the allocated quantity units
+   - `PRIMARY KEY(edge_id, observation_id, allocation_role)`
+
+2. **Residual Capacity Accounting**:
+   For any observation $O$ with evidenced quantity $Q_O$:
+   $$R_O = Q_O - \sum_{\text{allocations}} \text{amount}$$
+   For a candidate match between drop $D$ and pickup $P$, the edge amount is:
+   $$\text{alloc} = \min(R_D, R_P)$$
+   This guarantees strict quantity conservation without manufacturing items.
+
+3. **Explicit Forensic Lifecycle (`correlation_status`)**:
+   Replaces the overloaded binary interpretation of `correlated_at`:
+   - `PENDING`: unallocated, candidate window still open.
+   - `PARTIALLY_ALLOCATED`: partially consumed, window still open for subsequent split/merge matches.
+   - `FULLY_ALLOCATED`: all evidenced quantity accounted for ($R = 0$).
+   - `CLOSED_UNRESOLVED`: window expired with unallocated residual quantity ($R > 0$).
+
+4. **Multi-fragment bridge resolution**:
+   A single drop can split across multiple pickups (`stack split`); multiple drops can merge into a single pickup (`stack merge`); partial unrecovered quantities are preserved as residual until the time window closes. All edges, evidence links, allocation records, and observation status transitions commit in a single atomic database transaction.
 
 ### Confidence formula
 

@@ -163,9 +163,24 @@ Support:
 - merge
 - partial transfers
 
+### Delivered
+
+- **Quantity-Allocation Ledger (`ig_edge_allocations`)**:
+  Schema migration `V7__QuantityFlowLedger` adding `ig_edge_allocations` table with composite primary key `(edge_id, observation_id, allocation_role)` and indexes, plus backfilling historical Phase 5/6 edges.
+- **Explicit Observation Lifecycle (`ig_observations.correlation_status`)**:
+  Replaces overloaded binary interpretation of `correlated_at` with explicit states: `PENDING`, `PARTIALLY_ALLOCATED`, `FULLY_ALLOCATED`, and `CLOSED_UNRESOLVED`.
+- **Residual Capacity Accounting**:
+  Dynamic calculation of remaining capacity ($R_{obs} = Q_{obs} - \sum \text{allocated}$), enabling stack splits (1-to-many), stack merges (many-to-1), partial transfers, and multi-fragment flows with zero manufactured quantity.
+- **Explainable Quantity Narratives**:
+  `CorrelationEngine` generates detailed explanations recording flow classification (`stack split`, `stack merge`, `exact transfer`), allocated units, residuals before/after, candidate counts, and proximity/ambiguity factor arithmetic.
+- **Single-Transaction Atomicity**:
+  Inferred edges, evidence links, allocation records, and observation status updates commit in a single atomic transaction.
+- **Automated Verification**:
+  16 new comprehensive unit tests in `QuantityFlowTest` covering splits, merges, partials, window expiration, over-capacity protections, competing candidate penalties, idempotency, restart simulation, and transaction rollback. All 93 test cases passing.
+
 Acceptance:
 
-- ordinary iron/diamond stack movement can be reconstructed without item UUIDs
+- ordinary iron/diamond stack movement reconstructed without item UUIDs while strictly conserving quantity.
 
 ## Phase 8 — Missing high-value integrations
 
