@@ -32,7 +32,7 @@ class DatabaseManagerTest {
 
         assertTrue(dbManager.isInitialized());
         assertTrue(dbManager.isConnected());
-        assertEquals(6, dbManager.getCurrentSchemaVersion());
+        assertEquals(7, dbManager.getCurrentSchemaVersion());
         assertTrue(Files.exists(dbPath));
 
         Connection conn = dbManager.getConnection();
@@ -54,6 +54,7 @@ class DatabaseManagerTest {
         assertTrue(tables.contains("ig_observations"), "ig_observations table must exist");
         assertTrue(tables.contains("ig_inferred_edges"), "ig_inferred_edges table must exist");
         assertTrue(tables.contains("ig_edge_evidence"), "ig_edge_evidence table must exist");
+        assertTrue(tables.contains("ig_edge_allocations"), "ig_edge_allocations table must exist");
 
         // Verify unique constraint on ig_observations(source_type, source_event_id)
         try (Statement stmt = conn.createStatement()) {
@@ -74,7 +75,7 @@ class DatabaseManagerTest {
             assertEquals(0, affected);
         }
 
-        // V6 adds the correlation bookkeeping column the engine's incremental scan is
+        // V6/V7 adds the correlation bookkeeping columns the engine's incremental scan is
         // driven by; a fresh observation must start life unevaluated (NULL).
         List<String> observationColumns = new ArrayList<>();
         try (Statement stmt = conn.createStatement();
@@ -84,18 +85,20 @@ class DatabaseManagerTest {
             }
         }
         assertTrue(observationColumns.contains("correlated_at"), "ig_observations.correlated_at must exist");
+        assertTrue(observationColumns.contains("correlation_status"), "ig_observations.correlation_status must exist");
 
         try (Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT correlated_at FROM ig_observations")) {
+             ResultSet rs = stmt.executeQuery("SELECT correlated_at, correlation_status FROM ig_observations")) {
             assertTrue(rs.next());
             rs.getLong("correlated_at");
             assertTrue(rs.wasNull(), "a newly ingested observation must not be marked correlated");
+            assertEquals("PENDING", rs.getString("correlation_status"));
         }
 
         // Verify re-initializing does not fail and migrations are idempotent
         dbManager.close();
         dbManager.initialize(dbPath);
-        assertEquals(6, dbManager.getCurrentSchemaVersion());
+        assertEquals(7, dbManager.getCurrentSchemaVersion());
     }
 
     /**

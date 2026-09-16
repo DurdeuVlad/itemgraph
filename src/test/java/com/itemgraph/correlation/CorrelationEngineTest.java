@@ -318,13 +318,12 @@ class CorrelationEngineTest {
     }
 
     /**
-     * Quantity mismatch. Phase 5 has no split/merge model, so a partial pickup is
-     * deliberately left unmatched rather than guessed at: attributing 1 of 5 dropped
-     * items to a pickup without a conservation model would manufacture a flow the
-     * evidence does not support.
+     * Partial pickup. Phase 7 implements quantity-flow conservation, so when AlphaA drops 5
+     * and BetaB picks up 3 at the same ground location, the engine allocates 3 units to an
+     * inferred bridge edge A -> B and records the 2 unrecovered units as residual capacity.
      */
     @Test
-    void testQuantityMismatchIsRejected() throws Exception {
+    void testPartialQuantityAllocatesUpToPickupCapacityAndPreservesResidual() throws Exception {
         long playerA = insertPlayerNode("AlphaA");
         long playerB = insertPlayerNode("BetaB");
         long ground = insertGroundNode(20, 64, 20);
@@ -332,13 +331,24 @@ class CorrelationEngineTest {
 
         long dropTime = now - CLOSED;
         long dropObs = insertObservation(dropTime, playerA, ground, fp, "DROP_ITEM", 5);
-        insertObservation(dropTime + 30_000, ground, playerB, fp, "PICKUP_ITEM", 3);
+        long pickupObs = insertObservation(dropTime + 30_000, ground, playerB, fp, "PICKUP_ITEM", 3);
 
         CorrelationResult result = engine.runCorrelation();
         assertTrue(result.success(), result.errorMessage());
-        assertEquals(0, result.edgesCreated());
-        assertEquals(0, countEdges());
+        assertEquals(1, result.edgesCreated());
+        assertEquals(1, countEdges());
+
+        List<Edge> edges = loadEdges();
+        assertEquals(1, edges.size());
+        Edge edge = edges.get(0);
+        assertEquals(playerA, edge.fromNodeId());
+        assertEquals(playerB, edge.toNodeId());
+        assertEquals(3, edge.amount(), "edge amount must match the allocated quantity (3 of 5)");
+        assertTrue(edge.explanation().contains("stack split"));
+        assertTrue(edge.explanation().contains("Allocated 3 units (drop: 3/5 allocated, residual 2; pickup: 3/3 allocated, residual 0)"));
+
         assertNotNull(correlatedAt(dropObs));
+        assertNotNull(correlatedAt(pickupObs));
     }
 
     /** A different item at the same block and time is not the same stack. */
