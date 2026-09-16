@@ -97,4 +97,47 @@ class DatabaseManagerTest {
         dbManager.initialize(dbPath);
         assertEquals(6, dbManager.getCurrentSchemaVersion());
     }
+
+    /**
+     * Phase 6 query commands read through their own connection rather than the shared
+     * writer one, so a lookup running on the query worker cannot observe rows inside an
+     * ingestion transaction that is about to roll back. The read-only intent is enforced
+     * by SQLite ({@code PRAGMA query_only}), not merely documented — a query path that
+     * could write would make "reads only" an unverified claim.
+     */
+    @Test
+    void testReadOnlyConnectionSeesCommittedDataAndRefusesWrites(@TempDir Path tempDir) throws Exception {
+        DatabaseManager dbManager = DatabaseManager.getInstance();
+
+        // Before initialization there is nothing to read, and that must be an explicit
+        // failure rather than a connection to an empty file created as a side effect.
+        assertThrows(SQLException.class, dbManager::openReadOnlyConnection);
+
+        dbManager.initialize(tempDir.resolve("itemgraph.db"));
+        try (Statement stmt = dbManager.getConnection().createStatement()) {
+            stmt.execute("INSERT INTO ig_nodes (id, node_type, level_id) VALUES (7, 'PLAYER', 'minecraft:overworld')");
+        }
+
+        try (Connection readConn = dbManager.openReadOnlyConnection()) {
+            assertNotSame(dbManager.getConnection(), readConn, "queries must not borrow the writer connection");
+
+            try (Statement stmt = readConn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT node_type FROM ig_nodes WHERE id = 7")) {
+                assertTrue(rs.next(), "committed rows must be visible to the reader");
+                assertEquals("PLAYER", rs.getString(1));
+            }
+
+            assertThrows(SQLException.class, () -> {
+                try (Statement stmt = readConn.createStatement()) {
+                    stmt.execute("INSERT INTO ig_nodes (id, node_type, level_id) VALUES (8, 'PLAYER', 'minecraft:overworld')");
+                }
+            }, "a query connection must not be able to write");
+        }
+
+        // Closing the reader must not disturb the shared writer connection.
+        assertTrue(dbManager.isInitialized());
+        try (Statement stmt = dbManager.getConnection().createStatement()) {
+            stmt.execute("INSERT INTO ig_nodes (id, node_type, level_id) VALUES (9, 'PLAYER', 'minecraft:overworld')");
+        }
+    }
 }
