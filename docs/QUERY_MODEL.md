@@ -24,11 +24,84 @@ Alias:
 /ig
 ```
 
-Syntax remains provisional until implementation.
+## Implemented surface (Phase 6)
 
-## Core commands
+Everything below this heading and above "Not yet implemented" is live. The rest of this
+document is design intent for later phases and is explicitly marked as such.
+
+```text
+/ig status
+/ig ingest now
+/ig event   <observationId>
+/ig explain <edgeId>
+/ig trace item <fingerprintId> [limit] [sinceMinutes]
+```
+
+`/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
+under either name. The whole tree requires permission level 2 — the query subcommands
+inherit the same gate as the operational ones rather than relaxing it, because a trace
+names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
+
+### Arguments
+
+| Argument | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `observationId` | long ≥ 1 | — | `ig_observations.id` |
+| `edgeId` | long ≥ 1 | — | `ig_inferred_edges.id` |
+| `fingerprintId` | long ≥ 1 | — | `ig_item_fingerprints.id` |
+| `limit` | int ≥ 1 | 20 | hops returned; **capped at 100** |
+| `sinceMinutes` | long ≥ 1 | unbounded | window is `[now - sinceMinutes, now]`, inclusive |
+
+`limit` has no upper bound in the command grammar on purpose. An over-large request is
+**capped, not rejected**: an admin chasing an incident gets the first page of real output
+plus an explicit "capped from N" and "TRUNCATED at N" marker, rather than a usage message
+and no data. The cap lives in `QueryLimits.clampLimit`, applied before the value reaches
+SQL.
+
+`sinceMinutes` is relative rather than an absolute epoch value because a human cannot
+sanity-check a 13-digit number they typed by hand — an off-by-1000 typo would silently
+return an empty result that reads like a real negative finding. Relative minutes fail
+visibly. It is resolved against wall-clock "now" on the server thread, so the window shown
+in the output is the moment the command was run.
+
+Omitting `sinceMinutes` gives an all-time trace. That is still a bounded query: for a
+single fingerprint the row count is already hard-capped by the limit. The time filter
+narrows a noisy fingerprint; it is not what makes the query safe.
+
+### Execution model
+
+All three query commands run their SQL and formatting off the server thread on a dedicated
+`ItemGraph-Query-Worker`, then marshal the finished lines back onto the server thread with
+`source.getServer().execute(Runnable)` before calling `sendSuccess`/`sendFailure`. Each
+query reads through its own short-lived read-only connection rather than the ingestion
+worker's writer connection. Full rationale and the prior art this was checked against:
+"Query execution: off-thread, reported back on-thread" in `docs/ARCHITECTURE.md`.
+
+A command returns success as soon as the query is *accepted*; the answer arrives a tick or
+two later.
+
+### Not-found handling
+
+A missing id is reported as a command **failure** with a plain message
+(`No observation #42 exists in ig_observations.`), never an empty success and never a
+stack trace. For `/ig trace item` this matters most: an unknown fingerprint id and a real
+item with no recorded movement are different findings, and conflating them would let a
+typo read as "nothing ever happened to it".
+
+## Not yet implemented — design intent for later phases
+
+Everything from here on is design intent. Where a sketch below disagrees with the
+"Implemented surface (Phase 6)" section above, the implemented section is authoritative.
 
 ### Trace an item
+
+**Partly implemented.** Phase 6 traces by `ig_item_fingerprints.id`
+(`/ig trace item <fingerprintId> [limit] [sinceMinutes]`). Resolving a registry id or a
+custom name to a fingerprint from the command line is not implemented, so an admin
+currently reaches a fingerprint id via `/ig event <id>` output, which prints
+`[fingerprint#N hash=...]` on its item line.
+
+Intended eventual forms:
 
 ```text
 /ig trace item minecraft:iron_chestplate
@@ -82,13 +155,19 @@ Exact UX should depend on NeoForge command capabilities and admin ergonomics.
 
 ### View an observation
 
+**Implemented.**
+
 ```text
 /ig event 8812
 ```
 
-Shows only raw source evidence.
+Shows only raw source evidence: timestamp, source and source event id, action and amount,
+the item fingerprint, both endpoints, and whether the correlation engine has evaluated the
+row yet. Labelled `[OBSERVED]`; nothing on this view is scored or reconstructed.
 
 ### Explain an inferred edge
+
+**Implemented.**
 
 ```text
 /ig explain 9931
@@ -100,18 +179,29 @@ Shows:
 - destination node
 - item
 - quantity
-- confidence label
-- evidence IDs
-- matching/scoring factors
-- competing candidates if any
+- confidence label (`[INFERRED conf=0.9025]`, and again as a `confidence:` field)
+- the stored scoring narrative, read from the row, never recomputed
+- every observation cited through `ig_edge_evidence`, each labelled `[OBSERVED]`, each
+  rendered in the same shape `/ig event` uses and cross-referenced as `/ig event <id>`
+
+Competing candidates are named inside the stored explanation string written by the
+correlation engine (for example `2 admissible pickups`), not yet as a separate structured
+section.
 
 ### Operational status
+
+**Implemented.**
 
 ```text
 /ig status
 ```
 
-Suggested fields:
+Currently reports: mod version, GriefLogger detection, database connection and schema
+version, database path, last error, the ground-bridge correlation window and last-pass
+diagnostics, ingestion running state, total observation count, both source checkpoints,
+and last-cycle diagnostics.
+
+Remaining suggested fields:
 
 - ingestion status
 - GriefLogger connection state
@@ -127,16 +217,28 @@ Suggested fields:
 
 Support:
 
-- `since`
-- `after`
-- `before`
-- `between`
+- `since` — implemented as the positional `sinceMinutes` argument on `/ig trace item`
+- `after` — not implemented
+- `before` — not implemented
+- `between` — not implemented
 
 Avoid unbounded searches by default.
 
-A trace without an explicit time filter should use a reasonable server-configured default window.
+A trace without an explicit time filter is currently unbounded *in time* but still bounded
+*in rows* by the hard limit cap, which is what keeps it a safe query. A server-configured
+default window is not implemented; `QueryWindow.unbounded()` is used instead. Note that
+`QueryWindow` applies containment (`timestamp_ms BETWEEN ...`) to observations but
+*overlap* (`time_end >= since AND time_start <= until`) to inferred edges, because an edge
+spans time: an edge whose drop predates the window but whose pickup falls inside it really
+did happen during the window, and excluding it would leave a visible gap in the
+reconstructed path.
 
 ## Item matching modes
+
+None of the modes below are implemented. Phase 6 matches on exactly one thing: the
+`ig_item_fingerprints.id` passed to `/ig trace item`. That is the `fingerprint:` mode in
+all but syntax — the id is the primary key of the row whose `fingerprint_hash` is the
+deterministic canonical-metadata hash — reached by reading it off `/ig event` output.
 
 Potential modes:
 
@@ -170,31 +272,59 @@ fingerprint:<hash>
 Chat output should distinguish:
 
 ```text
-[OBSERVED]
-[INFERRED]
-[AMBIGUOUS]
-[UNRESOLVED]
+[OBSERVED]      implemented
+[INFERRED]      implemented
+[AMBIGUOUS]     not implemented
+[UNRESOLVED]    not implemented
 ```
 
-Example:
+`[AMBIGUOUS]` and `[UNRESOLVED]` have no marker of their own yet. Ambiguity is currently
+expressed as a *reduced confidence* on an `[INFERRED]` line plus the candidate counts in
+the stored explanation; an unresolved endpoint is currently an `UNKNOWN` node, which
+renders as a normal node on an `[OBSERVED]` line. Both deserve their own label later.
+
+Implemented line shape for a `/ig trace item` hop:
 
 ```text
-[OBSERVED] 14:31:08 Chest A removed 1x "Old Reliable"
-[OBSERVED] 14:31:08 Alice gained 1x "Old Reliable"
-[INFERRED] Chest A -> Alice [VERY HIGH]
+<label> <origin> -> <destination> : <amount>x at <time> (<ref>)
 ```
+
+Real examples:
+
+```text
+[OBSERVED] CONTAINER 10,64,10 -> AlphaA : 1x at 2026-09-16 14:31:08 UTC (event#8812 REMOVE_ITEM)
+[OBSERVED] AlphaA -> GROUND 20,64,20 : 1x at 2026-09-16 14:31:18 UTC (event#8813 DROP_ITEM)
+[INFERRED conf=0.9025] AlphaA -> BetaB : 1x at 2026-09-16 14:31:18 UTC (edge#9931 inferred transfer spanning 1m0s)
+[OBSERVED] GROUND 20,64,20 -> BetaB : 1x at 2026-09-16 14:32:18 UTC (event#8814 PICKUP_ITEM)
+```
+
+Provenance comes first on every line, so it is read before the claim it qualifies. The
+full set of rules is "Query output: the labelling convention" in `docs/ARCHITECTURE.md`.
+
+Note that the inferred bridge and the two observations underneath it all appear. That is
+deliberate: hiding the observations would hide the evidence, and hiding the bridge would
+hide the claim.
 
 ## Pagination
 
 Never dump an unbounded result set.
 
-Use:
+Implemented:
 
-- page size
-- next/previous actions
-- compact summaries
+- page size (`limit`, default 20, hard cap 100 in `QueryLimits`)
+- an explicit `TRUNCATED at N hops - more movement matched.` marker, produced by fetching
+  `LIMIT applied + 1` on each side so "there is more" is a fact rather than a guess
+- an explicit `(capped from N)` marker when the request exceeded the ceiling
+- a separate 50-row cap on the `/ig explain` evidence listing, with its own truncation line
+- textual cross-references: every hop names `event#<id>` or `edge#<id>`, and every
+  `/ig explain` evidence entry prints `/ig event <id>`
+
+Not yet implemented:
+
+- next/previous actions (there is no offset/cursor argument; narrow the window instead)
 - hover text for metadata
-- click actions for `/ig event` and `/ig explain`
+- clickable `ClickEvent` links for `/ig event` and `/ig explain` — the cross-references are
+  currently plain text an admin retypes
 
 ## Player-facing queries
 

@@ -194,6 +194,116 @@ The exact factor values, candidate counts, both observation IDs, both player nam
 
 Correlation runs on the **existing ingestion worker thread**, from the same scheduled executor, immediately after each ingestion cycle completes (`IngestionService.runIngestionSafely`). That gives newly ingested observations a correlation pass without waiting an extra cycle, and guarantees correlation never overlaps ingestion on the shared connection. `/ig ingest now` queues a pass onto that worker rather than running one inline, because candidate search must never happen on the server thread. GriefLogger's database is not touched by correlation at all: it reads and writes only ItemGraph's own tables, and each accepted bridge writes the edge, its two evidence rows and the drop's stamp in a single transaction, so an edge can never exist without its evidence.
 
+## Query execution: off-thread, reported back on-thread (Phase 6)
+
+Two engineering rules collide at the command layer and both have to hold at once:
+
+- a historical query is a multi-join read over `ig_observations` and
+  `ig_inferred_edges`, and **database scans must never run on the server thread**;
+- `CommandSourceStack.sendSuccess` / `sendFailure` reach player and entity state, and
+  **thread-unsafe Minecraft state must never be touched from a worker thread**.
+
+`com.itemgraph.command.QueryDispatcher` is the seam:
+
+```text
+server thread            ItemGraph-Query-Worker           server thread
+-------------            ----------------------           -------------
+parse arguments     ->   open read-only connection    ->   sendSuccess /
+resolve the window       run SQL                           sendFailure
+dispatch, return 1       format to List<String>
+```
+
+### Marshalling back
+
+The hand-back is `source.getServer().execute(Runnable)`. `MinecraftServer` extends
+`ReentrantBlockableEventLoop<TickTask>`, so `execute` appends the task to the server's
+pending-task queue and the next tick drains it on the server thread. This is the same
+mechanism NeoForge's `enqueueWork` uses for parallel-dispatch events.
+
+One caveat is handled explicitly: `MinecraftServer.scheduleExecutables()` returns false
+once the server is stopping, and `BlockableEventLoop.execute` then runs the task *inline
+on the calling thread* rather than queueing it. `QueryDispatcher` therefore checks
+`server.isStopped()` (and `ServerPlayer.hasDisconnected()`) before sending anything.
+
+### Prior art
+
+This pattern was checked against real mods before being adopted rather than derived from
+first principles:
+
+- **BigGlobe** (`builderb0y.bigglobe.commands.AsyncCommand`) runs a long search on its own
+  daemon thread and reports results with `this.source.getServer().execute(() -> ... sendSuccess ...)`,
+  guarded by an `isValid()` check that tests `getServer().isStopped()` and
+  `ServerPlayer.hasDisconnected()` — including in its uncaught-exception handler.
+- **ChronoVault** (`io.github.catt1eyaa.chronovault.command.ChronoVaultCommands`) drives a
+  `CompletableFuture` and marshals both progress and completion back with
+  `future.whenComplete((result, throwable) -> source.getServer().execute(...))`.
+
+ItemGraph matches both: `CompletableFuture` + `whenComplete` + `getServer().execute(...)`,
+with the same liveness guards. The only deliberate deviation is the executor — the mods
+above spawn a thread per invocation, whereas ItemGraph uses one shared single-threaded
+executor so that concurrent admin queries serialise instead of opening an unbounded number
+of SQLite readers.
+
+### Why not the ingestion worker
+
+The ingestion worker runs a 60-second ingest-then-correlate cycle. Queueing an admin's
+lookup behind it would mean an incident query that answers a minute late, or not until the
+current cycle finishes. Command latency is kept independent of the background pipeline.
+
+### Why a separate database connection
+
+`DatabaseManager.getConnection()` hands out the one connection the ingestion worker writes
+through, in explicit transactions. A query issued on another thread against that same
+connection would execute *inside* the writer's open transaction and could read rows that
+are about to be rolled back — an admin could be shown an observation that never existed.
+`DatabaseManager.openReadOnlyConnection()` opens a short-lived independent connection with
+`PRAGMA query_only = ON`; WAL mode (set at initialisation) means that reader sees a
+consistent committed snapshot and never blocks the writer.
+
+### Return value
+
+A query handler returns Brigadier's success code as soon as the query is *accepted*. The
+real answer cannot be known synchronously without doing on-thread SQL, which is the thing
+being avoided. The distinction is visible to the admin in the output itself.
+
+## Query output: the labelling convention (Phase 6)
+
+The charter forbids presenting inference as direct evidence. In query output that is
+enforced per line, not by a caveat printed once at the top:
+
+```text
+[OBSERVED]              one raw ig_observations row; directly evidenced
+[INFERRED conf=0.9025]  one ig_inferred_edges row; reconstructed, with its stored score
+```
+
+Rules that hold everywhere in `QueryFormatter`:
+
+- **No unlabelled movement line exists.** Every line asserting that an item moved is
+  prefixed with its provenance, provenance first so it is read before the claim.
+- **Confidence is printed on every inferred line**, to four decimals — enough to reproduce
+  the engine's rounded score exactly.
+- `ObservationDetail.kindLabel()` is the constant `OBSERVED` and
+  `EdgeExplanation.kindLabel()` the constant `INFERRED`. They are not fields, so the
+  display layer cannot relabel evidence as inference.
+- **The stored explanation is read, never recomputed.** Regenerating the scoring narrative
+  at display time would let the displayed reasoning drift from the confidence actually
+  stored on the row, describing an inference ItemGraph never made.
+- **A trace shows the bridge *and* the observations underneath it.** For a ground bridge,
+  the drop (`player -> GROUND`), the bridge (`player -> player`) and the pickup
+  (`GROUND -> player`) all appear. Hiding the observations would hide the evidence; hiding
+  the bridge would hide the claim.
+- **Dangling references render as `no such row`, not as a dropped row.** The shared
+  projection uses LEFT joins even where the schema declares the foreign key NOT NULL: a
+  missing row in an evidence listing is far more dangerous than an ugly one.
+- **An edge citing no evidence says so** (`NONE RECORDED - ... cannot be justified`) rather
+  than rendering an empty section that reads as though it scrolled off.
+- **Timestamps are UTC** (`yyyy-MM-dd HH:mm:ss UTC`). An incident report gets compared
+  against server logs and GriefLogger rows stored as epoch millis; a timezone-dependent
+  rendering would make two copies of the same output disagree.
+
+Output is sent with `broadcastToOps = false`. The graph names players, containers and
+coordinates — see `docs/SECURITY_AND_PERMISSIONS.md`.
+
 ## Layered architecture
 
 ```text

@@ -119,6 +119,40 @@ Add:
 - readable output
 - permission checks
 
+### Delivered
+
+```text
+/ig event   <observationId>
+/ig explain <edgeId>
+/ig trace item <fingerprintId> [limit] [sinceMinutes]
+/ig status
+```
+
+- Bounded output: `limit` defaults to 20 and is capped at 100 (`QueryLimits`), the
+  `/ig explain` evidence listing is capped at 50, and both truncation and capping are
+  stated in the output rather than applied quietly.
+- Bounded time filter: `sinceMinutes` on `/ig trace item` (`QueryWindow`), containment for
+  observations and overlap for time-spanning inferred edges.
+- Readable output with a per-line OBSERVED/INFERRED provenance label and explicit
+  confidence on every inferred line (`QueryFormatter`).
+- Permission level 2 on the whole tree, unchanged from Phase 1.
+- Queries run off the server thread on a dedicated worker and report back via
+  `MinecraftServer.execute` (`QueryDispatcher`), reading through their own read-only
+  connection so they never read inside the ingestion worker's open transaction.
+
+### Deferred out of Phase 6
+
+- Resolving a registry id or custom name to a fingerprint from the command line;
+  `/ig trace item` takes a fingerprint id, surfaced in `/ig event` output.
+- `/ig trace player`, `/ig trace container`, `/ig inspect`.
+- `after` / `before` / `between` filters; next/previous pagination actions.
+- Clickable `ClickEvent` links and metadata hover text — cross-references are plain text.
+- `[AMBIGUOUS]` and `[UNRESOLVED]` markers; ambiguity currently shows as reduced
+  confidence plus the candidate counts inside the stored explanation.
+
+See `docs/QUERY_MODEL.md` for the exact argument table and
+`docs/ARCHITECTURE.md` for the threading and labelling rules.
+
 ## Phase 7 — Quantity flow
 
 Add stack-aware conservation.

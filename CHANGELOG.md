@@ -8,6 +8,43 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- Phase 6: the three forensic query commands, all gated at permission level 2 like the
+  rest of the `/itemgraph` (alias `/ig`) tree.
+
+  ```text
+  /ig event   <observationId>
+  /ig explain <edgeId>
+  /ig trace item <fingerprintId> [limit] [sinceMinutes]
+  ```
+
+  `/ig event` prints one raw `ig_observations` row with both endpoints and the item
+  fingerprint resolved. `/ig explain` prints one `ig_inferred_edges` row, its stored
+  confidence, the scoring narrative written at inference time, and every observation
+  cited through `ig_edge_evidence` — the literal implementation of the charter's
+  "why does ItemGraph think this transfer happened?" requirement. `/ig trace item`
+  merges `ig_observations` and `ig_inferred_edges` into one chronological timeline for
+  a single fingerprint.
+- OBSERVED/INFERRED labelling convention in all query output. Every line that asserts a
+  movement is prefixed with its provenance — `[OBSERVED]` for a single raw evidence row,
+  `[INFERRED conf=0.9025]` for a reconstruction, with the confidence printed on every
+  inferred line to four decimals. There is no unlabelled movement line anywhere in the
+  output. See "Query output: the labelling convention" in `docs/ARCHITECTURE.md`.
+- Bounded results: `QueryLimits` caps any requested limit at 100 rows (default 20) and
+  caps a single `/ig explain` evidence listing at 50; `QueryWindow` bounds a trace by
+  relative minutes. Each side of a trace is queried with `LIMIT applied + 1`, so
+  "there is more" is a reported fact rather than silence, and both the cap and the
+  truncation are stated in the output instead of being applied quietly.
+- Query commands run off the server thread. `QueryDispatcher` runs the SQL and the
+  formatting on a dedicated single-threaded `ItemGraph-Query-Worker` — deliberately not
+  the ingestion worker, so an incident lookup never queues behind a 60-second
+  ingest-then-correlate cycle — and hands the finished lines back with
+  `source.getServer().execute(Runnable)` for `sendSuccess`/`sendFailure`. See
+  "Query execution: off-thread, reported back on-thread" in `docs/ARCHITECTURE.md`.
+- `DatabaseManager.openReadOnlyConnection()`: each query gets its own short-lived
+  connection with `PRAGMA query_only = ON`. Reading through the shared writer connection
+  would execute inside the ingestion worker's open transaction and could show an admin
+  rows that are about to be rolled back. WAL mode (already enabled) makes an independent
+  reader both consistent and non-blocking.
 - Phase 5: `CorrelationEngine`, which bridges a player's drop to a later player's pickup
   across the ephemeral `GROUND` node and writes an `ig_inferred_edges` row with its two
   supporting observations. This is the only Phase 5 pattern that is genuinely an inference

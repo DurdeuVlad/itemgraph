@@ -95,18 +95,40 @@ The first useful vertical slice should:
 10. Persist across restarts.
 11. Demonstrate the feature safely on staging.
 
-## Example commands
+## Commands
 
-Command syntax is provisional until implementation validates the query model.
+Implemented today (all require permission level 2):
+
+```text
+/ig status
+/ig ingest now
+/ig event   <observationId>
+/ig explain <edgeId>
+/ig trace item <fingerprintId> [limit] [sinceMinutes]
+```
+
+`limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Query
+commands run off the server thread and report back on it. Full argument table, output
+format and what is still unimplemented: [Query model](docs/QUERY_MODEL.md).
+
+Sample `/ig trace item` output:
+
+```text
+[OBSERVED] CONTAINER 10,64,10 -> AlphaA : 1x at 2026-09-16 14:31:08 UTC (event#8812 REMOVE_ITEM)
+[OBSERVED] AlphaA -> GROUND 20,64,20 : 1x at 2026-09-16 14:31:18 UTC (event#8813 DROP_ITEM)
+[INFERRED conf=0.9025] AlphaA -> BetaB : 1x at 2026-09-16 14:31:18 UTC (edge#9931 inferred transfer spanning 1m0s)
+[OBSERVED] GROUND 20,64,20 -> BetaB : 1x at 2026-09-16 14:32:18 UTC (event#8814 PICKUP_ITEM)
+```
+
+Evidence and inference are labelled per line, never once at the top.
+
+Still provisional, not yet implemented — syntax may change:
 
 ```text
 /ig trace item minecraft:iron_chestplate
 /ig trace item minecraft:iron_chestplate name:"Old Reliable"
 /ig trace player Vlad
 /ig trace container
-/ig event <id>
-/ig explain <edge-id>
-/ig status
 ```
 
 ## Documentation
