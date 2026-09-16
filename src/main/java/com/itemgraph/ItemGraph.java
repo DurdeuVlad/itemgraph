@@ -39,6 +39,9 @@ public class ItemGraph {
 
     private void onServerStopping(ServerStoppingEvent event) {
         com.itemgraph.ingest.IngestionService.getInstance().stop();
+        // Stop the query worker before closing the database, so an in-flight /ig trace
+        // cannot be reading through a connection that is about to disappear.
+        com.itemgraph.command.QueryDispatcher.shutdown();
         DatabaseManager.getInstance().close();
     }
 }

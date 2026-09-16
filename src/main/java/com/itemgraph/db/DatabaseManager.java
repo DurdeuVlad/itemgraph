@@ -109,6 +109,55 @@ public class DatabaseManager {
         return connection;
     }
 
+    /**
+     * Opens a short-lived, read-only connection to the same database file, for queries
+     * that run off the server thread.
+     *
+     * <h2>Why not just reuse {@link #getConnection()}</h2>
+     *
+     * <p>{@link #getConnection()} hands out the one shared connection the ingestion
+     * worker writes through, in explicit transactions ({@code setAutoCommit(false)},
+     * batch, {@code commit()}). A query issued on another thread against that same
+     * connection would execute <em>inside</em> the writer's open transaction and could
+     * read rows that are about to be rolled back. For a forensic tool that is not a
+     * performance detail: an admin could be shown an observation that never existed.
+     *
+     * <p>The database runs in WAL mode (set in {@link #initialize(Path)}), so an
+     * independent reader sees a consistent committed snapshot and never blocks the
+     * writer — which is exactly the property a command-triggered historical query needs.
+     *
+     * <p>{@code PRAGMA query_only = ON} is set so the read-only intent is enforced by
+     * SQLite rather than only asserted in javadoc. Callers must close the returned
+     * connection; it is theirs, not the shared one.
+     *
+     * @throws SQLException if the database has not been initialized yet, or the
+     *                      connection could not be opened
+     */
+    public Connection openReadOnlyConnection() throws SQLException {
+        Path path;
+        synchronized (this) {
+            if (!initialized || databasePath == null) {
+                throw new SQLException("ItemGraph database is not initialized"
+                        + (lastError != null ? " (" + lastError + ")" : ""));
+            }
+            path = databasePath;
+        }
+
+        Connection readConn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
+        try (Statement stmt = readConn.createStatement()) {
+            stmt.execute("PRAGMA busy_timeout = 5000;");
+            stmt.execute("PRAGMA query_only = ON;");
+        } catch (SQLException e) {
+            try {
+                readConn.close();
+            } catch (SQLException ignored) {
+                // The open failure is the interesting one.
+            }
+            throw e;
+        }
+        return readConn;
+    }
+
     public synchronized Path getDatabasePath() {
         return databasePath;
     }
