@@ -2,30 +2,14 @@
 
 This file defines the operational and engineering rules for AI-assisted work on ItemGraph.
 
-## Standing directives (always in effect)
+## Standing directive (always in effect)
 
-1. **Precision, no vagueness.** Talk in facts and direct names — exact file
-   paths, exact class/method names, exact command syntax, exact config keys.
-   Vlad sets the big-picture direction; the agent owns every detail
-   underneath it, and those details must be complete and internally
-   consistent — no contradicting an earlier-stated detail later.
-2. **Research prior art first.** Before designing or implementing anything
-   non-trivial (a new subsystem, a scoring formula, a data model), research
-   how comparable problems have been solved elsewhere — not just in other
-   Minecraft mods, but in adjacent fields (forensic/audit-log systems,
-   distributed tracing, provenance graphs, etc.). Bring back concrete, named
-   references, not a vague "this is common practice" gesture.
-3. **Adversarial self-verification is not self-review.** Before any phase is
-   reported "done," it must survive an independent adversarial audit, not
-   the same agent grading its own homework. Pipeline for this project:
-   Gemini (`agy`) implements a phase → dispatch Codex (`codex exec`) against
-   the same working tree with an adversarial-review brief — rerun
-   `./gradlew test`/`build` itself rather than trusting a reported PASS,
-   actively try to find missing edge cases/regressions/unverified claims in
-   the diff, and only report back once real problems are fixed → escalate to
-   the orchestrating Claude session only for genuine judgment calls (e.g.
-   staging deploy decisions, production-adjacent risk) or findings the audit
-   pass can't resolve itself.
+**Precision, no vagueness, completeness.** Talk in facts and direct names —
+exact file paths, exact class/method names, exact command syntax, exact
+config keys. The big-picture direction comes from Vlad; whoever implements
+owns every detail underneath it, and those details must be complete (nothing
+hand-waved as "TBD" when it doesn't need to be) and internally consistent —
+no contradicting an earlier-stated detail later.
 
 ## Project
 
