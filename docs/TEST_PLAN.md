@@ -253,6 +253,13 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `PlayerAndContainerTraceTest` | Phase 8/9 player trace, container coordinate trace, dynamic string fingerprint resolution, and transformation lineage surfacing (5 tests) |
 | `AuditServiceTest` | Phase 10 invariant auditing: conservation over-allocation detection, non-positive quantity detection, orphaned allocations, invalid node endpoints, and status consistency (5 tests) |
 | `QuantityFlowTest` | Phase 7 stack-aware quantity flow: 1-to-many splits, many-to-1 merges, partial transfers, open/closed window semantics, over-capacity protections, competing candidate penalties, idempotency, restart continuity, and rollback atomicity (16 tests) |
+| `TransformationEventListenerTest` | Phase 9 item transformation events: anvil rename/repair, crafting matrix ingredients with fallback, smelting, client-side guards, and empty stack handling (12 tests) |
+| `ArmorStandEventListenerTest` | Phase 8B armor stand interactions: main-hand/off-hand equip, empty-hand unequip, empty stand handling, non-armor-stand and client-side guards (7 tests) |
+| `InternalObservationServiceTest` | Phase 9 internal observation service: 10,000 item capacity bound & backpressure, multi-threaded concurrent enqueue, shutdown synchronous flush to SQLite, background worker persistence, armor stand node endpoints, and fingerprint dedup (7 tests) |
+| `QueryDispatcherTest` | Async query marshalling seam: database disconnection failure rendering (shutdown race protection), canStillReport 3-branch lifecycle checks (server stopped, disconnected player, active player, console), off-thread synchronous execution, and idempotent shutdown (10 tests) |
+| `ItemGraphConfigTest` | Mod configuration: default values (including 300s ground bridge window), config paths, range constraints [1, 86400], and NightConfig correction/clamping behavior (5 tests) |
+| `QueryFormatterTest` | Forensic text rendering: UTC time formatting, duration formatting (ms, s, m, h, negative), 4-decimal confidence precision, OBSERVED/INFERRED labeling, trace limit capping & truncation notices, audit reports, and error messages (14 tests) |
+| `ItemEntityEventListenerTest` | Phase 8A item entity drop and pickup tracking: ItemTossEvent, ItemEntityPickupEvent.Post, empty stack and null entity guards (6 tests) |
 | `CorrelationEngineTest` | ground bridging, scoring, temporal ordering, the MVP chain end to end (Phase 5/7/8) |
 | `ItemCanonicalizerTest` | fingerprint determinism and DataComponent decoding (Phase 3) |
 | `NodeManagerTest` | node identity resolution (Phase 4) |
@@ -262,5 +269,5 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ExplainQueryServiceTest` | evidence resolved back to observation detail, no cross-edge evidence leakage, unjustifiable edges reported, evidence cap |
 | `TraceQueryServiceTest` | OBSERVED/INFERRED merge order, limit capping, truncation keeping the earliest hops, window containment vs edge overlap, per-line provenance |
 
-Total automated test count: 106 tests, 100% passing.
+Total automated test count: 167 tests, 100% passing.
 
