@@ -229,7 +229,7 @@ public final class QueryDispatcher {
      * and are evaluated on the server thread anyway, so this is about not addressing a
      * departed source rather than about thread safety.
      */
-    private static boolean canStillReport(CommandSourceStack source, MinecraftServer server) {
+    static boolean canStillReport(CommandSourceStack source, MinecraftServer server) {
         if (server.isStopped()) {
             return false;
         }
