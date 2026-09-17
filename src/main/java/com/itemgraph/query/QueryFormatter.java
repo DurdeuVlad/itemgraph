@@ -112,6 +112,9 @@ public final class QueryFormatter {
         lines.add(indent + "item:        " + obs.fingerprint().describeFull());
         lines.add(indent + "origin:      " + node(obs.origin()));
         lines.add(indent + "destination: " + node(obs.destination()));
+        if (obs.itemEntityUuid() != null) {
+            lines.add(indent + "entity UUID: " + obs.itemEntityUuid());
+        }
         lines.add(indent + "correlated:  " + (obs.correlatedAtMs() == null
                 ? "not yet evaluated by the correlation engine"
                 : formatTime(obs.correlatedAtMs())));
@@ -176,18 +179,21 @@ public final class QueryFormatter {
      */
     public static List<String> formatTrace(TraceResult result) {
         List<String> lines = new ArrayList<>();
-        lines.add(PREFIX + "=== TRACE " + result.fingerprint().describeFull() + " ===");
+        lines.add(PREFIX + "=== TRACE " + result.targetDescription() + " ===");
         lines.add("  window: " + result.window().describe()
                 + " | limit: " + result.appliedLimit()
                 + (result.limitWasCapped() ? " (capped from " + result.requestedLimit() + ")" : ""));
 
         if (result.hops().isEmpty()) {
-            lines.add("  No observed or inferred movement recorded for this fingerprint in that window.");
+            lines.add("  No observed or inferred movement recorded for "
+                    + (result.fingerprint() != null ? "this fingerprint" : result.targetDescription())
+                    + " in that window.");
             return lines;
         }
 
+        boolean showItem = (result.fingerprint() == null);
         for (TraceHop hop : result.hops()) {
-            lines.add("  " + formatHop(hop));
+            lines.add("  " + formatHop(hop, showItem));
         }
 
         lines.add("  " + result.observedCount() + " observed hop" + (result.observedCount() == 1 ? "" : "s")
@@ -204,6 +210,10 @@ public final class QueryFormatter {
 
     /** One timeline row. Provenance first, so it is never read as an unqualified fact. */
     public static String formatHop(TraceHop hop) {
+        return formatHop(hop, false);
+    }
+
+    public static String formatHop(TraceHop hop, boolean showItem) {
         String label = hop.kind() == TraceHop.Kind.OBSERVED
                 ? "[OBSERVED]"
                 : "[INFERRED conf=" + formatConfidence(hop.confidence() == null ? 0.0 : hop.confidence()) + "]";
@@ -212,12 +222,54 @@ public final class QueryFormatter {
                 ? "(event#" + hop.refId() + " " + hop.detail() + ")"
                 : "(edge#" + hop.refId() + " " + hop.detail() + ")";
 
+        String itemSuffix = (showItem && hop.item() != null && hop.item().resolved())
+                ? " [" + hop.item().describe() + "]"
+                : "";
+
         return label + " " + nodeShort(hop.origin()) + " -> " + nodeShort(hop.destination())
-                + " : " + hop.amount() + "x at " + formatTime(hop.timestampMs()) + " " + reference;
+                + " : " + hop.amount() + "x" + itemSuffix + " at " + formatTime(hop.timestampMs()) + " " + reference;
     }
 
     public static String traceNoSuchFingerprint(long fingerprintId) {
         return PREFIX + "No item fingerprint #" + fingerprintId + " exists in ig_item_fingerprints.";
+    }
+
+    public static String traceNoSuchFingerprint(String query) {
+        return PREFIX + "No item fingerprint matching '" + query + "' exists in ig_item_fingerprints.";
+    }
+
+    public static String traceNoSuchTarget(String target) {
+        return PREFIX + "No recorded history found for " + target + ".";
+    }
+
+    public static List<String> formatFingerprintCandidates(String query, List<FingerprintRef> candidates) {
+        List<String> lines = new ArrayList<>();
+        lines.add(PREFIX + "Query '" + query + "' matched " + candidates.size() + " item fingerprints:");
+        for (FingerprintRef c : candidates) {
+            lines.add("  #" + c.id() + ": " + c.describe() + " [hash=" + c.fingerprintHash() + "]");
+        }
+        lines.add("  Run /ig trace item <id> with one of the IDs above to view its timeline.");
+        return lines;
+    }
+
+    public static List<String> formatAudit(com.itemgraph.audit.AuditReport report) {
+        List<String> lines = new ArrayList<>();
+        lines.add(PREFIX + "=== DATABASE INVARIANT AUDIT ===");
+        lines.add("  Status: " + (report.healthy() ? "HEALTHY (ALL INVARIANTS SATISFIED)" : "VIOLATIONS DETECTED"));
+        lines.add("  Observations: " + report.totalObservations() + " | Inferred edges: " + report.totalEdges());
+        lines.add("  Allocations: " + report.totalAllocations() + " | Transformations: " + report.totalTransformations());
+        lines.add("  Conservation violations: " + report.overAllocatedObservations());
+        lines.add("  Non-positive quantities: " + report.nonPositiveQuantities());
+        lines.add("  Orphaned allocations: " + report.orphanedAllocations());
+        lines.add("  Invalid edge nodes: " + report.invalidEdgeNodes());
+        lines.add("  Status consistency mismatches: " + report.statusMismatches());
+        if (!report.healthy()) {
+            lines.add("  Violations:");
+            for (String detail : report.violationDetails()) {
+                lines.add("   - " + detail);
+            }
+        }
+        return lines;
     }
 
     // ------------------------------------------------------------------

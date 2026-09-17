@@ -36,7 +36,8 @@ public record TraceHop(
         long timestampMs,
         long endMs,
         Double confidence,
-        String detail
+        String detail,
+        FingerprintRef item
 ) {
 
     public enum Kind {
@@ -44,6 +45,20 @@ public record TraceHop(
         OBSERVED,
         /** Reconstructed by the correlation engine from several observations. */
         INFERRED
+    }
+
+    public TraceHop(
+            Kind kind,
+            long refId,
+            NodeRef origin,
+            NodeRef destination,
+            int amount,
+            long timestampMs,
+            long endMs,
+            Double confidence,
+            String detail
+    ) {
+        this(kind, refId, origin, destination, amount, timestampMs, endMs, confidence, detail, null);
     }
 
     /**
@@ -68,7 +83,8 @@ public record TraceHop(
                 obs.timestampMs(),
                 obs.timestampMs(),
                 null,
-                obs.actionType()
+                obs.actionType(),
+                obs.fingerprint()
         );
     }
 
@@ -82,7 +98,8 @@ public record TraceHop(
                 edge.timeStart(),
                 edge.timeEnd(),
                 edge.confidence(),
-                "inferred transfer spanning " + QueryFormatter.formatDuration(edge.spanMs())
+                "inferred transfer spanning " + QueryFormatter.formatDuration(edge.spanMs()),
+                edge.fingerprint()
         );
     }
 }

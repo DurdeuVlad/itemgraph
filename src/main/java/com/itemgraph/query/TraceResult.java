@@ -13,6 +13,7 @@ import java.util.List;
  * @param truncated    true if more hops matched than were returned
  */
 public record TraceResult(
+        String targetDescription,
         FingerprintRef fingerprint,
         List<TraceHop> hops,
         QueryWindow window,
@@ -23,6 +24,25 @@ public record TraceResult(
 
     public TraceResult {
         hops = List.copyOf(hops);
+    }
+
+    public TraceResult(
+            FingerprintRef fingerprint,
+            List<TraceHop> hops,
+            QueryWindow window,
+            int appliedLimit,
+            int requestedLimit,
+            boolean truncated
+    ) {
+        this(
+                fingerprint != null ? fingerprint.describeFull() : "item",
+                fingerprint,
+                hops,
+                window,
+                appliedLimit,
+                requestedLimit,
+                truncated
+        );
     }
 
     public boolean limitWasCapped() {

@@ -1,21 +1,27 @@
 package com.itemgraph.command;
 
 import com.itemgraph.ItemGraph;
+import com.itemgraph.audit.AuditReport;
+import com.itemgraph.audit.AuditService;
 import com.itemgraph.correlation.CorrelationResult;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.ingest.IngestionResult;
 import com.itemgraph.ingest.IngestionService;
+import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.SourceCheckpoint;
 import com.itemgraph.query.EventQueryService;
 import com.itemgraph.query.ExplainQueryService;
+import com.itemgraph.query.FingerprintRef;
 import com.itemgraph.query.QueryFormatter;
 import com.itemgraph.query.QueryLimits;
 import com.itemgraph.query.QueryWindow;
 import com.itemgraph.query.TraceQueryService;
 import com.itemgraph.query.TraceResult;
+import com.itemgraph.tracker.ItemEntityTracker;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import net.minecraft.commands.CommandSourceStack;
@@ -25,27 +31,20 @@ import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 import java.sql.SQLException;
+import java.util.List;
 
 /**
- * The {@code /itemgraph} (alias {@code /ig}) command tree.
+ * The /itemgraph (alias /ig) command tree.
  *
- * <p>The query handlers here are deliberately thin: they parse arguments and hand a
- * closure to {@link QueryDispatcher}, which runs the SQL off the server thread and sends
- * the result back on it. All actual query logic lives in {@code com.itemgraph.query} and
- * is unit-tested against a real database without a running server; what is left in this
- * file is only Brigadier plumbing, which cannot be tested that way and so should contain
- * as little decidable behaviour as possible.
- *
- * <p>The whole tree requires permission level 2. Per
- * {@code docs/SECURITY_AND_PERMISSIONS.md} the graph is sensitive — a trace names
- * players, containers and coordinates — so access is default-deny and the query
- * subcommands inherit the same gate as the operational ones rather than relaxing it.
+ * All historical and traversal queries are executed asynchronously off the Minecraft
+ * server thread via QueryDispatcher.
  */
 public final class ItemGraphCommands {
 
     private static final EventQueryService EVENT_QUERIES = new EventQueryService();
     private static final ExplainQueryService EXPLAIN_QUERIES = new ExplainQueryService();
     private static final TraceQueryService TRACE_QUERIES = new TraceQueryService();
+    private static final AuditService AUDIT_SERVICE = new AuditService();
 
     private ItemGraphCommands() {}
 
@@ -56,6 +55,7 @@ public final class ItemGraphCommands {
                 Commands.literal("itemgraph")
                         .requires(source -> source.hasPermission(2))
                         .then(Commands.literal("status").executes(ItemGraphCommands::status))
+                        .then(Commands.literal("audit").executes(ItemGraphCommands::audit))
                         .then(Commands.literal("ingest")
                                 .then(Commands.literal("now").executes(ItemGraphCommands::ingestNow)))
 
@@ -69,35 +69,51 @@ public final class ItemGraphCommands {
                                 .then(Commands.argument("edgeId", LongArgumentType.longArg(1))
                                         .executes(ItemGraphCommands::explain)))
 
-                        // /ig trace item <fingerprintId> [limit] [sinceMinutes]
+                        // /ig trace ...
                         .then(Commands.literal("trace")
+                                // /ig trace item <query> [limit] [sinceMinutes]
                                 .then(Commands.literal("item")
-                                        .then(Commands.argument("fingerprintId", LongArgumentType.longArg(1))
+                                        .then(Commands.argument("itemQuery", StringArgumentType.string())
                                                 .executes(ctx -> traceItem(ctx, QueryLimits.DEFAULT_LIMIT, null))
-                                                // No upper bound on the argument on purpose: QueryLimits caps
-                                                // an over-large request and the output says it was capped.
-                                                // Rejecting it with a usage message would leave an admin
-                                                // chasing an incident with no data at all.
                                                 .then(Commands.argument("limit", IntegerArgumentType.integer(1))
                                                         .executes(ctx -> traceItem(ctx,
                                                                 IntegerArgumentType.getInteger(ctx, "limit"), null))
                                                         .then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
                                                                 .executes(ctx -> traceItem(ctx,
                                                                         IntegerArgumentType.getInteger(ctx, "limit"),
-                                                                        LongArgumentType.getLong(ctx, "sinceMinutes"))))))))
+                                                                        LongArgumentType.getLong(ctx, "sinceMinutes")))))))
+
+                                // /ig trace player <player> [limit] [sinceMinutes]
+                                .then(Commands.literal("player")
+                                        .then(Commands.argument("player", StringArgumentType.string())
+                                                .executes(ctx -> tracePlayer(ctx, QueryLimits.DEFAULT_LIMIT, null))
+                                                .then(Commands.argument("limit", IntegerArgumentType.integer(1))
+                                                        .executes(ctx -> tracePlayer(ctx,
+                                                                IntegerArgumentType.getInteger(ctx, "limit"), null))
+                                                        .then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                                                                .executes(ctx -> tracePlayer(ctx,
+                                                                        IntegerArgumentType.getInteger(ctx, "limit"),
+                                                                        LongArgumentType.getLong(ctx, "sinceMinutes")))))))
+
+                                // /ig trace container <x> <y> <z> [limit] [sinceMinutes]
+                                .then(Commands.literal("container")
+                                        .then(Commands.argument("x", IntegerArgumentType.integer())
+                                                .then(Commands.argument("y", IntegerArgumentType.integer())
+                                                        .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                                .executes(ctx -> traceContainer(ctx, QueryLimits.DEFAULT_LIMIT, null))
+                                                                .then(Commands.argument("limit", IntegerArgumentType.integer(1))
+                                                                        .executes(ctx -> traceContainer(ctx,
+                                                                                IntegerArgumentType.getInteger(ctx, "limit"), null))
+                                                                        .then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                                                                                .executes(ctx -> traceContainer(ctx,
+                                                                                        IntegerArgumentType.getInteger(ctx, "limit"),
+                                                                                        LongArgumentType.getLong(ctx, "sinceMinutes"))))))))))
         );
 
         dispatcher.register(Commands.literal("ig").redirect(root));
     }
 
-    // ------------------------------------------------------------------
-    // Query subcommands (Phase 6)
-    //
-    // Each of these returns as soon as the query is queued. The int is Brigadier's
-    // "accepted" code, not a statement about whether anything was found.
-    // ------------------------------------------------------------------
-
-    /** {@code /ig event <observationId>} — one raw observation, labelled OBSERVED. */
+    /** /ig event <observationId> - one raw observation, labelled OBSERVED. */
     private static int event(CommandContext<CommandSourceStack> ctx) {
         long observationId = LongArgumentType.getLong(ctx, "observationId");
         return QueryDispatcher.dispatch(ctx.getSource(), "event", conn ->
@@ -107,7 +123,7 @@ public final class ItemGraphCommands {
                                 QueryFormatter.eventNotFound(observationId))));
     }
 
-    /** {@code /ig explain <edgeId>} — one inferred edge plus every observation it cites. */
+    /** /ig explain <edgeId> - one inferred edge plus every observation it cites. */
     private static int explain(CommandContext<CommandSourceStack> ctx) {
         long edgeId = LongArgumentType.getLong(ctx, "edgeId");
         return QueryDispatcher.dispatch(ctx.getSource(), "explain", conn ->
@@ -117,31 +133,66 @@ public final class ItemGraphCommands {
                                 QueryFormatter.explainNotFound(edgeId))));
     }
 
-    /**
-     * {@code /ig trace item <fingerprintId> [limit] [sinceMinutes]} — the merged
-     * OBSERVED + INFERRED timeline for one item fingerprint.
-     *
-     * <p>A fingerprint id that does not exist is a failure rather than an empty trace:
-     * an empty timeline for a real item and a typo'd id are very different findings, and
-     * conflating them would let a mistyped query read as "nothing ever happened to it".
-     *
-     * @param sinceMinutes null for an all-time trace; the row count is capped either way
-     */
+    /** /ig trace item <query> [limit] [sinceMinutes] */
     private static int traceItem(CommandContext<CommandSourceStack> ctx, int limit, Long sinceMinutes) {
-        long fingerprintId = LongArgumentType.getLong(ctx, "fingerprintId");
-        // Resolved here, on the server thread, so the window an admin sees in the output
-        // is the moment they ran the command rather than whenever the worker got to it.
+        String query = StringArgumentType.getString(ctx, "itemQuery");
         QueryWindow window = sinceMinutes == null
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
 
         return QueryDispatcher.dispatch(ctx.getSource(), "trace item", conn -> {
-            TraceResult result = TRACE_QUERIES.trace(conn, fingerprintId, limit, window);
-            if (!result.fingerprint().resolved()) {
-                return QueryDispatcher.QueryOutput.notFound(
-                        QueryFormatter.traceNoSuchFingerprint(fingerprintId));
+            List<FingerprintRef> candidates = TRACE_QUERIES.resolveFingerprints(conn, query);
+            if (candidates.isEmpty()) {
+                return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchFingerprint(query));
+            }
+            if (candidates.size() > 1) {
+                return QueryDispatcher.QueryOutput.found(QueryFormatter.formatFingerprintCandidates(query, candidates));
+            }
+            FingerprintRef fp = candidates.get(0);
+            TraceResult result = TRACE_QUERIES.trace(conn, fp.id(), limit, window);
+            return QueryDispatcher.QueryOutput.found(QueryFormatter.formatTrace(result));
+        });
+    }
+
+    /** /ig trace player <player> [limit] [sinceMinutes] */
+    private static int tracePlayer(CommandContext<CommandSourceStack> ctx, int limit, Long sinceMinutes) {
+        String player = StringArgumentType.getString(ctx, "player");
+        QueryWindow window = sinceMinutes == null
+                ? QueryWindow.unbounded()
+                : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
+
+        return QueryDispatcher.dispatch(ctx.getSource(), "trace player", conn -> {
+            TraceResult result = TRACE_QUERIES.tracePlayer(conn, player, limit, window);
+            if (result.hops().isEmpty()) {
+                return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget("player '" + player + "'"));
             }
             return QueryDispatcher.QueryOutput.found(QueryFormatter.formatTrace(result));
+        });
+    }
+
+    /** /ig trace container <x> <y> <z> [limit] [sinceMinutes] */
+    private static int traceContainer(CommandContext<CommandSourceStack> ctx, int limit, Long sinceMinutes) {
+        int x = IntegerArgumentType.getInteger(ctx, "x");
+        int y = IntegerArgumentType.getInteger(ctx, "y");
+        int z = IntegerArgumentType.getInteger(ctx, "z");
+        QueryWindow window = sinceMinutes == null
+                ? QueryWindow.unbounded()
+                : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
+
+        return QueryDispatcher.dispatch(ctx.getSource(), "trace container", conn -> {
+            TraceResult result = TRACE_QUERIES.traceContainer(conn, null, x, y, z, limit, window);
+            if (result.hops().isEmpty()) {
+                return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget("container at [" + x + ", " + y + ", " + z + "]"));
+            }
+            return QueryDispatcher.QueryOutput.found(QueryFormatter.formatTrace(result));
+        });
+    }
+
+    /** /ig audit - database invariant verification */
+    private static int audit(CommandContext<CommandSourceStack> ctx) {
+        return QueryDispatcher.dispatch(ctx.getSource(), "audit", conn -> {
+            AuditReport report = AUDIT_SERVICE.audit(conn);
+            return QueryDispatcher.QueryOutput.found(QueryFormatter.formatAudit(report));
         });
     }
 
@@ -203,6 +254,23 @@ public final class ItemGraphCommands {
                     " containers, " + lastResult.durationMs() + "ms)")
         ), false);
 
+        InternalObservationService internalObs = InternalObservationService.getInstance();
+        ItemEntityTracker entityTracker = ItemEntityTracker.getInstance();
+
+        source.sendSuccess(() -> Component.literal(
+                "[ItemGraph] internal queue: size=" + internalObs.getQueueSize() +
+                " enqueued=" + internalObs.getTotalEnqueued() +
+                " persisted=" + internalObs.getTotalPersisted() +
+                " transformations=" + internalObs.getTotalTransformations()
+        ), false);
+
+        source.sendSuccess(() -> Component.literal(
+                "[ItemGraph] entity tracking: active=" + entityTracker.getActiveEntityCount() +
+                " drops=" + entityTracker.getDropCount() +
+                " pickups=" + entityTracker.getPickupCount() +
+                " continuityMatches=" + entityTracker.getContinuityMatchCount()
+        ), false);
+
         return 1;
     }
 
@@ -211,8 +279,6 @@ public final class ItemGraphCommands {
         IngestionResult result = IngestionService.getInstance().runIngestion();
 
         if (result.success()) {
-            // Correlation is queued onto the ingestion worker rather than run here:
-            // candidate search must never happen on the server thread.
             boolean queued = IngestionService.getInstance().requestCorrelationAsync();
             source.sendSuccess(() -> Component.literal(
                     "[ItemGraph] Ingestion cycle complete: " + result.itemsIngested() + " new item observations, " +

@@ -35,6 +35,7 @@ final class ObservationQueries {
                    o.amount AS o_amount,
                    o.correlated_at AS o_correlated_at,
                    o.correlation_status AS o_correlation_status,
+                   o.item_entity_uuid AS o_item_entity_uuid,
                    o.node_id AS origin_id,
                    origin.node_type AS origin_type,
                    origin.custom_label AS origin_label,
@@ -75,6 +76,7 @@ final class ObservationQueries {
         Long correlated = rs.wasNull() ? null : correlatedAt;
 
         String correlationStatus = rs.getString("o_correlation_status");
+        String itemEntityUuid = rs.getString("o_item_entity_uuid");
 
         return new ObservationDetail(
                 rs.getLong("o_id"),
@@ -87,7 +89,8 @@ final class ObservationQueries {
                 rs.getString("o_action_type"),
                 rs.getInt("o_amount"),
                 correlated,
-                correlationStatus
+                correlationStatus,
+                itemEntityUuid
         );
     }
 
@@ -96,18 +99,19 @@ final class ObservationQueries {
      * A non-null id whose joined row is absent yields {@link NodeRef#missing(long)}.
      */
     static NodeRef node(ResultSet rs, long id, String prefix) throws SQLException {
-        String type = rs.getString(prefix + "_type");
+        String pfx = (prefix == null || prefix.isEmpty()) ? "" : prefix + "_";
+        String type = rs.getString(pfx + (pfx.isEmpty() ? "node_type" : "type"));
         if (type == null) {
             return NodeRef.missing(id);
         }
         return new NodeRef(
                 id,
                 type,
-                rs.getString(prefix + "_label"),
-                rs.getString(prefix + "_level"),
-                nullableDouble(rs, prefix + "_x"),
-                nullableDouble(rs, prefix + "_y"),
-                nullableDouble(rs, prefix + "_z")
+                rs.getString(pfx + (pfx.isEmpty() ? "custom_label" : "label")),
+                rs.getString(pfx + (pfx.isEmpty() ? "level_id" : "level")),
+                nullableDouble(rs, pfx + "x"),
+                nullableDouble(rs, pfx + "y"),
+                nullableDouble(rs, pfx + "z")
         );
     }
 

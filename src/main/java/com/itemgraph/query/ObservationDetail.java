@@ -31,8 +31,25 @@ public record ObservationDetail(
         String actionType,
         int amount,
         Long correlatedAtMs,
-        String correlationStatus
+        String correlationStatus,
+        String itemEntityUuid
 ) {
+
+    public ObservationDetail(
+            long id,
+            String sourceType,
+            Long sourceEventId,
+            long timestampMs,
+            NodeRef origin,
+            NodeRef destination,
+            FingerprintRef fingerprint,
+            String actionType,
+            int amount,
+            Long correlatedAtMs,
+            String correlationStatus
+    ) {
+        this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint, actionType, amount, correlatedAtMs, correlationStatus, null);
+    }
 
     public ObservationDetail(
             long id,
@@ -46,7 +63,7 @@ public record ObservationDetail(
             int amount,
             Long correlatedAtMs
     ) {
-        this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint, actionType, amount, correlatedAtMs, null);
+        this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint, actionType, amount, correlatedAtMs, null, null);
     }
 
     /** Always {@code OBSERVED}. See the class javadoc. */
