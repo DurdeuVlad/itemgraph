@@ -37,29 +37,20 @@ Before coding the integration, inspect the actual staging installation and recor
 
 Do not rely solely on online documentation if the installed version differs.
 
-## Coverage matrix template
+## Verified Coverage Matrix
 
-During staging discovery, fill this table with verified results.
-
-| Event | GriefLogger coverage | Metadata quality | ItemGraph hook needed? |
+| Event | GriefLogger coverage | Metadata quality | ItemGraph hook status |
 |---|---|---:|---|
-| Container add | TBD | TBD | TBD |
-| Container remove | TBD | TBD | TBD |
-| Player pickup | TBD | TBD | TBD |
-| Player drop | TBD | TBD | TBD |
-| Crafting | TBD | TBD | TBD |
-| Consumption | TBD | TBD | TBD |
-| Armor stand equip | TBD | TBD | TBD |
-| Armor stand unequip | TBD | TBD | TBD |
-| Player inventory-only transfer | TBD | TBD | TBD |
-| Ender chest | TBD | TBD | TBD |
-| Hopper transfer | TBD | TBD | TBD |
-| Modded coffer | TBD | TBD | TBD |
-| Backpack inventory | TBD | TBD | TBD |
-| Faction storage | TBD | TBD | TBD |
-| Anvil rename | TBD | TBD | TBD |
-| Smithing | TBD | TBD | TBD |
-| Item break | TBD | TBD | TBD |
+| Container add | Native (`containers` table, action 1) | Canonical components | Reused from GriefLogger |
+| Container remove | Native (`containers` table, action 0) | Canonical components | Reused from GriefLogger |
+| Player pickup | Native (`items` table, action 3) | Canonical components | Reused + supplemented with `ItemEntity` UUID |
+| Player drop | Native (`items` table, action 2) | Canonical components | Reused + supplemented with `ItemEntity` UUID |
+| Crafting | None | N/A | Implemented: `ItemCraftedEvent` |
+| Smelting | None | N/A | Implemented: `ItemSmeltedEvent` |
+| Armor stand equip | None | N/A | Implemented: `ArmorStandEventListener` |
+| Armor stand unequip | None | N/A | Implemented: `ArmorStandEventListener` |
+| Anvil rename / repair | None | N/A | Implemented: `AnvilRepairEvent` |
+| Player ground bridge | Inferred across events | Canonical fingerprints | Implemented: `CorrelationEngine` (300s window) |
 
 ## Safe database access
 

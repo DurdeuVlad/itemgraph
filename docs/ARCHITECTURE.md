@@ -333,6 +333,67 @@ Rules that hold everywhere in `QueryFormatter`:
 Output is sent with `broadcastToOps = false`. The graph names players, containers and
 coordinates — see `docs/SECURITY_AND_PERMISSIONS.md`.
 
+## Quantity-Flow Allocation Ledger (Phase 7)
+
+ItemGraph reconstructs stack splits, stack merges, and partial transfers without assigning synthetic UUIDs to individual items.
+
+Instead, it maintains an explicit allocation ledger:
+
+```sql
+CREATE TABLE IF NOT EXISTS ig_edge_allocations (
+    edge_id INTEGER NOT NULL REFERENCES ig_inferred_edges(id) ON DELETE CASCADE,
+    observation_id INTEGER NOT NULL REFERENCES ig_observations(id),
+    allocation_role TEXT NOT NULL,  -- 'SOURCE' or 'DESTINATION'
+    amount INTEGER NOT NULL,
+    PRIMARY KEY(edge_id, observation_id, allocation_role)
+);
+```
+
+### Forensic Lifecycle (`correlation_status`)
+Observations track their allocation progress:
+- `PENDING`: newly ingested, candidate window remains open.
+- `PARTIALLY_ALLOCATED`: partially consumed by inferred edges, window still open for subsequent transfers.
+- `FULLY_ALLOCATED`: 100% of evidenced item quantity has been accounted for by edges ($R = 0$).
+- `CLOSED_UNRESOLVED`: candidate correlation window expired while residual unallocated quantity remained ($R > 0$).
+
+### Dynamic Capacity Accounting
+$$\text{allocation} = \min(R_{\text{drop}}, R_{\text{pickup}})$$
+Every allocation is strictly bounded by evidenced capacity, enforcing quantity conservation ($\sum \text{allocated} \le \text{evidenced capacity}$).
+
+## High-Value Integrations & Entity Continuity (Phase 8)
+
+### ItemEntity Continuity Tracking
+Authoritative Minecraft `ItemEntity` UUIDs are tracked at the time of ground toss and pickup.
+- Tracked via `ItemEntityTracker` and `ItemEntityEventListener` subscribed to `ItemTossEvent` and `ItemEntityPickupEvent.Post`.
+- Persisted in `ig_observations.item_entity_uuid` (schema V8).
+- When a drop and pickup share an exact `ItemEntity` UUID, the correlation engine boosts confidence to `0.9990` and documents direct entity continuity in the scoring explanation.
+
+### Armor Stand Tracking
+- `ArmorStandEventListener` captures `PlayerInteractEvent.EntityInteractSpecific` to record `EQUIP_ARMOR_STAND` and `UNEQUIP_ARMOR_STAND` observations on armor stand container nodes.
+
+### Expanded Query UX
+- `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
+- `/ig trace container <x> <y> <z>`: reconstructs item ingress and egress for a container at coordinates.
+- `/ig trace item <query>`: resolves string queries by numeric ID, item registry ID, or custom name.
+
+## Transformation Lineage (Phase 9)
+
+Item transformations (identity shifts) are tracked in `ig_item_transformations`:
+- Records transitions linking source fingerprint to result fingerprint (`ANVIL_RENAME`, `CRAFTING`, `SMELTING`).
+- Captured via `TransformationEventListener` (`AnvilRepairEvent`, `ItemCraftedEvent`, `ItemSmeltedEvent`).
+- Persisted asynchronously via `InternalObservationService` with a memory-bounded queue (10,000 capacity).
+- Surfaced chronologically in item trace timelines as `[TRANSFORMATION <type> <- <source>]` hops.
+
+## Database Invariant Auditing & Diagnostics (Phase 10)
+
+`AuditService` enforces ItemGraph's core invariants asynchronously:
+1. **Quantity Conservation**: $\sum \text{allocated} \le \text{evidenced capacity}$ across all observations and inferred edges.
+2. **Positivity**: quantities on observations, edges, and allocations are strictly positive ($amount > 0$).
+3. **Relational Graph Integrity**: zero orphaned allocations and zero missing edge endpoint nodes.
+4. **Lifecycle State Consistency**: validates observation `correlation_status` against active allocations.
+
+The `/ig audit` command runs this engine on the query worker and outputs a comprehensive integrity report. Diagnostic counters in `/ig status` report internal queue throughput, transformation totals, active tracked entities, and continuity matches.
+
 ## Layered architecture
 
 ```text

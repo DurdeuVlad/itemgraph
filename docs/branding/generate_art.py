@@ -387,12 +387,19 @@ def main():
 
     # FINAL: dark slate is the shipped icon. Written to both places so the
     # branding folder and the mod resource can never drift apart.
-    final = graph_tile(SLATE).image(scale=8)
-    final.save(os.path.join(here, "itemgraph_icon_v2_slate.png"))
-    final.save(os.path.join(res, "itemgraph_icon.png"))
+    final_256 = graph_tile(SLATE).image(scale=8)
+    final_256.save(os.path.join(here, "itemgraph_icon_v2_slate.png"))
+    final_256.save(os.path.join(res, "itemgraph_icon.png"))
+
+    # High-resolution CurseForge avatar exports (512x512 and 1024x1024)
+    final_512 = graph_tile(SLATE).image(scale=16)
+    final_512.save(os.path.join(here, "curseforge_avatar_512.png"))
+
+    final_1024 = graph_tile(SLATE).image(scale=32)
+    final_1024.save(os.path.join(here, "curseforge_avatar_1024.png"))
 
     banner().image(scale=2).save(os.path.join(here, "curseforge_banner.png"))
-    print("wrote icons (256x256) and banner (1024x256)")
+    print("wrote icons (256x256, 512x512, 1024x1024) and banner (1024x256)")
 
 
 if __name__ == "__main__":

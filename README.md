@@ -97,39 +97,35 @@ The first useful vertical slice should:
 
 ## Commands
 
-Implemented today (all require permission level 2):
+Implemented and available (all require permission level 2):
 
 ```text
 /ig status
+/ig audit
 /ig ingest now
 /ig event   <observationId>
 /ig explain <edgeId>
-/ig trace item <fingerprintId> [limit] [sinceMinutes]
+/ig trace item <query> [limit] [sinceMinutes]
+/ig trace player <playerName> [limit] [sinceMinutes]
+/ig trace container <x> <y> <z> [limit] [sinceMinutes]
 ```
 
-`limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Query
-commands run off the server thread and report back on it. Full argument table, output
-format and what is still unimplemented: [Query model](docs/QUERY_MODEL.md).
+- `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
+- `/ig trace item`: accepts numeric fingerprint IDs, item registry names (e.g. `minecraft:netherite_boots` or `netherite`), or custom item names. Shows complete chronological timeline including transformations (`[TRANSFORMATION <type> <- <source>]`).
+- `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
+- `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.
+- `limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Query commands run off the server thread and report back on it. Full argument table, output format: [Query model](docs/QUERY_MODEL.md).
 
 Sample `/ig trace item` output:
 
 ```text
 [OBSERVED] CONTAINER 10,64,10 -> AlphaA : 1x at 2026-09-16 14:31:08 UTC (event#8812 REMOVE_ITEM)
 [OBSERVED] AlphaA -> GROUND 20,64,20 : 1x at 2026-09-16 14:31:18 UTC (event#8813 DROP_ITEM)
-[INFERRED conf=0.9025] AlphaA -> BetaB : 1x at 2026-09-16 14:31:18 UTC (edge#9931 inferred transfer spanning 1m0s)
+[INFERRED conf=0.9990] AlphaA -> BetaB : 1x at 2026-09-16 14:31:18 UTC (edge#9931 inferred transfer spanning 1m0s)
 [OBSERVED] GROUND 20,64,20 -> BetaB : 1x at 2026-09-16 14:32:18 UTC (event#8814 PICKUP_ITEM)
 ```
 
 Evidence and inference are labelled per line, never once at the top.
-
-Still provisional, not yet implemented — syntax may change:
-
-```text
-/ig trace item minecraft:iron_chestplate
-/ig trace item minecraft:iron_chestplate name:"Old Reliable"
-/ig trace player Vlad
-/ig trace container
-```
 
 ## Documentation
 

@@ -24,17 +24,19 @@ Alias:
 /ig
 ```
 
-## Implemented surface (Phase 6)
+## Implemented surface (Phases 6–10)
 
-Everything below this heading and above "Not yet implemented" is live. The rest of this
-document is design intent for later phases and is explicitly marked as such.
+Everything below this heading and above "Not yet implemented" is live.
 
 ```text
 /ig status
+/ig audit
 /ig ingest now
 /ig event   <observationId>
 /ig explain <edgeId>
-/ig trace item <fingerprintId> [limit] [sinceMinutes]
+/ig trace item <query> [limit] [sinceMinutes]
+/ig trace player <playerName> [limit] [sinceMinutes]
+/ig trace container <x> <y> <z> [limit] [sinceMinutes]
 ```
 
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works

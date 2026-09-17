@@ -8,6 +8,36 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- Phase 10: Production Hardening, Integrity Auditing, and Comprehensive Diagnostics.
+  - Off-thread `AuditService` checking core architectural invariants:
+    - Quantity conservation ($\sum \text{allocated} \le \text{evidenced capacity}$) across all observations and inferred edges.
+    - Strict positivity for quantities on observations, edges, and allocations.
+    - Relational integrity: zero orphaned allocations and zero missing edge endpoint nodes.
+    - Lifecycle status consistency: validates observation `correlation_status` against active allocations.
+  - New administrative command `/ig audit`: dispatches audit analysis asynchronously and reports live invariant status.
+  - Diagnostic metrics in `/ig status`: internal queue capacity/throughput, total persisted transformations, active entity tracking counts, and continuity matches.
+  - Automated test suite `AuditServiceTest` verifying healthy graphs, conservation violation detection, orphaned allocation detection, and topology validation.
+  - Reached 106 automated tests with 100% pass rate.
+
+- Phase 9: Item Transformation Tracking (Renaming, Crafting, Smelting).
+  - Schema table `ig_item_transformations`: records item transitions linking source fingerprint to result fingerprint with actor node, transformation type, quantity, timestamp, and details.
+  - `TransformationEventListener`: captures NeoForge `AnvilRepairEvent` (renames, repairs), `ItemCraftedEvent` (crafting), and `ItemSmeltedEvent` (smelting).
+  - Asynchronous batch persistence via `InternalObservationService` with a memory-bounded queue (10,000 capacity).
+  - Chronological transformation surfacing in `TraceQueryService`: item traces now include `[TRANSFORMATION <type> <- <source>]` hops connecting item lineages across identity shifts.
+
+- Phase 8: High-Value Integrations and UX Enhancements.
+  - Authoritative `ItemEntity` UUID tracking:
+    - Schema migration `V8__HighValueIntegrations` adding `item_entity_uuid` column to `ig_observations`.
+    - Memory-bounded, thread-safe `ItemEntityTracker` tracking ground item drops and pickups with coordinate matching and temporal expiration.
+    - `ItemEntityEventListener` subscribed to `ItemTossEvent` and `ItemEntityPickupEvent.Post`.
+    - Enhanced `CorrelationEngine`: exact `item_entity_uuid` continuity matching yields `0.9990` confidence with narrative explanation citing authoritative Minecraft entity continuity.
+  - Armor stand interactions:
+    - `ArmorStandEventListener` capturing `PlayerInteractEvent.EntityInteractSpecific` to record `EQUIP_ARMOR_STAND` and `UNEQUIP_ARMOR_STAND` observations.
+  - Player and container trace queries:
+    - `/ig trace player <playerName> [limit] [sinceMinutes]`
+    - `/ig trace container <x> <y> <z> [limit] [sinceMinutes]`
+  - Dynamic string and registry query resolution for `/ig trace item <query>` supporting numeric IDs, registry IDs (e.g. `diamond_sword`), and custom names.
+
 - Phase 7: Stack-aware quantity-flow reconstruction and allocation ledger.
   - Migration `V7__QuantityFlowLedger` adding `ig_edge_allocations` table (`edge_id`, `observation_id`, `allocation_role`, `amount`) and explicit observation lifecycle states in `ig_observations.correlation_status` (`PENDING`, `PARTIALLY_ALLOCATED`, `FULLY_ALLOCATED`, `CLOSED_UNRESOLVED`).
   - Stack splitting: supports 1-to-many flows (e.g. drop 64 -> pickup 20 + pickup 44) without per-item UUIDs.

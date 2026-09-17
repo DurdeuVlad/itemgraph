@@ -245,33 +245,42 @@ Supporting factors:
 - No competing candidate within 2 seconds
 ```
 
-## Renames
+## Renames and Transformations (Phase 9)
 
-A custom name is evidence, not identity.
+A custom name is distinctive evidence, not permanent identity.
 
-If renaming is observable, represent it as a transformation:
+Transformations are tracked in `ig_item_transformations` (schema V8):
 
-```text
-"Old Helmet"
-    |
-    | anvil rename
-    v
-"Old Reliable"
+```sql
+CREATE TABLE IF NOT EXISTS ig_item_transformations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transformation_type TEXT NOT NULL,
+    player_node_id INTEGER NOT NULL REFERENCES ig_nodes(id),
+    source_fingerprint_id INTEGER NOT NULL REFERENCES ig_item_fingerprints(id),
+    result_fingerprint_id INTEGER NOT NULL REFERENCES ig_item_fingerprints(id),
+    quantity INTEGER NOT NULL,
+    timestamp_ms INTEGER NOT NULL,
+    details TEXT
+);
 ```
 
-This preserves continuity without pretending the name itself is permanent.
+Implemented transformation types:
 
-## Transformations
+- `ANVIL_RENAME`: captured via NeoForge `AnvilRepairEvent` when an item receives a custom name or repair.
+- `CRAFTING`: captured via `ItemCraftedEvent` linking input item components to crafted output products.
+- `SMELTING`: captured via `ItemSmeltedEvent`.
 
-Future ItemGraph versions should model:
+In query output, transformations are represented chronologically as:
 
-- crafting
-- smithing
-- repair
-- enchanting
-- trimming
-- renaming
-- consumption
-- breakage
+```text
+[OBSERVED] PlayerB -> PlayerB : 1x at 2026-09-17 06:55:47 UTC (event#1 [TRANSFORMATION ANVIL_RENAME <- minecraft:netherite_boots] (Renamed on Anvil))
+```
 
-A transformation edge may consume one or more fingerprints and produce another.
+## Entity Continuity Tracking (Phase 8)
+
+Authoritative Minecraft `ItemEntity` UUIDs are tracked at the time of ground toss and pickup.
+
+- Stored in `ig_observations.item_entity_uuid`.
+- Tracked via `ItemEntityTracker` and `ItemEntityEventListener`.
+- When matching a drop observation to a pickup observation, an identical `ItemEntity` UUID assigns a confidence score of `0.9990` and produces an explanation citing direct entity continuity on the ground.
+
