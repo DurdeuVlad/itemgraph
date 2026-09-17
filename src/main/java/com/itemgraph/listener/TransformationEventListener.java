@@ -18,6 +18,16 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
  */
 public class TransformationEventListener {
 
+    private final InternalObservationService observationService;
+
+    public TransformationEventListener() {
+        this(InternalObservationService.getInstance());
+    }
+
+    public TransformationEventListener(InternalObservationService observationService) {
+        this.observationService = observationService;
+    }
+
     @SubscribeEvent
     public void onAnvilRepair(AnvilRepairEvent event) {
         Player player = event.getEntity();
@@ -51,7 +61,7 @@ public class TransformationEventListener {
         long now = System.currentTimeMillis();
         String level = player.level().dimension().location().toString();
 
-        InternalObservationService.getInstance().submitTransformation(
+        this.observationService.submitTransformation(
                 new InternalObservationService.InternalTransformation(
                         now,
                         type,
@@ -101,7 +111,7 @@ public class TransformationEventListener {
         String level = player.level().dimension().location().toString();
         String details = "Crafted " + output.getCount() + "x " + resultItem.itemId() + " from " + primaryIngredient.itemId();
 
-        InternalObservationService.getInstance().submitTransformation(
+        this.observationService.submitTransformation(
                 new InternalObservationService.InternalTransformation(
                         now,
                         "CRAFT",
@@ -137,7 +147,7 @@ public class TransformationEventListener {
         String level = player.level().dimension().location().toString();
         String details = "Smelted " + output.getCount() + "x " + resultItem.itemId();
 
-        InternalObservationService.getInstance().submitTransformation(
+        this.observationService.submitTransformation(
                 new InternalObservationService.InternalTransformation(
                         now,
                         "SMELT",

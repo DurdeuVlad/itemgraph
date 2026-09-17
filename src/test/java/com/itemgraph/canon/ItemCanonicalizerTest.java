@@ -20,18 +20,12 @@ class ItemCanonicalizerTest {
 
     @BeforeAll
     static void initMinecraftRegistries() {
+        if (net.neoforged.fml.loading.LoadingModList.get() == null) {
+            net.neoforged.fml.loading.LoadingModList.of(
+                    java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.Map.of()
+            );
+        }
         SharedConstants.tryDetectVersion();
-        // Bootstrap.bootStrap() sets its internal `isBootstrapped` flag (which
-        // BuiltInRegistries.<clinit>'s checkBootstrapCalled() guards against) very
-        // early - bytecode-verified before it reaches FireBlock.bootStrap() -> ...
-        // -> FeatureFlags.<clinit> -> NeoForge's FeatureFlagLoader, which needs
-        // FML's LoadingModList (only populated during a real mod-loading game
-        // launch, not present in a bare `./gradlew test` JVM and throws NPE).
-        // By the time that NPE surfaces, BuiltInRegistries is already fully
-        // populated (its own <clinit> completes synchronously earlier in the
-        // same call), so swallowing this specific, expected failure here is
-        // safe and sufficient for what this test needs (DataComponentPatch
-        // encode/decode against BuiltInRegistries.ITEM / DataComponents.*).
         try {
             Bootstrap.bootStrap();
         } catch (Throwable expectedOutsideRealGameLaunch) {
