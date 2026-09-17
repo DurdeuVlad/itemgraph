@@ -129,9 +129,32 @@ public final class QueryDispatcher {
             return 0;
         }
 
-        CompletableFuture
-                .supplyAsync(() -> execute(query), queryExecutor())
-                .whenComplete((output, throwable) -> deliver(source, label, output, throwable));
+        MinecraftServer server = source.getServer();
+        CompletableFuture<QueryOutput> future = CompletableFuture
+                .supplyAsync(() -> execute(query), queryExecutor());
+
+        // If the query is dispatched from an off-server-thread context (such as an RCON client worker),
+        // we can safely block the off-thread caller up to a short timeout so synchronous command
+        // collectors (like Minecraft's RCON buffer) receive the output before closing the connection.
+        // If called on the Minecraft server thread, we NEVER block: we marshal back via server.execute().
+        if (server != null && Thread.currentThread() != server.getRunningThread()) {
+            try {
+                QueryOutput output = future.get(5, TimeUnit.SECONDS);
+                if (output.found()) {
+                    output.lines().forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
+                } else {
+                    output.lines().forEach(line -> source.sendFailure(Component.literal(line)));
+                }
+                return output.found() ? 1 : 0;
+            } catch (Exception e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                LOGGER.error("ItemGraph query '{}' failed on synchronous worker", label, cause);
+                source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
+                return 0;
+            }
+        }
+
+        future.whenComplete((output, throwable) -> deliver(source, label, output, throwable));
 
         return 1;
     }
@@ -178,14 +201,24 @@ public final class QueryDispatcher {
             }
 
             if (!output.found()) {
-                output.lines().forEach(line -> source.sendFailure(Component.literal(line)));
+                output.lines().forEach(line -> {
+                    source.sendFailure(Component.literal(line));
+                    if (source.getEntity() == null) {
+                        LOGGER.info("{}", line);
+                    }
+                });
                 return;
             }
 
             // false: query output is for the admin who asked, not broadcast to every op.
             // The graph is sensitive (see docs/SECURITY_AND_PERMISSIONS.md) and an item
             // trace names coordinates and players.
-            output.lines().forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
+            output.lines().forEach(line -> {
+                source.sendSuccess(() -> Component.literal(line), false);
+                if (source.getEntity() == null) {
+                    LOGGER.info("{}", line);
+                }
+            });
         });
     }
 
