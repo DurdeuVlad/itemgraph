@@ -154,6 +154,14 @@ public class InternalObservationService {
         return totalTransformations.get();
     }
 
+    public synchronized void clear() {
+        queue.clear();
+        transformationQueue.clear();
+        totalEnqueued.set(0);
+        totalPersisted.set(0);
+        totalTransformations.set(0);
+    }
+
     private void drainQueueSafely() {
         List<InternalObservation> obsBatch = new ArrayList<>(100);
         List<InternalTransformation> transBatch = new ArrayList<>(100);
