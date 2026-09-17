@@ -14,6 +14,16 @@ import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
  */
 public class ItemEntityEventListener {
 
+    private final ItemEntityTracker tracker;
+
+    public ItemEntityEventListener() {
+        this(ItemEntityTracker.getInstance());
+    }
+
+    public ItemEntityEventListener(ItemEntityTracker tracker) {
+        this.tracker = tracker;
+    }
+
     @SubscribeEvent
     public void onItemToss(ItemTossEvent event) {
         Player player = event.getPlayer();
@@ -35,7 +45,7 @@ public class ItemEntityEventListener {
         int z = (int) Math.floor(itemEntity.getZ());
         long now = System.currentTimeMillis();
 
-        ItemEntityTracker.getInstance().recordDrop(
+        this.tracker.recordDrop(
                 itemEntity.getUUID(),
                 player.getUUID(),
                 level,
@@ -67,7 +77,7 @@ public class ItemEntityEventListener {
         int z = (int) Math.floor(itemEntity.getZ());
         long now = System.currentTimeMillis();
 
-        ItemEntityTracker.getInstance().recordPickup(
+        this.tracker.recordPickup(
                 itemEntity.getUUID(),
                 player.getUUID(),
                 level,
