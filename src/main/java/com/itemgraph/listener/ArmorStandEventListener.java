@@ -17,6 +17,16 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
  */
 public class ArmorStandEventListener {
 
+    private final InternalObservationService observationService;
+
+    public ArmorStandEventListener() {
+        this(InternalObservationService.getInstance());
+    }
+
+    public ArmorStandEventListener(InternalObservationService observationService) {
+        this.observationService = observationService;
+    }
+
     @SubscribeEvent
     public void onEntityInteractSpecific(PlayerInteractEvent.EntityInteractSpecific event) {
         if (!(event.getTarget() instanceof ArmorStand armorStand)) {
@@ -42,7 +52,7 @@ public class ArmorStandEventListener {
         if (!held.isEmpty()) {
             // Player is equipping or swapping an item onto the armor stand
             com.itemgraph.canon.CanonicalItem item = com.itemgraph.canon.ItemCanonicalizer.canonicalizeStack(held);
-            InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+            this.observationService.submit(new InternalObservationService.InternalObservation(
                     now,
                     "EQUIP_ARMOR_STAND",
                     player.getUUID().toString(),
@@ -63,7 +73,7 @@ public class ArmorStandEventListener {
                 ItemStack equipped = armorStand.getItemBySlot(slot);
                 if (!equipped.isEmpty()) {
                     com.itemgraph.canon.CanonicalItem item = com.itemgraph.canon.ItemCanonicalizer.canonicalizeStack(equipped);
-                    InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+                    this.observationService.submit(new InternalObservationService.InternalObservation(
                             now,
                             "UNEQUIP_ARMOR_STAND",
                             player.getUUID().toString(),
