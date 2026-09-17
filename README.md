@@ -129,6 +129,15 @@ Evidence and inference are labelled per line, never once at the top.
 
 ## Documentation
 
+- [Business and intended value](Business.md)
+- [Decision log](Decision.md)
+- [Milestones](Milestones.md)
+- [Collaboration policy](Collaboration.md)
+- [Open-source policy](OSS.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [MIT license](LICENSE)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Evidence model](docs/EVIDENCE_MODEL.md)
 - [GriefLogger integration](docs/GRIEFLOGGER_INTEGRATION.md)
@@ -137,6 +146,17 @@ Evidence and inference are labelled per line, never once at the top.
 - [Test plan](docs/TEST_PLAN.md)
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Branding](docs/BRANDING.md)
+
+## Open-source project
+
+ItemGraph is developed in the open under the MIT License. External
+contributions use forks and pull requests. The configured non-publishing CI
+workflow runs on pull requests and pushes to main; release publishing remains
+a maintainer-only tag operation and never exposes release credentials to fork
+contributors.
+
+Read CONTRIBUTING.md before opening a pull request. Report security issues
+privately using SECURITY.md.
 
 ## Development rule
 
