@@ -19,6 +19,8 @@ import org.mockito.ArgumentCaptor;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.sql.SQLException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -44,8 +46,11 @@ class QueryDispatcherTest {
     }
 
     @Test
-    void testDispatchWhenDatabaseNotInitializedReturnsFailure() {
+    void testDispatchWhenDatabaseNotInitializedReturnsFailure(@TempDir Path tempDir) {
         DatabaseManager db = DatabaseManager.getInstance();
+        // Reset lastError so this asserts the exact no-error production response, not a
+        // substring that could keep passing after the command text changes.
+        db.initialize(tempDir.resolve("disconnected.db"));
         db.close();
         assertFalse(db.isInitialized(), "Database must be closed for this test");
 
@@ -58,12 +63,53 @@ class QueryDispatcherTest {
         ArgumentCaptor<Component> captor = ArgumentCaptor.forClass(Component.class);
         verify(source).sendFailure(captor.capture());
         String failureText = captor.getValue().getString();
-        assertTrue(failureText.contains("the ItemGraph database is not connected"),
-                "Failure message must state that the database is not connected, was: " + failureText);
-        assertTrue(failureText.contains("/ig status"),
-                "Failure message must refer user to /ig status, was: " + failureText);
+        assertEquals("[ItemGraph] Query failed: the ItemGraph database is not connected. See /ig status.",
+                failureText);
 
         verify(source, never()).sendSuccess(any(), anyBoolean());
+    }
+
+    @Test
+    void testDispatchReportsFailureWhenDatabaseClosesAfterPrecheck(@TempDir Path tempDir) throws Exception {
+        DatabaseManager db = DatabaseManager.getInstance();
+        db.initialize(tempDir.resolve("shutdown-race.db"));
+
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        CountDownLatch firstQueryStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstQuery = new CountDownLatch(1);
+
+        when(source.getServer()).thenReturn(server);
+        when(server.getRunningThread()).thenReturn(Thread.currentThread());
+        when(server.isStopped()).thenReturn(false);
+        doAnswer(invocation -> {
+            invocation.<Runnable>getArgument(0).run();
+            return null;
+        }).when(server).execute(any(Runnable.class));
+
+        assertEquals(1, QueryDispatcher.dispatch(source, "blocking-query", conn -> {
+            firstQueryStarted.countDown();
+            try {
+                assertTrue(releaseFirstQuery.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new SQLException(e);
+            }
+            return QueryOutput.found(List.of("first query complete"));
+        }));
+        assertTrue(firstQueryStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+
+        // The second dispatch passes isInitialized(), then waits behind the first query.
+        // Closing the database before releasing the worker reproduces the shutdown race.
+        assertEquals(1, QueryDispatcher.dispatch(source, "shutdown-race", conn ->
+                QueryOutput.found(List.of("must not be returned"))));
+        db.close();
+        releaseFirstQuery.countDown();
+
+        ArgumentCaptor<Component> captor = ArgumentCaptor.forClass(Component.class);
+        verify(source, timeout(5000)).sendFailure(captor.capture());
+        assertEquals("[ItemGraph] Query failed: ItemGraph database is not initialized",
+                captor.getValue().getString());
     }
 
     @Test

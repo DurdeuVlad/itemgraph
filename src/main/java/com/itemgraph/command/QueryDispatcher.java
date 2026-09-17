@@ -189,9 +189,18 @@ public final class QueryDispatcher {
             }
 
             if (throwable != null) {
-                Throwable cause = throwable instanceof QueryFailure && throwable.getCause() != null
-                        ? throwable.getCause()
-                        : throwable;
+                // CompletableFuture#supplyAsync wraps any exception thrown by the supplier in a
+                // CompletionException, whose getMessage() returns the wrapped exception's toString()
+                // (class name and all) rather than its plain message - unwrap that first, or the
+                // admin sees "com.itemgraph.command.QueryDispatcher$QueryFailure: <message>" instead
+                // of the clean message. Then peel QueryFailure/SQLException the same way as before.
+                Throwable cause = throwable;
+                while (cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                if (cause instanceof QueryFailure && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
                 if (cause.getCause() instanceof SQLException sql) {
                     cause = sql;
                 }

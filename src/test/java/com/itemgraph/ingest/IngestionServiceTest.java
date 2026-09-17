@@ -1,6 +1,8 @@
 package com.itemgraph.ingest;
 
+import com.itemgraph.correlation.CorrelationEngine;
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.graph.NodeManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -411,5 +413,36 @@ class IngestionServiceTest {
         IngestionResult result = service.runIngestion();
         assertFalse(result.success());
         assertTrue(result.errorMessage().contains("not found"));
+    }
+
+    @Test
+    void testStartClearsNodeCacheAfterDatabaseReinitialization() throws Exception {
+        NodeManager nodeManager = new NodeManager();
+        String playerUuid = "00000000-0000-0000-0000-000000000001";
+
+        long firstDatabaseNode = nodeManager.getOrCreatePlayerNode(
+                dbManager.getConnection(), playerUuid, "Alice", "minecraft:overworld", 0, 64, 0);
+
+        dbManager.close();
+        dbManager.initialize(tempDir.resolve("fresh-itemgraph.db"));
+
+        IngestionService restartedService = new IngestionService(
+                adapter, dbManager, nodeManager, new CorrelationEngine(dbManager));
+        restartedService.start();
+        try {
+            long freshDatabaseNode = nodeManager.getOrCreatePlayerNode(
+                    dbManager.getConnection(), playerUuid, "Alice", "minecraft:overworld", 0, 64, 0);
+
+            assertEquals(firstDatabaseNode, freshDatabaseNode,
+                    "SQLite may reuse the same numeric ID, but it must be resolved in the fresh database");
+            try (Statement stmt = dbManager.getConnection().createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_nodes WHERE id = " + freshDatabaseNode)) {
+                assertTrue(rs.next());
+                assertEquals(1, rs.getInt(1),
+                        "the cached node ID must not be returned without being recreated in the fresh database");
+            }
+        } finally {
+            restartedService.stop();
+        }
     }
 }

@@ -93,6 +93,12 @@ public class IngestionService {
             return;
         }
 
+        // The ItemGraph database can be reopened for a new server lifecycle while this
+        // singleton remains alive (for example, an integrated-server restart). Node IDs
+        // are only valid for the database that populated them, so never carry the
+        // read-through identity cache into a newly initialized database.
+        nodeManager.clearCaches();
+
         executor = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
             @Override
             public Thread newThread(Runnable r) {
@@ -128,6 +134,7 @@ public class IngestionService {
             executor = null;
             LOGGER.info("ItemGraph ingestion service stopped.");
         }
+        nodeManager.clearCaches();
     }
 
     public boolean isRunning() {
