@@ -262,8 +262,8 @@ public class IngestionService {
                 String insertObsSql = """
                     INSERT OR IGNORE INTO ig_observations (
                         source_type, source_event_id, timestamp_ms, node_id, target_node_id,
-                        fingerprint_id, action_type, amount, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        fingerprint_id, action_type, amount, raw_data, item_entity_uuid
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
                 long maxRowId = afterRowId;
@@ -302,6 +302,18 @@ public class IngestionService {
                                 pstmt.setBytes(9, event.rawData());
                             } else {
                                 pstmt.setNull(9, Types.BLOB);
+                            }
+
+                            java.util.UUID entityUuid = null;
+                            if (!isContainerTable && ("DROP_ITEM".equals(actionType) || "PICKUP_ITEM".equals(actionType))) {
+                                entityUuid = com.itemgraph.tracker.ItemEntityTracker.getInstance().findMatchingDropEntity(
+                                        event.levelName(), (int) Math.floor(event.x()), (int) Math.floor(event.y()), (int) Math.floor(event.z()),
+                                        event.materialName(), event.timestampMs());
+                            }
+                            if (entityUuid != null) {
+                                pstmt.setString(10, entityUuid.toString());
+                            } else {
+                                pstmt.setNull(10, Types.VARCHAR);
                             }
 
                             pstmt.executeUpdate();

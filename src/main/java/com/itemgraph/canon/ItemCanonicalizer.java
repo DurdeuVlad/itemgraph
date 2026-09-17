@@ -110,6 +110,14 @@ public class ItemCanonicalizer {
         return extractAndBuild(resolveRegistryId(rawItemId), patch);
     }
 
+    public static CanonicalItem canonicalizeStack(net.minecraft.world.item.ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return new CanonicalItem("minecraft:air", sha256Hex("id=minecraft:air"), null, null, null);
+        }
+        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        return extractAndBuild(itemId, stack.getComponentsPatch());
+    }
+
     private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch) {
         String customName = null;
         List<String> sortedEnchantments = new ArrayList<>();

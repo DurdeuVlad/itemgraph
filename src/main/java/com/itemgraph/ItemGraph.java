@@ -26,6 +26,10 @@ public class ItemGraph {
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
         NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
+
+        NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ItemEntityEventListener());
+        NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ArmorStandEventListener());
+        NeoForge.EVENT_BUS.register(new com.itemgraph.listener.TransformationEventListener());
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
@@ -34,10 +38,12 @@ public class ItemGraph {
 
     private void onServerStarting(ServerStartingEvent event) {
         DatabaseManager.getInstance().initialize();
+        com.itemgraph.ingest.InternalObservationService.getInstance().start();
         com.itemgraph.ingest.IngestionService.getInstance().start();
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
+        com.itemgraph.ingest.InternalObservationService.getInstance().stop();
         com.itemgraph.ingest.IngestionService.getInstance().stop();
         // Stop the query worker before closing the database, so an in-flight /ig trace
         // cannot be reading through a connection that is about to disappear.

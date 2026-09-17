@@ -10,6 +10,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -252,11 +253,16 @@ public class CorrelationEngine {
             Long targetNodeId,
             long fingerprintId,
             int amount,
-            String actionType
+            String actionType,
+            String itemEntityUuid
     ) {}
 
     /** A candidate observation with original and allocated quantity accounting. */
-    public record Candidate(long id, long timestampMs, Long playerNodeId, int originalAmount, int allocatedAmount) {
+    public record Candidate(long id, long timestampMs, Long playerNodeId, int originalAmount, int allocatedAmount, String itemEntityUuid) {
+        public Candidate(long id, long timestampMs, Long playerNodeId, int originalAmount, int allocatedAmount) {
+            this(id, timestampMs, playerNodeId, originalAmount, allocatedAmount, null);
+        }
+
         public int remainingCapacity() {
             return originalAmount - allocatedAmount;
         }
@@ -277,13 +283,14 @@ public class CorrelationEngine {
             int pickupCandidates,
             int dropCandidates,
             long forwardGapMs,
-            long reverseGapMs
+            long reverseGapMs,
+            boolean entityUuidMatch
     ) {}
 
     private List<PendingObservation> loadPendingGroundObservations(Connection conn) throws SQLException {
         String sql = """
             SELECT o.id, o.timestamp_ms, o.node_id, o.target_node_id, o.fingerprint_id,
-                   o.amount, o.action_type
+                   o.amount, o.action_type, o.item_entity_uuid
             FROM ig_observations o
             JOIN ig_nodes origin ON origin.id = o.node_id
             LEFT JOIN ig_nodes dest ON dest.id = o.target_node_id
@@ -309,7 +316,8 @@ public class CorrelationEngine {
                             targetNodeId,
                             rs.getLong("fingerprint_id"),
                             rs.getInt("amount"),
-                            rs.getString("action_type")
+                            rs.getString("action_type"),
+                            rs.getString("item_entity_uuid")
                     ));
                 }
             }
@@ -357,11 +365,22 @@ public class CorrelationEngine {
             reverseGapMs = nearest;
         }
 
+        boolean entityUuidMatch = drop.itemEntityUuid() != null
+                && chosen.itemEntityUuid() != null
+                && drop.itemEntityUuid().equals(chosen.itemEntityUuid());
+
         double proximity = proximityFactor(dt);
         double pickupAmbiguity = ambiguityFactor(pickups.size(), forwardGapMs);
         double dropAmbiguity = ambiguityFactor(competingDrops.size(), reverseGapMs);
 
-        double confidence = round4(BASE_CONFIDENCE * proximity * pickupAmbiguity * dropAmbiguity);
+        double confidence;
+        if (entityUuidMatch) {
+            // Authoritative ItemEntity UUID match guarantees exact ground continuity
+            confidence = 0.9990;
+            com.itemgraph.tracker.ItemEntityTracker.getInstance().recordContinuityMatch();
+        } else {
+            confidence = round4(BASE_CONFIDENCE * proximity * pickupAmbiguity * dropAmbiguity);
+        }
 
         int dropResidualBefore = dropRemaining;
         int dropResidualAfter = dropRemaining - allocAmount;
@@ -373,13 +392,14 @@ public class CorrelationEngine {
                 dropResidualBefore, dropResidualAfter,
                 pickupResidualBefore, pickupResidualAfter,
                 confidence, proximity, pickupAmbiguity, dropAmbiguity,
-                pickups.size(), competingDrops.size(), forwardGapMs, reverseGapMs
+                pickups.size(), competingDrops.size(), forwardGapMs, reverseGapMs,
+                entityUuidMatch
         );
     }
 
     private List<Candidate> findCandidatePickups(Connection conn, PendingObservation drop) throws SQLException {
         String sql = """
-            SELECT o.id, o.timestamp_ms, o.target_node_id, o.amount,
+            SELECT o.id, o.timestamp_ms, o.target_node_id, o.amount, o.item_entity_uuid,
                    COALESCE(alloc.allocated, 0) AS allocated_amount
             FROM ig_observations o
             LEFT JOIN (
@@ -395,7 +415,8 @@ public class CorrelationEngine {
               AND o.timestamp_ms <= ?
               AND o.target_node_id IS NOT NULL
               AND (o.amount - COALESCE(alloc.allocated, 0)) > 0
-            ORDER BY o.timestamp_ms ASC, o.id ASC
+            ORDER BY (CASE WHEN ? IS NOT NULL AND o.item_entity_uuid = ? THEN 0 ELSE 1 END) ASC,
+                     o.timestamp_ms ASC, o.id ASC
         """;
 
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -404,13 +425,20 @@ public class CorrelationEngine {
             pstmt.setLong(3, drop.fingerprintId());
             pstmt.setLong(4, drop.timestampMs());
             pstmt.setLong(5, drop.timestampMs() + windowMs());
+            if (drop.itemEntityUuid() != null) {
+                pstmt.setString(6, drop.itemEntityUuid());
+                pstmt.setString(7, drop.itemEntityUuid());
+            } else {
+                pstmt.setNull(6, Types.VARCHAR);
+                pstmt.setNull(7, Types.VARCHAR);
+            }
             return readCandidates(pstmt, "target_node_id");
         }
     }
 
     private List<Candidate> findCompetingDrops(Connection conn, PendingObservation drop, Candidate pickup) throws SQLException {
         String sql = """
-            SELECT o.id, o.timestamp_ms, o.node_id, o.amount,
+            SELECT o.id, o.timestamp_ms, o.node_id, o.amount, o.item_entity_uuid,
                    COALESCE(alloc.allocated, 0) AS allocated_amount
             FROM ig_observations o
             LEFT JOIN (
@@ -445,12 +473,14 @@ public class CorrelationEngine {
                 Long playerNodeId = rs.wasNull() ? null : rawPlayer;
                 int originalAmount = rs.getInt("amount");
                 int allocatedAmount = rs.getInt("allocated_amount");
+                String itemEntityUuid = rs.getString("item_entity_uuid");
                 candidates.add(new Candidate(
                         rs.getLong("id"),
                         rs.getLong("timestamp_ms"),
                         playerNodeId,
                         originalAmount,
-                        allocatedAmount
+                        allocatedAmount,
+                        itemEntityUuid
                 ));
             }
         }
@@ -671,14 +701,20 @@ public class CorrelationEngine {
                         ? " (nearest competing drop was " + formatDuration(bridge.reverseGapMs()) + " away)"
                         : ""));
 
-        sb.append(String.format(Locale.ROOT,
-                "Confidence %.4f = base %.2f x proximity %.4f x pickup-ambiguity %.4f x drop-ambiguity %.4f.",
-                bridge.confidence(), BASE_CONFIDENCE, bridge.proximityFactor(),
-                bridge.pickupAmbiguityFactor(), bridge.dropAmbiguityFactor()));
+        if (bridge.entityUuidMatch()) {
+            sb.append(String.format(Locale.ROOT,
+                    "Authoritative Minecraft ItemEntity UUID match (%s) establishes direct entity continuity on the ground. Confidence %.4f.",
+                    drop.itemEntityUuid(), bridge.confidence()));
+        } else {
+            sb.append(String.format(Locale.ROOT,
+                    "Confidence %.4f = base %.2f x proximity %.4f x pickup-ambiguity %.4f x drop-ambiguity %.4f.",
+                    bridge.confidence(), BASE_CONFIDENCE, bridge.proximityFactor(),
+                    bridge.pickupAmbiguityFactor(), bridge.dropAmbiguityFactor()));
 
-        if (bridge.pickupCandidates() > 1 || bridge.dropCandidates() > 1) {
-            sb.append(" Confidence is reduced below the unambiguous ceiling because competing candidates exist:")
-                    .append(" this is one plausible reconstruction, not the only one.");
+            if (bridge.pickupCandidates() > 1 || bridge.dropCandidates() > 1) {
+                sb.append(" Confidence is reduced below the unambiguous ceiling because competing candidates exist:")
+                        .append(" this is one plausible reconstruction, not the only one.");
+            }
         }
 
         return sb.toString();
