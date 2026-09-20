@@ -371,6 +371,56 @@ Authoritative Minecraft `ItemEntity` UUIDs are tracked at the time of ground tos
 ### Armor Stand Tracking
 - `ArmorStandEventListener` captures `PlayerInteractEvent.EntityInteractSpecific` to record `EQUIP_ARMOR_STAND` and `UNEQUIP_ARMOR_STAND` observations on armor stand container nodes.
 
+## Native Container & Ground Observation (M5, 0.2.0)
+
+When GriefLogger is absent (or as additive evidence when present), ItemGraph records
+its own `ITEMGRAPH_INTERNAL` observations via `InternalObservationService` (bounded
+10,000-entry async queue, batch-persisted with `INSERT OR IGNORE` under the V10
+dedup index).
+
+### Ground movement
+- `ItemTossEvent` → `DROP_ITEM` (player → GROUND); `ItemEntityPickupEvent.Post` →
+  `PICKUP_ITEM` (GROUND → player) with the *actually picked up* quantity
+  (`originalStack - currentStack`, so partial pickups never inflate quantity);
+  `LivingDropsEvent` → `DEATH_DROP`. All carry `item_entity_uuid` for authoritative
+  continuity matching.
+
+### Automated container transfers (Issue 4)
+- `ContainerCapabilityRegistrar` registers `ContainerCapabilityWrapper` providers
+  for `Capabilities.ItemHandler.BLOCK` at `EventPriority.HIGHEST`. Priority matters:
+  `BlockCapability.getCapability` returns the first non-null provider in
+  registration order, and NeoForge's own vanilla providers register at normal
+  priority — the wrapper must land earlier or it is never invoked.
+- Each provider wraps the *same* handler vanilla would return, so interception is
+  observation-only: `SidedInvWrapper` for `WorldlyContainer` types (face rules
+  preserved), `ChestBlock.getContainer` merged view for chests (double chests
+  intact), `VanillaHopperItemHandler` for hoppers (cooldown semantics preserved),
+  `ForwardingItemHandler` for the composter. Types vanilla does not serve (lectern,
+  ender chest) are not registered — adding a capability would create automation
+  behaviour rather than observe it.
+- Every real (`simulate=false`) insert/extract emits `HOPPER_INSERT` /
+  `HOPPER_EXTRACT` anchored to the observed container. The remote endpoint is not
+  knowable from an `IItemHandler` call, so the other endpoint is the per-level
+  UNKNOWN node — never a fabricated self-edge.
+
+### Player container transfers (Issue 3)
+- Player GUI clicks mutate the menu's `Container` directly
+  (`AbstractContainerMenu.moveItemStackTo`); they never traverse `IItemHandler`, so
+  a capability wrapper cannot observe them. `ContainerSessionListener` instead
+  binds `PlayerContainerEvent.Open`/`Close` to `ContainerInteractionTracker`
+  session watches and diffs fingerprint-level container totals across the session
+  (the same evidence model GriefLogger uses).
+- Concurrent machine traffic is excluded by signed automation credits: the
+  capability wrapper reports every watched-container move (+insert / −extract) and
+  the session residual subtracts it — no double-count, no misattribution.
+- One open participant → attributed `ADD_ITEM`/`REMOVE_ITEM`. Multiple
+  participants → one `[ambiguous]` observation (UNKNOWN actor endpoint, candidates
+  preserved in `raw_data`) rather than N rows manufacturing quantity.
+- Container resolution scans `menu.slots` for a `BlockEntity`-backed `Container`;
+  double chests (`CompoundContainer`) recover the clicked position from
+  `RightClickBlock` in the same tick and alias the partner half. Menus without a
+  block-entity container (crafting grids, anvils, ender chests) are not watched.
+
 ### Expanded Query UX
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
 - `/ig trace container <x> <y> <z>`: reconstructs item ingress and egress for a container at coordinates.

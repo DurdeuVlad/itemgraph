@@ -21,22 +21,36 @@ with no duplicate rows. The hard boot dependency on GriefLogger is removed.
   and `ItemEntityPickupEvent.Post` now write full `ig_observations` rows
   (action types `DROP_ITEM`, `PICKUP_ITEM`) in addition to UUID tracking. `LivingDropsEvent`
   writes `DEATH_DROP` observations for each player death drop stack.
-- **Container capability wrapper** (Issues 3 & 4): `ContainerCapabilityWrapper` wraps the
-  `IItemHandler` capability on all vanilla container block entities
-  (CHEST, TRAPPED_CHEST, BARREL, FURNACE, BLAST_FURNACE, SMOKER, HOPPER, DROPPER, DISPENSER,
-  all 16 SHULKER_BOX variants, BREWING_STAND). Writes observations for:
-  - Player-driven deposits: `ADD_ITEM`
-  - Player-driven withdrawals: `REMOVE_ITEM`
-  - Automated (hopper/pipe) insertions: `HOPPER_INSERT`
-  - Automated (hopper/pipe) extractions: `HOPPER_EXTRACT`
-- **`ContainerInteractionTracker`**: Thread-safe player context map for attributing capability
-  wrapper calls to the responsible player. Clears on `PlayerContainerEvent.Close`.
-- **`ContainerCapabilityRegistrar`**: Registers the capability wrapper for all vanilla
-  block entity types via `RegisterCapabilitiesEvent` on the mod event bus.
-- **Schema migration V9** (`V9__InternalObservationDedup`): Adds a partial unique index on
-  `ig_observations(source_type, timestamp_ms, node_id, fingerprint_id, amount, action_type)
-  WHERE source_event_id IS NULL` to prevent duplicate internal observations, and an
-  `idx_obs_action_type` index for correlation query performance.
+- **Container capability wrapper** (Issue 4): `ContainerCapabilityWrapper` wraps the
+  `IItemHandler` capability on every vanilla block/block-entity type NeoForge itself
+  serves — sided containers keep `SidedInvWrapper` face rules, chests keep the merged
+  double-chest view via `ChestBlock.getContainer`, hoppers keep
+  `VanillaHopperItemHandler` cooldown semantics, and the composter keeps its
+  `ForwardingItemHandler` re-evaluation. Registration runs at
+  `EventPriority.HIGHEST` because `BlockCapability.getCapability` returns the first
+  non-null provider in registration order and vanilla's own providers register at
+  normal priority. Real automated transfers write `HOPPER_INSERT`/`HOPPER_EXTRACT`
+  anchored to the observed container with the remote endpoint resolved to the
+  per-level UNKNOWN node.
+- **Player container session diffs** (Issue 3): player GUI clicks mutate
+  `Container` directly and never traverse `IItemHandler`, so player-driven
+  transfers are observed by diffing fingerprint-level container totals across
+  `PlayerContainerEvent.Open`/`Close` sessions (`ContainerSessionListener` +
+  `ContainerInteractionTracker`) — net deposits write `ADD_ITEM`, net withdrawals
+  `REMOVE_ITEM`. Automation credits reported by the capability wrapper exclude
+  concurrent machine traffic; multiple simultaneous viewers produce a single
+  `[ambiguous]` observation with candidates preserved in `raw_data`.
+- **`ContainerInteractionTracker`**: Session-watch tracker holding per-container
+  baseline totals, open sessions, participants, automation credits, and
+  double-chest position aliases.
+- **`ContainerCapabilityRegistrar`**: Registers the capability wrapper providers
+  on the mod event bus (`RegisterCapabilitiesEvent`, `EventPriority.HIGHEST`).
+- **Schema migrations V9+V10**: V9 adds a partial unique index on
+  `ig_observations(source_type, timestamp_ms, node_id, fingerprint_id, amount,
+  action_type) WHERE source_event_id IS NULL` plus `idx_obs_action_type`. V10
+  extends the dedup key with `item_entity_uuid` so re-submitted entity events still
+  deduplicate while distinct same-millisecond events (two identical death-drop
+  stacks, pile pickups, repeated machine pushes) are no longer collapsed.
 - **`DEATH_DROP` action type**: Added to `CorrelationEngine.DROP_ACTIONS` so death drop
   observations participate correctly in ground-bridge correlation.
 - **GriefLogger startup log**: ItemGraph now logs `GriefLogger integration: ENABLED` or
@@ -69,10 +83,14 @@ with no duplicate rows. The hard boot dependency on GriefLogger is removed.
 - NULL `source_event_id` dedup gap: internal observations could not be deduplicated by the
   existing `(source_type, source_event_id)` unique index because SQLite treats `NULL != NULL`.
   V9 adds a partial unique index covering internal row identity.
+- `PICKUP_ITEM` recorded the pre-pickup stack count even when only part of the stack
+  moved; it now records `originalStack - currentStack`.
+- `ItemTossEvent`/`ItemEntityPickupEvent` handlers now guard `isClientSide` so
+  client-side event posts cannot enqueue duplicate observations.
+- `CorrelationEngine.findCompetingDrops` now counts `DEATH_DROP` rows when scoring
+  drop-side ambiguity (matching `DROP_ACTIONS`).
 
-
-
-### Added
+### Earlier unreleased work
 
 - Phase 10: Production Hardening, Integrity Auditing, and Comprehensive Diagnostics.
   - Off-thread `AuditService` checking core architectural invariants:

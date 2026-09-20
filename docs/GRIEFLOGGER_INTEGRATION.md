@@ -41,8 +41,9 @@ Do not rely solely on online documentation if the installed version differs.
 
 | Event | GriefLogger coverage | Metadata quality | ItemGraph hook status |
 |---|---|---:|---|
-| Container add | Native (`containers` table, action 1) | Canonical components | Reused from GriefLogger |
-| Container remove | Native (`containers` table, action 0) | Canonical components | Reused from GriefLogger |
+| Container add | Native (`containers` table, action 1) | Canonical components | Reused from GriefLogger; without it: `ContainerSessionListener` diffs watched container contents between `PlayerContainerEvent.Open`/`Close` (`ADD_ITEM`) |
+| Container remove | Native (`containers` table, action 0) | Canonical components | Reused from GriefLogger; without it: session diff emits `REMOVE_ITEM` |
+| Hopper/machine transfer | None | N/A | Implemented: `ContainerCapabilityWrapper` on `Capabilities.ItemHandler.BLOCK` emits `HOPPER_INSERT`/`HOPPER_EXTRACT` (remote endpoint UNKNOWN) |
 | Player pickup | Native (`items` table, action 3) | Canonical components | Reused + supplemented with `ItemEntity` UUID |
 | Player drop | Native (`items` table, action 2) | Canonical components | Reused + supplemented with `ItemEntity` UUID |
 | Crafting | None | N/A | Implemented: `ItemCraftedEvent` |

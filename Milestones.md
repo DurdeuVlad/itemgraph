@@ -93,8 +93,8 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Acceptance evidence:
   - Issue [#1](https://github.com/DurdeuVlad/itemgraph/issues/1): JarJar `sqlite-jdbc` bundling & optional GriefLogger boot.
   - Issue [#2](https://github.com/DurdeuVlad/itemgraph/issues/2): Native drop, toss, and pickup observations with V9 dedup.
-  - Issue [#3](https://github.com/DurdeuVlad/itemgraph/issues/3): Player container transfer observation via `IItemHandler` capability wrapper.
-  - Issue [#4](https://github.com/DurdeuVlad/itemgraph/issues/4): Automated hopper/machine transfer observation.
+  - Issue [#3](https://github.com/DurdeuVlad/itemgraph/issues/3): Player container transfer observation. Player GUI clicks mutate `Container` directly and never reach `IItemHandler`, so player transfers are observed by session diffs over `PlayerContainerEvent.Open`/`Close` (`ContainerSessionListener` + `ContainerInteractionTracker`), with capability-reported automation credits excluding concurrent machine traffic.
+  - Issue [#4](https://github.com/DurdeuVlad/itemgraph/issues/4): Automated hopper/machine transfer observation via `ContainerCapabilityWrapper` on `Capabilities.ItemHandler.BLOCK`, registered at `EventPriority.HIGHEST` so providers precede NeoForge's vanilla ones.
   - Issue [#5](https://github.com/DurdeuVlad/itemgraph/issues/5): Source-agnostic correlation, log hygiene, and `/ig status` telemetry.
 - Risk: Modded inventories that bypass `IItemHandler` will remain unobserved until dedicated adapters are built.
 
