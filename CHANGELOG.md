@@ -21,6 +21,12 @@ with no duplicate rows. The hard boot dependency on GriefLogger is removed.
   and `ItemEntityPickupEvent.Post` now write full `ig_observations` rows
   (action types `DROP_ITEM`, `PICKUP_ITEM`) in addition to UUID tracking. `LivingDropsEvent`
   writes `DEATH_DROP` observations for each player death drop stack.
+- **Partial-pickup pairing**: `ItemEntityPickupEvent.Pre` records the entity's stack
+  count before `Inventory.add()` and a per-tick sweep emits the absorbed delta for
+  pickups where Post never fires (NeoForge 21.1.248 gates Post on `add()` returning
+  true, which is false for partial absorbs). Post consumes the pending entry so full
+  pickups are never double-counted; paired pickups are tagged
+  `{"detection":"pre_post_pairing"}` in `raw_data`.
 - **Container capability wrapper** (Issue 4): `ContainerCapabilityWrapper` wraps the
   `IItemHandler` capability on every vanilla block/block-entity type NeoForge itself
   serves — sided containers keep `SidedInvWrapper` face rules, chests keep the merged
@@ -82,6 +88,18 @@ with no duplicate rows. The hard boot dependency on GriefLogger is removed.
   conflict: `Modules grieflogger and org.xerial.sqlitejdbc export package org.sqlite`).
 - NULL `source_event_id` dedup gap: internal observations could not be deduplicated by the
   existing `(source_type, source_event_id)` unique index because SQLite treats `NULL != NULL`.
+- Partial item pickups were silently unobserved: `Inventory.addItem` returns false when
+  only part of the stack fit, so `ItemEntityPickupEvent.Post` never fired and no
+  `PICKUP_ITEM` row (or vanilla pickup stat) was produced. Resolved via the
+  Pre/stack-delta pairing described above (verified live: 1-of-10 partial pickup now
+  records exactly 1).
+- Dev-run classpath gap: jarJar strips sqlite-jdbc from dev run classpaths, so
+  `Class.forName("org.sqlite.JDBC")` only resolved when another installed mod embedded
+  it — a standalone dev boot failed DB init with `ClassNotFoundException`. The driver
+  is now added to `additionalRuntimeClasspath` only when no mod in `run/mods` already
+  embeds sqlite (detected via `META-INF/jarjar|jars/sqlite-jdbc-*.jar` entries; override
+  with `-Pitemgraph.devSqliteProvided=`); adding it unconditionally alongside such a
+  mod crashes module resolution with a duplicate `org.xerial.sqlitejdbc` module.
   V9 adds a partial unique index covering internal row identity.
 - `PICKUP_ITEM` recorded the pre-pickup stack count even when only part of the stack
   moved; it now records `originalStack - currentStack`.

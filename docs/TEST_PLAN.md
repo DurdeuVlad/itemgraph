@@ -46,7 +46,32 @@ Expected:
 Alice -> Ground -> Bob
 ```
 
-Where item entity identity is available, correlation should become stronger.
+Where item entity identity is available, correlation should become stronger. A ground row is
+created only after the ItemEntity is confirmed in the level; a canceled toss is UNKNOWN-
+destination evidence and a canceled death drop has no ground endpoint.
+
+### Cross-source copies
+
+Seed one physical five-item drop and pickup as both `ITEMGRAPH_INTERNAL` and `GRIEFLOGGER`
+rows with shared unique ItemEntity UUIDs:
+
+- exactly one active five-item inferred edge is allowed;
+- the edge evidence cites all four raw source rows, including when the GriefLogger copy
+  arrives after an edge has already been inferred;
+- the corroborating rows never contribute extra capacity.
+
+Repeat with compatible signatures but no shared entity UUID. Both events must be
+`SOURCE_AMBIGUOUS`, with no inferred allocation. A canceled ItemGraph drop attempt that
+conflicts with a GriefLogger ground-drop row must also remain ambiguous. A pre-V11
+duplicate-edge fixture must retain its old edge/allocation rows as superseded while
+rebuilding active capacity from one canonical source group.
+
+### Container session interval
+
+A viewer opens a container at total 10, the total changes to 7, and the viewer closes:
+`REMOVE_ITEM 3` has `timestamp_ms` and `timestamp_end_ms`, and query output identifies it as a
+session net delta. A 10 → 5 → 10 withdraw-and-return before close emits no net row; this is a
+known coverage limit, not evidence that no interaction occurred.
 
 ### Stack split
 
@@ -242,32 +267,76 @@ with:
 
 A stack split/merge scenario with no per-item UUIDs and correct conservation.
 
-## Automated coverage as of Phase 10
+## Automated coverage for the M5 repair
 
 Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain test`). All suites use a real SQLite file in a JUnit `@TempDir` with the real migrations applied — no mocked database, because a projection that drops a row on a LEFT-vs-INNER join mistake is exactly the class of bug these tests exist to catch.
 
 | Suite | Covers |
 | --- | --- |
-| `ItemEntityTrackerTest` | Phase 8 in-memory item entity tracking: drop/pickup tracking, spatial matching, temporal expiration, and tracking counters (4 tests) |
-| `ItemEntityCorrelationTest` | Phase 8 authoritative `ItemEntity` UUID correlation boost to 0.9990 confidence and narrative continuity citation (2 tests) |
-| `PlayerAndContainerTraceTest` | Phase 8/9 player trace, container coordinate trace, dynamic string fingerprint resolution, and transformation lineage surfacing (5 tests) |
-| `AuditServiceTest` | Phase 10 invariant auditing: conservation over-allocation detection, non-positive quantity detection, orphaned allocations, invalid node endpoints, and status consistency (5 tests) |
-| `QuantityFlowTest` | Phase 7 stack-aware quantity flow: 1-to-many splits, many-to-1 merges, partial transfers, open/closed window semantics, over-capacity protections, competing candidate penalties, idempotency, restart continuity, and rollback atomicity (16 tests) |
-| `TransformationEventListenerTest` | Phase 9 item transformation events: anvil rename/repair, crafting matrix ingredients with fallback, smelting, client-side guards, and empty stack handling (12 tests) |
+| `ItemEntityTrackerTest` | in-memory entity tracking: drop/pickup links, unique-only spatial/time matches, ambiguity rejection, expiry, and counters |
+| `ItemEntityCorrelationTest` | authoritative ItemEntity UUID correlation boost to 0.9990 and continuity citation (1 test) |
+| `PlayerAndContainerTraceTest` | player/container traces, fingerprint resolution, and transformation lineage (4 tests) |
+| `AuditServiceTest` | active-edge conservation, non-positive quantities, orphaned allocations, invalid endpoints, correlation status, source-group consistency, and invalid edge-state detection (6 tests) |
+| `QuantityFlowTest` | stack splits/merges, partial transfers, windows, capacity limits, competing candidates, idempotency, restart continuity, and rollback atomicity (19 tests) |
+| `TransformationEventListenerTest` | anvil rename/repair, crafting matrix fallback, smelting, client guards, and empty-stack handling (12 tests) |
 | `ArmorStandEventListenerTest` | Phase 8B armor stand interactions: main-hand/off-hand equip, empty-hand unequip, empty stand handling, non-armor-stand and client-side guards (7 tests) |
-| `InternalObservationServiceTest` | Phase 9 internal observation service: 10,000 item capacity bound & backpressure, multi-threaded concurrent enqueue, shutdown synchronous flush to SQLite, background worker persistence, armor stand node endpoints, and fingerprint dedup (7 tests) |
-| `QueryDispatcherTest` | Async query marshalling seam: database disconnection failure rendering (shutdown race protection), canStillReport 3-branch lifecycle checks (server stopped, disconnected player, active player, console), off-thread synchronous execution, and idempotent shutdown (10 tests) |
-| `ItemGraphConfigTest` | Mod configuration: default values (including 300s ground bridge window), config paths, range constraints [1, 86400], and NightConfig correction/clamping behavior (5 tests) |
-| `QueryFormatterTest` | Forensic text rendering: UTC time formatting, duration formatting (ms, s, m, h, negative), 4-decimal confidence precision, OBSERVED/INFERRED labeling, trace limit capping & truncation notices, audit reports, and error messages (14 tests) |
-| `ItemEntityEventListenerTest` | Phase 8A item entity drop and pickup tracking: ItemTossEvent, ItemEntityPickupEvent.Post, empty stack and null entity guards (6 tests) |
-| `CorrelationEngineTest` | ground bridging, scoring, temporal ordering, the MVP chain end to end (Phase 5/7/8) |
+| `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, shutdown flush, persistence, endpoint mapping, canceled-drop provenance, and fingerprint dedup (14 tests) |
+| `QueryDispatcherTest` | asynchronous query marshalling, disconnected DB rendering, source lifecycle checks, off-thread execution, and shutdown (11 tests) |
+| `ItemGraphConfigTest` | default values, config paths, range constraints, and NightConfig correction/clamping (5 tests) |
+| `QueryFormatterTest` | forensic labels, confidence/time formatting, session and queue-recovery intervals, source-group labels, trace limits, audit reports, and errors (16 tests) |
+| `ItemEntityEventListenerTest` | successful-spawn-only ground drops, canceled toss/death evidence, pickup quantity, partial-pickup handling, empty/null guards (10 tests) |
+| `CorrelationEngineTest` | ground bridging/scoring, cross-source confirmed/ambiguous groups, canceled-source conflicts, legacy edge supersession, temporal ordering, and MVP chain (24 tests) |
 | `ItemCanonicalizerTest` | fingerprint determinism and DataComponent decoding (Phase 3) |
 | `NodeManagerTest` | node identity resolution (Phase 4) |
-| `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction (Phases 2, 4, 5) |
-| `DatabaseManagerTest` | migrations (V1–V8), dedup constraint, read-only query connection |
+| `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction, and concurrent shared-connection transaction isolation (5 + 10 tests) |
+| `DatabaseManagerTest` | migrations V1–V11, interval/group/edge-state schema, dedup constraints, read-only query connection |
 | `EventQueryServiceTest` | found/not-found, dangling references rendering as "no such row", OBSERVED labelling |
 | `ExplainQueryServiceTest` | evidence resolved back to observation detail, no cross-edge evidence leakage, unjustifiable edges reported, evidence cap |
-| `TraceQueryServiceTest` | OBSERVED/INFERRED merge order, limit capping, truncation keeping the earliest hops, window containment vs edge overlap, per-line provenance |
+| `TraceQueryServiceTest` | OBSERVED/INFERRED merge order, session interval overlap, limit capping, truncation, per-line provenance, and active-edge filtering (13 tests) |
+| `ContainerCapabilityWrapperTest` | capability action labels, UNKNOWN caller/endpoints, open-session reconciliation, and queue rejection recovery (9 tests) |
+| `ContainerInteractionTrackerTest`, `ContainerSessionListenerTest` | open/close net deltas, timestamp intervals, multi-viewer ambiguity, capability-credit subtraction, and zero-net limitation (14 + 1 tests) |
+| `V9InternalObservationDedupTest`, `V10InternalDedupEntityUuidTest` | partial-index, UUID, destination-sensitive dedup, NULL-UUID preservation, and V11 idempotence (5 + 6 tests) |
+| `ItemEntityEventListenerPartialPickupTest` | pending-pickup resolution: emit on reduced count, drop on removal/expiry, keep while unchanged |
 
-Total automated test count: 167 tests, 100% passing.
+Total automated test count: **234 tests, 0 failures, 0 skipped** (verified with `./gradlew clean build` on 2026-09-24).
+
+## Historical live server results (pre-V11 staging `run/`)
+
+The rows below document the earlier schema-V10 staging build. They are retained as historical
+evidence, not as verification of V11 source groups, canceled-spawn handling, interval output,
+or queue-rejection recovery. A separate V11 staging run must record those cases before this
+repair is merge-ready. These historical runs used staging only and treated GriefLogger as
+read-only; production was not used.
+
+| Scenario | Expected | Observed rows |
+| --- | --- | --- |
+| Single-viewer chest withdraw (10 cobble) | one `REMOVE_ITEM` container→player | id 633: `REMOVE_ITEM` 10, correct endpoints |
+| Single-viewer deposit (10 cobble) | one `ADD_ITEM` player→container | id 644: `ADD_ITEM` 10 |
+| Two viewers on merged double chest, one withdraws 5 | one ambiguous row, no fabricated target | id 803: `REMOVE_ITEM` 5, target NULL, `raw_data.ambiguousActorCandidates` = both players |
+| Withdraw 3 while hopper drains same chest (V10) | residual attribution only | historical id 905: `REMOVE_ITEM` 3 to player; 72 legacy `HOPPER_EXTRACT` rows → UNKNOWN |
+| Real dev client shift-click 20 cobble (V10) | session net delta row | historical id 2560: `REMOVE_ITEM` 20 → player Dev; no interval field in V10 |
+| Toss + re-pickup 10 cobble | DROP + PICKUP linked by entity uuid | ids 2764/2765: `DROP_ITEM`/`PICKUP_ITEM` 10, same `item_entity_uuid` |
+| Partial pickup (1 of 10 fits) | `PICKUP_ITEM` amount 1 | id 2774: amount 1, `raw_data.detection=pre_post_pairing` |
+| `/kill` with 3 item types in inventory | `DEATH_DROP` per stack | ids 2778–2780: diamond 7, iron 12, emerald 3, distinct entity uuids |
+| Boot without GriefLogger jar | clean DISABLED, internal persistence | `GriefLogger integration: DISABLED` + `database initialized successfully`; ids 2787–2792 persisted |
+
+Comparative note: for the same sessions GriefLogger attributed 10 units for the 5-item
+dual-viewer move (one row per viewer) and misattributed hopper churn to the player;
+ItemGraph kept quantity conservation in both cases.
+
+## V11 staging startup smoke test (loopback)
+
+On `E:\\Github2\\itemgraph\\run`, `./gradlew runServer` bound to `127.0.0.1:26417`
+after temporarily setting `server-ip=127.0.0.1`. Startup applied schema V11 successfully;
+`/run/itemgraph/itemgraph.db` read-only inspection after stop showed schema version 11,
+2,793 observations, 0 source groups, 52 match checks, 10 active edges, and the V11
+`timestamp_end_ms`/destination-sensitive index. The original blank `server-ip` was restored,
+and no ItemGraph staging Java process remained.
+
+No player movement scenarios were run with GriefLogger enabled: its startup logged database
+preparation, so I stopped before Mineflayer actions that could create GriefLogger rows. The
+GriefLogger `run/database.db` mtime remained 2026-09-20 18:10:47 UTC and no WAL/SHM sidecar
+was present after stop, but no pre-start hash was captured; this is not a hash-verified
+no-write claim. Standalone live movement scenarios remain blocked until GriefLogger can be
+isolated without modifying its existing database.
 

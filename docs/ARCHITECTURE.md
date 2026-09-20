@@ -384,6 +384,17 @@ dedup index).
   (`originalStack - currentStack`, so partial pickups never inflate quantity);
   `LivingDropsEvent` → `DEATH_DROP`. All carry `item_entity_uuid` for authoritative
   continuity matching.
+- **Partial-pickup gap (NeoForge 21.1.248)**: `ItemEntity.playerTouch` gates `Post`
+  on `Inventory.add()` returning true, but `Inventory.addItem` returns false when
+  only part of the stack fit — a partial pickup absorbs items yet fires no Post
+  (and no vanilla pickup stat). `ItemEntityPickupEvent.Pre` therefore records a
+  pending attempt (entity, player, pre-add count); a `ServerTickEvent.Post` sweep
+  reads the entity's live stack — a reduced count on a still-alive entity is an
+  absorbed partial and emits `PICKUP_ITEM` with the exact delta, tagged
+  `{"detection":"pre_post_pairing"}` in `raw_data`. A fired Post consumes the
+  pending entry so full pickups are never double-counted; entries on removed
+  entities are dropped without emitting (merge/despawn indistinguishable from
+  absorb) and all entries expire after 1s under a 512-entry bound.
 
 ### Automated container transfers (Issue 4)
 - `ContainerCapabilityRegistrar` registers `ContainerCapabilityWrapper` providers
@@ -498,6 +509,14 @@ ItemGraph owns:
 - explanation records
 - schema migrations
 - operational metrics
+
+**SQLite driver provisioning**: `sqlite-jdbc` is bundled in the ItemGraph jar via
+`jarJar` (version range `[3.40.0.0,4.0.0.0)`, prefer `3.46.1.0`), so production boots
+standalone and JarJar negotiation deduplicates with GriefLogger's embedded copy. Dev
+runs launch the mod from `build/classes`, so the project's jarJar contents never
+materialize — `build.gradle` adds the driver to `additionalRuntimeClasspath` only when
+no jar in `run/mods` embeds `sqlite-jdbc` (adding it unconditionally alongside such a
+mod crashes module resolution with a duplicate `org.xerial.sqlitejdbc` module).
 
 ## Suggested persistence model
 
