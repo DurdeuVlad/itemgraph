@@ -6,6 +6,72 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-20
+
+### Summary
+
+ItemGraph 0.2.0 is fully independent from GriefLogger. It starts and operates without
+GriefLogger installed, capturing the complete item movement graph through its own NeoForge
+event listeners. When GriefLogger is present, it provides additive evidence that is merged
+with no duplicate rows. The hard boot dependency on GriefLogger is removed.
+
+### Added
+
+- **Native drop and pickup observation** (`ItemEntityEventListener` promoted): `ItemTossEvent`
+  and `ItemEntityPickupEvent.Post` now write full `ig_observations` rows
+  (action types `DROP_ITEM`, `PICKUP_ITEM`) in addition to UUID tracking. `LivingDropsEvent`
+  writes `DEATH_DROP` observations for each player death drop stack.
+- **Container capability wrapper** (Issues 3 & 4): `ContainerCapabilityWrapper` wraps the
+  `IItemHandler` capability on all vanilla container block entities
+  (CHEST, TRAPPED_CHEST, BARREL, FURNACE, BLAST_FURNACE, SMOKER, HOPPER, DROPPER, DISPENSER,
+  all 16 SHULKER_BOX variants, BREWING_STAND). Writes observations for:
+  - Player-driven deposits: `ADD_ITEM`
+  - Player-driven withdrawals: `REMOVE_ITEM`
+  - Automated (hopper/pipe) insertions: `HOPPER_INSERT`
+  - Automated (hopper/pipe) extractions: `HOPPER_EXTRACT`
+- **`ContainerInteractionTracker`**: Thread-safe player context map for attributing capability
+  wrapper calls to the responsible player. Clears on `PlayerContainerEvent.Close`.
+- **`ContainerCapabilityRegistrar`**: Registers the capability wrapper for all vanilla
+  block entity types via `RegisterCapabilitiesEvent` on the mod event bus.
+- **Schema migration V9** (`V9__InternalObservationDedup`): Adds a partial unique index on
+  `ig_observations(source_type, timestamp_ms, node_id, fingerprint_id, amount, action_type)
+  WHERE source_event_id IS NULL` to prevent duplicate internal observations, and an
+  `idx_obs_action_type` index for correlation query performance.
+- **`DEATH_DROP` action type**: Added to `CorrelationEngine.DROP_ACTIONS` so death drop
+  observations participate correctly in ground-bridge correlation.
+- **GriefLogger startup log**: ItemGraph now logs `GriefLogger integration: ENABLED` or
+  `DISABLED` with reason at `ServerStartingEvent`.
+
+### Changed
+
+- **`neoforge.mods.toml`**: GriefLogger dependency demoted from `type="required"` to
+  `type="optional"`. ItemGraph now starts without GriefLogger.
+- **`build.gradle`**: `sqlite-jdbc` switched from plain `implementation` to
+  `jarJar(implementation(...))` with version range `[3.40.0.0,4.0.0.0)` and preferred
+  version `3.46.1.0`. ItemGraph bundles its own SQLite driver. NeoForge JarJar negotiation
+  deduplicates with GriefLogger's bundled copy when both are present, eliminating the
+  confirmed JPMS split-package crash.
+- **`IngestionService`**: GL database unavailable no longer emits a WARN every 60 seconds.
+  Logs once at INFO level on first skip; subsequent skips are silent until GL becomes
+  available again.
+- **`/ig status`**: GriefLogger source now reports `ENABLED (database reachable)`,
+  `DISABLED (not installed)`, or `DISABLED (mod present but database not found)` instead
+  of the binary detected/NOT DETECTED.
+- **`InternalObservationService.persistBatch`**: Extended to resolve `GROUND`, `CONTAINER`,
+  `PLAYER`, and `ARMOR_STAND` target node types. Switched from `INSERT` to `INSERT OR IGNORE`
+  so the V9 dedup index suppresses duplicate internal rows silently.
+- **Version**: `0.1.0` → `0.2.0`.
+
+### Fixed
+
+- JPMS split-package crash when GriefLogger and ItemGraph are both installed (sqlite-jdbc
+  conflict: `Modules grieflogger and org.xerial.sqlitejdbc export package org.sqlite`).
+- NULL `source_event_id` dedup gap: internal observations could not be deduplicated by the
+  existing `(source_type, source_event_id)` unique index because SQLite treats `NULL != NULL`.
+  V9 adds a partial unique index covering internal row identity.
+
+
+
 ### Added
 
 - Phase 10: Production Hardening, Integrity Auditing, and Comprehensive Diagnostics.

@@ -2,18 +2,18 @@
 
 ## Purpose
 
-GriefLogger is expected to provide a significant portion of ItemGraph's raw evidence.
+GriefLogger is an **optional additive evidence source** for ItemGraph as of version 0.2.0.
 
-ItemGraph should complement it rather than replace it.
+ItemGraph does not depend on GriefLogger to boot or operate. When GriefLogger is present, ItemGraph ingests its SQLite database in read-only mode to enrich its observations. When GriefLogger is absent, ItemGraph captures the complete item movement graph through its own native NeoForge event listeners and capability wrappers.
 
 ## Integration principle
 
 ```text
-GriefLogger = existing audit evidence
-ItemGraph   = reconstruction and missing-event coverage
+GriefLogger (optional) = external audit evidence (additive)
+ItemGraph               = native event coverage, reconstruction, and graph inference
 ```
 
-GriefLogger must be treated as read-only.
+GriefLogger must always be treated as read-only. Ingestion skips gracefully with no log spam when the database is absent.
 
 ## Reconnaissance checklist
 

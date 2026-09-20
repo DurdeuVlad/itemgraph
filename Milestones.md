@@ -79,3 +79,22 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   faction/inventory APIs.
 - Acceptance evidence: updated architecture, security, test, and operations
   documents plus reproducible performance results.
+
+## M5: GriefLogger-Independent Feature Parity (0.2.0)
+
+- Status: complete
+- Outcome: ItemGraph 0.2.0 operates fully without GriefLogger installed, capturing
+  the complete item movement graph (player ground drops/pickups, container interactions,
+  and automated hopper transfers) through native NeoForge event listeners and capability
+  wrappers. When GriefLogger is present, it provides additive evidence with no duplicate rows.
+- Scope boundary: Vanilla container block entities, player inventory interactions, and
+  server-side automation. Excludes player-private ender chests and non-vanilla modded inventories.
+- Dependencies: NeoForge 1.21.1, Java 21, JarJar-bundled `org.xerial:sqlite-jdbc`.
+- Acceptance evidence:
+  - Issue [#1](https://github.com/DurdeuVlad/itemgraph/issues/1): JarJar `sqlite-jdbc` bundling & optional GriefLogger boot.
+  - Issue [#2](https://github.com/DurdeuVlad/itemgraph/issues/2): Native drop, toss, and pickup observations with V9 dedup.
+  - Issue [#3](https://github.com/DurdeuVlad/itemgraph/issues/3): Player container transfer observation via `IItemHandler` capability wrapper.
+  - Issue [#4](https://github.com/DurdeuVlad/itemgraph/issues/4): Automated hopper/machine transfer observation.
+  - Issue [#5](https://github.com/DurdeuVlad/itemgraph/issues/5): Source-agnostic correlation, log hygiene, and `/ig status` telemetry.
+- Risk: Modded inventories that bypass `IItemHandler` will remain unobserved until dedicated adapters are built.
+
