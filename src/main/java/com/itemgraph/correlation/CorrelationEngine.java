@@ -447,7 +447,7 @@ public class CorrelationEngine {
                 WHERE allocation_role = 'SOURCE'
                 GROUP BY observation_id
             ) alloc ON alloc.observation_id = o.id
-            WHERE o.action_type IN ('DROP_ITEM', 'THROW_ITEM', 'SHOOT_ITEM')
+            WHERE o.action_type IN ('DROP_ITEM', 'THROW_ITEM', 'SHOOT_ITEM', 'DEATH_DROP')
               AND o.target_node_id = ?
               AND o.fingerprint_id = ?
               AND o.timestamp_ms < ?
