@@ -48,6 +48,10 @@ public class ItemGraph {
         DatabaseManager.getInstance().initialize();
         com.itemgraph.ingest.InternalObservationService.getInstance().start();
         com.itemgraph.ingest.IngestionService.getInstance().start();
+        boolean glPresent = net.neoforged.fml.ModList.get().isLoaded("grieflogger");
+        LOGGER.info("GriefLogger integration: {}", glPresent
+                ? "ENABLED — reading from GriefLogger database as additive evidence source"
+                : "DISABLED — GriefLogger not installed; ItemGraph operating on native event listeners only");
     }
 
     private void onServerStopping(ServerStoppingEvent event) {

@@ -45,6 +45,13 @@ public class IngestionService {
     private volatile IngestionResult lastResult = null;
     private volatile long lastRunTimestamp = 0;
 
+    /**
+     * Tracks whether the "GL database unavailable" message has been logged already.
+     * Suppresses repeated WARN log spam (every 60s) when GriefLogger is absent.
+     * Reset to false if the DB becomes available again so re-appearance is also logged.
+     */
+    private volatile boolean glUnavailableLoggedOnce = false;
+
     public IngestionService() {
         this(new GriefLoggerAdapter(), DatabaseManager.getInstance());
     }
@@ -209,11 +216,18 @@ public class IngestionService {
         }
 
         if (!adapter.isDatabaseAvailable()) {
-            String error = "GriefLogger database not found or not readable at " + adapter.getDatabasePath();
-            LOGGER.warn("Skipping ingestion cycle: {}", error);
-            lastResult = new IngestionResult(false, 0, 0, 0, error);
+            if (!glUnavailableLoggedOnce) {
+                LOGGER.info("GriefLogger database not found at {} — ingestion skipped. " +
+                        "ItemGraph will rely on its own NeoForge event listeners for coverage.",
+                        adapter.getDatabasePath());
+                glUnavailableLoggedOnce = true;
+            }
+            lastResult = new IngestionResult(false, 0, 0, 0,
+                    "GriefLogger database not found or not readable at " + adapter.getDatabasePath());
             return lastResult;
         }
+        // GL DB is available (again) — reset so re-disappearance is also logged
+        glUnavailableLoggedOnce = false;
 
         int totalItems = 0;
         int totalContainers = 0;

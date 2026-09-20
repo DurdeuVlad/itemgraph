@@ -205,6 +205,10 @@ public final class ItemGraphCommands {
                 .orElse("unknown");
 
         boolean griefLoggerLoaded = ModList.get().isLoaded("grieflogger");
+        boolean glDbAvailable = IngestionService.getInstance().getAdapter().isDatabaseAvailable();
+        String glStatus = !griefLoggerLoaded ? "DISABLED (not installed)"
+                : glDbAvailable ? "ENABLED (database reachable)"
+                : "DISABLED (mod present but database not found)";
 
         DatabaseManager db = DatabaseManager.getInstance();
         boolean dbConnected = db.isInitialized();
@@ -213,7 +217,7 @@ public final class ItemGraphCommands {
 
         source.sendSuccess(() -> Component.literal(
                 "[ItemGraph] version=" + modVersion +
-                " griefLogger=" + (griefLoggerLoaded ? "detected" : "NOT DETECTED") +
+                " griefLogger=" + glStatus +
                 " db=" + (dbConnected ? "connected (schema v" + db.getCurrentSchemaVersion() + ")" : "NOT CONNECTED") +
                 " dbPath=" + dbPath +
                 (dbError != null ? " lastError=" + dbError : "")
