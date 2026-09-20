@@ -23,8 +23,12 @@ import static org.junit.jupiter.api.Assertions.*;
  * V9 adds a partial unique index on the logical identity of an internal
  * observation — {@code (source_type, timestamp_ms, node_id, fingerprint_id,
  * amount, action_type)} — scoped to {@code WHERE source_event_id IS NULL}.
- * These tests prove the index exists, that duplicate internal writes are
- * idempotently discarded, and that external-source rows are unaffected.
+ *
+ * <p>V10 extends that key with {@code item_entity_uuid}: entity-tracked events
+ * (drops, pickups, death drops) deduplicate on true re-submission while distinct
+ * entities sharing every other column stay separate rows. These tests prove the
+ * index exists, that uuid-bearing duplicate writes are idempotently discarded,
+ * and that external-source rows are unaffected.
  */
 class V9InternalObservationDedupTest {
 
@@ -65,15 +69,16 @@ class V9InternalObservationDedupTest {
     @Test
     void duplicateInternalObservationIsDiscardedIdempotently() throws Exception {
         try (Statement stmt = conn.createStatement()) {
-            stmt.execute(internalInsert(1000, "DROP_ITEM", 5));
+            // Same real event re-submitted: same entity uuid, same identity columns.
+            stmt.execute(internalInsert(1000, "DROP_ITEM", 5, "entity-aaa"));
 
             // Plain INSERT of an identical internal row must hit the unique index.
-            assertThrows(SQLException.class, () -> stmt.execute(internalInsert(1000, "DROP_ITEM", 5)),
+            assertThrows(SQLException.class, () -> stmt.execute(internalInsert(1000, "DROP_ITEM", 5, "entity-aaa")),
                     "duplicate internal observation must violate idx_obs_internal_dedup");
 
             // INSERT OR IGNORE (the path InternalObservationService.persistBatch uses)
             // must swallow the duplicate without throwing.
-            int affected = stmt.executeUpdate(internalOrIgnoreInsert(1000, "DROP_ITEM", 5));
+            int affected = stmt.executeUpdate(internalOrIgnoreInsert(1000, "DROP_ITEM", 5, "entity-aaa"));
             assertEquals(0, affected, "duplicate internal observation must be ignored, not stored");
 
             try (ResultSet rs = stmt.executeQuery(
@@ -88,17 +93,19 @@ class V9InternalObservationDedupTest {
     void distinctInternalObservationsAreNotConflated() throws Exception {
         try (Statement stmt = conn.createStatement()) {
             // Same identity except action_type — a drop and a pickup are different events.
-            stmt.execute(internalInsert(1000, "DROP_ITEM", 5));
-            stmt.execute(internalInsert(1000, "PICKUP_ITEM", 5));
+            stmt.execute(internalInsert(1000, "DROP_ITEM", 5, "entity-aaa"));
+            stmt.execute(internalInsert(1000, "PICKUP_ITEM", 5, "entity-aaa"));
             // Same identity except timestamp — the same event at a later time is new evidence.
-            stmt.execute(internalInsert(2000, "DROP_ITEM", 5));
+            stmt.execute(internalInsert(2000, "DROP_ITEM", 5, "entity-aaa"));
             // Same identity except amount — a partial quantity moved is a different event.
-            stmt.execute(internalInsert(1000, "DROP_ITEM", 3));
+            stmt.execute(internalInsert(1000, "DROP_ITEM", 3, "entity-aaa"));
+            // Same identity except entity uuid — two distinct item entities.
+            stmt.execute(internalInsert(1000, "DROP_ITEM", 5, "entity-bbb"));
 
             try (ResultSet rs = stmt.executeQuery(
                     "SELECT COUNT(*) FROM ig_observations WHERE source_type = 'ITEMGRAPH_INTERNAL'")) {
                 assertTrue(rs.next());
-                assertEquals(4, rs.getInt(1),
+                assertEquals(5, rs.getInt(1),
                         "observations differing in any identity column must all be stored");
             }
         }
@@ -133,13 +140,15 @@ class V9InternalObservationDedupTest {
         assertDoesNotThrow(() -> migration.apply(conn));
     }
 
-    private static String internalInsert(long timestampMs, String actionType, int amount) {
-        return "INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount) " +
-                "VALUES ('ITEMGRAPH_INTERNAL', NULL, " + timestampMs + ", 1, 1, '" + actionType + "', " + amount + ")";
+    private static String internalInsert(long timestampMs, String actionType, int amount, String entityUuid) {
+        String uuid = entityUuid == null ? "NULL" : "'" + entityUuid + "'";
+        return "INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount, item_entity_uuid) " +
+                "VALUES ('ITEMGRAPH_INTERNAL', NULL, " + timestampMs + ", 1, 1, '" + actionType + "', " + amount + ", " + uuid + ")";
     }
 
-    private static String internalOrIgnoreInsert(long timestampMs, String actionType, int amount) {
-        return "INSERT OR IGNORE INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount) " +
-                "VALUES ('ITEMGRAPH_INTERNAL', NULL, " + timestampMs + ", 1, 1, '" + actionType + "', " + amount + ")";
+    private static String internalOrIgnoreInsert(long timestampMs, String actionType, int amount, String entityUuid) {
+        String uuid = entityUuid == null ? "NULL" : "'" + entityUuid + "'";
+        return "INSERT OR IGNORE INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount, item_entity_uuid) " +
+                "VALUES ('ITEMGRAPH_INTERNAL', NULL, " + timestampMs + ", 1, 1, '" + actionType + "', " + amount + ", " + uuid + ")";
     }
 }
