@@ -99,6 +99,11 @@ public class ContainerSessionListener {
     }
 
     private void resolve(Player player, AbstractContainerMenu menu) {
+        // Consume any pending click up front: a stale click must never pair with
+        // a later menu open (e.g. a mod programmatically opening a menu the same
+        // tick after an unrelated container click).
+        PendingClick click = pendingClicks.remove(player.getUUID());
+
         Container blockContainer = null;
         BlockEntity containerEntity = null;
         CompoundContainer merged = null;
@@ -129,11 +134,7 @@ public class ContainerSessionListener {
 
         // Double chest (or any merged container): no block entity in the slot view —
         // recover the clicked chest position recorded this tick.
-        if (merged == null) {
-            return;
-        }
-        PendingClick click = pendingClicks.remove(player.getUUID());
-        if (click == null
+        if (merged == null || click == null
                 || !click.levelId().equals(levelId)
                 || player.level().getGameTime() - click.gameTime() > 1) {
             return;
