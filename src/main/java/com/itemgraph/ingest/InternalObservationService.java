@@ -91,6 +91,7 @@ public class InternalObservationService {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final java.util.concurrent.atomic.AtomicLong totalEnqueued = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalPersisted = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong totalDropped = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalTransformations = new java.util.concurrent.atomic.AtomicLong(0);
     private Thread workerThread;
 
@@ -126,6 +127,12 @@ public class InternalObservationService {
         boolean ok = queue.offer(obs);
         if (ok) {
             totalEnqueued.incrementAndGet();
+        } else {
+            long dropped = totalDropped.incrementAndGet();
+            if (dropped == 1 || dropped % 1000 == 0) {
+                LOGGER.warn("Internal observation queue is full — dropped {} observation ({} dropped total; evidence loss)",
+                        obs.actionType(), dropped);
+            }
         }
         return ok;
     }
@@ -148,6 +155,10 @@ public class InternalObservationService {
 
     public long getTotalPersisted() {
         return totalPersisted.get();
+    }
+
+    public long getTotalDropped() {
+        return totalDropped.get();
     }
 
     public long getTotalTransformations() {
@@ -295,23 +306,20 @@ public class InternalObservationService {
                             ? getOrCreateFingerprint(conn, obs.item())
                             : getOrCreateFingerprint(conn, obs.itemId(), obs.rawData());
 
-                    long playerNodeId = nodeManager.getOrCreatePlayerNode(
-                            conn, obs.playerUuid(), obs.playerName(), obs.levelName(), obs.x(), obs.y(), obs.z());
-
                     Long targetNodeId = null;
-                    long originNodeId = playerNodeId;
+                    long originNodeId;
 
                     switch (obs.targetType() != null ? obs.targetType() : "") {
                         case "ARMOR_STAND" -> {
                             long armorStandNodeId = nodeManager.getOrCreateArmorStandNode(
                                     conn, obs.targetLevelName(), obs.targetX(), obs.targetY(), obs.targetZ());
                             if ("EQUIP_ARMOR_STAND".equals(obs.actionType())) {
-                                originNodeId = playerNodeId;
+                                originNodeId = playerNode(conn, nodeManager, obs);
                                 targetNodeId = armorStandNodeId;
                             } else {
                                 // UNEQUIP_ARMOR_STAND
                                 originNodeId = armorStandNodeId;
-                                targetNodeId = playerNodeId;
+                                targetNodeId = playerNode(conn, nodeManager, obs);
                             }
                         }
                         case "GROUND" -> {
@@ -322,56 +330,44 @@ public class InternalObservationService {
                                     obs.targetX(), obs.targetY(), obs.targetZ());
                             if ("PICKUP_ITEM".equals(obs.actionType())) {
                                 originNodeId = groundNodeId;
-                                targetNodeId = playerNodeId;
+                                targetNodeId = playerNode(conn, nodeManager, obs);
                             } else {
                                 // DROP_ITEM, DEATH_DROP, THROW_ITEM, SHOOT_ITEM
-                                originNodeId = playerNodeId;
+                                originNodeId = playerNode(conn, nodeManager, obs);
                                 targetNodeId = groundNodeId;
                             }
                         }
                         case "CONTAINER" -> {
-                            // ADD_ITEM (player -> container) or REMOVE_ITEM (container -> player)
-                            // or HOPPER_INSERT (container -> container) / HOPPER_EXTRACT (container -> container)
+                            // ADD_ITEM / REMOVE_ITEM: player <-> container
+                            // HOPPER_INSERT / HOPPER_EXTRACT: container <-> UNKNOWN remote endpoint
+                            // (an IItemHandler call cannot identify the automation's other side,
+                            //  so the far endpoint is the per-level UNKNOWN sentinel, not a
+                            //  fabricated self-edge).
                             long containerNodeId = nodeManager.getOrCreateContainerNode(
                                     conn, obs.targetLevelName(),
                                     obs.targetX(), obs.targetY(), obs.targetZ());
-                            boolean isAutomation = com.itemgraph.listener.ContainerCapabilityWrapper.AUTOMATION_UUID
-                                    .equals(obs.playerUuid());
                             switch (obs.actionType()) {
                                 case "ADD_ITEM" -> {
-                                    // Player deposits into container: player -> container
-                                    originNodeId = playerNodeId;
+                                    // Player deposits into container: player -> container.
+                                    // Ambiguous sessions resolve the actor endpoint to UNKNOWN;
+                                    // candidate players are preserved in raw_data.
+                                    originNodeId = actorNode(conn, nodeManager, obs);
                                     targetNodeId = containerNodeId;
                                 }
                                 case "REMOVE_ITEM" -> {
                                     // Player withdraws from container: container -> player
                                     originNodeId = containerNodeId;
-                                    targetNodeId = playerNodeId;
+                                    targetNodeId = actorNode(conn, nodeManager, obs);
                                 }
                                 case "HOPPER_INSERT" -> {
-                                    // Automation pushes into container: source container -> this container
-                                    // obs.x/y/z holds the target container's coords (the one being inserted into)
-                                    // For HOPPER_INSERT the "player" node fields hold the source coords.
-                                    if (isAutomation) {
-                                        long sourceContainerNodeId = nodeManager.getOrCreateContainerNode(
-                                                conn, obs.levelName(), obs.x(), obs.y(), obs.z());
-                                        originNodeId = sourceContainerNodeId;
-                                    } else {
-                                        originNodeId = playerNodeId;
-                                    }
+                                    // Automation pushes into this container: remote source unknown
+                                    originNodeId = unknownNode(conn, nodeManager, obs);
                                     targetNodeId = containerNodeId;
                                 }
                                 case "HOPPER_EXTRACT" -> {
-                                    // Automation pulls from container: this container -> target container
-                                    if (isAutomation) {
-                                        long destContainerNodeId = nodeManager.getOrCreateContainerNode(
-                                                conn, obs.targetLevelName(), obs.targetX(), obs.targetY(), obs.targetZ());
-                                        originNodeId = containerNodeId;
-                                        targetNodeId = destContainerNodeId;
-                                    } else {
-                                        originNodeId = containerNodeId;
-                                        targetNodeId = playerNodeId;
-                                    }
+                                    // Automation pulls from this container: remote destination unknown
+                                    originNodeId = containerNodeId;
+                                    targetNodeId = unknownNode(conn, nodeManager, obs);
                                 }
                                 default -> {
                                     // Unknown container action: anchor to container with no direction
@@ -382,12 +378,14 @@ public class InternalObservationService {
                         }
                         case "PLAYER" -> {
                             // Direct player-to-player observation (future use)
+                            originNodeId = playerNode(conn, nodeManager, obs);
                             targetNodeId = nodeManager.getOrCreatePlayerNode(
                                     conn, obs.playerUuid(), obs.playerName(),
                                     obs.targetLevelName(), obs.targetX(), obs.targetY(), obs.targetZ());
                         }
                         default -> {
                             // No target type set: anchor to player with no direction (e.g. pure transformation hook)
+                            originNodeId = playerNode(conn, nodeManager, obs);
                         }
                     }
 
@@ -423,6 +421,38 @@ public class InternalObservationService {
         } finally {
             conn.setAutoCommit(origAutoCommit);
         }
+    }
+
+    /**
+     * Resolves the real player node for an observation. Only called for action
+     * types that have a genuine player endpoint — sentinel identities
+     * ({@code [automation]}, {@code [ambiguous]}) must not materialize fake
+     * PLAYER rows in {@code ig_nodes}.
+     */
+    private static long playerNode(Connection conn, NodeManager nodeManager, InternalObservation obs)
+            throws SQLException {
+        return nodeManager.getOrCreatePlayerNode(
+                conn, obs.playerUuid(), obs.playerName(), obs.levelName(), obs.x(), obs.y(), obs.z());
+    }
+
+    /**
+     * Resolves the player-side endpoint of a player-attributable container action:
+     * the actor's PLAYER node when the actor is unambiguous, or the per-level
+     * UNKNOWN sentinel when multiple players held the container open during the
+     * observation window (the candidates are preserved in {@code raw_data}).
+     */
+    private static long actorNode(Connection conn, NodeManager nodeManager, InternalObservation obs)
+            throws SQLException {
+        if (com.itemgraph.listener.ContainerInteractionTracker.AMBIGUOUS_UUID.equals(obs.playerUuid())
+                || com.itemgraph.listener.ContainerCapabilityWrapper.AUTOMATION_UUID.equals(obs.playerUuid())) {
+            return unknownNode(conn, nodeManager, obs);
+        }
+        return playerNode(conn, nodeManager, obs);
+    }
+
+    private static long unknownNode(Connection conn, NodeManager nodeManager, InternalObservation obs)
+            throws SQLException {
+        return nodeManager.getOrCreateUnknownNode(conn, obs.targetLevelName());
     }
 
     public long getOrCreateFingerprint(Connection conn, CanonicalItem canonical) throws SQLException {
