@@ -75,7 +75,7 @@ public class CorrelationEngine {
     private static final Logger LOGGER = LoggerFactory.getLogger(CorrelationEngine.class);
 
     /** Actions that put an item on the ground (player -> GROUND). */
-    private static final Set<String> DROP_ACTIONS = Set.of("DROP_ITEM", "THROW_ITEM", "SHOOT_ITEM");
+    private static final Set<String> DROP_ACTIONS = Set.of("DROP_ITEM", "THROW_ITEM", "SHOOT_ITEM", "DEATH_DROP");
 
     /** The action that takes an item off the ground (GROUND -> player). */
     private static final String PICKUP_ACTION = "PICKUP_ITEM";

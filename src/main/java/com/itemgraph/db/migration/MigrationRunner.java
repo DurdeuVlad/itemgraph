@@ -22,7 +22,8 @@ public class MigrationRunner {
             new V5__ContainerFlowTopology(),
             new V6__CorrelationState(),
             new V7__QuantityFlowLedger(),
-            new V8__HighValueIntegrations()
+            new V8__HighValueIntegrations(),
+            new V9__InternalObservationDedup()
     );
 
     public static int runMigrations(Connection conn) throws SQLException {

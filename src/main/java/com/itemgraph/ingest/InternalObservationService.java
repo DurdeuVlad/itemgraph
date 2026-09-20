@@ -279,8 +279,11 @@ public class InternalObservationService {
         try {
             conn.setAutoCommit(false);
 
+            // INSERT OR IGNORE: V9 partial unique index on (source_type, timestamp_ms,
+            // node_id, fingerprint_id, amount, action_type) WHERE source_event_id IS NULL
+            // silently discards duplicate internal observations rather than throwing.
             String insertSql = """
-                INSERT INTO ig_observations (
+                INSERT OR IGNORE INTO ig_observations (
                     source_type, source_event_id, timestamp_ms, node_id, target_node_id,
                     fingerprint_id, action_type, amount, raw_data, correlation_status, item_entity_uuid
                 ) VALUES ('ITEMGRAPH_INTERNAL', NULL, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
@@ -298,16 +301,93 @@ public class InternalObservationService {
                     Long targetNodeId = null;
                     long originNodeId = playerNodeId;
 
-                    if ("ARMOR_STAND".equals(obs.targetType())) {
-                        long armorStandNodeId = nodeManager.getOrCreateArmorStandNode(
-                                conn, obs.targetLevelName(), obs.targetX(), obs.targetY(), obs.targetZ());
-                        if ("EQUIP_ARMOR_STAND".equals(obs.actionType())) {
-                            originNodeId = playerNodeId;
-                            targetNodeId = armorStandNodeId;
-                        } else {
-                            // UNEQUIP_ARMOR_STAND
-                            originNodeId = armorStandNodeId;
-                            targetNodeId = playerNodeId;
+                    switch (obs.targetType() != null ? obs.targetType() : "") {
+                        case "ARMOR_STAND" -> {
+                            long armorStandNodeId = nodeManager.getOrCreateArmorStandNode(
+                                    conn, obs.targetLevelName(), obs.targetX(), obs.targetY(), obs.targetZ());
+                            if ("EQUIP_ARMOR_STAND".equals(obs.actionType())) {
+                                originNodeId = playerNodeId;
+                                targetNodeId = armorStandNodeId;
+                            } else {
+                                // UNEQUIP_ARMOR_STAND
+                                originNodeId = armorStandNodeId;
+                                targetNodeId = playerNodeId;
+                            }
+                        }
+                        case "GROUND" -> {
+                            // DROP_ITEM / DEATH_DROP: player -> ground
+                            // PICKUP_ITEM: ground -> player
+                            long groundNodeId = nodeManager.getOrCreateGroundNode(
+                                    conn, obs.targetLevelName(),
+                                    obs.targetX(), obs.targetY(), obs.targetZ());
+                            if ("PICKUP_ITEM".equals(obs.actionType())) {
+                                originNodeId = groundNodeId;
+                                targetNodeId = playerNodeId;
+                            } else {
+                                // DROP_ITEM, DEATH_DROP, THROW_ITEM, SHOOT_ITEM
+                                originNodeId = playerNodeId;
+                                targetNodeId = groundNodeId;
+                            }
+                        }
+                        case "CONTAINER" -> {
+                            // ADD_ITEM (player -> container) or REMOVE_ITEM (container -> player)
+                            // or HOPPER_INSERT (container -> container) / HOPPER_EXTRACT (container -> container)
+                            long containerNodeId = nodeManager.getOrCreateContainerNode(
+                                    conn, obs.targetLevelName(),
+                                    obs.targetX(), obs.targetY(), obs.targetZ());
+                            boolean isAutomation = com.itemgraph.listener.ContainerCapabilityWrapper.AUTOMATION_UUID
+                                    .equals(obs.playerUuid());
+                            switch (obs.actionType()) {
+                                case "ADD_ITEM" -> {
+                                    // Player deposits into container: player -> container
+                                    originNodeId = playerNodeId;
+                                    targetNodeId = containerNodeId;
+                                }
+                                case "REMOVE_ITEM" -> {
+                                    // Player withdraws from container: container -> player
+                                    originNodeId = containerNodeId;
+                                    targetNodeId = playerNodeId;
+                                }
+                                case "HOPPER_INSERT" -> {
+                                    // Automation pushes into container: source container -> this container
+                                    // obs.x/y/z holds the target container's coords (the one being inserted into)
+                                    // For HOPPER_INSERT the "player" node fields hold the source coords.
+                                    if (isAutomation) {
+                                        long sourceContainerNodeId = nodeManager.getOrCreateContainerNode(
+                                                conn, obs.levelName(), obs.x(), obs.y(), obs.z());
+                                        originNodeId = sourceContainerNodeId;
+                                    } else {
+                                        originNodeId = playerNodeId;
+                                    }
+                                    targetNodeId = containerNodeId;
+                                }
+                                case "HOPPER_EXTRACT" -> {
+                                    // Automation pulls from container: this container -> target container
+                                    if (isAutomation) {
+                                        long destContainerNodeId = nodeManager.getOrCreateContainerNode(
+                                                conn, obs.targetLevelName(), obs.targetX(), obs.targetY(), obs.targetZ());
+                                        originNodeId = containerNodeId;
+                                        targetNodeId = destContainerNodeId;
+                                    } else {
+                                        originNodeId = containerNodeId;
+                                        targetNodeId = playerNodeId;
+                                    }
+                                }
+                                default -> {
+                                    // Unknown container action: anchor to container with no direction
+                                    originNodeId = containerNodeId;
+                                    targetNodeId = null;
+                                }
+                            }
+                        }
+                        case "PLAYER" -> {
+                            // Direct player-to-player observation (future use)
+                            targetNodeId = nodeManager.getOrCreatePlayerNode(
+                                    conn, obs.playerUuid(), obs.playerName(),
+                                    obs.targetLevelName(), obs.targetX(), obs.targetY(), obs.targetZ());
+                        }
+                        default -> {
+                            // No target type set: anchor to player with no direction (e.g. pure transformation hook)
                         }
                     }
 
