@@ -13,14 +13,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
-import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for {@link ContainerCapabilityWrapper} (0.2.0 — Issues 3 &amp; 4).
+ * Unit tests for {@link ContainerCapabilityWrapper} (0.2.0 — Issue 4).
  *
  * <p>A bare {@code gradlew test} JVM cannot bootstrap Minecraft item registries:
  * {@code Bootstrap.bootStrap()} dies inside {@code Blocks.<clinit>} on NeoForge's
@@ -32,11 +30,16 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>Consequently these tests verify the wrapper through its package-private
  * seams — {@link ContainerCapabilityWrapper#shouldEmit} (the simulate/movement
  * guard) and {@link ContainerCapabilityWrapper#submitObservation} (action-type
- * mapping and attribution) — plus the real public {@code insertItem}/
- * {@code extractItem} path with {@link ItemStack#EMPTY}, which exercises
- * delegation and proves no observation is written when nothing moved.
- * The pending-observation queue is read via reflection; the worker thread is
- * never started, so {@code submit()} is a pure enqueue.
+ * mapping) — plus the real public {@code insertItem}/{@code extractItem} path
+ * with {@link ItemStack#EMPTY}, which exercises delegation and proves no
+ * observation is written when nothing moved. The pending-observation queue is
+ * read via reflection; the worker thread is never started, so {@code submit()}
+ * is a pure enqueue.
+ *
+ * <p>Capability invocations are always automation: player transfers never reach
+ * {@code IItemHandler} (menus mutate {@code Container} directly), so every real
+ * call emits {@code HOPPER_INSERT}/{@code HOPPER_EXTRACT} with the automation
+ * sentinel regardless of open sessions.
  */
 class ContainerCapabilityWrapperTest {
 
@@ -60,9 +63,9 @@ class ContainerCapabilityWrapperTest {
     }
 
     @BeforeEach
-    void drainQueuesAndContexts() throws Exception {
+    void drainQueuesAndContexts() {
         pendingObservations().clear();
-        clearPlayerContexts();
+        ContainerInteractionTracker.getInstance().clearAll();
     }
 
     // -------------------------------------------------------------------------
@@ -94,11 +97,11 @@ class ContainerCapabilityWrapperTest {
     }
 
     // -------------------------------------------------------------------------
-    // Action mapping + attribution via submitObservation (Issues 3 & 4)
+    // Action mapping via submitObservation — always automation (Issue 4)
     // -------------------------------------------------------------------------
 
     @Test
-    void insertWithoutPlayerContextProducesHopperInsert() throws Exception {
+    void insertProducesHopperInsertAnchoredToContainer() throws Exception {
         ContainerCapabilityWrapper wrapper = wrapperAt(POS);
 
         wrapper.submitObservation("INSERT", 5, DIAMOND);
@@ -122,7 +125,7 @@ class ContainerCapabilityWrapperTest {
     }
 
     @Test
-    void extractWithoutPlayerContextProducesHopperExtract() throws Exception {
+    void extractProducesHopperExtract() throws Exception {
         ContainerCapabilityWrapper wrapper = wrapperAt(POS);
 
         wrapper.submitObservation("EXTRACT", 4, DIAMOND);
@@ -136,53 +139,37 @@ class ContainerCapabilityWrapperTest {
     }
 
     @Test
-    void insertWithPlayerContextProducesAddItem() throws Exception {
-        ContainerCapabilityWrapper wrapper = wrapperAt(POS);
-        UUID playerUuid = UUID.randomUUID();
-        ContainerInteractionTracker.getInstance()
-                .setPlayerContext(Level.OVERWORLD, POS, playerUuid, "Steve");
+    void capabilityCallsStayAutomationEvenWhileWatched() throws Exception {
+        // A player session open on this container must NOT flip capability traffic
+        // to ADD_ITEM/REMOVE_ITEM: anything reaching IItemHandler is automation.
+        // The watch only receives an automation credit so the session diff can
+        // exclude this transfer later.
+        ContainerInteractionTracker tracker = ContainerInteractionTracker.getInstance();
+        var key = new ContainerInteractionTracker.ContainerKey("minecraft:overworld", 10, 64, -20);
+        tracker.openSession(java.util.UUID.randomUUID(), "Steve", key,
+                () -> new ContainerInteractionTracker.InventoryTotals(java.util.Map.of(), java.util.Map.of()),
+                java.util.List.of());
 
+        ContainerCapabilityWrapper wrapper = wrapperAt(POS);
         wrapper.submitObservation("INSERT", 3, DIAMOND);
 
         InternalObservationService.InternalObservation obs = pendingObservations().poll();
         assertNotNull(obs);
-        assertEquals("ADD_ITEM", obs.actionType());
-        assertEquals(playerUuid.toString(), obs.playerUuid());
-        assertEquals("Steve", obs.playerName());
-        assertEquals(3, obs.amount());
-        assertEquals("CONTAINER", obs.targetType());
+        assertEquals("HOPPER_INSERT", obs.actionType(),
+                "capability traffic is always automation-attributed");
+        assertEquals(ContainerCapabilityWrapper.AUTOMATION_UUID, obs.playerUuid());
     }
 
     @Test
-    void extractWithPlayerContextProducesRemoveItem() throws Exception {
-        ContainerCapabilityWrapper wrapper = wrapperAt(POS);
-        UUID playerUuid = UUID.randomUUID();
-        ContainerInteractionTracker.getInstance()
-                .setPlayerContext(Level.OVERWORLD, POS, playerUuid, "Alex");
-
-        wrapper.submitObservation("EXTRACT", 7, DIAMOND);
-
-        InternalObservationService.InternalObservation obs = pendingObservations().poll();
-        assertNotNull(obs);
-        assertEquals("REMOVE_ITEM", obs.actionType());
-        assertEquals(playerUuid.toString(), obs.playerUuid());
-        assertEquals("Alex", obs.playerName());
-        assertEquals(7, obs.amount());
-    }
-
-    @Test
-    void playerContextIsKeyedByDimensionAndPosition() throws Exception {
-        // A player context registered at POS must not leak into observations at POS_B.
-        ContainerInteractionTracker.getInstance()
-                .setPlayerContext(Level.OVERWORLD, POS, UUID.randomUUID(), "Steve");
-
+    void observationsAreKeyedToTheirOwnPosition() throws Exception {
+        // Each wrapper anchors its observation to its own block position.
         wrapperAt(POS_B).submitObservation("INSERT", 2, DIAMOND);
 
         InternalObservationService.InternalObservation obs = pendingObservations().poll();
         assertNotNull(obs);
-        assertEquals("HOPPER_INSERT", obs.actionType(),
-                "transfers at a different block position must stay automation-attributed");
-        assertEquals(ContainerCapabilityWrapper.AUTOMATION_UUID, obs.playerUuid());
+        assertEquals("HOPPER_INSERT", obs.actionType());
+        assertEquals((double) POS_B.getX(), obs.targetX());
+        assertEquals((double) POS_B.getZ(), obs.targetZ());
     }
 
     // -------------------------------------------------------------------------
@@ -248,16 +235,6 @@ class ContainerCapabilityWrapperTest {
                     f.get(InternalObservationService.getInstance());
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("cannot reach InternalObservationService.queue", e);
-        }
-    }
-
-    private static void clearPlayerContexts() {
-        try {
-            Field f = ContainerInteractionTracker.class.getDeclaredField("openContainers");
-            f.setAccessible(true);
-            ((Map<?, ?>) f.get(ContainerInteractionTracker.getInstance())).clear();
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("cannot reach ContainerInteractionTracker.openContainers", e);
         }
     }
 }

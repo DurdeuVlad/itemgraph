@@ -12,39 +12,32 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Non-invasive {@link IItemHandler} wrapper that observes item insertions and extractions
- * from vanilla container block entities (Phase 0.2.0 — Issue 3 &amp; 4).
+ * Non-invasive {@link IItemHandler} wrapper that observes automated item insertions
+ * and extractions on vanilla container block entities (0.2.0 — Issue 4).
  *
- * <h2>How it works</h2>
- * <p>Every inventory access in NeoForge — whether triggered by a player clicking a GUI
- * or a hopper's automation tick — ultimately calls {@code insertItem} or {@code extractItem}
- * on the block entity's {@link IItemHandler} capability. By wrapping the capability, we
- * intercept all transfers without polling, ticking, or mixins.
+ * <h2>What this observes</h2>
+ * <p>Only automation traffic reaches an {@code IItemHandler} capability: hoppers,
+ * pipes, and other mods' transfer logic. Player GUI clicks mutate the menu's
+ * {@code Container} directly ({@code AbstractContainerMenu.moveItemStackTo},
+ * {@code Slot.set}) and never traverse this interface — player transfers are
+ * observed by {@link ContainerInteractionTracker} session diffs instead.
+ * Every call through this wrapper is therefore attributed to automation as
+ * {@code HOPPER_INSERT}/{@code HOPPER_EXTRACT} unconditionally.
  *
  * <h2>Simulation guard</h2>
- * <p>All IItemHandler callers (hoppers, pipes, player GUIs) first call with
- * {@code simulate=true} to preview the result. Only {@code simulate=false} represents
- * a real transfer. Observations are ONLY written when {@code simulate=false} AND a
- * real quantity actually moved ({@code remainder.getCount() != stack.getCount()}).
+ * <p>IItemHandler callers first call with {@code simulate=true} to preview the
+ * result. Only {@code simulate=false} with a real quantity moved emits.
  *
- * <h2>Player vs automation attribution</h2>
- * <p>When a player has the container open, {@link ContainerInteractionTracker} holds their
- * UUID for the container's DimPos. If no player context is found, the transfer is
- * attributed to automation (hopper, pipe, etc.) with a synthetic "AUTOMATION" UUID sentinel.
- *
- * <h2>Action types written</h2>
- * <ul>
- *   <li>{@code ADD_ITEM} — player deposits into container</li>
- *   <li>{@code REMOVE_ITEM} — player withdraws from container</li>
- *   <li>{@code HOPPER_INSERT} — automation inserts into container</li>
- *   <li>{@code HOPPER_EXTRACT} — automation extracts from container</li>
- * </ul>
+ * <h2>Automation credit</h2>
+ * <p>While a player has the container open the wrapper additionally reports the
+ * signed delta to {@link ContainerInteractionTracker}, so the session diff does
+ * not attribute concurrent hopper traffic to the player or double-count it.
  */
 public class ContainerCapabilityWrapper implements IItemHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ContainerCapabilityWrapper.class);
 
-    /** Sentinel UUID used for automation-attributed observations (no player involved). */
+    /** Sentinel identity carried by automation-attributed observations. */
     public static final String AUTOMATION_UUID = "00000000-0000-0000-0000-000000000000";
     public static final String AUTOMATION_NAME = "[automation]";
 
@@ -76,7 +69,6 @@ public class ContainerCapabilityWrapper implements IItemHandler {
     public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
         ItemStack remainder = delegate.insertItem(slot, stack, simulate);
         if (shouldEmit(simulate, stack.getCount(), remainder.getCount())) {
-            // Real items were inserted
             int movedCount = stack.getCount() - remainder.getCount();
             ItemStack movedStack = stack.copyWithCount(movedCount);
             emitObservation("INSERT", movedStack);
@@ -108,10 +100,11 @@ public class ContainerCapabilityWrapper implements IItemHandler {
     // -------------------------------------------------------------------------
 
     /**
-     * Whether a completed {@code insertItem}/{@code extractItem} call represents a real
-     * transfer worth observing: not a simulation ({@code simulate=false}) and the
-     * remainder/result count differs from the requested amount (items actually moved).
-     * For extractions pass {@code remainder=0}: any non-empty result counts as moved.
+     * Whether a completed {@code insertItem}/{@code extractItem} call represents a
+     * real transfer worth observing: not a simulation ({@code simulate=false}) and
+     * the remainder/result count differs from the requested amount (items actually
+     * moved). For extractions pass {@code remainder=0}: any non-empty result
+     * counts as moved.
      */
     static boolean shouldEmit(boolean simulate, int requestedCount, int remainderCount) {
         return !simulate && requestedCount != remainderCount;
@@ -119,50 +112,44 @@ public class ContainerCapabilityWrapper implements IItemHandler {
 
     private void emitObservation(String direction, ItemStack stack) {
         try {
-            submitObservation(direction, stack.getCount(), ItemCanonicalizer.canonicalizeStack(stack));
+            CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(stack);
+            // Report the signed automation delta so an open player session does not
+            // take credit for machine traffic (or double-count it).
+            long delta = "INSERT".equals(direction) ? stack.getCount() : -stack.getCount();
+            ContainerInteractionTracker.getInstance().recordAutomationDelta(
+                    new ContainerInteractionTracker.ContainerKey(
+                            dimension.location().toString(), pos.getX(), pos.getY(), pos.getZ()),
+                    canonical.fingerprintHash(), delta);
+            submitObservation(direction, stack.getCount(), canonical);
         } catch (Exception e) {
             LOGGER.error("ContainerCapabilityWrapper: error submitting observation for {} at {}", direction, pos, e);
         }
     }
 
     /**
-     * Builds and submits the observation for a completed transfer, resolving
-     * player-vs-automation attribution via {@link ContainerInteractionTracker}.
+     * Builds and submits the observation for a completed automated transfer.
+     * Capability invocations are always automation — the remote endpoint is not
+     * knowable from an {@code IItemHandler} call, so persistence anchors the row to
+     * this container and leaves the other endpoint UNKNOWN rather than fabricating
+     * a self-referencing edge.
      *
      * <p>Package-private for unit tests: a bare {@code gradlew test} JVM cannot
-     * bootstrap Minecraft items (NeoForge's FeatureFlagLoader requires a live mod
-     * list), so the {@link ItemStack}-based path cannot be exercised directly.
-     * Tests drive this method with an explicit {@link CanonicalItem} instead.
+     * bootstrap Minecraft items, so the {@link ItemStack}-based path cannot be
+     * exercised directly. Tests drive this method with an explicit
+     * {@link CanonicalItem} instead.
      */
     void submitObservation(String direction, int amount, CanonicalItem canonical) {
-        ContainerInteractionTracker.PlayerContext ctx =
-                ContainerInteractionTracker.getInstance().getPlayerContext(dimension, pos);
-
-        boolean isPlayer = ctx != null;
-        String actionType;
-        String playerUuid;
-        String playerName;
-
-        if (isPlayer) {
-            playerUuid = ctx.uuid().toString();
-            playerName = ctx.name();
-            actionType = "INSERT".equals(direction) ? "ADD_ITEM" : "REMOVE_ITEM";
-        } else {
-            playerUuid = AUTOMATION_UUID;
-            playerName = AUTOMATION_NAME;
-            actionType = "INSERT".equals(direction) ? "HOPPER_INSERT" : "HOPPER_EXTRACT";
-        }
-
+        String actionType = "INSERT".equals(direction) ? "HOPPER_INSERT" : "HOPPER_EXTRACT";
         String levelId = dimension.location().toString();
 
         InternalObservationService.getInstance().submit(
                 new InternalObservationService.InternalObservation(
                         System.currentTimeMillis(),
                         actionType,
-                        playerUuid,
-                        playerName,
+                        AUTOMATION_UUID,
+                        AUTOMATION_NAME,
                         levelId,
-                        pos.getX(), pos.getY(), pos.getZ(), // player coords = container coords for automation
+                        pos.getX(), pos.getY(), pos.getZ(),
                         levelId,
                         (double) pos.getX(), (double) pos.getY(), (double) pos.getZ(),
                         "CONTAINER",

@@ -1,111 +1,161 @@
 package com.itemgraph.listener;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.Container;
+import net.minecraft.world.WorldlyContainer;
+import net.minecraft.world.WorldlyContainerHolder;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.items.IItemHandler;
+import net.neoforged.neoforge.items.VanillaHopperItemHandler;
+import net.neoforged.neoforge.items.wrapper.ForwardingItemHandler;
 import net.neoforged.neoforge.items.wrapper.InvWrapper;
+import net.neoforged.neoforge.items.wrapper.SidedInvWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
 /**
- * Registers {@link ContainerCapabilityWrapper} for all vanilla container block entities
- * via the NeoForge mod event bus (Phase 0.2.0 — Issue 3 &amp; 4).
+ * Registers {@link ContainerCapabilityWrapper} providers for vanilla container
+ * blocks via the NeoForge mod event bus (0.2.0 — Issue 4).
  *
- * <h2>Registration pattern</h2>
- * <p>{@link RegisterCapabilitiesEvent} fires on the mod event bus during mod loading.
- * We register a provider for {@code Capabilities.ItemHandler.BLOCK} on every vanilla
- * block entity type that holds items. The provider wraps the block entity's own
- * IItemHandler with a {@link ContainerCapabilityWrapper} that intercepts real (non-simulate)
- * insertions and extractions and writes {@code ig_observations} asynchronously.
+ * <h2>Provider ordering</h2>
+ * <p>{@code BlockCapability.getCapability} returns the first non-null provider in
+ * registration order, and NeoForge registers its own vanilla providers
+ * ({@code InvWrapper}/{@code SidedInvWrapper}/{@code VanillaHopperItemHandler})
+ * at normal priority before this mod's bus runs. Registering at
+ * {@link EventPriority#HIGHEST} places ItemGraph's providers first so the wrapper
+ * is actually reached.
  *
- * <h2>Vanilla block entity types covered</h2>
+ * <h2>Behaviour preservation</h2>
+ * <p>Each provider wraps the exact handler vanilla would have produced, so the
+ * interception is observation-only:
  * <ul>
- *   <li>CHEST, TRAPPED_CHEST, BARREL</li>
- *   <li>FURNACE, BLAST_FURNACE, SMOKER</li>
- *   <li>HOPPER, DROPPER, DISPENSER</li>
- *   <li>All 16 SHULKER_BOX variants</li>
- *   <li>BREWING_STAND</li>
+ *   <li>Sided containers (furnaces, brewing stand, shulker box) keep
+ *       {@link SidedInvWrapper} face restrictions.</li>
+ *   <li>Chests keep the merged {@code CompoundContainer} view via
+ *       {@link ChestBlock#getContainer} (double chests stay intact).</li>
+ *   <li>Hoppers keep {@link VanillaHopperItemHandler} cooldown semantics.</li>
+ *   <li>The composter keeps its {@link ForwardingItemHandler} re-evaluation.</li>
  * </ul>
- *
- * <p>Modded inventories are out of scope for 0.2.0.
+ * <p>Types vanilla does not serve (lectern, ender chest) are deliberately not
+ * registered — adding a capability where vanilla has none would create new
+ * automation behaviour, not observe existing behaviour.
  */
 public class ContainerCapabilityRegistrar {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ContainerCapabilityRegistrar.class);
 
-    @SubscribeEvent
-    public void registerCapabilities(RegisterCapabilitiesEvent event) {
-        // All vanilla block entity types that hold item stacks and expose IItemHandler
-        // Note: BlockEntityType.SHULKER_BOX covers all 16 dyed shulker box variants in 1.21.1.
-        List<BlockEntityType<?>> vanillaContainerTypes = List.of(
-                BlockEntityType.CHEST,
-                BlockEntityType.TRAPPED_CHEST,
-                BlockEntityType.BARREL,
-                BlockEntityType.FURNACE,
-                BlockEntityType.BLAST_FURNACE,
-                BlockEntityType.SMOKER,
-                BlockEntityType.HOPPER,
-                BlockEntityType.DROPPER,
-                BlockEntityType.DISPENSER,
-                BlockEntityType.SHULKER_BOX,
-                BlockEntityType.BREWING_STAND,
-                BlockEntityType.CRAFTER,
-                BlockEntityType.CHISELED_BOOKSHELF
-        );
+    /** Mirrors NeoForge's sided vanilla registrations ({@code SidedInvWrapper::new}). */
+    private static final List<BlockEntityType<? extends BlockEntity>> SIDED_TYPES = List.of(
+            BlockEntityType.BLAST_FURNACE,
+            BlockEntityType.BREWING_STAND,
+            BlockEntityType.FURNACE,
+            BlockEntityType.SMOKER,
+            BlockEntityType.SHULKER_BOX
+    );
 
+    /** Mirrors NeoForge's non-sided vanilla registrations ({@code new InvWrapper(be)}). */
+    private static final List<BlockEntityType<? extends BlockEntity>> NON_SIDED_TYPES = List.of(
+            BlockEntityType.BARREL,
+            BlockEntityType.CHISELED_BOOKSHELF,
+            BlockEntityType.DISPENSER,
+            BlockEntityType.DROPPER,
+            BlockEntityType.JUKEBOX,
+            BlockEntityType.CRAFTER,
+            BlockEntityType.DECORATED_POT
+    );
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void registerCapabilities(RegisterCapabilitiesEvent event) {
         int registered = 0;
-        for (BlockEntityType<?> beType : vanillaContainerTypes) {
-            if (tryRegister(event, beType)) {
-                registered++;
-            }
+
+        for (BlockEntityType<? extends BlockEntity> type : SIDED_TYPES) {
+            registered += tryRegister(event, type, (be, side) ->
+                    be instanceof WorldlyContainer wc
+                            ? wrap(new SidedInvWrapper(wc, side), be)
+                            : null);
         }
-        LOGGER.info("ItemGraph: registered container capability wrappers for {} vanilla block entity types.", registered);
+        for (BlockEntityType<? extends BlockEntity> type : NON_SIDED_TYPES) {
+            registered += tryRegister(event, type, (be, side) ->
+                    be instanceof Container c
+                            ? wrap(new InvWrapper(c), be)
+                            : null);
+        }
+        registered += tryRegister(event, BlockEntityType.HOPPER, (hopper, side) ->
+                wrap(new VanillaHopperItemHandler(hopper), hopper));
+
+        // Chests are served at block level by vanilla so a double chest exposes one
+        // merged CompoundContainer. Reproduce that view before wrapping.
+        try {
+            event.registerBlock(
+                    Capabilities.ItemHandler.BLOCK,
+                    (level, pos, state, blockEntity, side) -> {
+                        Container container = ChestBlock.getContainer(
+                                (ChestBlock) state.getBlock(), state, level, pos, true);
+                        return container == null
+                                ? null
+                                : wrap(new InvWrapper(container), pos, level.dimension());
+                    },
+                    Blocks.CHEST, Blocks.TRAPPED_CHEST);
+            registered += 2;
+        } catch (Exception e) {
+            LOGGER.warn("ItemGraph: could not register chest capability wrapper: {}", e.toString());
+        }
+
+        // Composter: vanilla serves a re-evaluating sided wrapper over the holder's
+        // state-dependent container; keep that delegation inside our observer.
+        try {
+            event.registerBlock(
+                    Capabilities.ItemHandler.BLOCK,
+                    (level, pos, state, blockEntity, side) -> {
+                        WorldlyContainerHolder holder = (WorldlyContainerHolder) state.getBlock();
+                        return wrap(new ForwardingItemHandler(() ->
+                                new SidedInvWrapper(holder.getContainer(level.getBlockState(pos), level, pos), side)),
+                                pos, level.dimension());
+                    },
+                    Blocks.COMPOSTER);
+            registered++;
+        } catch (Exception e) {
+            LOGGER.warn("ItemGraph: could not register composter capability wrapper: {}", e.toString());
+        }
+
+        LOGGER.info("ItemGraph: registered container capability wrappers for {} vanilla blocks/block entity types.", registered);
     }
 
     /**
-     * Registers the capability wrapper for a single block entity type.
-     *
-     * <p>NeoForge calls our provider lambda when another system queries
-     * {@code Capabilities.ItemHandler.BLOCK} for one of these block entities.
-     * We forward the query to the block entity's own getDefaultCapability / vanilla
-     * InvWrapper, then wrap the result in our observer.
-     *
-     * <p>The {@code side} parameter is passed through because some block entities
-     * (e.g. furnaces) expose different slots per side.
+     * Registers one block-entity provider, counting success. A provider returning
+     * {@code null} defers to the next registered provider (vanilla's own).
      */
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private <T extends net.minecraft.world.level.block.entity.BlockEntity>
-    boolean tryRegister(RegisterCapabilitiesEvent event, BlockEntityType<T> beType) {
+    private <BE extends BlockEntity> int tryRegister(
+            RegisterCapabilitiesEvent event,
+            BlockEntityType<BE> beType,
+            net.neoforged.neoforge.capabilities.ICapabilityProvider<BE, net.minecraft.core.Direction, IItemHandler> provider) {
         try {
-            event.registerBlockEntity(
-                    Capabilities.ItemHandler.BLOCK,
-                    beType,
-                    (blockEntity, side) -> {
-                        // NeoForge vanilla block entities implement Container.
-                        // InvWrapper provides an IItemHandler view of any Container.
-                        // We wrap that with our observer to intercept all moves.
-                        if (blockEntity instanceof net.minecraft.world.Container container) {
-                            IItemHandler inner = new InvWrapper(container);
-                            if (blockEntity.getLevel() == null) {
-                                return inner; // No level yet — return unwrapped (safe, won't write obs)
-                            }
-                            return new ContainerCapabilityWrapper(
-                                    inner,
-                                    blockEntity.getBlockPos(),
-                                    blockEntity.getLevel().dimension()
-                            );
-                        }
-                        return null;
-                    }
-            );
-            return true;
+            event.registerBlockEntity(Capabilities.ItemHandler.BLOCK, beType, provider);
+            return 1;
         } catch (Exception e) {
-            LOGGER.warn("ItemGraph: could not register capability wrapper for {}: {}", beType, e.getMessage());
-            return false;
+            LOGGER.warn("ItemGraph: could not register capability wrapper for {}: {}", beType, e.toString());
+            return 0;
         }
+    }
+
+    private static IItemHandler wrap(IItemHandler inner, BlockEntity be) {
+        Level level = be.getLevel();
+        // No level yet (block entity not placed): defer so vanilla's provider answers.
+        return level == null ? null : new ContainerCapabilityWrapper(inner, be.getBlockPos(), level.dimension());
+    }
+
+    private static IItemHandler wrap(IItemHandler inner, BlockPos pos, ResourceKey<Level> dimension) {
+        return new ContainerCapabilityWrapper(inner, pos, dimension);
     }
 }
