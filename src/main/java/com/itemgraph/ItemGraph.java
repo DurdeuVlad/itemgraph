@@ -30,6 +30,14 @@ public class ItemGraph {
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ItemEntityEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ArmorStandEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.TransformationEventListener());
+
+        // Container capability wrapper: intercepts IItemHandler insertItem/extractItem on all
+        // vanilla container block entities for player and automated transfer observation.
+        // Must register on the mod event bus (RegisterCapabilitiesEvent fires on mod bus).
+        modEventBus.register(new com.itemgraph.listener.ContainerCapabilityRegistrar());
+        // Player context tracker: records which player has which container open for
+        // attribution of capability wrapper calls to the responsible player.
+        NeoForge.EVENT_BUS.register(com.itemgraph.listener.ContainerInteractionTracker.getInstance());
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
