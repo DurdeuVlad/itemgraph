@@ -1,11 +1,8 @@
 package com.itemgraph.listener;
 
-import com.itemgraph.graph.NodeManager;
-import com.itemgraph.ingest.IngestionService;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.tracker.ItemEntityTracker;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
@@ -14,9 +11,6 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
-
-import java.sql.Connection;
-import java.sql.SQLException;
 
 /**
  * NeoForge event listener for tracking item drops and pickups (Phase 8A + 0.2.0).
@@ -45,6 +39,11 @@ public class ItemEntityEventListener {
         Player player = event.getPlayer();
         ItemEntity itemEntity = event.getEntity();
         if (player == null || itemEntity == null) {
+            return;
+        }
+        // ItemTossEvent is posted on both sides (only addFreshEntity is gated);
+        // a client-side post must not enqueue a duplicate observation.
+        if (player.level().isClientSide()) {
             return;
         }
 
@@ -93,14 +92,24 @@ public class ItemEntityEventListener {
         if (player == null || itemEntity == null) {
             return;
         }
+        if (player.level().isClientSide()) {
+            return;
+        }
 
         ItemStack stack = event.getOriginalStack();
         if (stack.isEmpty()) {
             return;
         }
 
+        // getOriginalStack() is the stack BEFORE pickup; a nearly-full inventory can
+        // absorb only part of it. The moved quantity is original minus what the
+        // ItemEntity still holds (NeoForge exposes getCurrentStack() for exactly this).
+        int amount = stack.getCount() - event.getCurrentStack().getCount();
+        if (amount <= 0) {
+            return;
+        }
+
         String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-        int amount = stack.getCount();
         String level = player.level().dimension().location().toString();
         int x = (int) Math.floor(itemEntity.getX());
         int y = (int) Math.floor(itemEntity.getY());
