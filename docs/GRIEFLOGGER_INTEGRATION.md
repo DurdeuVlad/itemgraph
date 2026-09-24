@@ -2,18 +2,18 @@
 
 ## Purpose
 
-GriefLogger is expected to provide a significant portion of ItemGraph's raw evidence.
+GriefLogger is an **optional additive evidence source** for ItemGraph as of version 0.2.0.
 
-ItemGraph should complement it rather than replace it.
+ItemGraph does not depend on GriefLogger to boot or operate. When GriefLogger is present, ItemGraph ingests its SQLite database in read-only mode as an additive evidence source. When GriefLogger is absent, ItemGraph still records its supported native NeoForge events and capability-mediated container changes, then reconstructs flows with the same evidence limits; session net deltas do not expose click order, and generic capability calls do not identify their caller.
 
 ## Integration principle
 
 ```text
-GriefLogger = existing audit evidence
-ItemGraph   = reconstruction and missing-event coverage
+GriefLogger (optional) = external audit evidence (additive)
+ItemGraph               = native event coverage, reconstruction, and graph inference
 ```
 
-GriefLogger must be treated as read-only.
+GriefLogger must always be treated as read-only. Ingestion skips gracefully with no log spam when the database is absent.
 
 ## Reconnaissance checklist
 
@@ -41,10 +41,11 @@ Do not rely solely on online documentation if the installed version differs.
 
 | Event | GriefLogger coverage | Metadata quality | ItemGraph hook status |
 |---|---|---:|---|
-| Container add | Native (`containers` table, action 1) | Canonical components | Reused from GriefLogger |
-| Container remove | Native (`containers` table, action 0) | Canonical components | Reused from GriefLogger |
-| Player pickup | Native (`items` table, action 3) | Canonical components | Reused + supplemented with `ItemEntity` UUID |
-| Player drop | Native (`items` table, action 2) | Canonical components | Reused + supplemented with `ItemEntity` UUID |
+| Container add | Native (`containers` table, action 1) | Canonical components | Reused from GriefLogger; without it, `ContainerSessionListener` emits an interval-bounded `ADD_ITEM` session net delta between open/close. A zero-net withdraw-and-return is not represented. |
+| Container remove | Native (`containers` table, action 0) | Canonical components | Reused from GriefLogger; without it, session net delta emits `REMOVE_ITEM`; not click-time history. |
+| Capability-mediated transfer | None | N/A | `ContainerCapabilityWrapper` emits `CAPABILITY_INSERT`/`CAPABILITY_EXTRACT` with caller and remote endpoint UNKNOWN; the cause is not asserted as hopper/automation. |
+| Player pickup | Native (`items` table, action 3) | Canonical components | Reused + supplemented with `ItemEntity` UUID only when the spatial/time match is unique |
+| Player drop | Native (`items` table, action 2) | Canonical components | Ground row emitted only after the ItemEntity is confirmed in the level; canceled toss is `DROP_CANCELLED` to UNKNOWN |
 | Crafting | None | N/A | Implemented: `ItemCraftedEvent` |
 | Smelting | None | N/A | Implemented: `ItemSmeltedEvent` |
 | Armor stand equip | None | N/A | Implemented: `ArmorStandEventListener` |
@@ -104,7 +105,14 @@ Imported observations should preserve:
 - original coordinates
 - original item data
 
-A unique constraint over source + source-event ID can prevent duplicate ingestion.
+A unique constraint over source + source-event ID prevents replay of one producer's row. It
+does not establish that a GriefLogger row and an ItemGraph row describe the same physical
+event. Cross-source equivalence requires a unique shared `item_entity_uuid` plus matching
+action family, fingerprint, amount, actor, and timestamps within 250 ms. Both source rows stay
+stored and are cited by the inferred edge; only one canonical row contributes capacity.
+Compatible rows without a unique shared entity identity are marked ambiguous and withheld from
+allocation. ItemGraph's derived source-group tables and edge-state corrections never write to
+the GriefLogger database.
 
 ## Schema drift
 

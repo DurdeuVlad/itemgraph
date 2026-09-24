@@ -30,6 +30,15 @@ public class ItemGraph {
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ItemEntityEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ArmorStandEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.TransformationEventListener());
+
+        // Container capability wrapper: intercepts IItemHandler insertItem/extractItem on all
+        // vanilla container block entities for automated transfer observation.
+        // Must register on the mod event bus (RegisterCapabilitiesEvent fires on mod bus).
+        modEventBus.register(new com.itemgraph.listener.ContainerCapabilityRegistrar());
+        // Container session listener: binds PlayerContainerEvent open/close to
+        // ContainerInteractionTracker watches so player-driven transfers are observed
+        // as interval-bounded session net deltas (GUI clicks never traverse IItemHandler).
+        NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ContainerSessionListener());
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
@@ -40,6 +49,10 @@ public class ItemGraph {
         DatabaseManager.getInstance().initialize();
         com.itemgraph.ingest.InternalObservationService.getInstance().start();
         com.itemgraph.ingest.IngestionService.getInstance().start();
+        boolean glPresent = net.neoforged.fml.ModList.get().isLoaded("grieflogger");
+        LOGGER.info("GriefLogger integration: {}", glPresent
+                ? "ENABLED — reading from GriefLogger database as additive evidence source"
+                : "DISABLED — GriefLogger not installed; ItemGraph operating on native event listeners only");
     }
 
     private void onServerStopping(ServerStoppingEvent event) {

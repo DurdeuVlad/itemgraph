@@ -18,6 +18,7 @@ public final class TraceQueryService {
 
     private static final String EDGES_BASE = """
             SELECT e.id AS e_id,
+                   e.edge_state AS e_edge_state,
                    e.amount AS e_amount,
                    e.time_start AS e_time_start,
                    e.time_end AS e_time_end,
@@ -223,7 +224,7 @@ public final class TraceQueryService {
             throws SQLException {
         StringBuilder sql = new StringBuilder(OBSERVATIONS_BASE);
         if (window.sinceMs() != null) {
-            sql.append(" AND o.timestamp_ms >= ?");
+            sql.append(" AND COALESCE(o.timestamp_end_ms, o.timestamp_ms) >= ?");
         }
         if (window.untilMs() != null) {
             sql.append(" AND o.timestamp_ms <= ?");
@@ -255,7 +256,7 @@ public final class TraceQueryService {
         StringBuilder sql = new StringBuilder(ObservationQueries.SELECT_FROM)
                 .append(" WHERE (o.node_id = ? OR o.target_node_id = ?)");
         if (window.sinceMs() != null) {
-            sql.append(" AND o.timestamp_ms >= ?");
+            sql.append(" AND COALESCE(o.timestamp_end_ms, o.timestamp_ms) >= ?");
         }
         if (window.untilMs() != null) {
             sql.append(" AND o.timestamp_ms <= ?");
@@ -285,7 +286,7 @@ public final class TraceQueryService {
 
     private List<TraceHop> loadInferredHops(Connection conn, long fingerprintId, int fetch, QueryWindow window)
             throws SQLException {
-        StringBuilder sql = new StringBuilder(EDGES_BASE).append(" WHERE e.fingerprint_id = ?");
+        StringBuilder sql = new StringBuilder(EDGES_BASE).append(" WHERE e.edge_state = 'ACTIVE' AND e.fingerprint_id = ?");
         if (window.sinceMs() != null) {
             sql.append(" AND e.time_end >= ?");
         }
@@ -316,7 +317,7 @@ public final class TraceQueryService {
 
     private List<TraceHop> loadNodeEdges(Connection conn, long nodeId, int fetch, QueryWindow window)
             throws SQLException {
-        StringBuilder sql = new StringBuilder(EDGES_BASE).append(" WHERE (e.from_node_id = ? OR e.to_node_id = ?)");
+        StringBuilder sql = new StringBuilder(EDGES_BASE).append(" WHERE e.edge_state = 'ACTIVE' AND (e.from_node_id = ? OR e.to_node_id = ?)");
         if (window.sinceMs() != null) {
             sql.append(" AND e.time_end >= ?");
         }

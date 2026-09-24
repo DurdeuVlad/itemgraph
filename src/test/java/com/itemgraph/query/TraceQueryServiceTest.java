@@ -2,6 +2,8 @@ package com.itemgraph.query;
 
 import org.junit.jupiter.api.Test;
 
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -87,6 +89,37 @@ class TraceQueryServiceTest extends QueryTestBase {
         assertEquals(playerB, inferredHop.destination().id());
         assertEquals(t0 + 10_000, inferredHop.timestampMs());
         assertEquals(t0 + 70_000, inferredHop.endMs(), "an inferred transfer spans time");
+    }
+
+    @Test
+    void sessionNetDeltaIsIncludedWhenItsIntervalOverlapsTheTraceWindow() throws Exception {
+        long container = insertContainerNode(10, 64, 10);
+        long player = insertPlayerNode("AlphaA");
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond", null);
+        long observationId;
+        try (PreparedStatement pstmt = conn.prepareStatement("""
+                INSERT INTO ig_observations (source_type, timestamp_ms, timestamp_end_ms, node_id,
+                    target_node_id, fingerprint_id, action_type, amount, raw_data)
+                VALUES ('ITEMGRAPH_INTERNAL', 1000, 5000, ?, ?, ?, 'REMOVE_ITEM', 3,
+                    '{"capture":"container_session_net_delta","sessionStartMs":1000,"sessionEndMs":5000}')
+                """, java.sql.Statement.RETURN_GENERATED_KEYS)) {
+            pstmt.setLong(1, container);
+            pstmt.setLong(2, player);
+            pstmt.setLong(3, fp);
+            pstmt.executeUpdate();
+            try (ResultSet keys = pstmt.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                observationId = keys.getLong(1);
+            }
+        }
+
+        TraceResult result = service.trace(conn, fp, QueryLimits.DEFAULT_LIMIT,
+                new QueryWindow(3_000L, 4_000L));
+
+        assertEquals(List.of(observationId), refIds(result));
+        assertEquals(1_000L, result.hops().get(0).timestampMs());
+        assertEquals(5_000L, result.hops().get(0).endMs());
+        assertTrue(result.hops().get(0).detail().contains("session net delta"));
     }
 
     /** A trace is about one fingerprint. Another item's movement must not appear in it. */

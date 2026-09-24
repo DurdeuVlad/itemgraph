@@ -67,6 +67,46 @@ Chest A -5 emeralds
 
 with no plausible destination event. In Phase 7, this is formally tracked as `CLOSED_UNRESOLVED` once the candidate correlation window expires.
 
+## Cross-source corroboration (V11)
+
+`source_type + source_event_id` is producer-local identity; a GriefLogger row ID is not
+an ItemGraph event ID. ItemGraph preserves both raw observations and stores their derived
+relationship in `ig_observation_groups` / `ig_observation_group_members`.
+
+A pair is `CONFIRMED` only when a unique cross-source counterpart shares a non-null
+`item_entity_uuid`, action family, fingerprint, amount, actor, and a timestamp within 250 ms.
+The canonical row is the only row with quantity capacity; corroborating rows are added to
+`ig_edge_evidence` but never to allocations. If identity is missing, non-unique, or otherwise
+uncertain, the group is `AMBIGUOUS`, its members receive `SOURCE_AMBIGUOUS`, and none of its
+rows may support an inferred edge. Raw observations and source IDs are never deleted.
+
+If a legacy active edge allocated through a corroborating or ambiguous row, ItemGraph keeps
+the edge and allocations but changes `edge_state` to `SUPERSEDED_SOURCE_DUPLICATE` or
+`SUPERSEDED_SOURCE_AMBIGUITY`. Superseded edges are excluded from active traces and capacity
+audit totals; `/ig explain <edgeId>` labels them as superseded.
+
+## Interval and unresolved observations
+
+`timestamp_end_ms` bounds interval observations. A container observation with
+`captureType=container_session_net_delta` represents the net fingerprint-level change between
+`PlayerContainerEvent.Open` and `Close`; it is not click-time evidence. A withdraw-and-return
+that leaves zero net change emits no row, and that absence is not evidence that no transfer
+occurred. Multi-viewer attribution remains one ambiguous row, not one row per viewer.
+
+`CAPABILITY_INSERT` and `CAPABILITY_EXTRACT` mean an item changed through an `IItemHandler`.
+`IItemHandler` does not expose the caller or cause, so the remote endpoint is UNKNOWN and the
+action is not labeled hopper/automation without separate evidence. Queue-rejected capability
+rows are excluded from player session attribution and retried once at session close as
+interval-bounded UNKNOWN-caller evidence. If the queue remains full, the retry is counted as
+dropped and is not attributed to a player; `/ig status` reports `dropped` and
+`capabilityQueueRejections` counters.
+
+A canceled `ItemTossEvent` is recorded as `DROP_CANCELLED` to UNKNOWN because it did not
+produce a world item entity. A canceled `LivingDropsEvent` is recorded as
+`DEATH_DROP_CANCELLED` with no destination. Neither is a ground transfer or correlation
+capacity. `DROP_ITEM`/`DEATH_DROP` ground evidence is written only after the corresponding
+`ItemEntity` is confirmed with `isAddedToLevel()`.
+
 ### 5. Quantity-Flow Evidence and Ledgers (Phase 7)
 
 ItemGraph reconstructs stack flows without permanent item UUIDs by tracking exact quantity capacities and allocations:
@@ -278,9 +318,10 @@ In query output, transformations are represented chronologically as:
 
 ## Entity Continuity Tracking (Phase 8)
 
-Authoritative Minecraft `ItemEntity` UUIDs are tracked at the time of ground toss and pickup.
+Authoritative Minecraft `ItemEntity` UUIDs are tracked only after an item entity is confirmed in the level, then reused on pickup when identity remains unique.
 
 - Stored in `ig_observations.item_entity_uuid`.
 - Tracked via `ItemEntityTracker` and `ItemEntityEventListener`.
-- When matching a drop observation to a pickup observation, an identical `ItemEntity` UUID assigns a confidence score of `0.9990` and produces an explanation citing direct entity continuity on the ground.
+- `ItemEntityTracker.findMatchingDropEntity` returns an exact UUID only when exactly one spatial/time candidate fits; ambiguity returns null.
+- When matching a drop observation to a pickup observation, an identical unique `ItemEntity` UUID assigns a confidence score of `0.9990` and produces an explanation citing direct entity continuity on the ground.
 

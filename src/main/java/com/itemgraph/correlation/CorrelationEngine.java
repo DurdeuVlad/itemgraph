@@ -75,7 +75,7 @@ public class CorrelationEngine {
     private static final Logger LOGGER = LoggerFactory.getLogger(CorrelationEngine.class);
 
     /** Actions that put an item on the ground (player -> GROUND). */
-    private static final Set<String> DROP_ACTIONS = Set.of("DROP_ITEM", "THROW_ITEM", "SHOOT_ITEM");
+    private static final Set<String> DROP_ACTIONS = Set.of("DROP_ITEM", "THROW_ITEM", "SHOOT_ITEM", "DEATH_DROP");
 
     /** The action that takes an item off the ground (GROUND -> player). */
     private static final String PICKUP_ACTION = "PICKUP_ITEM";
@@ -149,12 +149,28 @@ public class CorrelationEngine {
             return lastResult;
         }
 
+        try {
+            Connection conn = dbManager.getConnection();
+            synchronized (conn) {
+                lastResult = runCorrelationLocked(conn, startTime);
+                return lastResult;
+            }
+        } catch (Exception e) {
+            long duration = System.currentTimeMillis() - startTime;
+            String msg = "Correlation pass failed: " + e.getMessage();
+            LOGGER.error("Error during ItemGraph correlation pass", e);
+            lastResult = new CorrelationResult(false, 0, 0, 0, duration, msg);
+            return lastResult;
+        }
+    }
+
+    private CorrelationResult runCorrelationLocked(Connection conn, long startTime) {
         int finalised = 0;
         int edges = 0;
         int deferred = 0;
 
         try {
-            Connection conn = dbManager.getConnection();
+            new ObservationEquivalenceService().reconcile(conn, startTime);
             List<PendingObservation> pending = loadPendingGroundObservations(conn);
 
             for (PendingObservation obs : pending) {
@@ -226,18 +242,17 @@ public class CorrelationEngine {
             }
 
             long duration = System.currentTimeMillis() - startTime;
-            lastResult = new CorrelationResult(true, finalised, edges, deferred, duration, null);
+            CorrelationResult result = new CorrelationResult(true, finalised, edges, deferred, duration, null);
             if (edges > 0 || finalised > 0) {
                 LOGGER.info("ItemGraph correlation pass completed in {}ms: {} observations evaluated, {} ground bridges inferred, {} deferred.",
                         duration, finalised, edges, deferred);
             }
-            return lastResult;
+            return result;
         } catch (Exception e) {
             long duration = System.currentTimeMillis() - startTime;
             String msg = "Correlation pass failed: " + e.getMessage();
             LOGGER.error("Error during ItemGraph correlation pass", e);
-            lastResult = new CorrelationResult(false, finalised, edges, deferred, duration, msg);
-            return lastResult;
+            return new CorrelationResult(false, finalised, edges, deferred, duration, msg);
         }
     }
 
@@ -296,6 +311,7 @@ public class CorrelationEngine {
             LEFT JOIN ig_nodes dest ON dest.id = o.target_node_id
             WHERE o.correlated_at IS NULL
               AND (origin.node_type = ? OR dest.node_type = ?)
+              AND EXISTS (SELECT 1 FROM ig_observation_match_checks c WHERE c.observation_id = o.id)
             ORDER BY o.timestamp_ms ASC, o.id ASC
             LIMIT ?
         """;
@@ -403,10 +419,11 @@ public class CorrelationEngine {
                    COALESCE(alloc.allocated, 0) AS allocated_amount
             FROM ig_observations o
             LEFT JOIN (
-                SELECT observation_id, SUM(amount) AS allocated
-                FROM ig_edge_allocations
-                WHERE allocation_role = 'DESTINATION'
-                GROUP BY observation_id
+                SELECT a.observation_id, SUM(a.amount) AS allocated
+                FROM ig_edge_allocations a
+                JOIN ig_inferred_edges e ON e.id = a.edge_id
+                WHERE a.allocation_role = 'DESTINATION' AND e.edge_state = 'ACTIVE'
+                GROUP BY a.observation_id
             ) alloc ON alloc.observation_id = o.id
             WHERE o.action_type = ?
               AND o.node_id = ?
@@ -414,6 +431,8 @@ public class CorrelationEngine {
               AND o.timestamp_ms > ?
               AND o.timestamp_ms <= ?
               AND o.target_node_id IS NOT NULL
+              AND o.correlation_status NOT IN ('CORROBORATING', 'SOURCE_AMBIGUOUS')
+              AND EXISTS (SELECT 1 FROM ig_observation_match_checks c WHERE c.observation_id = o.id)
               AND (o.amount - COALESCE(alloc.allocated, 0)) > 0
             ORDER BY (CASE WHEN ? IS NOT NULL AND o.item_entity_uuid = ? THEN 0 ELSE 1 END) ASC,
                      o.timestamp_ms ASC, o.id ASC
@@ -442,16 +461,19 @@ public class CorrelationEngine {
                    COALESCE(alloc.allocated, 0) AS allocated_amount
             FROM ig_observations o
             LEFT JOIN (
-                SELECT observation_id, SUM(amount) AS allocated
-                FROM ig_edge_allocations
-                WHERE allocation_role = 'SOURCE'
-                GROUP BY observation_id
+                SELECT a.observation_id, SUM(a.amount) AS allocated
+                FROM ig_edge_allocations a
+                JOIN ig_inferred_edges e ON e.id = a.edge_id
+                WHERE a.allocation_role = 'SOURCE' AND e.edge_state = 'ACTIVE'
+                GROUP BY a.observation_id
             ) alloc ON alloc.observation_id = o.id
-            WHERE o.action_type IN ('DROP_ITEM', 'THROW_ITEM', 'SHOOT_ITEM')
+            WHERE o.action_type IN ('DROP_ITEM', 'THROW_ITEM', 'SHOOT_ITEM', 'DEATH_DROP')
               AND o.target_node_id = ?
               AND o.fingerprint_id = ?
               AND o.timestamp_ms < ?
               AND o.timestamp_ms >= ?
+              AND o.correlation_status NOT IN ('CORROBORATING', 'SOURCE_AMBIGUOUS')
+              AND EXISTS (SELECT 1 FROM ig_observation_match_checks c WHERE c.observation_id = o.id)
               AND (o.amount - COALESCE(alloc.allocated, 0)) > 0
             ORDER BY o.timestamp_ms ASC, o.id ASC
         """;
@@ -517,7 +539,12 @@ public class CorrelationEngine {
     // ---------------------------------------------------------------------
 
     public int getSourceAllocated(Connection conn, long observationId) throws SQLException {
-        String sql = "SELECT COALESCE(SUM(amount), 0) FROM ig_edge_allocations WHERE observation_id = ? AND allocation_role = 'SOURCE'";
+        String sql = """
+                SELECT COALESCE(SUM(a.amount), 0)
+                FROM ig_edge_allocations a
+                JOIN ig_inferred_edges e ON e.id = a.edge_id
+                WHERE a.observation_id = ? AND a.allocation_role = 'SOURCE' AND e.edge_state = 'ACTIVE'
+                """;
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, observationId);
             try (ResultSet rs = pstmt.executeQuery()) {
@@ -527,7 +554,12 @@ public class CorrelationEngine {
     }
 
     public int getDestinationAllocated(Connection conn, long observationId) throws SQLException {
-        String sql = "SELECT COALESCE(SUM(amount), 0) FROM ig_edge_allocations WHERE observation_id = ? AND allocation_role = 'DESTINATION'";
+        String sql = """
+                SELECT COALESCE(SUM(a.amount), 0)
+                FROM ig_edge_allocations a
+                JOIN ig_inferred_edges e ON e.id = a.edge_id
+                WHERE a.observation_id = ? AND a.allocation_role = 'DESTINATION' AND e.edge_state = 'ACTIVE'
+                """;
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, observationId);
             try (ResultSet rs = pstmt.executeQuery()) {
@@ -588,6 +620,8 @@ public class CorrelationEngine {
                 pstmt.addBatch();
                 pstmt.executeBatch();
             }
+            addGroupEvidence(conn, edgeId, drop.id());
+            addGroupEvidence(conn, edgeId, bridge.pickup().id());
 
             // Record exact quantity allocations in the ledger
             String insertAllocSql = "INSERT INTO ig_edge_allocations (edge_id, observation_id, allocation_role, amount) VALUES (?, ?, ?, ?)";
@@ -624,6 +658,21 @@ public class CorrelationEngine {
             throw e;
         } finally {
             conn.setAutoCommit(originalAutoCommit);
+        }
+    }
+
+    private void addGroupEvidence(Connection conn, long edgeId, long observationId) throws SQLException {
+        try (PreparedStatement pstmt = conn.prepareStatement("""
+                INSERT OR IGNORE INTO ig_edge_evidence (edge_id, observation_id)
+                SELECT ?, gm.observation_id
+                FROM ig_observation_group_members gm
+                WHERE gm.group_id = (
+                    SELECT group_id FROM ig_observation_group_members WHERE observation_id = ?
+                )
+                """)) {
+            pstmt.setLong(1, edgeId);
+            pstmt.setLong(2, observationId);
+            pstmt.executeUpdate();
         }
     }
 

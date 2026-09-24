@@ -23,7 +23,7 @@ import java.util.Comparator;
  * @param destination  where the item went, may be null when the source recorded no endpoint
  * @param amount       stack size moved
  * @param timestampMs  when the hop happened (OBSERVED) or started (INFERRED)
- * @param endMs        equal to {@code timestampMs} for OBSERVED; {@code time_end} for INFERRED
+ * @param endMs        event interval end for a session net delta, {@code timestampMs} for point OBSERVED evidence, or {@code time_end} for INFERRED
  * @param confidence   null for OBSERVED (evidence is not scored), the stored score for INFERRED
  * @param detail       action type for OBSERVED, short inference description for INFERRED
  */
@@ -74,6 +74,19 @@ public record TraceHop(
                     .thenComparingLong(TraceHop::refId);
 
     public static TraceHop observed(ObservationDetail obs) {
+        String detail = obs.actionType();
+        if (obs.sourceGroup() != null) {
+            ObservationDetail.SourceGroup group = obs.sourceGroup();
+            detail += " [source group #" + group.id() + " " + group.state() + "]";
+            if (group.canonicalObservationId() != null) {
+                detail += " corroborates observation#" + group.canonicalObservationId();
+            }
+        }
+        if ("container_session_net_delta".equals(obs.captureType())) {
+            detail += " [session net delta]";
+        } else if ("queue_overflow_recovery".equals(obs.captureType())) {
+            detail += " [queue overflow recovery]";
+        }
         return new TraceHop(
                 Kind.OBSERVED,
                 obs.id(),
@@ -81,9 +94,9 @@ public record TraceHop(
                 obs.destination(),
                 obs.amount(),
                 obs.timestampMs(),
-                obs.timestampMs(),
+                obs.timestampEndMs() == null ? obs.timestampMs() : obs.timestampEndMs(),
                 null,
-                obs.actionType(),
+                detail,
                 obs.fingerprint()
         );
     }

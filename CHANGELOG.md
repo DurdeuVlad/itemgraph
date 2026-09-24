@@ -6,7 +6,117 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-20
+
+### Summary
+
+ItemGraph 0.2.0 is independent from GriefLogger. It starts and records supported native
+NeoForge event/capability evidence without GriefLogger installed. When GriefLogger is present,
+its read-only rows remain additive evidence; confirmed cross-source copies share one quantity
+capacity, while uncertain pairs remain ambiguous. The hard boot dependency on GriefLogger is
+removed.
+
 ### Added
+
+- **Native drop and pickup observation** (`ItemEntityEventListener` promoted): successful
+  ItemToss/LivingDrops entities write `DROP_ITEM`/`DEATH_DROP` only after
+  `ItemEntity.isAddedToLevel()` confirms world insertion; `ItemEntityPickupEvent.Post` writes
+  `PICKUP_ITEM`. Canceled tosses record `DROP_CANCELLED` to UNKNOWN, and canceled death drops
+  are no-destination `DEATH_DROP_CANCELLED` events; neither is ground movement.
+- **Partial-pickup pairing**: `ItemEntityPickupEvent.Pre` records the entity's stack
+  count before `Inventory.add()` and a per-tick sweep emits the absorbed delta for
+  pickups where Post never fires (NeoForge 21.1.248 gates Post on `add()` returning
+  true, which is false for partial absorbs). Post consumes the pending entry so full
+  pickups are never double-counted; paired pickups are tagged
+  `{"detection":"pre_post_pairing"}` in `raw_data`.
+- **Container capability wrapper** (Issue 4): `ContainerCapabilityWrapper` wraps the
+  `IItemHandler` capability on the vanilla block/block-entity types NeoForge serves —
+  sided-container face rules, double-chest views, hopper cooldowns, and composter
+  re-evaluation remain delegated. Registration runs at `EventPriority.HIGHEST` because
+  `BlockCapability.getCapability` returns the first non-null provider. Real calls emit
+  `CAPABILITY_INSERT`/`CAPABILITY_EXTRACT`; `IItemHandler` does not identify its caller or
+  cause, so both player/cause identity and the remote endpoint remain UNKNOWN.
+- **Player container session deltas** (Issue 3): player GUI clicks mutate
+  `Container` directly and never traverse `IItemHandler`, so player-driven changes are
+  measured as fingerprint-level net deltas across `PlayerContainerEvent.Open`/`Close`.
+  Rows carry `timestamp_ms`/`timestamp_end_ms` and are not click-time evidence. A zero-net
+  withdraw-and-return is not represented and does not prove no interaction occurred.
+  Capability deltas are subtracted; multi-viewer sessions produce one `[ambiguous]` row
+  with candidates preserved in `raw_data`.
+- **`ContainerInteractionTracker`**: Session-watch tracker holding per-container
+  baseline totals, open sessions, participants, signed capability deltas, rejected-row
+  recovery amounts, and double-chest position aliases.
+- **`ContainerCapabilityRegistrar`**: Registers the capability wrapper providers
+  on the mod event bus (`RegisterCapabilitiesEvent`, `EventPriority.HIGHEST`).
+- **Schema migrations V9+V10**: V9 adds a partial unique index on
+  `ig_observations(source_type, timestamp_ms, node_id, fingerprint_id, amount,
+  action_type) WHERE source_event_id IS NULL` plus `idx_obs_action_type`. V10
+  extends the dedup key with `item_entity_uuid` so re-submitted entity events still
+  deduplicate while distinct same-millisecond events (two identical death-drop
+  stacks, pile pickups, repeated machine pushes) are no longer collapsed.
+- **Schema migration V11**: adds `timestamp_end_ms`, source-group/member and match-check
+  tables, and `edge_state`; rebuilds the internal dedup index with `target_node_id` so
+  same-time pickups for different recipients survive.
+- **Cross-source quantity conservation**: a unique shared ItemEntity UUID and matching event
+  details corroborate GriefLogger and ItemGraph rows without duplicating capacity. Uncertain
+  pairs remain ambiguous; legacy edges using aliases are superseded without deleting records.
+- **Shared-writer serialization**: internal observations, GriefLogger ingestion, and
+  correlation transactions serialize on the shared ItemGraph JDBC connection.
+- **`DEATH_DROP` action type**: Added to `CorrelationEngine.DROP_ACTIONS` so death drop
+  observations participate correctly in ground-bridge correlation.
+- **GriefLogger startup log**: ItemGraph now logs `GriefLogger integration: ENABLED` or
+  `DISABLED` with reason at `ServerStartingEvent`.
+
+### Changed
+
+- **`neoforge.mods.toml`**: GriefLogger dependency demoted from `type="required"` to
+  `type="optional"`. ItemGraph now starts without GriefLogger.
+- **`build.gradle`**: `sqlite-jdbc` switched from plain `implementation` to
+  `jarJar(implementation(...))` with version range `[3.40.0.0,4.0.0.0)` and preferred
+  version `3.46.1.0`. ItemGraph bundles its own SQLite driver. NeoForge JarJar negotiation
+  deduplicates with GriefLogger's bundled copy when both are present, eliminating the
+  confirmed JPMS split-package crash.
+- **`IngestionService`**: GL database unavailable no longer emits a WARN every 60 seconds.
+  Logs once at INFO level on first skip; subsequent skips are silent until GL becomes
+  available again.
+- **`/ig status`**: GriefLogger source reports `ENABLED (database reachable)`,
+  `DISABLED (not installed)`, or `DISABLED (mod present but database not found)`; database
+  counts/checkpoints and active/superseded edge counts are queried off-thread, alongside
+  queue loss and capability queue-rejection counts.
+- **`/ig ingest now`**: queues one bounded ingest-and-correlate cycle on the background
+  worker instead of doing source reads and candidate search on the server thread.
+- **`InternalObservationService.persistBatch`**: Resolves `GROUND`, `CONTAINER`, `PLAYER`,
+  `UNKNOWN`, and `ARMOR_STAND` endpoints. `INSERT OR IGNORE` uses the V11 destination-sensitive
+  partial index so same-time events for different recipients are not conflated.
+- **Version**: `0.1.0` → `0.2.0`.
+
+### Fixed
+
+- JPMS split-package crash when GriefLogger and ItemGraph are both installed (sqlite-jdbc
+  conflict: `Modules grieflogger and org.xerial.sqlitejdbc export package org.sqlite`).
+- NULL `source_event_id` dedup gap: internal observations could not be deduplicated by the
+  existing `(source_type, source_event_id)` unique index because SQLite treats `NULL != NULL`.
+- Partial item pickups were silently unobserved: `Inventory.addItem` returns false when
+  only part of the stack fit, so `ItemEntityPickupEvent.Post` never fired and no
+  `PICKUP_ITEM` row (or vanilla pickup stat) was produced. Resolved via the
+  Pre/stack-delta pairing described above (verified live: 1-of-10 partial pickup now
+  records exactly 1).
+- Dev-run classpath gap: jarJar strips sqlite-jdbc from dev run classpaths, so
+  `Class.forName("org.sqlite.JDBC")` only resolved when another installed mod embedded
+  it — a standalone dev boot failed DB init with `ClassNotFoundException`. The driver
+  is now added to `additionalRuntimeClasspath` only when no mod in `run/mods` already
+  embeds sqlite (detected via `META-INF/jarjar|jars/sqlite-jdbc-*.jar` entries; override
+  with `-Pitemgraph.devSqliteProvided=`); adding it unconditionally alongside such a
+  mod crashes module resolution with a duplicate `org.xerial.sqlitejdbc` module.
+  V9 adds a partial unique index covering internal row identity.
+- `PICKUP_ITEM` recorded the pre-pickup stack count even when only part of the stack
+  moved; it now records `originalStack - currentStack`.
+- `ItemTossEvent`/`ItemEntityPickupEvent` handlers now guard `isClientSide` so
+  client-side event posts cannot enqueue duplicate observations.
+- `CorrelationEngine.findCompetingDrops` now counts `DEATH_DROP` rows when scoring
+  drop-side ambiguity (matching `DROP_ACTIONS`).
+
+### Earlier unreleased work
 
 - Phase 10: Production Hardening, Integrity Auditing, and Comprehensive Diagnostics.
   - Off-thread `AuditService` checking core architectural invariants:

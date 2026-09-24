@@ -65,6 +65,22 @@ class AuditServiceTest {
     }
 
     @Test
+    void testDetectsUnknownEdgeState() throws Exception {
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO ig_nodes (id, node_type, level_id) VALUES (1, 'PLAYER', 'minecraft:overworld')");
+            stmt.execute("INSERT INTO ig_item_fingerprints (id, item_id, fingerprint_hash) VALUES (1, 'minecraft:diamond', 'hash1')");
+            stmt.execute("INSERT INTO ig_inferred_edges (id, from_node_id, to_node_id, fingerprint_id, amount, time_start, time_end, confidence, explanation, created_at, edge_state) "
+                    + "VALUES (1, 1, 1, 1, 1, 1000, 2000, 0.9, 'test', 2000, 'UNKNOWN_STATE')");
+        }
+
+        AuditReport report = auditService.audit(conn);
+
+        assertFalse(report.healthy());
+        assertTrue(report.statusMismatches() > 0);
+        assertTrue(report.violationDetails().stream().anyMatch(detail -> detail.contains("unknown edge_state")));
+    }
+
+    @Test
     void testDetectsConservationOverAllocation() throws Exception {
         try (Statement stmt = conn.createStatement()) {
             stmt.execute("INSERT INTO ig_nodes (id, node_type, custom_label, level_id) VALUES (1, 'PLAYER', 'PlayerA', 'minecraft:overworld'), (2, 'GROUND', '0,64,0', 'minecraft:overworld')");

@@ -1,8 +1,11 @@
 package com.itemgraph.tracker;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
  * High-performance temporal tracker for Minecraft ItemEntity UUIDs (Phase 8A).
@@ -35,8 +38,7 @@ public class ItemEntityTracker {
             long timestampMs
     ) {}
 
-    // Key: level:x:y:z:itemId -> EntityRecord
-    private final Map<String, EntityRecord> recentDrops = new ConcurrentHashMap<>();
+    private final Map<String, ConcurrentLinkedDeque<EntityRecord>> recentDrops = new ConcurrentHashMap<>();
     private final Map<UUID, EntityRecord> entityByUuid = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicLong dropCount = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong pickupCount = new java.util.concurrent.atomic.AtomicLong(0);
@@ -52,7 +54,8 @@ public class ItemEntityTracker {
         dropCount.incrementAndGet();
         EntityRecord record = new EntityRecord(entityUuid, playerUuid, level, x, y, z, itemId, amount, timestampMs);
         entityByUuid.put(entityUuid, record);
-        recentDrops.put(makeSpatialKey(level, x, y, z, itemId), record);
+        recentDrops.computeIfAbsent(makeSpatialKey(level, x, y, z, itemId), key -> new ConcurrentLinkedDeque<>())
+                .addLast(record);
         cleanExpired(timestampMs);
     }
 
@@ -88,19 +91,29 @@ public class ItemEntityTracker {
     }
 
     public UUID findMatchingDropEntity(String level, int x, int y, int z, String itemId, long eventTimeMs) {
-        String key = makeSpatialKey(level, x, y, z, itemId);
-        EntityRecord record = recentDrops.get(key);
-        if (record != null && Math.abs(record.timestampMs() - eventTimeMs) < 15_000L) {
-            return record.entityUuid();
+        ConcurrentLinkedDeque<EntityRecord> records = recentDrops.get(makeSpatialKey(level, x, y, z, itemId));
+        if (records == null) {
+            return null;
         }
-        return null;
+
+        List<UUID> candidates = new ArrayList<>();
+        for (EntityRecord record : records) {
+            if (Math.abs(record.timestampMs() - eventTimeMs) < 15_000L
+                    && !candidates.contains(record.entityUuid())) {
+                candidates.add(record.entityUuid());
+            }
+        }
+        return candidates.size() == 1 ? candidates.get(0) : null;
     }
 
     private void cleanExpired(long nowMs) {
         if (entityByUuid.size() > 5000) {
             long cutoff = nowMs - EXPIRATION_MS;
             entityByUuid.entrySet().removeIf(e -> e.getValue().timestampMs() < cutoff);
-            recentDrops.entrySet().removeIf(e -> e.getValue().timestampMs() < cutoff);
+            recentDrops.entrySet().removeIf(e -> {
+                e.getValue().removeIf(record -> record.timestampMs() < cutoff);
+                return e.getValue().isEmpty();
+            });
         }
     }
 

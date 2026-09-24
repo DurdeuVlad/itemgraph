@@ -31,11 +31,27 @@ final class ObservationQueries {
                    o.source_type AS o_source_type,
                    o.source_event_id AS o_source_event_id,
                    o.timestamp_ms AS o_timestamp_ms,
+                   o.timestamp_end_ms AS o_timestamp_end_ms,
+                   CASE
+                       WHEN o.source_type = 'ITEMGRAPH_INTERNAL'
+                         AND substr(CAST(o.raw_data AS TEXT), 1, 128) LIKE '%\"capture\":\"container_session_net_delta\"%'
+                           THEN 'container_session_net_delta'
+                       WHEN o.source_type = 'ITEMGRAPH_INTERNAL'
+                         AND substr(CAST(o.raw_data AS TEXT), 1, 128) LIKE '%\"capture\":\"queue_overflow_recovery\"%'
+                           THEN 'queue_overflow_recovery'
+                       ELSE NULL
+                   END AS o_capture_type,
                    o.action_type AS o_action_type,
                    o.amount AS o_amount,
                    o.correlated_at AS o_correlated_at,
                    o.correlation_status AS o_correlation_status,
                    o.item_entity_uuid AS o_item_entity_uuid,
+                   ogm.group_id AS o_source_group_id,
+                   og.state AS o_source_group_state,
+                   ogm.member_role AS o_source_group_role,
+                   canonical_member.observation_id AS o_canonical_observation_id,
+                   og.match_basis AS o_source_match_basis,
+                   og.explanation AS o_source_group_explanation,
                    o.node_id AS origin_id,
                    origin.node_type AS origin_type,
                    origin.custom_label AS origin_label,
@@ -54,6 +70,10 @@ final class ObservationQueries {
             LEFT JOIN ig_nodes origin ON origin.id = o.node_id
             LEFT JOIN ig_nodes dest ON dest.id = o.target_node_id
             LEFT JOIN ig_item_fingerprints f ON f.id = o.fingerprint_id
+            LEFT JOIN ig_observation_group_members ogm ON ogm.observation_id = o.id
+            LEFT JOIN ig_observation_groups og ON og.id = ogm.group_id
+            LEFT JOIN ig_observation_group_members canonical_member
+                ON canonical_member.group_id = ogm.group_id AND canonical_member.member_role = 'CANONICAL'
             """;
 
     static ObservationDetail map(ResultSet rs) throws SQLException {
@@ -77,6 +97,23 @@ final class ObservationQueries {
 
         String correlationStatus = rs.getString("o_correlation_status");
         String itemEntityUuid = rs.getString("o_item_entity_uuid");
+        long rawEndMs = rs.getLong("o_timestamp_end_ms");
+        Long timestampEndMs = rs.wasNull() ? null : rawEndMs;
+        String captureType = rs.getString("o_capture_type");
+        long rawGroupId = rs.getLong("o_source_group_id");
+        Long groupId = rs.wasNull() ? null : rawGroupId;
+        ObservationDetail.SourceGroup sourceGroup = null;
+        if (groupId != null) {
+            long rawCanonicalId = rs.getLong("o_canonical_observation_id");
+            Long canonicalId = rs.wasNull() ? null : rawCanonicalId;
+            sourceGroup = new ObservationDetail.SourceGroup(
+                    groupId,
+                    rs.getString("o_source_group_state"),
+                    rs.getString("o_source_group_role"),
+                    canonicalId,
+                    rs.getString("o_source_match_basis"),
+                    rs.getString("o_source_group_explanation"));
+        }
 
         return new ObservationDetail(
                 rs.getLong("o_id"),
@@ -90,7 +127,10 @@ final class ObservationQueries {
                 rs.getInt("o_amount"),
                 correlated,
                 correlationStatus,
-                itemEntityUuid
+                itemEntityUuid,
+                timestampEndMs,
+                captureType,
+                sourceGroup
         );
     }
 

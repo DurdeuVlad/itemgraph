@@ -29,6 +29,7 @@ public final class ExplainQueryService {
 
     private static final String EDGE_BY_ID = """
             SELECT e.id AS e_id,
+                   e.edge_state AS e_edge_state,
                    e.amount AS e_amount,
                    e.time_start AS e_time_start,
                    e.time_end AS e_time_end,
@@ -106,7 +107,8 @@ public final class ExplainQueryService {
                         rs.getString("e_explanation"),
                         rs.getLong("e_created_at"),
                         evidence,
-                        truncated
+                        truncated,
+                        rs.getString("e_edge_state")
                 ));
             }
         }

@@ -105,7 +105,18 @@ public final class QueryFormatter {
      */
     public static List<String> observationBody(ObservationDetail obs, String indent) {
         List<String> lines = new ArrayList<>();
-        lines.add(indent + "time:        " + formatTime(obs.timestampMs()));
+        if (obs.timestampEndMs() == null) {
+            lines.add(indent + "time:        " + formatTime(obs.timestampMs()));
+        } else {
+            lines.add(indent + "time window: " + formatTime(obs.timestampMs()) + " -> " + formatTime(obs.timestampEndMs()));
+            if ("container_session_net_delta".equals(obs.captureType())) {
+                lines.add(indent + "scope:       session net delta; intra-session order is unknown and zero-net activity is not represented.");
+            } else if ("queue_overflow_recovery".equals(obs.captureType())) {
+                lines.add(indent + "scope:       coalesced capability transfers recovered after queue rejection; caller remains UNKNOWN.");
+            } else {
+                lines.add(indent + "scope:       observation spans an interval; intra-interval event order is not available.");
+            }
+        }
         lines.add(indent + "source:      " + obs.sourceType()
                 + (obs.sourceEventId() != null ? " event#" + obs.sourceEventId() : " (no source event id)"));
         lines.add(indent + "action:      " + obs.actionType() + "  amount: " + obs.amount() + "x");
@@ -114,6 +125,16 @@ public final class QueryFormatter {
         lines.add(indent + "destination: " + node(obs.destination()));
         if (obs.itemEntityUuid() != null) {
             lines.add(indent + "entity UUID: " + obs.itemEntityUuid());
+        }
+        if (obs.sourceGroup() != null) {
+            ObservationDetail.SourceGroup group = obs.sourceGroup();
+            if ("CONFIRMED".equals(group.state())) {
+                lines.add(indent + "source group: confirmed #" + group.id() + " " + group.matchBasis()
+                        + "; role=" + group.memberRole() + "; canonical observation #" + group.canonicalObservationId());
+            } else {
+                lines.add(indent + "source group: ambiguous #" + group.id()
+                        + "; no independent quantity capacity; " + group.explanation());
+            }
         }
         lines.add(indent + "correlated:  " + (obs.correlatedAtMs() == null
                 ? "not yet evaluated by the correlation engine"
@@ -135,9 +156,13 @@ public final class QueryFormatter {
      */
     public static List<String> formatExplain(EdgeExplanation edge) {
         List<String> lines = new ArrayList<>();
-        lines.add(PREFIX + "=== INFERRED EDGE #" + edge.id()
+        boolean active = "ACTIVE".equals(edge.edgeState());
+        lines.add(PREFIX + "=== " + (active ? "INFERRED" : "SUPERSEDED INFERENCE") + " EDGE #" + edge.id()
                 + " [INFERRED conf=" + formatConfidence(edge.confidence()) + "] ===");
         lines.add("  WARNING: this is a reconstruction, not direct evidence. Only the observations listed below were observed.");
+        if (!active) {
+            lines.add("  state:       " + edge.edgeState() + " (excluded from current traces and quantity capacity)");
+        }
         lines.add("  from:        " + node(edge.from()));
         lines.add("  to:          " + node(edge.to()));
         lines.add("  item:        " + edge.fingerprint().describeFull());
@@ -195,6 +220,11 @@ public final class QueryFormatter {
         for (TraceHop hop : result.hops()) {
             lines.add("  " + formatHop(hop, showItem));
         }
+        if (result.hops().stream().anyMatch(hop -> hop.kind() == TraceHop.Kind.OBSERVED
+                && hop.endMs() > hop.timestampMs()
+                && hop.detail().contains("session net delta"))) {
+            lines.add("  Session net container deltas are interval measurements; intra-session order is unknown, and zero-net activity is not represented.");
+        }
 
         lines.add("  " + result.observedCount() + " observed hop" + (result.observedCount() == 1 ? "" : "s")
                 + ", " + result.inferredCount() + " inferred hop" + (result.inferredCount() == 1 ? "" : "s") + ".");
@@ -226,8 +256,11 @@ public final class QueryFormatter {
                 ? " [" + hop.item().describe() + "]"
                 : "";
 
+        String time = hop.endMs() > hop.timestampMs()
+                ? "during [" + formatTime(hop.timestampMs()) + " -> " + formatTime(hop.endMs()) + "]"
+                : "at " + formatTime(hop.timestampMs());
         return label + " " + nodeShort(hop.origin()) + " -> " + nodeShort(hop.destination())
-                + " : " + hop.amount() + "x" + itemSuffix + " at " + formatTime(hop.timestampMs()) + " " + reference;
+                + " : " + hop.amount() + "x" + itemSuffix + " " + time + " " + reference;
     }
 
     public static String traceNoSuchFingerprint(long fingerprintId) {

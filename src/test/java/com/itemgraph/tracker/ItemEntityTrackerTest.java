@@ -59,6 +59,19 @@ class ItemEntityTrackerTest {
     }
 
     @Test
+    void ambiguousDropsAtTheSameLocationDoNotProduceAnExactEntityMatch() {
+        long now = System.currentTimeMillis();
+        tracker.recordDrop(UUID.randomUUID(), UUID.randomUUID(), "minecraft:overworld", 10, 64, 10,
+                "minecraft:iron_ingot", 1, now);
+        tracker.recordDrop(UUID.randomUUID(), UUID.randomUUID(), "minecraft:overworld", 10, 64, 10,
+                "minecraft:iron_ingot", 1, now + 1_000);
+
+        assertNull(tracker.findMatchingDropEntity("minecraft:overworld", 10, 64, 10,
+                "minecraft:iron_ingot", now + 1_500),
+                "a GriefLogger row must not be assigned to an arbitrary matching ItemEntity");
+    }
+
+    @Test
     void testCounters() {
         long initialDrops = tracker.getDropCount();
         long initialPickups = tracker.getPickupCount();

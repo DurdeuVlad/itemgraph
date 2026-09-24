@@ -221,7 +221,7 @@ The exact factor values, candidate counts, both observation IDs, both player nam
 - A **drop** is stamped once it produces an edge, or once its window has closed with no match (a recorded negative result).
 - A drop whose window is **still open is left pending on purpose**: the pickup that explains it may simply not have been ingested yet — ingestion runs every 60s while the window is minutes long. That deferral is what stops the engine from permanently writing off drops purely for arriving near a cycle boundary.
 
-Correlation runs on the **existing ingestion worker thread**, from the same scheduled executor, immediately after each ingestion cycle completes (`IngestionService.runIngestionSafely`). That gives newly ingested observations a correlation pass without waiting an extra cycle, and guarantees correlation never overlaps ingestion on the shared connection. `/ig ingest now` queues a pass onto that worker rather than running one inline, because candidate search must never happen on the server thread. GriefLogger's database is not touched by correlation at all: it reads and writes only ItemGraph's own tables, and each accepted bridge writes the edge, its two evidence rows and the drop's stamp in a single transaction, so an edge can never exist without its evidence.
+Correlation runs on the **existing ingestion worker thread**, from the same scheduled executor, immediately after each ingestion cycle completes (`IngestionService.runIngestionSafely`). Before candidate search, cross-source matching checks at most 500 unchecked ground observations; `loadPendingGroundObservations` only admits checked rows. `/ig ingest now` queues one complete ingest-and-correlate cycle with `requestIngestionAsync`; it does not read GriefLogger or search candidates on the server thread. Internal persistence, GriefLogger batch writes, and correlation transactions synchronize on the shared ItemGraph JDBC connection, preventing `autoCommit`/commit state interleaving. GriefLogger's database is not touched by correlation at all: accepted bridges write the edge, corroborating evidence rows and quantity allocations to ItemGraph's own tables in a single transaction.
 
 ## Query execution: off-thread, reported back on-thread (Phase 6)
 
@@ -355,6 +355,8 @@ Observations track their allocation progress:
 - `PARTIALLY_ALLOCATED`: partially consumed by inferred edges, window still open for subsequent transfers.
 - `FULLY_ALLOCATED`: 100% of evidenced item quantity has been accounted for by edges ($R = 0$).
 - `CLOSED_UNRESOLVED`: candidate correlation window expired while residual unallocated quantity remained ($R > 0$).
+- `CORROBORATING`: raw row belongs to a confirmed cross-source group but contributes no independent quantity capacity.
+- `SOURCE_AMBIGUOUS`: raw row has a plausible cross-source duplicate without unique identity; it is withheld from correlation.
 
 ### Dynamic Capacity Accounting
 $$\text{allocation} = \min(R_{\text{drop}}, R_{\text{pickup}})$$
@@ -363,13 +365,107 @@ Every allocation is strictly bounded by evidenced capacity, enforcing quantity c
 ## High-Value Integrations & Entity Continuity (Phase 8)
 
 ### ItemEntity Continuity Tracking
-Authoritative Minecraft `ItemEntity` UUIDs are tracked at the time of ground toss and pickup.
-- Tracked via `ItemEntityTracker` and `ItemEntityEventListener` subscribed to `ItemTossEvent` and `ItemEntityPickupEvent.Post`.
+Authoritative Minecraft `ItemEntity` UUIDs are tracked only after the entity is confirmed in the level.
+- `ItemEntityEventListener` records successful toss/death drops after `ItemEntity.isAddedToLevel()` becomes true, and records pickups from `ItemEntityPickupEvent.Post` or a verified partial stack delta.
+- A canceled toss is `DROP_CANCELLED` to UNKNOWN; canceled death drops are `DEATH_DROP_CANCELLED` attempt evidence with no destination. Neither is a ground transfer.
+- `ItemEntityTracker.findMatchingDropEntity` returns an exact UUID only when one candidate fits the spatial/time query.
 - Persisted in `ig_observations.item_entity_uuid` (schema V8).
-- When a drop and pickup share an exact `ItemEntity` UUID, the correlation engine boosts confidence to `0.9990` and documents direct entity continuity in the scoring explanation.
+- When a drop and pickup share an exact unique `ItemEntity` UUID, correlation boosts confidence to `0.9990` and documents direct entity continuity in the scoring explanation.
 
 ### Armor Stand Tracking
 - `ArmorStandEventListener` captures `PlayerInteractEvent.EntityInteractSpecific` to record `EQUIP_ARMOR_STAND` and `UNEQUIP_ARMOR_STAND` observations on armor stand container nodes.
+
+## Native Container & Ground Observation (M5, 0.2.0)
+
+When GriefLogger is absent (or as additive evidence when present), ItemGraph records
+its own `ITEMGRAPH_INTERNAL` observations via `InternalObservationService` (bounded
+10,000-entry async queue, batch-persisted with `INSERT OR IGNORE`). V11 adds a
+destination-sensitive internal dedup index, interval end times, edge state, and derived
+cross-source source groups. Raw observations remain unchanged; a confirmed group has one
+canonical capacity row and corroborating source rows, while a merely compatible signature
+is marked ambiguous and contributes no independent capacity. If a legacy inferred edge
+used an alias or ambiguous row for allocation, it is marked superseded rather than deleted.
+
+### Cross-source equivalence (V11)
+
+`ObservationEquivalenceService` processes up to 500 unchecked ground observations per
+correlation pass using a fingerprint/action/actor/time-bounded candidate query, recording
+checked rows in `ig_observation_match_checks`. A pair is
+confirmed only when it has one unique counterpart with the same non-null `item_entity_uuid`,
+action family, fingerprint, amount, actor, and a timestamp difference of at most 250 ms.
+The corroborating source row remains raw evidence and is attached to inferred edges; only the
+canonical row contributes quantity capacity. A compatible signature without shared entity
+identity becomes an `AMBIGUOUS` group with no inference capacity.
+
+Groups and member roles live in `ig_observation_groups` and
+`ig_observation_group_members`; they do not merge or delete source rows. If an existing edge
+used a corroborating or ambiguous row for an allocation, it is retained with
+`edge_state=SUPERSEDED_SOURCE_DUPLICATE` or `edge_state=SUPERSEDED_SOURCE_AMBIGUITY`, excluded
+from active traces and capacity totals, and visible through `/ig explain <edgeId>` as a
+superseded inference. Correlation, GriefLogger ingestion, and internal observation writes
+serialize transactions on the shared ItemGraph JDBC connection.
+
+### Ground movement
+- `ItemTossEvent` and `LivingDropsEvent` create bounded pending-drop entries. The
+  listener records `DROP_ITEM`/`DEATH_DROP` as player → GROUND only after the
+  `ItemEntity` reports `isAddedToLevel()`. A canceled toss is `DROP_CANCELLED` to UNKNOWN;
+  a canceled death-drop is `DEATH_DROP_CANCELLED` with no destination. Neither claims
+  ground movement or receives an `item_entity_uuid`.
+- `ItemEntityPickupEvent.Post` → `PICKUP_ITEM` (GROUND → player) with the *actually picked
+  up* quantity (`originalStack - currentStack`, so partial pickups never inflate quantity).
+  The `ItemEntityTracker` returns an exact UUID only when the spatial/time match is unique.
+- **Partial-pickup gap (NeoForge 21.1.248)**: `ItemEntity.playerTouch` gates `Post`
+  on `Inventory.add()` returning true, but `Inventory.addItem` returns false when
+  only part of the stack fit — a partial pickup absorbs items yet fires no Post
+  (and no vanilla pickup stat). `ItemEntityPickupEvent.Pre` therefore records a
+  pending attempt (entity, player, pre-add count); a `ServerTickEvent.Post` sweep
+  reads the entity's live stack — a reduced count on a still-alive entity is an
+  absorbed partial and emits `PICKUP_ITEM` with the exact delta, tagged
+  `{"detection":"pre_post_pairing"}` in `raw_data`. A fired Post consumes the
+  pending entry so full pickups are never double-counted; entries on removed
+  entities are dropped without emitting (merge/despawn indistinguishable from
+  absorb) and all entries expire after 1s under a 512-entry bound.
+
+### Automated container transfers (Issue 4)
+- `ContainerCapabilityRegistrar` registers `ContainerCapabilityWrapper` providers
+  for `Capabilities.ItemHandler.BLOCK` at `EventPriority.HIGHEST`. Priority matters:
+  `BlockCapability.getCapability` returns the first non-null provider in
+  registration order, and NeoForge's own vanilla providers register at normal
+  priority — the wrapper must land earlier or it is never invoked.
+- Each provider wraps the *same* handler vanilla would return, so interception is
+  observation-only: `SidedInvWrapper` for `WorldlyContainer` types (face rules
+  preserved), `ChestBlock.getContainer` merged view for chests (double chests
+  intact), `VanillaHopperItemHandler` for hoppers (cooldown semantics preserved),
+  `ForwardingItemHandler` for the composter. Types vanilla does not serve (lectern,
+  ender chest) are not registered — adding a capability would create automation
+  behaviour rather than observe it.
+- Every real (`simulate=false`) insert/extract emits `CAPABILITY_INSERT` /
+  `CAPABILITY_EXTRACT` anchored to the observed container. An `IItemHandler` call
+  identifies neither caller nor cause, so the other endpoint is the per-level UNKNOWN
+  node and the row does not claim hopper/automation provenance.
+- The wrapper records signed capability deltas even when the bounded observation queue
+  rejects the raw row. At session close, rejected quantities are retried once as
+  coalesced UNKNOWN-caller evidence; if the queue is still full, the retry is counted as
+  dropped and never attributed to a player. `/ig status` exposes both counters.
+
+### Player container transfers (Issue 3)
+- Player GUI clicks mutate the menu's `Container` directly
+  (`AbstractContainerMenu.moveItemStackTo`); they never traverse `IItemHandler`, so
+  a capability wrapper cannot observe them. `ContainerSessionListener` binds
+  `PlayerContainerEvent.Open`/`Close` to `ContainerInteractionTracker` and emits a
+  fingerprint-level session net delta. `timestamp_ms` and `timestamp_end_ms` bound the
+  interval; the row is not click-time evidence.
+- Withdraw-and-return activity with zero net change emits no row. That absence does not
+  prove that no interaction occurred. Exact click/slot chronology remains out of scope.
+- Capability deltas are excluded from the player residual whether their raw row queued
+  or was rejected, preventing machine traffic from being attributed to a viewer.
+- One open participant → attributed `ADD_ITEM`/`REMOVE_ITEM`. Multiple participants →
+  one `[ambiguous]` observation (UNKNOWN actor endpoint, candidates preserved in
+  `raw_data`) rather than N rows manufacturing quantity.
+- Container resolution scans `menu.slots` for a `BlockEntity`-backed `Container`;
+  double chests (`CompoundContainer`) recover the clicked position from
+  `RightClickBlock` in the same tick and alias the partner half. Menus without a
+  block-entity container (crafting grids, anvils, ender chests) are not watched.
 
 ### Expanded Query UX
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
@@ -392,7 +488,7 @@ Item transformations (identity shifts) are tracked in `ig_item_transformations`:
 3. **Relational Graph Integrity**: zero orphaned allocations and zero missing edge endpoint nodes.
 4. **Lifecycle State Consistency**: validates observation `correlation_status` against active allocations.
 
-The `/ig audit` command runs this engine on the query worker and outputs a comprehensive integrity report. Diagnostic counters in `/ig status` report internal queue throughput, transformation totals, active tracked entities, and continuity matches.
+The `/ig audit` command runs this engine on the query worker and outputs a comprehensive integrity report. `/ig status` reports active/superseded edges, internal queue throughput/drops, capability queue rejections, transformation totals, active tracked entities, and continuity matches; its database count/checkpoint reads also run on the query worker.
 
 ## Layered architecture
 
@@ -448,6 +544,14 @@ ItemGraph owns:
 - explanation records
 - schema migrations
 - operational metrics
+
+**SQLite driver provisioning**: `sqlite-jdbc` is bundled in the ItemGraph jar via
+`jarJar` (version range `[3.40.0.0,4.0.0.0)`, prefer `3.46.1.0`), so production boots
+standalone and JarJar negotiation deduplicates with GriefLogger's embedded copy. Dev
+runs launch the mod from `build/classes`, so the project's jarJar contents never
+materialize — `build.gradle` adds the driver to `additionalRuntimeClasspath` only when
+no jar in `run/mods` embeds `sqlite-jdbc` (adding it unconditionally alongside such a
+mod crashes module resolution with a duplicate `org.xerial.sqlitejdbc` module).
 
 ## Suggested persistence model
 
@@ -547,7 +651,7 @@ The architecture should leave room for:
 - repairs
 - enchanting
 - container-within-container tracking
-- hopper/automation flow
+- identifying the caller/cause of UNKNOWN-endpoint capability transfers when a supported API exposes it
 - faction-aware visibility
 - richer graph UI
 - exportable moderation case reports

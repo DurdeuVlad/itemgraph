@@ -40,8 +40,27 @@ public record EdgeExplanation(
         String explanation,
         long createdAtMs,
         List<ObservationDetail> evidence,
-        boolean evidenceTruncated
+        boolean evidenceTruncated,
+        String edgeState
 ) {
+
+    public EdgeExplanation(
+            long id,
+            NodeRef from,
+            NodeRef to,
+            FingerprintRef fingerprint,
+            int amount,
+            long timeStart,
+            long timeEnd,
+            double confidence,
+            String explanation,
+            long createdAtMs,
+            List<ObservationDetail> evidence,
+            boolean evidenceTruncated
+    ) {
+        this(id, from, to, fingerprint, amount, timeStart, timeEnd, confidence, explanation,
+                createdAtMs, evidence, evidenceTruncated, "ACTIVE");
+    }
 
     public EdgeExplanation {
         evidence = List.copyOf(evidence);

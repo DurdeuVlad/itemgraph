@@ -40,15 +40,49 @@ repositories {
     mavenCentral()
 }
 
+// jarJar strips the dependency from every dev-run classpath, but a dev run launches
+// the mod from build/classes so the project's own jarJar contents never materialize
+// — org.sqlite.JDBC then resolves only if some installed mod embeds it (GriefLogger
+// does). Scan the dev run's mods dir for an embedded sqlite jar and put the driver
+// on the dev classpath only when nothing provides it; adding it unconditionally
+// alongside such a mod crashes module resolution (duplicate org.xerial.sqlitejdbc).
+// The production jar is unaffected — it always uses the bundled jarJar copy.
+// Override detection with -Pitemgraph.devSqliteProvided=true|false if needed.
+def devSqliteProvided = providers.gradleProperty('itemgraph.devSqliteProvided')
+        .map { it.toBoolean() }
+        .orElse(provider {
+            (file('run/mods').listFiles()?.findAll { it.name.endsWith('.jar') } ?: []).any { jar ->
+                try {
+                    new java.util.zip.ZipFile(jar).withCloseable { z ->
+                        java.util.Collections.list(z.entries()).any {
+                            it.name ==~ /META-INF\/(jarjar|jars)\/sqlite-jdbc-.*\.jar/
+                        }
+                    }
+                } catch (Exception ignored) {
+                    false
+                }
+            }
+        })
+
+if (!devSqliteProvided.get()) {
+    dependencies {
+        additionalRuntimeClasspath 'org.xerial:sqlite-jdbc:3.46.1.0'
+    }
+}
+
 dependencies {
-    // Compile-only: do NOT jarJar-bundle this. GriefLogger (a hard runtime
-    // dependency of ItemGraph anyway) already bundles sqlite-jdbc and exports
-    // the org.sqlite package as its own JPMS module. Bundling a second copy
-    // here causes a module resolution conflict at boot: "Modules grieflogger
-    // and org.xerial.sqlitejdbc export package org.sqlite to module chimes"
-    // - confirmed live on staging. ItemGraph relies on GriefLogger's bundled
-    // copy being present on the module path at runtime instead.
-    implementation 'org.xerial:sqlite-jdbc:3.46.1.0'
+    // Bundle sqlite-jdbc via NeoForge JarJar so ItemGraph is self-sufficient
+    // when GriefLogger is absent. When GriefLogger IS present, JarJar's version
+    // negotiation deduplicates on the same group:artifact coordinates — only the
+    // highest version within both mods' declared ranges is placed on the module
+    // path, eliminating the "two modules export org.sqlite" JPMS split-package
+    // conflict that occurred with plain `implementation`.
+    jarJar(implementation('org.xerial:sqlite-jdbc')) {
+        version {
+            prefer '3.46.1.0'
+            require '[3.40.0.0,4.0.0.0)'
+        }
+    }
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

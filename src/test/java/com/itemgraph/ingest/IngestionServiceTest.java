@@ -1,9 +1,14 @@
 package com.itemgraph.ingest;
 
+import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.correlation.CorrelationEngine;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.graph.NodeManager;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.neoforged.fml.loading.LoadingModList;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -13,6 +18,11 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -26,6 +36,18 @@ class IngestionServiceTest {
     private DatabaseManager dbManager;
     private GriefLoggerAdapter adapter;
     private IngestionService ingestionService;
+
+    @BeforeAll
+    static void initMinecraftRegistries() {
+        if (LoadingModList.get() == null) {
+            LoadingModList.of(java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.Map.of());
+        }
+        SharedConstants.tryDetectVersion();
+        try {
+            Bootstrap.bootStrap();
+        } catch (Throwable ignored) {
+        }
+    }
 
     @BeforeEach
     void setUp() throws Exception {
@@ -175,6 +197,77 @@ class IngestionServiceTest {
         assertTrue(rerunResult.success());
         // Deduplication prevents double insert
         assertEquals(1, ingestionService.getTotalObservationsCount());
+    }
+
+    @Test
+    void concurrentIngestionAndInternalPersistenceKeepTransactionsIsolated() throws Exception {
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + griefLoggerDbPath.toAbsolutePath());
+             Statement stmt = conn.createStatement()) {
+            for (int i = 0; i < 500; i++) {
+                stmt.execute("INSERT INTO items (time, user, level, x, y, z, type, amount, action) VALUES ("
+                        + (System.currentTimeMillis() + i) + ", 1, 1, 1646, 78, -1475, 1, 1, 2)");
+            }
+        }
+
+        InternalObservationService internal = InternalObservationService.getInstance();
+        internal.clear();
+        CanonicalItem item = new CanonicalItem("minecraft:diamond", "internal-diamond", null, null, null);
+        for (int i = 0; i < 500; i++) {
+            internal.submit(new InternalObservationService.InternalObservation(
+                    System.currentTimeMillis() + i,
+                    "EQUIP_ARMOR_STAND",
+                    "internal-player",
+                    "InternalPlayer",
+                    "minecraft:overworld",
+                    10, 64, 20,
+                    "minecraft:overworld",
+                    12.0, 64.0, 22.0,
+                    "ARMOR_STAND",
+                    item,
+                    1,
+                    null));
+        }
+
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> internalStart = workers.submit(() -> {
+                start.await();
+                internal.start();
+                return null;
+            });
+            Future<IngestionResult> ingestion = workers.submit(() -> {
+                start.await();
+                return ingestionService.runIngestion();
+            });
+            start.countDown();
+
+            internalStart.get(5, TimeUnit.SECONDS);
+            IngestionResult result = ingestion.get(30, TimeUnit.SECONDS);
+            assertTrue(result.success(), result.errorMessage());
+            internal.stop();
+
+            assertEquals(500, internal.getTotalPersisted());
+            assertEquals(0, internal.getTotalDropped());
+            try (Statement stmt = dbManager.getConnection().createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT source_type, COUNT(*) AS amount FROM ig_observations GROUP BY source_type")) {
+                int griefLoggerRows = 0;
+                int internalRows = 0;
+                while (rs.next()) {
+                    if ("GRIEFLOGGER".equals(rs.getString("source_type"))) {
+                        griefLoggerRows = rs.getInt("amount");
+                    } else if ("ITEMGRAPH_INTERNAL".equals(rs.getString("source_type"))) {
+                        internalRows = rs.getInt("amount");
+                    }
+                }
+                assertEquals(501, griefLoggerRows);
+                assertEquals(500, internalRows);
+            }
+        } finally {
+            start.countDown();
+            internal.stop();
+            workers.shutdownNow();
+        }
     }
 
     @Test

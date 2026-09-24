@@ -30,13 +30,17 @@ description='''${mod_description}'''
     ordering="NONE"
     side="BOTH"
 
-# ItemGraph's own SQLite JDBC driver is NOT bundled (see build.gradle comment) -
-# it relies on GriefLogger's bundled copy being present on the module path at
-# runtime, in addition to being ItemGraph's primary evidence source.
+# GriefLogger is an OPTIONAL evidence source. ItemGraph operates without it:
+# GriefLogger ingestion cycles are skipped when the database file is absent, and
+# ItemGraph's own NeoForge event listeners provide complete item movement coverage.
+# When GriefLogger IS present, ItemGraph reads its SQLite database read-only and
+# merges the evidence with its own observations (duplicates suppressed).
+# ItemGraph bundles its own sqlite-jdbc via JarJar; JarJar version negotiation
+# deduplicates with GriefLogger's bundled copy when both are present.
 [[dependencies.${mod_id}]]
     modId="grieflogger"
-    type="required"
-    reason="ItemGraph reads GriefLogger's evidence database and relies on its bundled sqlite-jdbc on the module path"
+    type="optional"
+    reason="Optional evidence source. ItemGraph functions fully without it."
     versionRange="[1.2.10,)"
     ordering="AFTER"
     side="BOTH"
