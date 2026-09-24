@@ -4,7 +4,14 @@
 
 GriefLogger is an **optional additive evidence source** for ItemGraph as of version 0.2.0.
 
-ItemGraph does not depend on GriefLogger to boot or operate. When GriefLogger is present, ItemGraph ingests its SQLite database in read-only mode as an additive evidence source. When GriefLogger is absent, ItemGraph still records its supported native NeoForge events and capability-mediated container changes, then reconstructs flows with the same evidence limits; session net deltas do not expose click order, and generic capability calls do not identify their caller.
+## Supported modes
+
+| GriefLogger installation | ItemGraph behavior |
+|---|---|
+| Absent | ItemGraph boots with its own database and records its supported native NeoForge observations and registered vanilla `IItemHandler` changes. Coverage remains limited: container observations are open/close session net deltas, capability callers/causes are UNKNOWN, private ender chests are not natively watched, and non-vanilla inventories need dedicated adapters. |
+| Present | The same ItemGraph-native capture remains enabled. ItemGraph additionally ingests GriefLogger's SQLite evidence through read-only connections. Raw rows from both sources are preserved; confirmed copies share one capacity group and uncertain matches remain ambiguous. |
+
+These are additive modes, not an either/or switch. GriefLogger is not required for ItemGraph to boot or run.
 
 ## Integration principle
 

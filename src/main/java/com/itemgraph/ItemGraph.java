@@ -52,7 +52,7 @@ public class ItemGraph {
         boolean glPresent = net.neoforged.fml.ModList.get().isLoaded("grieflogger");
         LOGGER.info("GriefLogger integration: {}", glPresent
                 ? "ENABLED — reading from GriefLogger database as additive evidence source"
-                : "DISABLED — GriefLogger not installed; ItemGraph operating on native event listeners only");
+                : "DISABLED — GriefLogger not installed; ItemGraph using supported native event and capability observations");
     }
 
     private void onServerStopping(ServerStoppingEvent event) {

@@ -1,7 +1,7 @@
 # ItemGraph Milestones
 
 Document status: active
-Last reviewed: 2026-09-17
+Last reviewed: 2026-09-24
 Owner: Vlad Durdeu
 
 Milestones describe outcomes and proof, not a list of implementation chores.
@@ -82,19 +82,55 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 
 ## M5: GriefLogger-Independent Feature Parity (0.2.0)
 
-- Status: complete
-- Outcome: ItemGraph 0.2.0 operates fully without GriefLogger installed, capturing
-  the complete item movement graph (player ground drops/pickups, container interactions,
-  and automated hopper transfers) through native NeoForge event listeners and capability
-  wrappers. When GriefLogger is present, it provides additive evidence with no duplicate rows.
-- Scope boundary: Vanilla container block entities, player inventory interactions, and
-  server-side automation. Excludes player-private ender chests and non-vanilla modded inventories.
+- Status: implemented and merged in PR #6. The V11 live movement scenarios remain
+  unverified; see `docs/TEST_PLAN.md` for the exact staging boundary and evidence gap.
+- Outcome: ItemGraph boots and records its supported native observations without
+  GriefLogger. When GriefLogger is installed, ItemGraph reads its SQLite database
+  read-only and adds its observations as evidence. Confirmed source copies retain both
+  raw rows but contribute one capacity; uncertain matches remain ambiguous. No claim is
+  made that all item movement is observable.
+- Scope boundary: native player ground drops/pickups and death drops after confirmed
+  entity insertion; player container **session net deltas** over open/close (not click
+  history); caller-unknown capability transfers through registered vanilla block
+  `IItemHandler` providers; armor-stand and transformation observations. Excludes private
+  ender chests and non-vanilla inventories without a supported adapter. Generic
+  `IItemHandler` calls do not prove a hopper or automation cause.
 - Dependencies: NeoForge 1.21.1, Java 21, JarJar-bundled `org.xerial:sqlite-jdbc`.
 - Acceptance evidence:
-  - Issue [#1](https://github.com/DurdeuVlad/itemgraph/issues/1): JarJar `sqlite-jdbc` bundling & optional GriefLogger boot.
-  - Issue [#2](https://github.com/DurdeuVlad/itemgraph/issues/2): Native drop, toss, and pickup observations with V9 dedup.
-  - Issue [#3](https://github.com/DurdeuVlad/itemgraph/issues/3): Player container transfer observation. Player GUI clicks mutate `Container` directly and never reach `IItemHandler`, so player transfers are observed by session diffs over `PlayerContainerEvent.Open`/`Close` (`ContainerSessionListener` + `ContainerInteractionTracker`), with capability-reported automation credits excluding concurrent machine traffic.
-  - Issue [#4](https://github.com/DurdeuVlad/itemgraph/issues/4): Automated hopper/machine transfer observation via `ContainerCapabilityWrapper` on `Capabilities.ItemHandler.BLOCK`, registered at `EventPriority.HIGHEST` so providers precede NeoForge's vanilla ones.
-  - Issue [#5](https://github.com/DurdeuVlad/itemgraph/issues/5): Source-agnostic correlation, log hygiene, and `/ig status` telemetry.
-- Risk: Modded inventories that bypass `IItemHandler` will remain unobserved until dedicated adapters are built.
+  - Issues [#1](https://github.com/DurdeuVlad/itemgraph/issues/1)–[#5](https://github.com/DurdeuVlad/itemgraph/issues/5) are closed and PR #6 is merged.
+  - `./gradlew clean build`: 234 tests passed, 0 failures, 0 skipped.
+  - The loopback staging server migrated ItemGraph's database to V11. Live player-movement
+    scenarios were not run in that session, and the GriefLogger database was not
+    hash-verified; do not treat startup as proof of movement parity.
+- Risk: unobserved or unsupported inventory changes remain unresolved; V11 live movement
+  coverage still needs a staging run isolated from the existing GriefLogger database.
+
+## M6: Moderator investigation without a custom client
+
+- Status: active; tracked by GitHub milestone #2 and issues #7, #8, #10, and #11.
+- Outcome: moderators can read the existing ItemGraph evidence through a vanilla-client
+  GUI, a command-toggled container inspector, and complete command help.
+- Scope boundary: read-only evidence browsing at permission level 2. No rollback,
+  inventory mutation, custom client screen, or custom ItemGraph item.
+- Dependencies: M5 is merged; the GUI (#8) precedes the inspector (#10), and the command
+  reference (#11) follows both.
+- Acceptance evidence: automated command/query/menu tests and a dedicated NeoForge 1.21.1
+  staging run with a vanilla client, with GriefLogger absent and present.
+- Risk: menu interactions could mutate player inventories or disclose sensitive graph data;
+  all menu actions must remain navigation/display-only and permission-checked.
+
+## M7: Preview integration API for NeoForge mods
+
+- Status: active; tracked by GitHub milestone #3 and issues #9 and #12.
+- Outcome: a separate NeoForge mod can submit source-attributed observations and query
+  bounded ItemGraph flows without database access.
+- Scope boundary: server-side Java API in the main ItemGraph JAR, preview-only before 1.0.
+  No GriefLogger API, JDBC exposure, web API, custom client protocol, or CustomNPCs integration.
+- Dependencies: the API contract (#9) must be reviewed and accepted before implementation
+  and consumer example (#12).
+- Acceptance evidence: a separate sample consumer compiles against the main JAR and
+  exercises observation submission and flow queries on a dedicated server with
+  GriefLogger absent and present.
+- Risk: external source identity, inventory identity, backpressure, and sensitive query
+  results require explicit contracts and consumer-side permission checks.
 
