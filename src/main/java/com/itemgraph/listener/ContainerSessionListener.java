@@ -34,9 +34,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Player-driven container transfers are not observable through the
  * {@code IItemHandler} capability (menus mutate {@code Container} directly), so
  * this listener snapshots a fingerprint-level view of the container at
- * {@code Open} and diffs it at {@code Close}; the residual delta — after
- * automation credits reported by {@link ContainerCapabilityWrapper} are removed —
- * is recorded as {@code ADD_ITEM}/{@code REMOVE_ITEM}.
+ * {@code Open} and diffs it at {@code Close}; the residual session net delta — after
+ * capability-mediated changes are removed — is recorded as {@code ADD_ITEM}/{@code REMOVE_ITEM}
+ * with explicit start/end timestamps, not as click-time evidence.
  *
  * <h2>Container resolution</h2>
  * <p>The observed {@code Container} is located by scanning
@@ -45,7 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * accessible block entity, so the position is recovered from the
  * {@link PlayerInteractEvent.RightClickBlock} that opened the menu — recorded the
  * same tick — and the connected chest half is registered as an alias so
- * automation against either half hits the same watch. Menus whose slots are not
+ * capability calls against either half hit the same watch. Menus whose slots are not
  * backed by a block-entity container (crafting grids, ender chests, anvils) are
  * ignored.
  */

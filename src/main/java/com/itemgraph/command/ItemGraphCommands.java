@@ -9,6 +9,7 @@ import com.itemgraph.ingest.IngestionResult;
 import com.itemgraph.ingest.IngestionService;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.SourceCheckpoint;
+import com.itemgraph.listener.ContainerInteractionTracker;
 import com.itemgraph.query.EventQueryService;
 import com.itemgraph.query.ExplainQueryService;
 import com.itemgraph.query.FingerprintRef;
@@ -30,7 +31,6 @@ import net.minecraft.network.chat.Component;
 import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
-import java.sql.SQLException;
 import java.util.List;
 
 /**
@@ -198,12 +198,10 @@ public final class ItemGraphCommands {
 
     private static int status(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
-
         String modVersion = ModList.get()
                 .getModContainerById(ItemGraph.MOD_ID)
                 .map(c -> c.getModInfo().getVersion().toString())
                 .orElse("unknown");
-
         boolean griefLoggerLoaded = ModList.get().isLoaded("grieflogger");
         boolean glDbAvailable = IngestionService.getInstance().getAdapter().isDatabaseAvailable();
         String glStatus = !griefLoggerLoaded ? "DISABLED (not installed)"
@@ -214,7 +212,6 @@ public final class ItemGraphCommands {
         boolean dbConnected = db.isInitialized();
         String dbPath = db.getDatabasePath() != null ? db.getDatabasePath().toString() : "not set";
         String dbError = db.getLastError();
-
         source.sendSuccess(() -> Component.literal(
                 "[ItemGraph] version=" + modVersion +
                 " griefLogger=" + glStatus +
@@ -222,78 +219,77 @@ public final class ItemGraphCommands {
                 " dbPath=" + dbPath +
                 (dbError != null ? " lastError=" + dbError : "")
         ), false);
+        if (!dbConnected) {
+            source.sendFailure(Component.literal("[ItemGraph] Database statistics unavailable; see the database error above."));
+            return 0;
+        }
 
         IngestionService ingestion = IngestionService.getInstance();
-        long totalObservations = ingestion.getTotalObservationsCount();
         IngestionResult lastResult = ingestion.getLastResult();
-
-        String checkpointsSummary;
-        try {
-            var igConn = db.getConnection();
-            SourceCheckpoint itemsCp = ingestion.getCheckpoint(igConn, IngestionService.SOURCE_ITEMS);
-            SourceCheckpoint containersCp = ingestion.getCheckpoint(igConn, IngestionService.SOURCE_CONTAINERS);
-            checkpointsSummary = "items(rowid=" + itemsCp.lastSourceRowid() + ") containers(rowid=" + containersCp.lastSourceRowid() + ")";
-        } catch (SQLException e) {
-            checkpointsSummary = "unavailable (" + e.getMessage() + ")";
-        }
-        final String checkpointsSummaryFinal = checkpointsSummary;
-
         CorrelationResult lastCorrelation = ingestion.getCorrelationEngine().getLastResult();
-        source.sendSuccess(() -> Component.literal(
-                "[ItemGraph] correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s" +
-                " lastPass=" + (lastCorrelation == null ? "never run yet" :
-                    (lastCorrelation.success() ? "OK" : "ERROR (" + lastCorrelation.errorMessage() + ")") +
-                    " (" + lastCorrelation.observationsFinalised() + " evaluated, " +
-                    lastCorrelation.edgesCreated() + " bridges inferred, " +
-                    lastCorrelation.deferred() + " deferred, " + lastCorrelation.durationMs() + "ms)")
-        ), false);
-
-        source.sendSuccess(() -> Component.literal(
-                "[ItemGraph] ingestion: running=" + ingestion.isRunning() +
-                " totalObservations=" + totalObservations +
-                " checkpoints=" + checkpointsSummaryFinal +
-                " lastCycle=" + (lastResult == null ? "never run yet" :
-                    (lastResult.success() ? "OK" : "ERROR (" + lastResult.errorMessage() + ")") +
-                    " (" + lastResult.itemsIngested() + " items, " + lastResult.containersIngested() +
-                    " containers, " + lastResult.durationMs() + "ms)")
-        ), false);
-
         InternalObservationService internalObs = InternalObservationService.getInstance();
         ItemEntityTracker entityTracker = ItemEntityTracker.getInstance();
+        long capabilityQueueRejections = ContainerInteractionTracker.getInstance().getTotalCapabilityQueueRejections();
 
-        source.sendSuccess(() -> Component.literal(
-                "[ItemGraph] internal queue: size=" + internalObs.getQueueSize() +
-                " enqueued=" + internalObs.getTotalEnqueued() +
-                " persisted=" + internalObs.getTotalPersisted() +
-                " transformations=" + internalObs.getTotalTransformations()
-        ), false);
-
-        source.sendSuccess(() -> Component.literal(
-                "[ItemGraph] entity tracking: active=" + entityTracker.getActiveEntityCount() +
-                " drops=" + entityTracker.getDropCount() +
-                " pickups=" + entityTracker.getPickupCount() +
-                " continuityMatches=" + entityTracker.getContinuityMatchCount()
-        ), false);
-
-        return 1;
+        return QueryDispatcher.dispatch(source, "status", conn -> {
+            long totalObservations;
+            try (var stmt = conn.createStatement(); var rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_observations")) {
+                rs.next();
+                totalObservations = rs.getLong(1);
+            }
+            long activeEdges = 0;
+            long supersededEdges = 0;
+            try (var stmt = conn.createStatement();
+                 var rs = stmt.executeQuery("SELECT edge_state, COUNT(*) FROM ig_inferred_edges GROUP BY edge_state")) {
+                while (rs.next()) {
+                    if ("ACTIVE".equals(rs.getString(1))) {
+                        activeEdges = rs.getLong(2);
+                    } else {
+                        supersededEdges += rs.getLong(2);
+                    }
+                }
+            }
+            SourceCheckpoint itemsCp = ingestion.getCheckpoint(conn, IngestionService.SOURCE_ITEMS);
+            SourceCheckpoint containersCp = ingestion.getCheckpoint(conn, IngestionService.SOURCE_CONTAINERS);
+            String checkpoints = "items(rowid=" + itemsCp.lastSourceRowid() + ") containers(rowid="
+                    + containersCp.lastSourceRowid() + ")";
+            return QueryDispatcher.QueryOutput.found(List.of(
+                    "[ItemGraph] correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s"
+                            + " lastPass=" + (lastCorrelation == null ? "never run yet"
+                            : (lastCorrelation.success() ? "OK" : "ERROR (" + lastCorrelation.errorMessage() + ")")
+                            + " (" + lastCorrelation.observationsFinalised() + " evaluated, "
+                            + lastCorrelation.edgesCreated() + " bridges inferred, " + lastCorrelation.deferred()
+                            + " deferred, " + lastCorrelation.durationMs() + "ms)"),
+                    "[ItemGraph] ingestion: running=" + ingestion.isRunning()
+                            + " totalObservations=" + totalObservations
+                            + " checkpoints=" + checkpoints
+                            + " lastCycle=" + (lastResult == null ? "never run yet"
+                            : (lastResult.success() ? "OK" : "ERROR (" + lastResult.errorMessage() + ")")
+                            + " (" + lastResult.itemsIngested() + " items, " + lastResult.containersIngested()
+                            + " containers, " + lastResult.durationMs() + "ms)"),
+                    "[ItemGraph] inference ledger: activeEdges=" + activeEdges + " supersededEdges=" + supersededEdges,
+                    "[ItemGraph] internal queue: size=" + internalObs.getQueueSize()
+                            + " enqueued=" + internalObs.getTotalEnqueued()
+                            + " persisted=" + internalObs.getTotalPersisted()
+                            + " dropped=" + internalObs.getTotalDropped()
+                            + " capabilityQueueRejections=" + capabilityQueueRejections
+                            + " transformations=" + internalObs.getTotalTransformations(),
+                    "[ItemGraph] entity tracking: active=" + entityTracker.getActiveEntityCount()
+                            + " drops=" + entityTracker.getDropCount()
+                            + " pickups=" + entityTracker.getPickupCount()
+                            + " continuityMatches=" + entityTracker.getContinuityMatchCount()
+            ));
+        });
     }
 
     private static int ingestNow(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
-        IngestionResult result = IngestionService.getInstance().runIngestion();
-
-        if (result.success()) {
-            boolean queued = IngestionService.getInstance().requestCorrelationAsync();
-            source.sendSuccess(() -> Component.literal(
-                    "[ItemGraph] Ingestion cycle complete: " + result.itemsIngested() + " new item observations, " +
-                    result.containersIngested() + " new container observations (" + result.durationMs() + "ms). " +
-                    (queued ? "Correlation pass queued on the ingestion worker."
-                            : "Ingestion service is stopped; correlation not queued.")
-            ), false);
-        } else {
-            source.sendFailure(Component.literal("[ItemGraph] Ingestion cycle failed: " + result.errorMessage()));
+        if (!IngestionService.getInstance().requestIngestionAsync()) {
+            source.sendFailure(Component.literal("[ItemGraph] Manual ingestion was not queued: the worker is stopped or a manual cycle is already queued."));
+            return 0;
         }
-
-        return result.success() ? 1 : 0;
+        source.sendSuccess(() -> Component.literal(
+                "[ItemGraph] Manual ingestion and correlation queued on the background worker; check /ig status for the result."), false);
+        return 1;
     }
 }

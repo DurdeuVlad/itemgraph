@@ -37,7 +37,7 @@ public class ItemGraph {
         modEventBus.register(new com.itemgraph.listener.ContainerCapabilityRegistrar());
         // Container session listener: binds PlayerContainerEvent open/close to
         // ContainerInteractionTracker watches so player-driven transfers are observed
-        // via session diffs (GUI clicks never traverse the IItemHandler capability).
+        // as interval-bounded session net deltas (GUI clicks never traverse IItemHandler).
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ContainerSessionListener());
     }
 

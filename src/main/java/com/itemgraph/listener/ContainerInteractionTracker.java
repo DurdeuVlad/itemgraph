@@ -10,38 +10,34 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
- * Tracks open player container sessions and per-container automation deltas so that
- * container contents changes can be attributed to the correct actor (0.2.0 — Issue 3).
+ * Tracks open player container sessions and capability-mediated deltas (0.2.0 — Issue 3).
  *
- * <h2>Why session diffing instead of IItemHandler interception</h2>
- * <p>Vanilla container menus mutate the backing {@code Container} directly
- * ({@code AbstractContainerMenu.moveItemStackTo}, {@code Slot.set}) — player GUI
- * clicks never traverse the {@code IItemHandler} capability, so no capability
- * wrapper can observe them. Player-driven transfers are therefore observed by
- * diffing the watched container's fingerprint totals between
- * {@code PlayerContainerEvent.Open} and {@code PlayerContainerEvent.Close}.
+ * <h2>Session evidence</h2>
+ * <p>Vanilla container menus mutate the backing {@code Container} directly, so player
+ * transfers are measured as fingerprint-level net changes between
+ * {@code PlayerContainerEvent.Open} and {@code PlayerContainerEvent.Close}. Each row is
+ * an interval-bounded session net delta, not a click-time event. Transfers that return
+ * the container to its baseline are not represented and their absence is not evidence
+ * that no interaction occurred.
  *
- * <h2>Automation credits</h2>
- * <p>{@link ContainerCapabilityWrapper} still observes real automated transfers
- * through the {@code IItemHandler} capability. While a container is watched it
- * reports every moved quantity here as a signed automation credit
- * (+insert / -extract). At close, the credit is subtracted from the net content
- * delta so hopper moves that ran during an open session are not attributed to the
- * player and are not double-counted.
+ * <h2>Capability reconciliation</h2>
+ * <p>{@link ContainerCapabilityWrapper} observes content changes made through an
+ * {@code IItemHandler}. The caller is unknown, so its signed delta is excluded from the
+ * player session net delta whether the raw row was queued or retained as unresolved after
+ * queue rejection.
  *
  * <h2>Attribution</h2>
  * <p>A residual delta is attributed to the session's participants: exactly one
- * participant means unambiguous {@code ADD_ITEM}/{@code REMOVE_ITEM}; multiple
- * participants emit a single {@code [ambiguous]} observation whose
- * {@code raw_data} lists the candidate players (the actor cannot be determined,
- * and emitting one row per candidate would manufacture quantity).
+ * participant means a single candidate; multiple participants emit one ambiguous row
+ * with the candidate players in {@code raw_data}. Quantity is never multiplied by the
+ * number of viewers.
  *
  * <h2>Threading</h2>
- * <p>All callers (container events, capability invocations) run on the server
- * thread, but the map types are safe for concurrent use anyway.
+ * <p>All callers run on the server thread. The maps remain safe for concurrent access.
  */
 public class ContainerInteractionTracker {
 
@@ -64,6 +60,10 @@ public class ContainerInteractionTracker {
      */
     public record InventoryTotals(Map<String, Long> counts, Map<String, CanonicalItem> exemplars) {}
 
+    private record CapabilityGapKey(String fingerprintHash, String actionType) {}
+
+    private record CapabilityGap(CanonicalItem item, long amount) {}
+
     private static final class Watch {
         final ContainerKey key;
         final Supplier<InventoryTotals> snapshotSource;
@@ -73,8 +73,10 @@ public class ContainerInteractionTracker {
         final Map<UUID, String> participants = new LinkedHashMap<>();
         Map<String, Long> baseline;
         Map<String, CanonicalItem> exemplars;
-        /** Signed automation deltas observed while watched: +insert, -extract. */
-        final Map<String, Long> automationDelta = new ConcurrentHashMap<>();
+        long windowStartMs;
+        /** Signed capability deltas observed while watched: +insert, -extract. */
+        final Map<String, Long> capabilityDelta = new ConcurrentHashMap<>();
+        final Map<CapabilityGapKey, CapabilityGap> unpersistedCapabilityTransfers = new HashMap<>();
 
         Watch(ContainerKey key, Supplier<InventoryTotals> snapshotSource) {
             this.key = key;
@@ -88,6 +90,7 @@ public class ContainerInteractionTracker {
     private final Map<ContainerKey, ContainerKey> aliases = new ConcurrentHashMap<>();
     /** Player uuid -> canonical key of the container they have open. */
     private final Map<UUID, ContainerKey> playerSessions = new ConcurrentHashMap<>();
+    private final AtomicLong totalCapabilityQueueRejections = new AtomicLong();
 
     private ContainerInteractionTracker() {}
 
@@ -112,6 +115,7 @@ public class ContainerInteractionTracker {
             InventoryTotals totals = snapshotSource.get();
             w.baseline = new HashMap<>(totals.counts());
             w.exemplars = new HashMap<>(totals.exemplars());
+            w.windowStartMs = System.currentTimeMillis();
             return w;
         });
         if (aliases != null) {
@@ -126,17 +130,27 @@ public class ContainerInteractionTracker {
         playerSessions.put(playerUuid, canonical);
     }
 
-    /**
-     * Records a signed automated transfer against the watched container:
-     * {@code +count} for an insertion, {@code -count} for an extraction.
-     * No-op when nothing is watching the container (pure automation traffic is
-     * already reported by the capability wrapper as {@code HOPPER_*} observations).
-     */
-    public void recordAutomationDelta(ContainerKey key, String fingerprintHash, long delta) {
-        Watch watch = watches.get(resolve(key));
-        if (watch != null) {
-            watch.automationDelta.merge(fingerprintHash, delta, Long::sum);
+    public void recordCapabilityDelta(ContainerKey key, CanonicalItem item, long delta, boolean persisted) {
+        if (!persisted) {
+            totalCapabilityQueueRejections.incrementAndGet();
         }
+        Watch watch = watches.get(resolve(key));
+        if (watch == null) {
+            return;
+        }
+
+        watch.capabilityDelta.merge(item.fingerprintHash(), delta, Long::sum);
+        if (!persisted) {
+            String actionType = delta > 0 ? "CAPABILITY_INSERT" : "CAPABILITY_EXTRACT";
+            CapabilityGapKey gapKey = new CapabilityGapKey(item.fingerprintHash(), actionType);
+            watch.unpersistedCapabilityTransfers.merge(gapKey,
+                    new CapabilityGap(item, Math.abs(delta)),
+                    (existing, added) -> new CapabilityGap(existing.item(), existing.amount() + added.amount()));
+        }
+    }
+
+    public long getTotalCapabilityQueueRejections() {
+        return totalCapabilityQueueRejections.get();
     }
 
     /**
@@ -148,10 +162,9 @@ public class ContainerInteractionTracker {
 
     /**
      * Closes the player's session: recomputes the container totals, subtracts the
-     * automation credits accumulated during the window, and emits one
-     * {@code ADD_ITEM}/{@code REMOVE_ITEM} observation per fingerprint for the
-     * residual (player-attributable) delta. {@code x,y,z} is the closing player's
-     * position.
+     * capability deltas accumulated during the window, and emits one interval-bounded
+     * {@code ADD_ITEM}/{@code REMOVE_ITEM} net observation per remaining fingerprint.
+     * {@code x,y,z} is the closing player's position.
      */
     public void closeSession(UUID playerUuid, double x, double y, double z) {
         ContainerKey key = playerSessions.remove(playerUuid);
@@ -164,18 +177,22 @@ public class ContainerInteractionTracker {
         }
 
         InventoryTotals now = watch.snapshotSource.get();
+        long windowEndMs = System.currentTimeMillis();
         Map<String, Long> playerDelta = computePlayerDelta(
-                watch.baseline, now.counts(), watch.automationDelta);
+                watch.baseline, now.counts(), watch.capabilityDelta);
 
         Map<String, CanonicalItem> exemplars = new HashMap<>(watch.exemplars);
         exemplars.putAll(now.exemplars());
-        emit(watch, playerDelta, exemplars, x, y, z);
+        emit(watch, playerDelta, exemplars, x, y, z, watch.windowStartMs, windowEndMs);
+        emitUnpersistedCapabilityTransfers(watch, watch.windowStartMs, windowEndMs);
 
         // The emitted window ends here: the next delta window starts from now and
         // only the still-open sessions can be responsible for further changes.
         watch.baseline = new HashMap<>(now.counts());
         watch.exemplars = new HashMap<>(now.exemplars());
-        watch.automationDelta.clear();
+        watch.windowStartMs = windowEndMs;
+        watch.capabilityDelta.clear();
+        watch.unpersistedCapabilityTransfers.clear();
         watch.sessions.remove(playerUuid);
         watch.participants.clear();
         watch.participants.putAll(watch.sessions);
@@ -186,16 +203,15 @@ public class ContainerInteractionTracker {
     }
 
     /**
-     * Net player-attributable delta per fingerprint:
-     * {@code (current - baseline) - automationCredits}, zeroes removed.
+     * Net session delta per fingerprint after capability-mediated changes are removed.
      */
     static Map<String, Long> computePlayerDelta(Map<String, Long> baseline,
                                                 Map<String, Long> current,
-                                                Map<String, Long> automationCredits) {
+                                                Map<String, Long> capabilityCredits) {
         Map<String, Long> delta = new HashMap<>();
         for (String fp : unionKeys(baseline, current)) {
             long net = current.getOrDefault(fp, 0L) - baseline.getOrDefault(fp, 0L);
-            long player = net - automationCredits.getOrDefault(fp, 0L);
+            long player = net - capabilityCredits.getOrDefault(fp, 0L);
             if (player != 0) {
                 delta.put(fp, player);
             }
@@ -213,25 +229,57 @@ public class ContainerInteractionTracker {
         return keys;
     }
 
+    private void emitUnpersistedCapabilityTransfers(Watch watch, long sessionStartMs, long sessionEndMs) {
+        for (Map.Entry<CapabilityGapKey, CapabilityGap> entry : watch.unpersistedCapabilityTransfers.entrySet()) {
+            long remaining = entry.getValue().amount();
+            while (remaining > 0) {
+                int amount = (int) Math.min(Integer.MAX_VALUE, remaining);
+                byte[] rawData = ("{\"capture\":\"queue_overflow_recovery\",\"sessionStartMs\":"
+                        + sessionStartMs + ",\"sessionEndMs\":" + sessionEndMs + "}")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                InternalObservationService.getInstance().submit(
+                        new InternalObservationService.InternalObservation(
+                                sessionStartMs,
+                                entry.getKey().actionType(),
+                                ContainerCapabilityWrapper.UNKNOWN_CALLER_UUID,
+                                ContainerCapabilityWrapper.UNKNOWN_CALLER_NAME,
+                                watch.key.levelId(),
+                                watch.key.x(), watch.key.y(), watch.key.z(),
+                                watch.key.levelId(),
+                                (double) watch.key.x(), (double) watch.key.y(), (double) watch.key.z(),
+                                "CONTAINER",
+                                entry.getValue().item().itemId(),
+                                rawData,
+                                entry.getValue().item(),
+                                amount,
+                                null,
+                                sessionEndMs
+                        )
+                );
+                remaining -= amount;
+            }
+        }
+    }
+
     private void emit(Watch watch, Map<String, Long> playerDelta,
-                      Map<String, CanonicalItem> exemplars, double x, double y, double z) {
+                      Map<String, CanonicalItem> exemplars, double x, double y, double z,
+                      long sessionStartMs, long sessionEndMs) {
         if (playerDelta.isEmpty()) {
             return;
         }
         boolean unambiguous = watch.participants.size() == 1;
         String actorUuid;
         String actorName;
-        byte[] rawData;
         if (unambiguous) {
             Map.Entry<UUID, String> actor = watch.participants.entrySet().iterator().next();
             actorUuid = actor.getKey().toString();
             actorName = actor.getValue();
-            rawData = null;
         } else {
             actorUuid = AMBIGUOUS_UUID;
             actorName = AMBIGUOUS_NAME;
-            rawData = candidatesJson(watch.participants);
         }
+        byte[] rawData = sessionWindowJson(sessionStartMs, sessionEndMs,
+                unambiguous ? null : watch.participants);
 
         for (Map.Entry<String, Long> e : playerDelta.entrySet()) {
             CanonicalItem canonical = exemplars.get(e.getKey());
@@ -241,7 +289,7 @@ public class ContainerInteractionTracker {
             long delta = e.getValue();
             InternalObservationService.getInstance().submit(
                     new InternalObservationService.InternalObservation(
-                            System.currentTimeMillis(),
+                            sessionStartMs,
                             delta > 0 ? "ADD_ITEM" : "REMOVE_ITEM",
                             actorUuid,
                             actorName,
@@ -256,10 +304,21 @@ public class ContainerInteractionTracker {
                             rawData,
                             canonical,
                             (int) Math.abs(delta),
-                            null
+                            null,
+                            sessionEndMs
                     )
             );
         }
+    }
+
+    private static byte[] sessionWindowJson(long startMs, long endMs, Map<UUID, String> participants) {
+        StringBuilder json = new StringBuilder("{\"capture\":\"container_session_net_delta\",\"sessionStartMs\":")
+                .append(startMs).append(",\"sessionEndMs\":").append(endMs);
+        if (participants != null) {
+            String candidates = new String(candidatesJson(participants), java.nio.charset.StandardCharsets.UTF_8);
+            json.append(',').append(candidates, 1, candidates.length() - 1);
+        }
+        return json.append('}').toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private static byte[] candidatesJson(Map<UUID, String> participants) {
@@ -292,6 +351,7 @@ public class ContainerInteractionTracker {
         watches.clear();
         aliases.clear();
         playerSessions.clear();
+        totalCapabilityQueueRejections.set(0);
     }
 
     public int watchCount() {

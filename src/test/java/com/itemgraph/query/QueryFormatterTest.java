@@ -139,6 +139,43 @@ class QueryFormatterTest {
     }
 
     @Test
+    void sessionNetDeltaTraceHopShowsItsFullTimeInterval() {
+        NodeRef container = new NodeRef(1, "CONTAINER", null, "minecraft:overworld", 10.0, 64.0, -20.0);
+        NodeRef player = new NodeRef(2, "PLAYER", "Steve", "minecraft:overworld", null, null, null);
+        TraceHop sessionDelta = new TraceHop(
+                TraceHop.Kind.OBSERVED, 42L, container, player, 3,
+                1_000L, 5_000L, null, "REMOVE_ITEM session net delta",
+                new FingerprintRef(1, "minecraft:diamond", null, "hash1"));
+        TraceResult result = new TraceResult("container at 10,64,-20", null,
+                List.of(sessionDelta), QueryWindow.unbounded(), 50, 50, false);
+
+        List<String> lines = QueryFormatter.formatTrace(result);
+
+        assertTrue(lines.stream().anyMatch(line -> line.contains("session net delta")
+                && line.contains("1970-01-01 00:00:01 UTC")
+                && line.contains("1970-01-01 00:00:05 UTC")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("net container deltas")
+                && line.contains("intra-session order is unknown")));
+    }
+
+    @Test
+    void queueOverflowRecoveryIsNotLabeledAsPlayerSessionNetDelta() {
+        NodeRef unknown = NodeRef.missing(2);
+        ObservationDetail observation = new ObservationDetail(
+                9L, "ITEMGRAPH_INTERNAL", null, 1_000L, unknown, unknown,
+                new FingerprintRef(1, "minecraft:diamond", null, "hash1"),
+                "CAPABILITY_INSERT", 3, null, "PENDING", null,
+                5_000L, "queue_overflow_recovery", null);
+
+        List<String> lines = QueryFormatter.formatEvent(observation);
+        String formatted = String.join("\n", lines);
+
+        assertTrue(formatted.contains("time window:"));
+        assertTrue(formatted.contains("coalesced capability transfers recovered after queue rejection"));
+        assertFalse(formatted.contains("session net delta"));
+    }
+
+    @Test
     void testFormatTraceWithCappingAndTruncation() {
         QueryWindow window = QueryWindow.unbounded();
         NodeRef p1 = new NodeRef(1, "PLAYER", "Alice", "minecraft:overworld", null, null, null);

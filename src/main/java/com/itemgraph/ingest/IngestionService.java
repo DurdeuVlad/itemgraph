@@ -41,6 +41,7 @@ public class IngestionService {
 
     private ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicBoolean manualIngestionQueued = new AtomicBoolean(false);
 
     private volatile IngestionResult lastResult = null;
     private volatile long lastRunTimestamp = 0;
@@ -115,6 +116,7 @@ public class IngestionService {
             }
         });
 
+        manualIngestionQueued.set(false);
         running.set(true);
         // Schedule every 60 seconds, with an initial delay of 5 seconds
         executor.scheduleWithFixedDelay(this::runIngestionSafely, 5, 60, TimeUnit.SECONDS);
@@ -174,19 +176,14 @@ public class IngestionService {
     }
 
     /**
-     * Runs one correlation pass. Synchronized on the same monitor as
-     * {@link #runIngestion()}, so a pass can never interleave with an ingestion cycle —
-     * including a manual {@code /ig ingest now} issued from the server thread.
+     * Runs one correlation pass. The scheduled and manual worker tasks share one executor;
+     * the connection monitor also protects direct callers from overlapping ingestion writes.
      */
     public synchronized CorrelationResult runCorrelation() {
         return correlationEngine.runCorrelation();
     }
 
-    /**
-     * Queues a correlation pass onto the ingestion worker. Used by the command layer so
-     * a manually triggered ingest still produces inferred edges without doing candidate
-     * search on the server thread. No-op when the service is not running.
-     */
+    /** Queues a standalone correlation pass on the ingestion worker. No-op when stopped. */
     public boolean requestCorrelationAsync() {
         ScheduledExecutorService current = executor;
         if (!running.get() || current == null) {
@@ -194,6 +191,27 @@ public class IngestionService {
         }
         current.execute(this::runCorrelationSafely);
         return true;
+    }
+
+    /** Queues one manual ingest-and-correlate pass; false means the worker is stopped or already has a manual request queued. */
+    public boolean requestIngestionAsync() {
+        ScheduledExecutorService current = executor;
+        if (!running.get() || current == null || !manualIngestionQueued.compareAndSet(false, true)) {
+            return false;
+        }
+        try {
+            current.execute(() -> {
+                try {
+                    runIngestionSafely();
+                } finally {
+                    manualIngestionQueued.set(false);
+                }
+            });
+            return true;
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            manualIngestionQueued.set(false);
+            return false;
+        }
     }
 
     public CorrelationEngine getCorrelationEngine() {
@@ -276,10 +294,33 @@ public class IngestionService {
                 break;
             }
 
+            GriefLoggerBatch batch = persistGriefLoggerBatch(
+                    igConn, tableName, checkpointSource, isContainerTable, events,
+                    afterRowId, checkpoint.lastTimestamp());
+            ingestedCount += batch.ingestedCount();
+            afterRowId = batch.lastRowId();
+            checkpoint = new SourceCheckpoint(checkpointSource, afterRowId, batch.lastTimestamp(), checkpoint.updatedAt());
+
+            if (events.size() < BATCH_SIZE) {
+                break;
+            }
+        }
+
+        return ingestedCount;
+    }
+
+    private record GriefLoggerBatch(int ingestedCount, long lastRowId, long lastTimestamp) {}
+
+    private GriefLoggerBatch persistGriefLoggerBatch(
+            Connection igConn, String tableName, String checkpointSource, boolean isContainerTable,
+            List<GriefLoggerRawEvent> events, long afterRowId, long lastTimestamp) throws SQLException {
+        synchronized (igConn) {
             boolean origAutoCommit = igConn.getAutoCommit();
+            int ingestedCount = 0;
+            long maxRowId = afterRowId;
+            long maxTimestamp = lastTimestamp;
             try {
                 igConn.setAutoCommit(false);
-
                 String insertObsSql = """
                     INSERT OR IGNORE INTO ig_observations (
                         source_type, source_event_id, timestamp_ms, node_id, target_node_id,
@@ -287,32 +328,22 @@ public class IngestionService {
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
-                long maxRowId = afterRowId;
-                long maxTimestamp = checkpoint.lastTimestamp();
-
                 try (PreparedStatement pstmt = igConn.prepareStatement(insertObsSql)) {
                     for (GriefLoggerRawEvent event : events) {
                         try {
                             long sourceEventId = isContainerTable ? (CONTAINER_EVENT_ID_OFFSET + event.rowid()) : event.rowid();
                             long fingerprintId = getOrCreateFingerprint(igConn, event.materialName(), event.rawData());
-
                             String actionType = ItemActionMapping.getActionName(event.actionId());
-
-                            long nodeId;
-                            Long targetNodeId = null;
-
                             FlowEndpoints endpoints = isContainerTable
                                     ? resolveContainerEndpoints(igConn, event, actionType)
                                     : resolveItemEndpoints(igConn, event, actionType);
-                            nodeId = endpoints.nodeId();
-                            targetNodeId = endpoints.targetNodeId();
 
                             pstmt.setString(1, SOURCE_TYPE_GRIEFLOGGER);
                             pstmt.setLong(2, sourceEventId);
                             pstmt.setLong(3, event.timestampMs());
-                            pstmt.setLong(4, nodeId);
-                            if (targetNodeId != null) {
-                                pstmt.setLong(5, targetNodeId);
+                            pstmt.setLong(4, endpoints.nodeId());
+                            if (endpoints.targetNodeId() != null) {
+                                pstmt.setLong(5, endpoints.targetNodeId());
                             } else {
                                 pstmt.setNull(5, Types.INTEGER);
                             }
@@ -339,24 +370,16 @@ public class IngestionService {
 
                             pstmt.executeUpdate();
                             ingestedCount++;
-
-                            if (event.rowid() > maxRowId) {
-                                maxRowId = event.rowid();
-                            }
-                            if (event.timestampMs() > maxTimestamp) {
-                                maxTimestamp = event.timestampMs();
-                            }
+                            maxRowId = Math.max(maxRowId, event.rowid());
+                            maxTimestamp = Math.max(maxTimestamp, event.timestampMs());
                         } catch (Exception rowEx) {
                             LOGGER.warn("Skipping malformed GriefLogger row {} in table '{}': {}", event.rowid(), tableName, rowEx.getMessage());
                         }
                     }
                 }
 
-                // Update checkpoint after batch is processed
                 updateCheckpoint(igConn, checkpointSource, maxRowId, maxTimestamp);
-
                 igConn.commit();
-                afterRowId = maxRowId;
             } catch (SQLException e) {
                 igConn.rollback();
                 LOGGER.error("Failed to persist batch for GriefLogger table '{}' at rowid {}. Rolled back.", tableName, afterRowId, e);
@@ -364,13 +387,8 @@ public class IngestionService {
             } finally {
                 igConn.setAutoCommit(origAutoCommit);
             }
-
-            if (events.size() < BATCH_SIZE) {
-                break;
-            }
+            return new GriefLoggerBatch(ingestedCount, maxRowId, maxTimestamp);
         }
-
-        return ingestedCount;
     }
 
     /** Resolved (origin, destination) node pair for a single observation. */
@@ -515,16 +533,18 @@ public class IngestionService {
 
     public SourceCheckpoint getCheckpoint(Connection conn, String sourceName) throws SQLException {
         String sql = "SELECT last_source_rowid, last_timestamp, updated_at FROM ig_source_checkpoints WHERE source_name = ?";
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, sourceName);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return new SourceCheckpoint(
-                            sourceName,
-                            rs.getLong("last_source_rowid"),
-                            rs.getLong("last_timestamp"),
-                            rs.getLong("updated_at")
-                    );
+        synchronized (conn) {
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setString(1, sourceName);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        return new SourceCheckpoint(
+                                sourceName,
+                                rs.getLong("last_source_rowid"),
+                                rs.getLong("last_timestamp"),
+                                rs.getLong("updated_at")
+                        );
+                    }
                 }
             }
         }
@@ -618,7 +638,7 @@ public class IngestionService {
 
     public long getTotalObservationsCount() {
         if (!dbManager.isInitialized()) return 0;
-        try (Connection conn = dbManager.getConnection();
+        try (Connection conn = dbManager.openReadOnlyConnection();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_observations")) {
             if (rs.next()) {

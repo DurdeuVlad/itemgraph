@@ -72,8 +72,8 @@ narrows a noisy fingerprint; it is not what makes the query safe.
 
 ### Execution model
 
-All three query commands run their SQL and formatting off the server thread on a dedicated
-`ItemGraph-Query-Worker`, then marshal the finished lines back onto the server thread with
+`/ig event`, `/ig explain`, `/ig trace`, `/ig audit`, and the database-backed portion of
+`/ig status` run SQL and formatting off the server thread on a dedicated `ItemGraph-Query-Worker`, then marshal the finished lines back onto the server thread with
 `source.getServer().execute(Runnable)` before calling `sendSuccess`/`sendFailure`. Each
 query reads through its own short-lived read-only connection rather than the ingestion
 worker's writer connection. Full rationale and the prior art this was checked against:
@@ -163,9 +163,12 @@ Exact UX should depend on NeoForge command capabilities and admin ergonomics.
 /ig event 8812
 ```
 
-Shows only raw source evidence: timestamp, source and source event id, action and amount,
-the item fingerprint, both endpoints, and whether the correlation engine has evaluated the
-row yet. Labelled `[OBSERVED]`; nothing on this view is scored or reconstructed.
+Shows one raw source row: source and source event id, action and amount, item fingerprint,
+endpoints, correlation state, and any derived source-group metadata. A confirmed source group
+identifies the canonical capacity row and corroborating aliases; an ambiguous group states
+that no independent quantity capacity was allocated. Interval rows show `timestamp_ms` to
+`timestamp_end_ms` and their capture scope. Labelled `[OBSERVED]`; nothing on this view is
+scored or reconstructed.
 
 ### Explain an inferred edge
 
@@ -187,8 +190,10 @@ Shows:
   rendered in the same shape `/ig event` uses and cross-referenced as `/ig event <id>`
 
 Competing candidates are named inside the stored explanation string written by the
-correlation engine (for example `2 admissible pickups`), not yet as a separate structured
-section.
+correlation engine (for example `2 admissible pickups`). Confirmed cross-source group
+members are listed as evidence so both source row IDs remain auditable. An edge superseded
+by source-equivalence repair is labelled `[SUPERSEDED INFERENCE]`, excluded from current
+traces and capacity, and remains addressable by `/ig explain <edgeId>`.
 
 ### Operational status
 
@@ -198,22 +203,13 @@ section.
 /ig status
 ```
 
-Currently reports: mod version, GriefLogger detection, database connection and schema
-version, database path, last error, the ground-bridge correlation window and last-pass
-diagnostics, ingestion running state, total observation count, both source checkpoints,
-and last-cycle diagnostics.
-
-Remaining suggested fields:
-
-- ingestion status
-- GriefLogger connection state
-- pending queue size
-- latest source checkpoint
-- DB write latency
-- observation count
-- inferred-edge count
-- last reconstruction duration
-- errors
+Reports the mod version, optional GriefLogger reachability, database connection/schema/path,
+correlation window and last-pass counts, ingestion running state, total observation count,
+both source checkpoints, last-cycle counts, active/superseded edge counts, internal queue
+size/enqueued/persisted/dropped counts, capability queue-rejection count, transformations,
+and ItemEntity tracking counters. Database counts/checkpoints run through `QueryDispatcher` off the server
+thread. `/ig ingest now` queues one bounded manual ingest-and-correlate cycle on the existing
+background worker and returns immediately; `/ig status` reports its result when available.
 
 ## Time filters
 
@@ -228,12 +224,13 @@ Avoid unbounded searches by default.
 
 A trace without an explicit time filter is currently unbounded *in time* but still bounded
 *in rows* by the hard limit cap, which is what keeps it a safe query. A server-configured
-default window is not implemented; `QueryWindow.unbounded()` is used instead. Note that
-`QueryWindow` applies containment (`timestamp_ms BETWEEN ...`) to observations but
-*overlap* (`time_end >= since AND time_start <= until`) to inferred edges, because an edge
-spans time: an edge whose drop predates the window but whose pickup falls inside it really
-did happen during the window, and excluding it would leave a visible gap in the
-reconstructed path.
+default window is not implemented; `QueryWindow.unbounded()` is used instead. Point
+observations are selected by their timestamp; session observations are selected when their
+`timestamp_ms`–`timestamp_end_ms` interval overlaps the requested window. Inferred edges also
+use overlap (`time_end >= since AND time_start <= until`), because an edge whose drop predates
+the window but whose pickup falls inside it really did happen during the window, and excluding
+it would leave a visible gap in the reconstructed path. Session rows display their interval
+and state that order inside it is unknown.
 
 ## Item matching modes
 

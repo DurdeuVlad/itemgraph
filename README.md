@@ -77,7 +77,7 @@ GriefLogger / Minecraft / Mod hooks
        Query + explanation UI
 ```
 
-GriefLogger is treated as a read-only evidence source. ItemGraph maintains its own storage for supplemental observations and derived data.
+GriefLogger is treated as a read-only evidence source. ItemGraph maintains its own storage for supplemental observations and derived data. Confirmed cross-source copies preserve both raw rows but contribute one quantity capacity; uncertain matches remain ambiguous. Container GUI observations are session net deltas with explicit time bounds, not click history, and generic `IItemHandler` rows keep caller/cause identity UNKNOWN.
 
 ## MVP goals
 
@@ -114,7 +114,7 @@ Implemented and available (all require permission level 2):
 - `/ig trace item`: accepts numeric fingerprint IDs, item registry names (e.g. `minecraft:netherite_boots` or `netherite`), or custom item names. Shows complete chronological timeline including transformations (`[TRANSFORMATION <type> <- <source>]`).
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
 - `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.
-- `limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Query commands run off the server thread and report back on it. Full argument table, output format: [Query model](docs/QUERY_MODEL.md).
+- `limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Query commands and the database-backed portion of `/ig status` run off the server thread and report back on it. `/ig ingest now` queues one complete ingest-and-correlate cycle on the background worker. Full argument table and output format: [Query model](docs/QUERY_MODEL.md).
 
 Sample `/ig trace item` output:
 

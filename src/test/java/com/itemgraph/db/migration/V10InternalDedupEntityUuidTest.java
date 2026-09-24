@@ -40,6 +40,7 @@ class V10InternalDedupEntityUuidTest {
         try (Statement stmt = conn.createStatement()) {
             stmt.execute("INSERT INTO ig_nodes (id, node_type, level_id) VALUES (1, 'PLAYER', 'minecraft:overworld')");
             stmt.execute("INSERT INTO ig_nodes (id, node_type, level_id) VALUES (2, 'GROUND', 'minecraft:overworld')");
+            stmt.execute("INSERT INTO ig_nodes (id, node_type, level_id) VALUES (3, 'PLAYER', 'minecraft:overworld')");
             stmt.execute("INSERT INTO ig_item_fingerprints (id, item_id, fingerprint_hash) VALUES (1, 'minecraft:cobblestone', 'hash-cobble')");
         }
     }
@@ -50,14 +51,16 @@ class V10InternalDedupEntityUuidTest {
     }
 
     @Test
-    void indexIncludesItemEntityUuidAfterV10() throws Exception {
+    void indexIncludesItemEntityUuidAndDestinationAfterV11() throws Exception {
         try (Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(
                      "SELECT sql FROM sqlite_master WHERE name = 'idx_obs_internal_dedup'")) {
             assertTrue(rs.next(), "idx_obs_internal_dedup must exist after migrations");
             String sql = rs.getString("sql");
             assertTrue(sql.contains("item_entity_uuid"),
-                    "V10 must add item_entity_uuid to the dedup key: " + sql);
+                    "the dedup key must include item_entity_uuid: " + sql);
+            assertTrue(sql.contains("target_node_id"),
+                    "V11 must distinguish item transfers to different recipients: " + sql);
             assertTrue(sql.contains("source_event_id IS NULL"),
                     "index must stay partial, scoped to internal rows: " + sql);
         }
@@ -94,8 +97,8 @@ class V10InternalDedupEntityUuidTest {
         try (Statement stmt = conn.createStatement()) {
             // Two identical same-millisecond machine inserts into the same container:
             // separate real events (no entity uuid), both must be stored.
-            stmt.execute(internalInsert(5000, "HOPPER_INSERT", 1, null));
-            stmt.execute(internalInsert(5000, "HOPPER_INSERT", 1, null));
+            stmt.execute(internalInsert(5000, "CAPABILITY_INSERT", 1, null));
+            stmt.execute(internalInsert(5000, "CAPABILITY_INSERT", 1, null));
 
             assertEquals(2, internalRowCount(),
                     "NULL-uuid rows are distinct real events, not duplicates");
@@ -103,11 +106,27 @@ class V10InternalDedupEntityUuidTest {
     }
 
     @Test
+    void sameEntityUuidPickupsForDifferentPlayersBothPersist() throws Exception {
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("INSERT OR IGNORE INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) "
+                    + "VALUES ('ITEMGRAPH_INTERNAL', NULL, 1000, 2, 1, 1, 'PICKUP_ITEM', 1, 'entity-shared')");
+            stmt.execute("INSERT OR IGNORE INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) "
+                    + "VALUES ('ITEMGRAPH_INTERNAL', NULL, 1000, 2, 3, 1, 'PICKUP_ITEM', 1, 'entity-shared')");
+        }
+
+        assertEquals(2, internalRowCount(), "different pickup recipients are distinct events for one entity UUID");
+    }
+
+    @Test
     void migrationApplyIsIdempotent() throws Exception {
-        V10__InternalDedupEntityUuid migration = new V10__InternalDedupEntityUuid();
-        assertEquals(10, migration.getVersion());
-        assertDoesNotThrow(() -> migration.apply(conn));
-        assertDoesNotThrow(() -> migration.apply(conn));
+        V10__InternalDedupEntityUuid v10 = new V10__InternalDedupEntityUuid();
+        V11__ObservationSourceGroupsAndIntervals v11 = new V11__ObservationSourceGroupsAndIntervals();
+        assertEquals(10, v10.getVersion());
+        assertEquals(11, v11.getVersion());
+        assertDoesNotThrow(() -> v10.apply(conn));
+        assertDoesNotThrow(() -> v10.apply(conn));
+        assertDoesNotThrow(() -> v11.apply(conn));
+        assertDoesNotThrow(() -> v11.apply(conn));
     }
 
     private int internalRowCount() throws SQLException {
@@ -121,13 +140,13 @@ class V10InternalDedupEntityUuidTest {
 
     private static String internalInsert(long timestampMs, String actionType, int amount, String entityUuid) {
         String uuid = entityUuid == null ? "NULL" : "'" + entityUuid + "'";
-        return "INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount, item_entity_uuid) " +
-                "VALUES ('ITEMGRAPH_INTERNAL', NULL, " + timestampMs + ", 1, 1, '" + actionType + "', " + amount + ", " + uuid + ")";
+        return "INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) " +
+                "VALUES ('ITEMGRAPH_INTERNAL', NULL, " + timestampMs + ", 1, 2, 1, '" + actionType + "', " + amount + ", " + uuid + ")";
     }
 
     private static String internalOrIgnoreInsert(long timestampMs, String actionType, int amount, String entityUuid) {
         String uuid = entityUuid == null ? "NULL" : "'" + entityUuid + "'";
-        return "INSERT OR IGNORE INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount, item_entity_uuid) " +
-                "VALUES ('ITEMGRAPH_INTERNAL', NULL, " + timestampMs + ", 1, 1, '" + actionType + "', " + amount + ", " + uuid + ")";
+        return "INSERT OR IGNORE INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) " +
+                "VALUES ('ITEMGRAPH_INTERNAL', NULL, " + timestampMs + ", 1, 2, 1, '" + actionType + "', " + amount + ", " + uuid + ")";
     }
 }

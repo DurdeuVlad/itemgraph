@@ -24,7 +24,8 @@ public class MigrationRunner {
             new V7__QuantityFlowLedger(),
             new V8__HighValueIntegrations(),
             new V9__InternalObservationDedup(),
-            new V10__InternalDedupEntityUuid()
+            new V10__InternalDedupEntityUuid(),
+            new V11__ObservationSourceGroupsAndIntervals()
     );
 
     public static int runMigrations(Connection conn) throws SQLException {

@@ -187,8 +187,8 @@ Acceptance:
 
 Implemented:
 
-- Authoritative `ItemEntity` UUID tracking (`ItemEntityTracker`, `ItemEntityEventListener`, schema V8 `item_entity_uuid` column).
-- Exact `ItemEntity` UUID correlation boost: continuity matching assigns 0.9990 confidence and records authoritative Minecraft entity continuity explanation.
+- Authoritative `ItemEntity` UUID tracking (`ItemEntityTracker`, `ItemEntityEventListener`, schema V8 `item_entity_uuid` column), with drops recorded only after `ItemEntity.isAddedToLevel()` confirms world insertion.
+- Unique `ItemEntity` UUID correlation boost: continuity matching assigns 0.9990 confidence only when one spatial/time candidate matches and records the entity-continuity explanation.
 - Armor stand equip/unequip supplemental tracking (`ArmorStandEventListener`).
 - User experience query extensions:
   - `/ig trace player <playerName>`
@@ -228,8 +228,8 @@ Implemented:
   - Relational graph integrity (no orphaned allocations or broken node endpoints).
   - Lifecycle state consistency (`correlation_status` vs allocations).
 - Administrative audit command `/ig audit`.
-- Live diagnostic telemetry in `/ig status` (internal queue size/throughput, transformation totals, active tracked entities, continuity matches).
-- 106 automated tests passing with 0 failures.
+- Live diagnostic telemetry in `/ig status` (internal queue throughput/drops, capability queue rejections, transformation totals, active tracked entities, continuity matches).
+- 234 automated tests pass with 0 failures on the current M5 repair branch (`./gradlew clean build`, 2026-09-24).
 - Zero-tamper verification against GriefLogger database (SHA-256 unchanged).
 - Full restart persistence verified on live dedicated NeoForge server.
 
@@ -238,6 +238,30 @@ Acceptance:
 - `/ig audit` reports `HEALTHY (ALL INVARIANTS SATISFIED)`.
 - Live staging server tests passing end-to-end.
 - Zero GriefLogger modification across all operational cycles.
+
+## M5 evidence-integrity repair (staging and review pending)
+
+Implemented in the current M5 repair branch:
+
+- V11 destination-sensitive deduplication, `timestamp_end_ms`, cross-source groups/checks,
+  and retained `edge_state` for superseded inferences.
+- Unique shared ItemEntity UUID matching consolidates confirmed ItemGraph/GriefLogger
+  copies; plausible pairs without strong identity remain `SOURCE_AMBIGUOUS` with no capacity.
+- Drop ground rows require a confirmed added ItemEntity; canceled attempts never become
+  ground movement. Spatial UUID enrichment is unique-only.
+- Generic capability rows use UNKNOWN caller/cause labels; queue rejection is excluded from
+  player attribution and retried once at session close.
+- Container changes are interval-bounded net deltas, not click-time records; zero-net
+  out-and-back activity is documented as unobserved.
+- Internal persistence, GriefLogger ingestion, and correlation transactions serialize on
+  the shared ItemGraph connection. `/ig ingest now` and database-backed `/ig status` are
+  asynchronous.
+
+Remaining delivery gates are controlled live movement/queue/cancellation scenarios, independent
+adversarial review of the final diff, PR #6 CI/review, and authoritative merge confirmation.
+V11 startup migration succeeded on loopback, but player scenarios were not run because the
+available safe tools cannot disable the GriefLogger mod without moving its jar. Production and
+the existing GriefLogger database remain out of scope for writes.
 
 ## Git strategy
 

@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>The tracker is pure Java: container contents are supplied as
  * {@link InventoryTotals} snapshots by the listener, so session binding, baseline
- * diffing, automation-credit subtraction, and ambiguous attribution are all
+ * diffing, capability-credit subtraction, and ambiguous attribution are all
  * exercised here without a Minecraft runtime.
  */
 class ContainerInteractionTrackerTest {
@@ -84,7 +84,8 @@ class ContainerInteractionTrackerTest {
         assertEquals("CONTAINER", obs.targetType());
         assertEquals((double) KEY.x(), obs.targetX());
         assertSame(DIAMOND, obs.item());
-        assertNull(obs.rawData(), "unambiguous attribution carries no candidate list");
+        assertTrue(new String(obs.rawData(), StandardCharsets.UTF_8)
+                .contains("\"capture\":\"container_session_net_delta\""));
         assertTrue(pendingObservations().isEmpty());
     }
 
@@ -113,6 +114,19 @@ class ContainerInteractionTrackerTest {
     }
 
     @Test
+    void outAndBackSessionChangesAreNotPresentedAsNetMovement() {
+        AtomicReference<InventoryTotals> live = new AtomicReference<>(totals(DIAMOND, 10));
+        tracker.openSession(STEVE, "Steve", KEY, live::get, List.of());
+
+        live.set(totals(DIAMOND, 5));
+        live.set(totals(DIAMOND, 10));
+        tracker.closeSession(STEVE, 1, 64, 1);
+
+        assertTrue(pendingObservations().isEmpty(),
+                "a zero-net session must not be presented as an observed item flow");
+    }
+
+    @Test
     void removedItemKeepsBaselineExemplar() {
         AtomicReference<InventoryTotals> live = new AtomicReference<>(totals(IRON, 4));
         tracker.openSession(STEVE, "Steve", KEY, live::get, List.of());
@@ -132,51 +146,51 @@ class ContainerInteractionTrackerTest {
     // -------------------------------------------------------------------------
 
     @Test
-    void automationCreditFullyOffsetsMachineDelta() {
+    void capabilityDeltaFullyOffsetsContainerNetChange() {
         AtomicReference<InventoryTotals> live = new AtomicReference<>(totals(DIAMOND, 5));
         tracker.openSession(STEVE, "Steve", KEY, live::get, List.of());
 
-        live.set(totals(DIAMOND, 10));           // hopper pushed +5 while open
-        tracker.recordAutomationDelta(KEY, "fp-diamond", 5);
+        live.set(totals(DIAMOND, 10));           // capability insert +5 while open
+        tracker.recordCapabilityDelta(KEY, DIAMOND, 5, true);
         tracker.closeSession(STEVE, 1, 64, 1);
 
         assertTrue(pendingObservations().isEmpty(),
-                "a delta fully explained by automation credits must emit nothing");
+                "a delta fully explained by capability credits must emit nothing");
     }
 
     @Test
-    void automationCreditLeavesPlayerResidual() {
+    void capabilityDeltaLeavesPlayerResidual() {
         AtomicReference<InventoryTotals> live = new AtomicReference<>(totals(DIAMOND, 5));
         tracker.openSession(STEVE, "Steve", KEY, live::get, List.of());
 
-        live.set(totals(DIAMOND, 13));           // +8 total: hopper +5, player +3
-        tracker.recordAutomationDelta(KEY, "fp-diamond", 5);
+        live.set(totals(DIAMOND, 13));           // +8 total: capability +5, player +3
+        tracker.recordCapabilityDelta(KEY, DIAMOND, 5, true);
         tracker.closeSession(STEVE, 1, 64, 1);
 
         InternalObservationService.InternalObservation obs = pendingObservations().poll();
         assertNotNull(obs);
         assertEquals("ADD_ITEM", obs.actionType());
-        assertEquals(3, obs.amount(), "only the residual beyond the automation credit is the player's");
+        assertEquals(3, obs.amount(), "only the residual beyond the capability delta is attributed to the player");
     }
 
     @Test
     void creditOnUnwatchedContainerIsIgnored() {
-        tracker.recordAutomationDelta(KEY, "fp-diamond", 5);
+        tracker.recordCapabilityDelta(KEY, DIAMOND, 5, true);
         assertEquals(0, tracker.watchCount(), "credits must never create a watch");
     }
 
     @Test
     void aliasedPositionFeedsSameWatch() {
-        // Double chest: watch keyed at clicked half, automation on partner half.
+        // Double chest: watch keyed at clicked half, capability call on partner half.
         AtomicReference<InventoryTotals> live = new AtomicReference<>(totals(DIAMOND, 5));
         tracker.openSession(STEVE, "Steve", KEY, live::get, List.of(KEY_B));
 
         live.set(totals(DIAMOND, 9));
-        tracker.recordAutomationDelta(KEY_B, "fp-diamond", 4); // hopper hit the other half
+        tracker.recordCapabilityDelta(KEY_B, DIAMOND, 4, true); // capability call hit the other half
         tracker.closeSession(STEVE, 1, 64, 1);
 
         assertTrue(pendingObservations().isEmpty(),
-                "automation on the aliased half must credit the shared watch");
+                "a capability call on the aliased half must credit the shared watch");
         assertEquals(0, tracker.watchCount(), "watch must be destroyed after last close");
     }
 

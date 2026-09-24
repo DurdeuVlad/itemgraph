@@ -10,17 +10,19 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Summary
 
-ItemGraph 0.2.0 is fully independent from GriefLogger. It starts and operates without
-GriefLogger installed, capturing the complete item movement graph through its own NeoForge
-event listeners. When GriefLogger is present, it provides additive evidence that is merged
-with no duplicate rows. The hard boot dependency on GriefLogger is removed.
+ItemGraph 0.2.0 is independent from GriefLogger. It starts and records supported native
+NeoForge event/capability evidence without GriefLogger installed. When GriefLogger is present,
+its read-only rows remain additive evidence; confirmed cross-source copies share one quantity
+capacity, while uncertain pairs remain ambiguous. The hard boot dependency on GriefLogger is
+removed.
 
 ### Added
 
-- **Native drop and pickup observation** (`ItemEntityEventListener` promoted): `ItemTossEvent`
-  and `ItemEntityPickupEvent.Post` now write full `ig_observations` rows
-  (action types `DROP_ITEM`, `PICKUP_ITEM`) in addition to UUID tracking. `LivingDropsEvent`
-  writes `DEATH_DROP` observations for each player death drop stack.
+- **Native drop and pickup observation** (`ItemEntityEventListener` promoted): successful
+  ItemToss/LivingDrops entities write `DROP_ITEM`/`DEATH_DROP` only after
+  `ItemEntity.isAddedToLevel()` confirms world insertion; `ItemEntityPickupEvent.Post` writes
+  `PICKUP_ITEM`. Canceled tosses record `DROP_CANCELLED` to UNKNOWN, and canceled death drops
+  are no-destination `DEATH_DROP_CANCELLED` events; neither is ground movement.
 - **Partial-pickup pairing**: `ItemEntityPickupEvent.Pre` records the entity's stack
   count before `Inventory.add()` and a per-tick sweep emits the absorbed delta for
   pickups where Post never fires (NeoForge 21.1.248 gates Post on `add()` returning
@@ -28,27 +30,22 @@ with no duplicate rows. The hard boot dependency on GriefLogger is removed.
   pickups are never double-counted; paired pickups are tagged
   `{"detection":"pre_post_pairing"}` in `raw_data`.
 - **Container capability wrapper** (Issue 4): `ContainerCapabilityWrapper` wraps the
-  `IItemHandler` capability on every vanilla block/block-entity type NeoForge itself
-  serves — sided containers keep `SidedInvWrapper` face rules, chests keep the merged
-  double-chest view via `ChestBlock.getContainer`, hoppers keep
-  `VanillaHopperItemHandler` cooldown semantics, and the composter keeps its
-  `ForwardingItemHandler` re-evaluation. Registration runs at
-  `EventPriority.HIGHEST` because `BlockCapability.getCapability` returns the first
-  non-null provider in registration order and vanilla's own providers register at
-  normal priority. Real automated transfers write `HOPPER_INSERT`/`HOPPER_EXTRACT`
-  anchored to the observed container with the remote endpoint resolved to the
-  per-level UNKNOWN node.
-- **Player container session diffs** (Issue 3): player GUI clicks mutate
-  `Container` directly and never traverse `IItemHandler`, so player-driven
-  transfers are observed by diffing fingerprint-level container totals across
-  `PlayerContainerEvent.Open`/`Close` sessions (`ContainerSessionListener` +
-  `ContainerInteractionTracker`) — net deposits write `ADD_ITEM`, net withdrawals
-  `REMOVE_ITEM`. Automation credits reported by the capability wrapper exclude
-  concurrent machine traffic; multiple simultaneous viewers produce a single
-  `[ambiguous]` observation with candidates preserved in `raw_data`.
+  `IItemHandler` capability on the vanilla block/block-entity types NeoForge serves —
+  sided-container face rules, double-chest views, hopper cooldowns, and composter
+  re-evaluation remain delegated. Registration runs at `EventPriority.HIGHEST` because
+  `BlockCapability.getCapability` returns the first non-null provider. Real calls emit
+  `CAPABILITY_INSERT`/`CAPABILITY_EXTRACT`; `IItemHandler` does not identify its caller or
+  cause, so both player/cause identity and the remote endpoint remain UNKNOWN.
+- **Player container session deltas** (Issue 3): player GUI clicks mutate
+  `Container` directly and never traverse `IItemHandler`, so player-driven changes are
+  measured as fingerprint-level net deltas across `PlayerContainerEvent.Open`/`Close`.
+  Rows carry `timestamp_ms`/`timestamp_end_ms` and are not click-time evidence. A zero-net
+  withdraw-and-return is not represented and does not prove no interaction occurred.
+  Capability deltas are subtracted; multi-viewer sessions produce one `[ambiguous]` row
+  with candidates preserved in `raw_data`.
 - **`ContainerInteractionTracker`**: Session-watch tracker holding per-container
-  baseline totals, open sessions, participants, automation credits, and
-  double-chest position aliases.
+  baseline totals, open sessions, participants, signed capability deltas, rejected-row
+  recovery amounts, and double-chest position aliases.
 - **`ContainerCapabilityRegistrar`**: Registers the capability wrapper providers
   on the mod event bus (`RegisterCapabilitiesEvent`, `EventPriority.HIGHEST`).
 - **Schema migrations V9+V10**: V9 adds a partial unique index on
@@ -57,6 +54,14 @@ with no duplicate rows. The hard boot dependency on GriefLogger is removed.
   extends the dedup key with `item_entity_uuid` so re-submitted entity events still
   deduplicate while distinct same-millisecond events (two identical death-drop
   stacks, pile pickups, repeated machine pushes) are no longer collapsed.
+- **Schema migration V11**: adds `timestamp_end_ms`, source-group/member and match-check
+  tables, and `edge_state`; rebuilds the internal dedup index with `target_node_id` so
+  same-time pickups for different recipients survive.
+- **Cross-source quantity conservation**: a unique shared ItemEntity UUID and matching event
+  details corroborate GriefLogger and ItemGraph rows without duplicating capacity. Uncertain
+  pairs remain ambiguous; legacy edges using aliases are superseded without deleting records.
+- **Shared-writer serialization**: internal observations, GriefLogger ingestion, and
+  correlation transactions serialize on the shared ItemGraph JDBC connection.
 - **`DEATH_DROP` action type**: Added to `CorrelationEngine.DROP_ACTIONS` so death drop
   observations participate correctly in ground-bridge correlation.
 - **GriefLogger startup log**: ItemGraph now logs `GriefLogger integration: ENABLED` or
@@ -74,12 +79,15 @@ with no duplicate rows. The hard boot dependency on GriefLogger is removed.
 - **`IngestionService`**: GL database unavailable no longer emits a WARN every 60 seconds.
   Logs once at INFO level on first skip; subsequent skips are silent until GL becomes
   available again.
-- **`/ig status`**: GriefLogger source now reports `ENABLED (database reachable)`,
-  `DISABLED (not installed)`, or `DISABLED (mod present but database not found)` instead
-  of the binary detected/NOT DETECTED.
-- **`InternalObservationService.persistBatch`**: Extended to resolve `GROUND`, `CONTAINER`,
-  `PLAYER`, and `ARMOR_STAND` target node types. Switched from `INSERT` to `INSERT OR IGNORE`
-  so the V9 dedup index suppresses duplicate internal rows silently.
+- **`/ig status`**: GriefLogger source reports `ENABLED (database reachable)`,
+  `DISABLED (not installed)`, or `DISABLED (mod present but database not found)`; database
+  counts/checkpoints and active/superseded edge counts are queried off-thread, alongside
+  queue loss and capability queue-rejection counts.
+- **`/ig ingest now`**: queues one bounded ingest-and-correlate cycle on the background
+  worker instead of doing source reads and candidate search on the server thread.
+- **`InternalObservationService.persistBatch`**: Resolves `GROUND`, `CONTAINER`, `PLAYER`,
+  `UNKNOWN`, and `ARMOR_STAND` endpoints. `INSERT OR IGNORE` uses the V11 destination-sensitive
+  partial index so same-time events for different recipients are not conflated.
 - **Version**: `0.1.0` → `0.2.0`.
 
 ### Fixed

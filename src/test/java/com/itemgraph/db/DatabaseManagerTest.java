@@ -32,7 +32,7 @@ class DatabaseManagerTest {
 
         assertTrue(dbManager.isInitialized());
         assertTrue(dbManager.isConnected());
-        assertEquals(10, dbManager.getCurrentSchemaVersion());
+        assertEquals(11, dbManager.getCurrentSchemaVersion());
         assertTrue(Files.exists(dbPath));
 
         Connection conn = dbManager.getConnection();
@@ -55,6 +55,9 @@ class DatabaseManagerTest {
         assertTrue(tables.contains("ig_inferred_edges"), "ig_inferred_edges table must exist");
         assertTrue(tables.contains("ig_edge_evidence"), "ig_edge_evidence table must exist");
         assertTrue(tables.contains("ig_edge_allocations"), "ig_edge_allocations table must exist");
+        assertTrue(tables.contains("ig_observation_groups"), "ig_observation_groups table must exist");
+        assertTrue(tables.contains("ig_observation_group_members"), "ig_observation_group_members table must exist");
+        assertTrue(tables.contains("ig_observation_match_checks"), "ig_observation_match_checks table must exist");
 
         // Verify unique constraint on ig_observations(source_type, source_event_id)
         try (Statement stmt = conn.createStatement()) {
@@ -86,6 +89,16 @@ class DatabaseManagerTest {
         }
         assertTrue(observationColumns.contains("correlated_at"), "ig_observations.correlated_at must exist");
         assertTrue(observationColumns.contains("correlation_status"), "ig_observations.correlation_status must exist");
+        assertTrue(observationColumns.contains("timestamp_end_ms"), "ig_observations.timestamp_end_ms must exist for session intervals");
+
+        List<String> edgeColumns = new ArrayList<>();
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("PRAGMA table_info(ig_inferred_edges)")) {
+            while (rs.next()) {
+                edgeColumns.add(rs.getString("name"));
+            }
+        }
+        assertTrue(edgeColumns.contains("edge_state"), "ig_inferred_edges.edge_state must preserve superseded historical inferences");
 
         try (Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT correlated_at, correlation_status FROM ig_observations")) {
@@ -98,7 +111,7 @@ class DatabaseManagerTest {
         // Verify re-initializing does not fail and migrations are idempotent
         dbManager.close();
         dbManager.initialize(dbPath);
-        assertEquals(10, dbManager.getCurrentSchemaVersion());
+        assertEquals(11, dbManager.getCurrentSchemaVersion());
     }
 
     /**

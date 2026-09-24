@@ -1,9 +1,18 @@
 package com.itemgraph.correlation;
 
+import com.itemgraph.audit.AuditService;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.ingest.GriefLoggerAdapter;
 import com.itemgraph.ingest.IngestionService;
+import com.itemgraph.query.EdgeExplanation;
+import com.itemgraph.query.ExplainQueryService;
+import com.itemgraph.query.ObservationDetail;
+import com.itemgraph.query.QueryFormatter;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.neoforged.fml.loading.LoadingModList;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -54,6 +63,18 @@ class CorrelationEngineTest {
     private long now;
 
     private long sourceEventSeq = 1;
+
+    @BeforeAll
+    static void initMinecraftRegistries() {
+        if (LoadingModList.get() == null) {
+            LoadingModList.of(List.of(), List.of(), List.of(), List.of(), java.util.Map.of());
+        }
+        SharedConstants.tryDetectVersion();
+        try {
+            Bootstrap.bootStrap();
+        } catch (Throwable ignored) {
+        }
+    }
 
     @BeforeEach
     void setUp() throws Exception {
@@ -123,6 +144,286 @@ class CorrelationEngineTest {
 
         assertNotNull(correlatedAt(dropObs));
         assertNotNull(correlatedAt(pickupObs));
+    }
+
+    @Test
+    void crossSourceCopiesDoNotProvideIndependentGroundCapacity() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long ground = insertGroundNode(20, 64, 20);
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long dropTime = now - CLOSED;
+        String itemEntityUuid = "entity-cross-source-1";
+        long internalDropId;
+        long griefLoggerDropId;
+        long internalPickupId;
+        long griefLoggerPickupId;
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + dropTime + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            internalDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('GRIEFLOGGER', 101, "
+                    + (dropTime + 1) + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + (dropTime + 60_000) + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            internalPickupId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('GRIEFLOGGER', 102, "
+                    + (dropTime + 60_001) + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerPickupId = generatedKey(stmt);
+        }
+
+        CorrelationResult result = engine.runCorrelation();
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, result.edgesCreated(), "four source rows describe one physical five-item transfer");
+        assertEquals(1, countEdges());
+        assertEquals(5, loadEdges().get(0).amount(), "corroborating source rows must not double quantity");
+        long edgeId = loadEdges().get(0).id();
+        assertEquals(List.of(internalDropId, griefLoggerDropId, internalPickupId, griefLoggerPickupId),
+                evidenceFor(edgeId), "the inferred edge must cite both sources for each physical event");
+
+        EdgeExplanation explanation = new ExplainQueryService().findEdge(conn, edgeId).orElseThrow();
+        assertEquals(4, explanation.evidence().size());
+        ObservationDetail corroboratingPickup = explanation.evidence().stream()
+                .filter(observation -> observation.id() == griefLoggerPickupId)
+                .findFirst().orElseThrow();
+        assertEquals("CONFIRMED", corroboratingPickup.sourceGroup().state());
+        assertEquals("CORROBORATING", corroboratingPickup.sourceGroup().memberRole());
+        assertTrue(String.join("\n", QueryFormatter.formatExplain(explanation))
+                .contains("source group: confirmed"));
+    }
+
+    @Test
+    void lateGriefLoggerCopiesAttachToExistingEdgeWithoutAddingCapacity() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long ground = insertGroundNode(20, 64, 20);
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long dropTime = now - 120_000;
+        long pickupTime = dropTime + 60_000;
+        String itemEntityUuid = "entity-late-source-copy";
+        long internalDropId;
+        long internalPickupId;
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + dropTime + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            internalDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + pickupTime + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            internalPickupId = generatedKey(stmt);
+        }
+
+        assertEquals(1, engine.runCorrelation().edgesCreated());
+        long edgeId = loadEdges().get(0).id();
+        long griefLoggerDropId;
+        long griefLoggerPickupId;
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('GRIEFLOGGER', 501, "
+                    + (dropTime + 1) + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('GRIEFLOGGER', 502, "
+                    + (pickupTime + 1) + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerPickupId = generatedKey(stmt);
+        }
+
+        CorrelationResult secondPass = engine.runCorrelation();
+
+        assertTrue(secondPass.success(), secondPass.errorMessage());
+        assertEquals(0, secondPass.edgesCreated());
+        assertEquals(1, countActiveEdges());
+        assertEquals(List.of(internalDropId, internalPickupId, griefLoggerDropId, griefLoggerPickupId),
+                evidenceFor(edgeId));
+        assertEquals("CONFIRMED", matchCheckResult(internalDropId));
+        assertEquals("CONFIRMED", matchCheckResult(griefLoggerDropId));
+        assertEquals("CONFIRMED", matchCheckResult(internalPickupId));
+        assertEquals("CONFIRMED", matchCheckResult(griefLoggerPickupId));
+    }
+
+    @Test
+    void legacyInternalSourceTypeStillGroupsWithGriefLoggerCopies() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long ground = insertGroundNode(20, 64, 20);
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long dropTime = now - CLOSED;
+        String itemEntityUuid = "entity-legacy-internal";
+        long legacyDropId;
+        long griefLoggerDropId;
+        long legacyPickupId;
+        long griefLoggerPickupId;
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('INTERNAL', "
+                    + dropTime + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            legacyDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('GRIEFLOGGER', 151, "
+                    + (dropTime + 1) + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('INTERNAL', "
+                    + (dropTime + 60_000) + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            legacyPickupId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('GRIEFLOGGER', 152, "
+                    + (dropTime + 60_001) + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerPickupId = generatedKey(stmt);
+        }
+
+        CorrelationResult result = engine.runCorrelation();
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, result.edgesCreated());
+        assertEquals(List.of(legacyDropId, griefLoggerDropId, legacyPickupId, griefLoggerPickupId),
+                evidenceFor(loadEdges().get(0).id()));
+    }
+
+    @Test
+    void crossSourceRowsWithoutSharedEntityIdentityRemainAmbiguous() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long ground = insertGroundNode(20, 64, 20);
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long dropTime = now - CLOSED;
+        long internalDropId;
+        long griefLoggerDropId;
+        long internalPickupId;
+        long griefLoggerPickupId;
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + dropTime + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5)", Statement.RETURN_GENERATED_KEYS);
+            internalDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount) VALUES ('GRIEFLOGGER', 201, "
+                    + (dropTime + 1) + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5)", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + (dropTime + 60_000) + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5)", Statement.RETURN_GENERATED_KEYS);
+            internalPickupId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount) VALUES ('GRIEFLOGGER', 202, "
+                    + (dropTime + 60_001) + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5)", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerPickupId = generatedKey(stmt);
+        }
+
+        CorrelationResult result = engine.runCorrelation();
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(0, result.edgesCreated(), "a possible source duplicate without shared entity identity cannot support quantity allocation");
+        assertEquals("SOURCE_AMBIGUOUS", correlationStatus(internalDropId));
+        assertEquals("SOURCE_AMBIGUOUS", correlationStatus(griefLoggerDropId));
+        assertEquals("SOURCE_AMBIGUOUS", correlationStatus(internalPickupId));
+        assertEquals("SOURCE_AMBIGUOUS", correlationStatus(griefLoggerPickupId));
+    }
+
+    @Test
+    void sharedEntityUuidWithConflictingPickupActorsIsAmbiguousNotCollapsed() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long ground = insertGroundNode(20, 64, 20);
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long pickupTime = now - CLOSED;
+        String itemEntityUuid = "entity-conflicting-pickup-actor";
+        long internalPickupId;
+        long griefLoggerPickupId;
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + pickupTime + ", " + ground + ", " + playerA + ", " + fp + ", 'PICKUP_ITEM', 3, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            internalPickupId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('GRIEFLOGGER', 601, "
+                    + (pickupTime + 1) + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 3, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerPickupId = generatedKey(stmt);
+        }
+
+        CorrelationResult result = engine.runCorrelation();
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(0, result.edgesCreated());
+        assertEquals("SOURCE_AMBIGUOUS", correlationStatus(internalPickupId));
+        assertEquals("SOURCE_AMBIGUOUS", correlationStatus(griefLoggerPickupId));
+        assertEquals(2, countObservations(), "conflicting actor rows remain separately auditable");
+    }
+
+    @Test
+    void canceledDropAttemptMakesConflictingGriefLoggerGroundRowAmbiguous() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long ground = insertGroundNode(20, 64, 20);
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long dropTime = now - CLOSED;
+        long cancelledId;
+        long griefLoggerDropId;
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, fingerprint_id, action_type, amount) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + dropTime + ", " + playerA + ", " + fp + ", 'DROP_CANCELLED', 5)", Statement.RETURN_GENERATED_KEYS);
+            cancelledId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount) VALUES ('GRIEFLOGGER', 701, "
+                    + (dropTime + 1) + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5)", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerDropId = generatedKey(stmt);
+        }
+        insertObservation(dropTime + 60_000, ground, playerB, fp, "PICKUP_ITEM", 5);
+
+        CorrelationResult result = engine.runCorrelation();
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(0, result.edgesCreated());
+        assertEquals("SOURCE_AMBIGUOUS", correlationStatus(cancelledId));
+        assertEquals("SOURCE_AMBIGUOUS", correlationStatus(griefLoggerDropId));
+        assertEquals(0, countEdges());
+    }
+
+    @Test
+    void legacyDuplicateEdgesAreSupersededAndQuantityIsRebuiltFromOneSourceGroup() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long ground = insertGroundNode(20, 64, 20);
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long dropTime = now - CLOSED;
+        long pickupTime = dropTime + 60_000;
+        String itemEntityUuid = "entity-legacy-duplicate";
+        long internalDropId;
+        long griefLoggerDropId;
+        long internalPickupId;
+        long griefLoggerPickupId;
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + dropTime + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            internalDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('GRIEFLOGGER', 301, "
+                    + (dropTime + 1) + ", " + playerA + ", " + ground + ", " + fp + ", 'DROP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerDropId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('ITEMGRAPH_INTERNAL', "
+                    + pickupTime + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            internalPickupId = generatedKey(stmt);
+            stmt.executeUpdate("INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms, node_id, target_node_id, fingerprint_id, action_type, amount, item_entity_uuid) VALUES ('GRIEFLOGGER', 302, "
+                    + (pickupTime + 1) + ", " + ground + ", " + playerB + ", " + fp + ", 'PICKUP_ITEM', 5, '" + itemEntityUuid + "')", Statement.RETURN_GENERATED_KEYS);
+            griefLoggerPickupId = generatedKey(stmt);
+        }
+
+        long retainedEdge = insertLegacyEdge(playerA, playerB, fp, 5, dropTime, pickupTime,
+                internalDropId, internalPickupId);
+        long supersededEdge = insertLegacyEdge(playerA, playerB, fp, 5, dropTime + 1, pickupTime + 1,
+                griefLoggerDropId, griefLoggerPickupId);
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "UPDATE ig_observations SET correlation_status = 'FULLY_ALLOCATED', correlated_at = ?")) {
+            pstmt.setLong(1, now);
+            pstmt.executeUpdate();
+        }
+
+        CorrelationResult result = engine.runCorrelation();
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(0, result.edgesCreated());
+        assertEquals(2, countEdges(), "superseded evidence rows remain stored for auditability");
+        assertEquals(1, countActiveEdges());
+        assertEquals("SUPERSEDED_SOURCE_DUPLICATE", edgeState(supersededEdge));
+        assertEquals(List.of(internalDropId, griefLoggerDropId, internalPickupId, griefLoggerPickupId),
+                evidenceFor(retainedEdge));
+        assertEquals("SUPERSEDED_SOURCE_DUPLICATE",
+                new ExplainQueryService().findEdge(conn, supersededEdge).orElseThrow().edgeState());
+        assertTrue(new AuditService().audit(conn).healthy());
     }
 
     /**
@@ -660,6 +961,13 @@ class CorrelationEngineTest {
         }
     }
 
+    private static long generatedKey(Statement stmt) throws SQLException {
+        try (ResultSet keys = stmt.getGeneratedKeys()) {
+            assertTrue(keys.next(), "insert must yield a generated key");
+            return keys.getLong(1);
+        }
+    }
+
     private List<Edge> loadEdges() throws SQLException {
         List<Edge> edges = new ArrayList<>();
         try (Statement stmt = conn.createStatement();
@@ -686,6 +994,81 @@ class CorrelationEngineTest {
             rs.next();
             return rs.getInt(1);
         }
+    }
+
+    private int countObservations() throws SQLException {
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_observations")) {
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    private int countActiveEdges() throws SQLException {
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_inferred_edges WHERE edge_state = 'ACTIVE'")) {
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    private String edgeState(long edgeId) throws SQLException {
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "SELECT edge_state FROM ig_inferred_edges WHERE id = ?")) {
+            pstmt.setLong(1, edgeId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next() ? rs.getString(1) : null;
+            }
+        }
+    }
+
+    private long insertLegacyEdge(long fromNode, long toNode, long fingerprintId, int amount,
+                                  long timeStart, long timeEnd, long sourceObservation,
+                                  long destinationObservation) throws SQLException {
+        long edgeId;
+        try (PreparedStatement pstmt = conn.prepareStatement("""
+                INSERT INTO ig_inferred_edges (from_node_id, to_node_id, fingerprint_id, amount,
+                    time_start, time_end, confidence, explanation, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0.9, 'legacy duplicated source inference', ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            pstmt.setLong(1, fromNode);
+            pstmt.setLong(2, toNode);
+            pstmt.setLong(3, fingerprintId);
+            pstmt.setInt(4, amount);
+            pstmt.setLong(5, timeStart);
+            pstmt.setLong(6, timeEnd);
+            pstmt.setLong(7, now);
+            pstmt.executeUpdate();
+            try (ResultSet keys = pstmt.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                edgeId = keys.getLong(1);
+            }
+        }
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "INSERT INTO ig_edge_evidence (edge_id, observation_id) VALUES (?, ?)")) {
+            pstmt.setLong(1, edgeId);
+            pstmt.setLong(2, sourceObservation);
+            pstmt.addBatch();
+            pstmt.setLong(1, edgeId);
+            pstmt.setLong(2, destinationObservation);
+            pstmt.addBatch();
+            pstmt.executeBatch();
+        }
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "INSERT INTO ig_edge_allocations (edge_id, observation_id, allocation_role, amount) VALUES (?, ?, ?, ?)")) {
+            pstmt.setLong(1, edgeId);
+            pstmt.setLong(2, sourceObservation);
+            pstmt.setString(3, "SOURCE");
+            pstmt.setInt(4, amount);
+            pstmt.addBatch();
+            pstmt.setLong(1, edgeId);
+            pstmt.setLong(2, destinationObservation);
+            pstmt.setString(3, "DESTINATION");
+            pstmt.setInt(4, amount);
+            pstmt.addBatch();
+            pstmt.executeBatch();
+        }
+        return edgeId;
     }
 
     private List<Long> evidenceFor(long edgeId) throws SQLException {
@@ -721,6 +1104,28 @@ class CorrelationEngineTest {
                 assertTrue(rs.next(), "observation " + observationId + " should exist");
                 long value = rs.getLong(1);
                 return rs.wasNull() ? null : value;
+            }
+        }
+    }
+
+    private String matchCheckResult(long observationId) throws SQLException {
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "SELECT result FROM ig_observation_match_checks WHERE observation_id = ?")) {
+            pstmt.setLong(1, observationId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                assertTrue(rs.next(), "match check for observation " + observationId + " should exist");
+                return rs.getString(1);
+            }
+        }
+    }
+
+    private String correlationStatus(long observationId) throws SQLException {
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "SELECT correlation_status FROM ig_observations WHERE id = ?")) {
+            pstmt.setLong(1, observationId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                assertTrue(rs.next(), "observation " + observationId + " should exist");
+                return rs.getString(1);
             }
         }
     }

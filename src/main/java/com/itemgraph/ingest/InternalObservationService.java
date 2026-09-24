@@ -44,12 +44,13 @@ public class InternalObservationService {
             double x, double y, double z,
             String targetLevelName,
             Double targetX, Double targetY, Double targetZ,
-            String targetType, // e.g. "ARMOR_STAND", "PLAYER", "GROUND"
+            String targetType, // e.g. "ARMOR_STAND", "PLAYER", "GROUND", "CONTAINER", "UNKNOWN"
             String itemId,
             byte[] rawData,
             CanonicalItem item,
             int amount,
-            String itemEntityUuid
+            String itemEntityUuid,
+            Long timestampEndMs
     ) {
         public InternalObservation(
                 long timestampMs, String actionType, String playerUuid, String playerName,
@@ -58,7 +59,17 @@ public class InternalObservationService {
                 String targetType, String itemId, byte[] rawData, int amount, String itemEntityUuid
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
-                 targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, null, amount, itemEntityUuid);
+                 targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, null, amount, itemEntityUuid, null);
+        }
+
+        public InternalObservation(
+                long timestampMs, String actionType, String playerUuid, String playerName,
+                String levelName, double x, double y, double z,
+                String targetLevelName, Double targetX, Double targetY, Double targetZ,
+                String targetType, String itemId, byte[] rawData, CanonicalItem item, int amount, String itemEntityUuid
+        ) {
+            this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
+                    targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, item, amount, itemEntityUuid, null);
         }
 
         public InternalObservation(
@@ -69,7 +80,18 @@ public class InternalObservationService {
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
                  targetLevelName, targetX, targetY, targetZ, targetType,
-                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid);
+                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, null);
+        }
+
+        public InternalObservation(
+                long timestampMs, String actionType, String playerUuid, String playerName,
+                String levelName, double x, double y, double z,
+                String targetLevelName, Double targetX, Double targetY, Double targetZ,
+                String targetType, CanonicalItem item, int amount, String itemEntityUuid, Long timestampEndMs
+        ) {
+            this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
+                 targetLevelName, targetX, targetY, targetZ, targetType,
+                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, timestampEndMs);
         }
     }
 
@@ -170,6 +192,7 @@ public class InternalObservationService {
         transformationQueue.clear();
         totalEnqueued.set(0);
         totalPersisted.set(0);
+        totalDropped.set(0);
         totalTransformations.set(0);
     }
 
@@ -236,6 +259,12 @@ public class InternalObservationService {
         if (!db.isInitialized()) return;
 
         Connection conn = db.getConnection();
+        synchronized (conn) {
+            persistTransformationsLocked(conn, batch);
+        }
+    }
+
+    private void persistTransformationsLocked(Connection conn, List<InternalTransformation> batch) throws SQLException {
         NodeManager nodeManager = IngestionService.getInstance().getNodeManager();
 
         boolean origAutoCommit = conn.getAutoCommit();
@@ -284,20 +313,24 @@ public class InternalObservationService {
         if (!db.isInitialized()) return;
 
         Connection conn = db.getConnection();
+        synchronized (conn) {
+            persistBatchLocked(conn, batch);
+        }
+    }
+
+    private void persistBatchLocked(Connection conn, List<InternalObservation> batch) throws SQLException {
         NodeManager nodeManager = IngestionService.getInstance().getNodeManager();
 
         boolean origAutoCommit = conn.getAutoCommit();
         try {
             conn.setAutoCommit(false);
 
-            // INSERT OR IGNORE: V9 partial unique index on (source_type, timestamp_ms,
-            // node_id, fingerprint_id, amount, action_type) WHERE source_event_id IS NULL
-            // silently discards duplicate internal observations rather than throwing.
+            // INSERT OR IGNORE: the V11 partial unique index protects internal event submissions.
             String insertSql = """
                 INSERT OR IGNORE INTO ig_observations (
                     source_type, source_event_id, timestamp_ms, node_id, target_node_id,
-                    fingerprint_id, action_type, amount, raw_data, correlation_status, item_entity_uuid
-                ) VALUES ('ITEMGRAPH_INTERNAL', NULL, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+                    fingerprint_id, action_type, amount, raw_data, correlation_status, item_entity_uuid, timestamp_end_ms
+                ) VALUES ('ITEMGRAPH_INTERNAL', NULL, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
             """;
 
             try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
@@ -338,43 +371,41 @@ public class InternalObservationService {
                             }
                         }
                         case "CONTAINER" -> {
-                            // ADD_ITEM / REMOVE_ITEM: player <-> container
-                            // HOPPER_INSERT / HOPPER_EXTRACT: container <-> UNKNOWN remote endpoint
-                            // (an IItemHandler call cannot identify the automation's other side,
-                            //  so the far endpoint is the per-level UNKNOWN sentinel, not a
-                            //  fabricated self-edge).
+                            // ADD_ITEM / REMOVE_ITEM: player <-> container; CAPABILITY_* keeps the remote endpoint UNKNOWN.
                             long containerNodeId = nodeManager.getOrCreateContainerNode(
                                     conn, obs.targetLevelName(),
                                     obs.targetX(), obs.targetY(), obs.targetZ());
                             switch (obs.actionType()) {
                                 case "ADD_ITEM" -> {
                                     // Player deposits into container: player -> container.
-                                    // Ambiguous sessions resolve the actor endpoint to UNKNOWN;
-                                    // candidate players are preserved in raw_data.
+                                    // Ambiguous sessions resolve the actor endpoint to UNKNOWN; candidates stay in raw_data.
                                     originNodeId = actorNode(conn, nodeManager, obs);
                                     targetNodeId = containerNodeId;
                                 }
                                 case "REMOVE_ITEM" -> {
-                                    // Player withdraws from container: container -> player
+                                    // Player withdraws from container: container -> player.
                                     originNodeId = containerNodeId;
                                     targetNodeId = actorNode(conn, nodeManager, obs);
                                 }
-                                case "HOPPER_INSERT" -> {
-                                    // Automation pushes into this container: remote source unknown
+                                case "CAPABILITY_INSERT", "HOPPER_INSERT" -> {
+                                    // Capability-mediated insertion; the handler API does not identify the caller.
                                     originNodeId = unknownNode(conn, nodeManager, obs);
                                     targetNodeId = containerNodeId;
                                 }
-                                case "HOPPER_EXTRACT" -> {
-                                    // Automation pulls from this container: remote destination unknown
+                                case "CAPABILITY_EXTRACT", "HOPPER_EXTRACT" -> {
+                                    // Capability-mediated extraction; the handler API does not identify the caller.
                                     originNodeId = containerNodeId;
                                     targetNodeId = unknownNode(conn, nodeManager, obs);
                                 }
                                 default -> {
-                                    // Unknown container action: anchor to container with no direction
                                     originNodeId = containerNodeId;
                                     targetNodeId = null;
                                 }
                             }
+                        }
+                        case "UNKNOWN" -> {
+                            originNodeId = playerNode(conn, nodeManager, obs);
+                            targetNodeId = unknownNode(conn, nodeManager, obs);
                         }
                         case "PLAYER" -> {
                             // Direct player-to-player observation (future use)
@@ -409,6 +440,11 @@ public class InternalObservationService {
                     } else {
                         pstmt.setNull(8, Types.VARCHAR);
                     }
+                    if (obs.timestampEndMs() != null) {
+                        pstmt.setLong(9, obs.timestampEndMs());
+                    } else {
+                        pstmt.setNull(9, Types.BIGINT);
+                    }
                     pstmt.addBatch();
                 }
                 pstmt.executeBatch();
@@ -426,7 +462,7 @@ public class InternalObservationService {
     /**
      * Resolves the real player node for an observation. Only called for action
      * types that have a genuine player endpoint — sentinel identities
-     * ({@code [automation]}, {@code [ambiguous]}) must not materialize fake
+     * ({@code [capability caller unknown]}, {@code [ambiguous]}) must not materialize fake
      * PLAYER rows in {@code ig_nodes}.
      */
     private static long playerNode(Connection conn, NodeManager nodeManager, InternalObservation obs)
@@ -444,7 +480,7 @@ public class InternalObservationService {
     private static long actorNode(Connection conn, NodeManager nodeManager, InternalObservation obs)
             throws SQLException {
         if (com.itemgraph.listener.ContainerInteractionTracker.AMBIGUOUS_UUID.equals(obs.playerUuid())
-                || com.itemgraph.listener.ContainerCapabilityWrapper.AUTOMATION_UUID.equals(obs.playerUuid())) {
+                || com.itemgraph.listener.ContainerCapabilityWrapper.UNKNOWN_CALLER_UUID.equals(obs.playerUuid())) {
             return unknownNode(conn, nodeManager, obs);
         }
         return playerNode(conn, nodeManager, obs);

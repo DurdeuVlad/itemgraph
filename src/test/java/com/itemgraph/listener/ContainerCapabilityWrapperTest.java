@@ -2,44 +2,29 @@ package com.itemgraph.listener;
 
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.ingest.InternalObservationService;
-import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.Bootstrap;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.neoforged.neoforge.items.ItemStackHandler;
-import org.junit.jupiter.api.BeforeAll;
+import net.neoforged.neoforge.items.IItemHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link ContainerCapabilityWrapper} (0.2.0 — Issue 4).
  *
- * <p>A bare {@code gradlew test} JVM cannot bootstrap Minecraft item registries:
- * {@code Bootstrap.bootStrap()} dies inside {@code Blocks.<clinit>} on NeoForge's
- * FeatureFlagLoader (no LoadingModList outside a real mod launch), which poisons
- * {@code Blocks}/{@code Items}/{@code Item$Properties} permanently for the JVM.
- * Verified empirically: {@link ItemStack} and {@link ItemStackHandler} class-load
- * fine, but no non-empty {@link ItemStack} can be constructed.
+ * <p>These tests avoid bootstrapping global item registries and use explicit canonical
+ * fingerprints for completed transfers. Delegation is verified with an {@link IItemHandler}
+ * mock; the pending-observation queue is read via reflection without starting the worker.
  *
- * <p>Consequently these tests verify the wrapper through its package-private
- * seams — {@link ContainerCapabilityWrapper#shouldEmit} (the simulate/movement
- * guard) and {@link ContainerCapabilityWrapper#submitObservation} (action-type
- * mapping) — plus the real public {@code insertItem}/{@code extractItem} path
- * with {@link ItemStack#EMPTY}, which exercises delegation and proves no
- * observation is written when nothing moved. The pending-observation queue is
- * read via reflection; the worker thread is never started, so {@code submit()}
- * is a pure enqueue.
- *
- * <p>Capability invocations are always automation: player transfers never reach
- * {@code IItemHandler} (menus mutate {@code Container} directly), so every real
- * call emits {@code HOPPER_INSERT}/{@code HOPPER_EXTRACT} with the automation
- * sentinel regardless of open sessions.
+ * <p>{@code IItemHandler} does not identify its caller, so capability observations retain
+ * an UNKNOWN remote endpoint and do not claim hopper or automation identity.
  */
 class ContainerCapabilityWrapperTest {
 
@@ -49,22 +34,9 @@ class ContainerCapabilityWrapperTest {
     private static final CanonicalItem DIAMOND =
             new CanonicalItem("minecraft:diamond", "fingerprint-diamond", null, null, null);
 
-    @BeforeAll
-    static void initMinecraftRegistries() {
-        SharedConstants.tryDetectVersion();
-        // Same bootstrap pattern as ItemCanonicalizerTest: partial failure is expected
-        // outside a real game launch; what this test touches (ItemStack.EMPTY,
-        // ItemStackHandler, ResourceKey) class-loads before the failure point.
-        try {
-            Bootstrap.bootStrap();
-        } catch (Throwable expectedOutsideRealGameLaunch) {
-            // Intentionally swallowed — see ItemCanonicalizerTest for the full rationale.
-        }
-    }
-
     @BeforeEach
     void drainQueuesAndContexts() {
-        pendingObservations().clear();
+        InternalObservationService.getInstance().clear();
         ContainerInteractionTracker.getInstance().clearAll();
     }
 
@@ -97,20 +69,20 @@ class ContainerCapabilityWrapperTest {
     }
 
     // -------------------------------------------------------------------------
-    // Action mapping via submitObservation — always automation (Issue 4)
+    // Action mapping via submitObservation — caller and remote endpoint remain unknown
     // -------------------------------------------------------------------------
 
     @Test
-    void insertProducesHopperInsertAnchoredToContainer() throws Exception {
+    void insertProducesCapabilityInsertWithUnknownCaller() throws Exception {
         ContainerCapabilityWrapper wrapper = wrapperAt(POS);
 
         wrapper.submitObservation("INSERT", 5, DIAMOND);
 
         InternalObservationService.InternalObservation obs = pendingObservations().poll();
         assertNotNull(obs, "a real insertion must emit exactly one observation");
-        assertEquals("HOPPER_INSERT", obs.actionType());
-        assertEquals(ContainerCapabilityWrapper.AUTOMATION_UUID, obs.playerUuid());
-        assertEquals(ContainerCapabilityWrapper.AUTOMATION_NAME, obs.playerName());
+        assertEquals("CAPABILITY_INSERT", obs.actionType());
+        assertEquals("00000000-0000-0000-0000-000000000000", obs.playerUuid());
+        assertEquals("[capability caller unknown]", obs.playerName());
         assertEquals("CONTAINER", obs.targetType());
         assertEquals(5, obs.amount());
         assertEquals("minecraft:diamond", obs.itemId());
@@ -125,39 +97,81 @@ class ContainerCapabilityWrapperTest {
     }
 
     @Test
-    void extractProducesHopperExtract() throws Exception {
+    void extractProducesCapabilityExtractWithUnknownDestination() throws Exception {
         ContainerCapabilityWrapper wrapper = wrapperAt(POS);
 
         wrapper.submitObservation("EXTRACT", 4, DIAMOND);
 
         InternalObservationService.InternalObservation obs = pendingObservations().poll();
         assertNotNull(obs);
-        assertEquals("HOPPER_EXTRACT", obs.actionType());
-        assertEquals(ContainerCapabilityWrapper.AUTOMATION_UUID, obs.playerUuid());
+        assertEquals("CAPABILITY_EXTRACT", obs.actionType());
+        assertEquals("00000000-0000-0000-0000-000000000000", obs.playerUuid());
         assertEquals(4, obs.amount());
         assertTrue(pendingObservations().isEmpty());
     }
 
     @Test
-    void capabilityCallsStayAutomationEvenWhileWatched() throws Exception {
-        // A player session open on this container must NOT flip capability traffic
-        // to ADD_ITEM/REMOVE_ITEM: anything reaching IItemHandler is automation.
-        // The watch only receives an automation credit so the session diff can
-        // exclude this transfer later.
+    void capabilityObservationPreventsTheSameDeltaFromBeingAttributedToAnOpenPlayer() throws Exception {
         ContainerInteractionTracker tracker = ContainerInteractionTracker.getInstance();
-        var key = new ContainerInteractionTracker.ContainerKey("minecraft:overworld", 10, 64, -20);
-        tracker.openSession(java.util.UUID.randomUUID(), "Steve", key,
-                () -> new ContainerInteractionTracker.InventoryTotals(java.util.Map.of(), java.util.Map.of()),
-                java.util.List.of());
+        var key = new ContainerInteractionTracker.ContainerKey("minecraft:overworld", POS.getX(), POS.getY(), POS.getZ());
+        AtomicReference<ContainerInteractionTracker.InventoryTotals> live = new AtomicReference<>(
+                new ContainerInteractionTracker.InventoryTotals(java.util.Map.of(), java.util.Map.of()));
+        java.util.UUID playerUuid = java.util.UUID.randomUUID();
+        tracker.openSession(playerUuid, "Steve", key, live::get, java.util.List.of());
 
         ContainerCapabilityWrapper wrapper = wrapperAt(POS);
         wrapper.submitObservation("INSERT", 3, DIAMOND);
+        live.set(new ContainerInteractionTracker.InventoryTotals(
+                java.util.Map.of(DIAMOND.fingerprintHash(), 3L),
+                java.util.Map.of(DIAMOND.fingerprintHash(), DIAMOND)));
+        tracker.closeSession(playerUuid, 1, 64, 1);
 
         InternalObservationService.InternalObservation obs = pendingObservations().poll();
         assertNotNull(obs);
-        assertEquals("HOPPER_INSERT", obs.actionType(),
-                "capability traffic is always automation-attributed");
-        assertEquals(ContainerCapabilityWrapper.AUTOMATION_UUID, obs.playerUuid());
+        assertEquals("CAPABILITY_INSERT", obs.actionType(),
+                "capability traffic remains a separate observation while a player session is open");
+        assertEquals("00000000-0000-0000-0000-000000000000", obs.playerUuid());
+        assertEquals("[capability caller unknown]", obs.playerName());
+        assertNull(pendingObservations().poll(), "the same inventory delta must not also become a player transfer");
+    }
+
+    @Test
+    void queueRejectionDoesNotAttributeCapabilityDeltaToTheOpenPlayer() {
+        ContainerInteractionTracker tracker = ContainerInteractionTracker.getInstance();
+        var key = new ContainerInteractionTracker.ContainerKey("minecraft:overworld", POS.getX(), POS.getY(), POS.getZ());
+        AtomicReference<ContainerInteractionTracker.InventoryTotals> live = new AtomicReference<>(
+                new ContainerInteractionTracker.InventoryTotals(java.util.Map.of(), java.util.Map.of()));
+        java.util.UUID playerUuid = java.util.UUID.randomUUID();
+        tracker.openSession(playerUuid, "Steve", key, live::get, java.util.List.of());
+
+        InternalObservationService.InternalObservation filler = new InternalObservationService.InternalObservation(
+                1000, "EQUIP_ARMOR_STAND", null, null,
+                "minecraft:overworld", 0, 64, 0,
+                "minecraft:overworld", 0.0, 64.0, 0.0,
+                "CONTAINER", DIAMOND, 1, null);
+        for (int i = 0; i < 10_000; i++) {
+            assertTrue(pendingObservations().offer(filler));
+        }
+
+        wrapperAt(POS).submitObservation("INSERT", 5, DIAMOND);
+        assertEquals(1, InternalObservationService.getInstance().getTotalDropped());
+        assertEquals(1, tracker.getTotalCapabilityQueueRejections());
+        pendingObservations().clear();
+        live.set(new ContainerInteractionTracker.InventoryTotals(
+                java.util.Map.of(DIAMOND.fingerprintHash(), 5L),
+                java.util.Map.of(DIAMOND.fingerprintHash(), DIAMOND)));
+        tracker.closeSession(playerUuid, 1, 64, 1);
+
+        InternalObservationService.InternalObservation unresolved = pendingObservations().poll();
+        assertNotNull(unresolved, "the lost capability transfer must be retried as unresolved once queue capacity returns");
+        assertEquals("CAPABILITY_INSERT", unresolved.actionType());
+        assertEquals(ContainerCapabilityWrapper.UNKNOWN_CALLER_UUID, unresolved.playerUuid());
+        assertEquals(5, unresolved.amount());
+        assertNotNull(unresolved.timestampEndMs());
+        assertTrue(new String(unresolved.rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("queue_overflow_recovery"));
+        assertNull(pendingObservations().poll(), "queue rejection must not turn the lost capability delta into a player transfer");
+        assertEquals(1, InternalObservationService.getInstance().getTotalDropped());
     }
 
     @Test
@@ -167,55 +181,24 @@ class ContainerCapabilityWrapperTest {
 
         InternalObservationService.InternalObservation obs = pendingObservations().poll();
         assertNotNull(obs);
-        assertEquals("HOPPER_INSERT", obs.actionType());
+        assertEquals("CAPABILITY_INSERT", obs.actionType());
         assertEquals((double) POS_B.getX(), obs.targetX());
         assertEquals((double) POS_B.getZ(), obs.targetZ());
     }
 
-    // -------------------------------------------------------------------------
-    // Real public path: ItemStack.EMPTY drives every branch that cannot emit
-    // -------------------------------------------------------------------------
-
-    @Test
-    void simulatedCallsProduceNoObservation() {
-        ItemStackHandler handler = new ItemStackHandler(1);
-        ContainerCapabilityWrapper wrapper = new ContainerCapabilityWrapper(handler, POS, Level.OVERWORLD);
-
-        ItemStack insertRemainder = wrapper.insertItem(0, ItemStack.EMPTY, true);
-        ItemStack extractPreview = wrapper.extractItem(0, 4, true);
-
-        assertTrue(insertRemainder.isEmpty());
-        assertTrue(extractPreview.isEmpty());
-        assertTrue(handler.getStackInSlot(0).isEmpty(), "simulation must not mutate the inventory");
-        assertEquals(0, pendingObservations().size(), "simulate=true must not emit observations");
-    }
-
-    @Test
-    void realCallsThatMoveNothingProduceNoObservation() {
-        ItemStackHandler handler = new ItemStackHandler(1);
-        ContainerCapabilityWrapper wrapper = new ContainerCapabilityWrapper(handler, POS, Level.OVERWORLD);
-
-        // Empty stack into the handler: remainder == input == 0 → nothing moved.
-        ItemStack remainder = wrapper.insertItem(0, ItemStack.EMPTY, false);
-        // Empty extraction: extracted.isEmpty() → nothing moved.
-        ItemStack extracted = wrapper.extractItem(0, 4, false);
-
-        assertTrue(remainder.isEmpty());
-        assertTrue(extracted.isEmpty());
-        assertEquals(0, pendingObservations().size(),
-                "a real call that moves zero items must not emit an observation");
-    }
-
     @Test
     void readMethodsDelegateUnchanged() {
-        ItemStackHandler handler = new ItemStackHandler(2);
-        ContainerCapabilityWrapper wrapper = new ContainerCapabilityWrapper(handler, POS, Level.OVERWORLD);
+        IItemHandler delegate = mock(IItemHandler.class);
+        when(delegate.getSlots()).thenReturn(2);
+        when(delegate.getStackInSlot(1)).thenReturn(null);
+        when(delegate.getSlotLimit(0)).thenReturn(64);
+        when(delegate.isItemValid(0, null)).thenReturn(true);
+        ContainerCapabilityWrapper wrapper = new ContainerCapabilityWrapper(delegate, POS, Level.OVERWORLD);
 
         assertEquals(2, wrapper.getSlots());
-        assertSame(handler.getStackInSlot(1), wrapper.getStackInSlot(1));
-        assertEquals(handler.getSlotLimit(0), wrapper.getSlotLimit(0));
-        assertEquals(handler.isItemValid(0, ItemStack.EMPTY),
-                wrapper.isItemValid(0, ItemStack.EMPTY));
+        assertNull(wrapper.getStackInSlot(1));
+        assertEquals(64, wrapper.getSlotLimit(0));
+        assertTrue(wrapper.isItemValid(0, null));
     }
 
     // -------------------------------------------------------------------------
@@ -223,7 +206,7 @@ class ContainerCapabilityWrapperTest {
     // -------------------------------------------------------------------------
 
     private static ContainerCapabilityWrapper wrapperAt(BlockPos pos) {
-        return new ContainerCapabilityWrapper(new ItemStackHandler(1), pos, Level.OVERWORLD);
+        return new ContainerCapabilityWrapper(mock(IItemHandler.class), pos, Level.OVERWORLD);
     }
 
     @SuppressWarnings("unchecked")
