@@ -32,15 +32,15 @@ description='''${mod_description}'''
 
 # GriefLogger is an OPTIONAL evidence source. ItemGraph operates without it:
 # GriefLogger ingestion cycles are skipped when the database file is absent, and
-# ItemGraph's own NeoForge event listeners provide complete item movement coverage.
+# ItemGraph records its supported native NeoForge events and capability changes.
 # When GriefLogger IS present, ItemGraph reads its SQLite database read-only and
-# merges the evidence with its own observations (duplicates suppressed).
+# groups confirmed copies so both raw rows remain auditable but add one capacity.
 # ItemGraph bundles its own sqlite-jdbc via JarJar; JarJar version negotiation
 # deduplicates with GriefLogger's bundled copy when both are present.
 [[dependencies.${mod_id}]]
     modId="grieflogger"
     type="optional"
-    reason="Optional evidence source. ItemGraph functions fully without it."
+    reason="Optional evidence source; ItemGraph records its supported native observations without it."
     versionRange="[1.2.10,)"
     ordering="AFTER"
     side="BOTH"

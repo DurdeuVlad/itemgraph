@@ -4,7 +4,9 @@
 
 ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **NeoForge 1.21.1**.
 
-Its purpose is to reconstruct how item types and stack quantities move through players, containers, entities, and other inventories over time. It does **not** assign a permanent UUID to every item. Instead, it combines raw evidence from existing logging systems such as GriefLogger with carefully selected supplemental event hooks, then builds an explainable temporal item-flow graph.
+Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time. It does **not** assign a permanent UUID to every item. Instead, it combines raw evidence from existing logging systems such as GriefLogger with carefully selected supplemental event hooks, then builds an explainable temporal item-flow graph.
+
+**GriefLogger is optional.** Without it, ItemGraph uses its own storage and supported native NeoForge observations. When GriefLogger is installed, ItemGraph reads its SQLite database strictly read-only as additive evidence.
 
 > Evidence first. Inference second. Confidence explicit. Every conclusion traceable.
 
