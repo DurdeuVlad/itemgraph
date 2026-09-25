@@ -80,17 +80,28 @@ jobs:
             exit 1
           fi
 
-      - name: Publish to Modrinth, CurseForge, and GitHub Releases
+      - name: Publish to GitHub Releases
+        id: publish_github
         uses: Kir-Antipov/mc-publish@v3.3
         with:
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
-
-          curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
-          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-
           github-token: ${{ secrets.GITHUB_TOKEN }}
           github-tag: ${{ steps.version_data.outputs.tag_name }}
+
+          files: |
+            build/libs/!(*-@(dev|sources|javadoc)).jar
+
+          name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
+          version: ${{ steps.version_data.outputs.version }}
+          version-type: release
+          changelog-file: release-notes.md
+
+      - name: Publish to CurseForge
+        id: publish_curseforge
+        if: ${{ !cancelled() }}
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
 
           files: |
             build/libs/!(*-@(dev|sources|javadoc)).jar
@@ -111,3 +122,49 @@ jobs:
 
           dependencies: |
             grieflogger(optional){curseforge:435029}
+
+      - name: Publish to Modrinth
+        id: publish_modrinth
+        if: ${{ !cancelled() }}
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          modrinth-id: itemgraph
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+
+          files: |
+            build/libs/!(*-@(dev|sources|javadoc)).jar
+
+          name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
+          version: ${{ steps.version_data.outputs.version }}
+          version-type: release
+          changelog-file: release-notes.md
+
+          game-versions: |
+            1.21.1
+
+          loaders: |
+            neoforge
+
+          java: |
+            21
+
+          dependencies: |
+            grieflogger(optional){curseforge:435029}
+
+      - name: Write publication summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GITHUB_URL: ${{ steps.publish_github.outputs.github-url }}
+          CURSEFORGE_URL: ${{ steps.publish_curseforge.outputs.curseforge-url }}
+          CURSEFORGE_VERSION: ${{ steps.publish_curseforge.outputs.curseforge-version }}
+          MODRINTH_URL: ${{ steps.publish_modrinth.outputs.modrinth-url }}
+          MODRINTH_VERSION: ${{ steps.publish_modrinth.outputs.modrinth-version }}
+        run: |
+          {
+            echo "## Publication results"
+            echo
+            echo "- GitHub: ${GITHUB_URL:-not published}"
+            echo "- CurseForge: ${CURSEFORGE_URL:-not published} (${CURSEFORGE_VERSION:-no file id})"
+            echo "- Modrinth: ${MODRINTH_URL:-not published} (${MODRINTH_VERSION:-no version id})"
+          } >> "${GITHUB_STEP_SUMMARY}"
