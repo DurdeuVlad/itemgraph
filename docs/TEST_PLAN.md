@@ -472,9 +472,10 @@ mapping, coordinate-less `EXTERNAL_INVENTORY` identity, opaque evidence URIs, am
 limits/relative windows, inferred explanations/supporting evidence, and service lifecycle.
 `./gradlew clean build` must remain green before delivery.
 
-`examples/api-consumer` is a separate NeoForge 1.21.1 subproject. It depends on
-`compileOnly files("../../build/libs/itemgraph-0.2.0.jar")`—the built main JAR, not source
-project internals—and `run/mods/itemgraph-api-consumer-0.1.0.jar` was produced by
+`examples/api-consumer` is a separate NeoForge 1.21.1 subproject. It uses a
+`compileOnly` local-file dependency on `build/libs/itemgraph-${rootProject.mod_version}.jar`—the
+built main JAR, not source project internals—and `run/mods/itemgraph-api-consumer-0.1.0.jar`
+was produced by
 `./gradlew :examples:api-consumer:build`. Its `neoforge.mods.toml` declares an `itemgraph`
 runtime dependency. On `ServerStartedEvent` it registers `itemgraph_api_consumer`,
 submits stable source event `1`, then calls `traceItem(ItemQuery.itemId("minecraft:diamond"),

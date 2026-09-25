@@ -11,7 +11,7 @@ This document contains everything needed to list and publish **ItemGraph** on Cu
 | **Project Avatar (Logo)** | [`docs/branding/curseforge_avatar_512.png`](file:///E:/Github2/itemgraph/docs/branding/curseforge_avatar_512.png) | 512 × 512 | **Project Logo** | Dark slate tile with amber graph trace, nearest-neighbour pixel art. Also available in 1024×1024 at [`docs/branding/curseforge_avatar_1024.png`](file:///E:/Github2/itemgraph/docs/branding/curseforge_avatar_1024.png). |
 | **Header Banner** | [`docs/branding/curseforge_banner.png`](file:///E:/Github2/itemgraph/docs/branding/curseforge_banner.png) | 1024 × 256 | **Project Description Header** | Includes title "ItemGraph", tagline, and slate graph motifs. Embed at top of Description. |
 | **In-Game Icon** | [`src/main/resources/itemgraph_icon.png`](file:///E:/Github2/itemgraph/src/main/resources/itemgraph_icon.png) | 256 × 256 | Bundled in Jar | Loaded by NeoForge mods menu via `neoforge.mods.toml`. |
-| **Release Jar** | [`build/libs/itemgraph-0.1.0.jar`](file:///E:/Github2/itemgraph/build/libs/itemgraph-0.1.0.jar) | Jar File | **File Upload** | Built with Java 21, NeoForge 21.1.248. |
+| **Release Jar** | [`build/libs/itemgraph-0.3.0.jar`](file:///E:/Github2/itemgraph/build/libs/itemgraph-0.3.0.jar) | Jar File | **File Upload** | Built with Java 21, NeoForge 21.1.248. |
 
 ---
 
@@ -60,7 +60,7 @@ CurseForge projects with 3–5 clean screenshots convert substantially higher. T
 ## 4. Full Project Description (Ready to Paste into CurseForge)
 
 ```markdown
-![ItemGraph Banner](https://raw.githubusercontent.com/DurdeuVlad/itemgraph/master/docs/branding/curseforge_banner.png)
+![ItemGraph Banner](https://raw.githubusercontent.com/DurdeuVlad/itemgraph/main/docs/branding/curseforge_banner.png)
 
 # ItemGraph
 
@@ -94,6 +94,10 @@ Instead of assigning artificial, invasive UUIDs to every Minecraft item, ItemGra
 - **Authoritative Entity Continuity**: Matches Minecraft `ItemEntity` UUIDs on drop and pickup, boosting transfer confidence to `0.9990`.
 - **Transformation Tracking**: Automatically links item identity shifts across **Anvil repairs & renames**, **Crafting tables**, and **Smelting furnaces**.
 - **Armor Stand & Container Integration**: Captures armor stand equipment swaps alongside standard chest, barrel, and hopper inventories.
+- **Vanilla Flow Browser (`/ig gui`)**: Opens a six-row chest GUI for item, player, or container timelines on a vanilla client; menu interactions are display-only and cannot move items.
+- **Container Inspector (`/ig inspect`)**: Lets a moderator right-click supported containers to inspect the exact dimension/position without opening or mutating the normal inventory.
+- **Moderator Help (`/ig help`)**: Documents every command topic with syntax, permissions, evidence semantics, limits, and examples.
+- **Preview Integration API**: Trusted NeoForge mods can register an evidence source, submit direct observations, and query bounded flows through `com.itemgraph.api` `PREVIEW_1`.
 - **Live Invariant Auditor (`/ig audit`)**: Self-diagnosing auditor verifies database health, quantity conservation, and relational integrity on demand.
 
 ---
@@ -123,7 +127,16 @@ Explanation: Ground bridge (exact transfer): Alice dropped 1x minecraft:netherit
 Reconstructs all item ingress, egress, container interactions, and ground exchanges involving a specific player.
 
 #### `/ig trace container <x> <y> <z> [limit] [sinceMinutes]`
-Shows all item additions and removals for a container at block coordinates `(x, y, z)`.
+Shows all item additions and removals for a container at block coordinates `(x, y, z)` in the command sender's dimension.
+
+#### `/ig gui item|player|container ...`
+Opens the read-only vanilla flow browser for a target, with ambiguity pickers, paged timelines, and evidence/detail views.
+
+#### `/ig inspect [on|off|status]`
+Toggles moderator container-inspection mode; while enabled, clicking a supported container opens its ItemGraph timeline without opening or mutating the normal container inventory.
+
+#### `/ig help [topic]`
+Shows the complete moderator command reference or one command topic.
 
 #### `/ig audit`
 Runs an asynchronous invariant check across the database:
@@ -147,8 +160,6 @@ Displays live operational health, background ingestion checkpoints, correlation 
 - **Platform**: **NeoForge 1.21.1** (tested on `21.1.248+`)
 - **Java**: Java 21+
 - **Environment**: **Server-Side Only**. Players do not need ItemGraph installed on their clients to join.
-- **Dependencies**:
-  - [GriefLogger](https://www.curseforge.com/minecraft/mc-mods/grieflogger) (`1.2.10+` for 1.21.1)
-  - [Architectury API](https://www.curseforge.com/minecraft/mc-mods/architectury-api)
-  - [SuperMartijn642's Config Lib](https://www.curseforge.com/minecraft/mc-mods/supermartijn642s-config-lib)
+- **Required**: NeoForge 1.21.1 and Java 21+.
+- **Optional Integration**: [GriefLogger](https://www.curseforge.com/minecraft/mc-mods/grieflogger) (`1.2.10+` for 1.21.1) can be installed alongside ItemGraph as an additive read-only evidence source. ItemGraph does not require GriefLogger or GriefLogger's own dependencies to start or record its supported native observations.
 ```

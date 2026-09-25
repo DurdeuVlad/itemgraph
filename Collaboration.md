@@ -64,4 +64,6 @@ External contributors may not:
 
 Maintainers update the version, changelog, and release metadata, then push a
 matching vX.Y.Z tag. The release workflow builds and publishes only from
-that tag. Pull requests never receive release credentials.
+that tag, extracts the matching `## [X.Y.Z]` section from `CHANGELOG.md` into
+`release-notes.md`, and sends those same notes to GitHub Releases, CurseForge,
+and Modrinth. Pull requests never receive release credentials.

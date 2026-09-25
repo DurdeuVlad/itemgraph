@@ -55,8 +55,9 @@ The official release path is:
 2. run the full build and test suite;
 3. commit the release change;
 4. create a matching vX.Y.Z tag;
-5. let the tag-only GitHub Actions workflow publish the jar to GitHub
-   Releases, Modrinth, and CurseForge.
+5. let the tag-only GitHub Actions workflow extract the matching changelog
+   section and publish the jar plus release notes to GitHub Releases,
+   Modrinth, and CurseForge.
 
 Release credentials are maintainer-only. A contributor's pull request cannot
 publish an official release.

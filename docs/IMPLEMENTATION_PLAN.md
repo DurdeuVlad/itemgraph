@@ -311,7 +311,8 @@ with GriefLogger present (`PERSISTED / query=AMBIGUOUS`) and ItemGraph ran stand
 with GriefLogger absent (`DUPLICATE / query=AMBIGUOUS`). The `AMBIGUOUS` query result is
 expected staging evidence because `minecraft:diamond` has multiple fingerprint
 candidates; `run/database.db` remained hash-identical and the GriefLogger JAR was
-restored. Remaining issue-#12 delivery gates are final review and PR/CI/merge.
+restored. Issue #12 was delivered through PR #18 and merged into `main`; post-merge CI
+passed.
 
 Non-goals for M7 remain JDBC/schema exposure, GriefLogger API access, caller-provided
 inference, player-facing authorization, a standalone API artifact, and a stable pre-1.0

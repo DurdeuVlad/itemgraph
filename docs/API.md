@@ -38,7 +38,7 @@ accepting impossible evidence.
 ## Version and preview policy
 
 `ItemGraphApi.API_VERSION` is `ApiVersion.PREVIEW_1`. It is separate from `mod_version`
-(`0.2.0` at the time of writing). `PREVIEW_1` is the first public boundary and may change
+(`0.3.0` at the time of writing). `PREVIEW_1` is the first public boundary and may change
 incompatibly before ItemGraph 1.0.
 
 Policy:
@@ -61,7 +61,7 @@ repositories {
 
 dependencies {
     implementation "net.neoforged:neoforge:21.1.248"
-    compileOnly files("libs/itemgraph-0.2.0.jar")
+    compileOnly files("libs/itemgraph-0.3.0.jar")
 }
 ```
 
@@ -72,14 +72,14 @@ the consumer cannot run without ItemGraph; use `optional` for an optional integr
 [[dependencies.examplemod]]
     modId="itemgraph"
     type="required"
-    versionRange="[0.2.0]"
+    versionRange="[0.3.0]"
     ordering="AFTER"
     side="SERVER"
 ```
 
 The `compileOnly` declaration is intentionally a local-file dependency for M7. Do not
 publish or fetch a separate `itemgraph-api` artifact. The working consumer fixture lives
-at `examples/api-consumer/` and pins the built `itemgraph-0.2.0.jar`; widen a runtime
+at `examples/api-consumer/` and pins the built `itemgraph-0.3.0.jar`; widen a runtime
 `versionRange` only to releases known to implement `PREVIEW_1`.
 
 ## Public signatures
@@ -737,7 +737,7 @@ public final class ExampleIntegration {
 ```
 
 The example is illustrative. The required issue-#12 fixture is `examples/api-consumer/`:
-it compiles against `build/libs/itemgraph-0.2.0.jar`, declares an `itemgraph` runtime
+it compiles against `build/libs/itemgraph-0.3.0.jar`, declares an `itemgraph` runtime
 dependency, registers `itemgraph_api_consumer`, submits stable source event `1`, and runs
 a bounded `traceItem` query from `ServerStartedEvent` without touching Minecraft state on
 an API worker. Dedicated-server verification passed with GriefLogger present
