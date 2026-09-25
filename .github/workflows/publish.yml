@@ -57,6 +57,29 @@ jobs:
       - name: Run automated test suite and build release jar
         run: ./gradlew clean build
 
+      - name: Extract release changelog
+        shell: bash
+        run: |
+          VERSION="${{ steps.version_data.outputs.version }}"
+          SECTION="## [${VERSION}]"
+
+          awk -v section="${SECTION}" '
+            {
+              line = $0
+              sub(/\r$/, "", line)
+              if (line ~ /^## \[/) {
+                if (in_section && index(line, section) != 1) { exit }
+                if (index(line, section) == 1) { in_section = 1 }
+              }
+              if (in_section) { print line }
+            }
+          ' CHANGELOG.md > release-notes.md
+
+          if [[ ! -s release-notes.md ]]; then
+            echo "CHANGELOG.md does not contain release section: ${SECTION}" >&2
+            exit 1
+          fi
+
       - name: Publish to Modrinth, CurseForge, and GitHub Releases
         uses: Kir-Antipov/mc-publish@v3.3
         with:
@@ -75,7 +98,7 @@ jobs:
           name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
           version: ${{ steps.version_data.outputs.version }}
           version-type: release
-          changelog-file: CHANGELOG.md
+          changelog-file: release-notes.md
 
           game-versions: |
             1.21.1
@@ -87,6 +110,4 @@ jobs:
             21
 
           dependencies: |
-            grieflogger(required)
-            architectury-api(required)
-            supermartijn642s-config-lib(required)
+            grieflogger(optional){curseforge:435029}

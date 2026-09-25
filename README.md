@@ -20,6 +20,7 @@ Its purpose is to reconstruct plausible item-type and stack-quantity movement ac
 - **Target Minecraft version:** 1.21.1
 - **Primary deployment model:** server-side
 - **Preview integration API:** `com.itemgraph.api` `PREVIEW_1` in the main JAR
+- **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 - **Tagline:** *Trace item movement through time.*
 
 ## Why ItemGraph exists

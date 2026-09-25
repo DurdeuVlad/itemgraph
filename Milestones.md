@@ -1,7 +1,7 @@
 # ItemGraph Milestones
 
 Document status: active
-Last reviewed: 2026-09-24
+Last reviewed: 2026-09-25
 Owner: Vlad Durdeu
 
 Milestones describe outcomes and proof, not a list of implementation chores.
@@ -107,21 +107,24 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 
 ## M6: Moderator investigation without a custom client
 
-- Status: active; tracked by GitHub milestone #2 and issues #7, #8, #10, and #11.
+- Status: complete; issue #7 documented standalone/co-installed behavior, and issues #8,
+  #10, and #11 are merged through PRs #14, #15, and #16.
 - Outcome: moderators can read the existing ItemGraph evidence through a vanilla-client
   GUI, a command-toggled container inspector, and complete command help.
 - Scope boundary: read-only evidence browsing at permission level 2. No rollback,
   inventory mutation, custom client screen, or custom ItemGraph item.
 - Dependencies: M5 is merged; the GUI (#8) precedes the inspector (#10), and the command
   reference (#11) follows both.
-- Acceptance evidence: automated command/query/menu tests and a dedicated NeoForge 1.21.1
-  staging run with a vanilla client, with GriefLogger absent and present.
-- Risk: menu interactions could mutate player inventories or disclose sensitive graph data;
-  all menu actions must remain navigation/display-only and permission-checked.
+- Acceptance evidence: automated command/query/menu tests; dedicated NeoForge 1.21.1
+  staging passed with MC Pilot on a real graphical client in GriefLogger-present and
+  GriefLogger-absent modes. Menu interactions remained display-only and permission-checked.
+- Risk: unsupported inventory types can still leave evidence unresolved; menu output remains
+  read-only and does not claim complete world coverage.
 
 ## M7: Preview integration API for NeoForge mods
 
-- Status: implementation verified on staging; issue #9 contract merged and issue #12 is pending final PR/CI/merge. Tracked by GitHub milestone #3.
+- Status: complete; issue #9 contract merged through PR #17 and issue #12 implementation
+  merged through PR #18. Tracked by GitHub milestone #3.
 - Outcome: a separate NeoForge mod can submit source-attributed observations and query
   bounded ItemGraph flows without database access.
 - Scope boundary: server-side Java API in the main ItemGraph JAR, preview-only before 1.0.

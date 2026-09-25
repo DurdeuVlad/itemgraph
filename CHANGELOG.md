@@ -6,12 +6,20 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-25
+
 ### Added
 
 - **Preview integration API**: `com.itemgraph.api` implements the approved PREVIEW_1 boundary for trusted NeoForge mods: active-container source registration through a service-issued `SourceHandle`, immutable raw direct-observation DTOs, `(source modId, sourceEventId)` deduplication, durable `EXTERNAL_INVENTORY` identity, bounded async submission/query workers, and explainable flow DTOs with opaque evidence URIs. `examples/api-consumer` compiles as a separate mod against the built ItemGraph JAR; dedicated staging passed with GriefLogger present (`PERSISTED / query=AMBIGUOUS`) and absent (`DUPLICATE / query=AMBIGUOUS`). This remains a preview API, not a stable compatibility promise.
 - **Complete command help/reference**: bare `/itemgraph` or `/ig` and `/ig help [topic]` document every live command with syntax, defaults, permission, asynchronous behavior, evidence semantics, and examples. Player, item-ID, dimension, literal, and topic suggestions are registered, and dispatcher tests cross-check help coverage against the live command tree.
 - **Read-only vanilla flow browser**: permission-level-2 `/ig gui item`, `/ig gui player`, and dimension-qualified `/ig gui container` commands open a vanilla six-row chest menu with 45-entry keyset-paginated timelines, provenance/confidence labels, and event/transformation/edge detail views. Menu actions cannot move items.
 - **Command-toggled container inspector**: `/ig inspect [on|off|status]` stores per-player server-side mode. While enabled, a supported container right-click opens the read-only flow browser for that exact dimension/position without opening the normal container GUI, consuming the held item, or recording a transfer. The mode clears on logout and server stop.
+
+### Fixed
+
+- **Vanilla GUI title overflow**: resolved flow-browser titles now use compact node/fingerprint references such as `ItemGraph: item #100`; the complete target description remains available in the page tooltip.
+- **Preview API validation boundaries**: malformed endpoint/component maps now return `INVALID_INPUT`, oversized `customName` values are rejected, persistence failures return explicit `FAILED` results, player query results do not expose first-seen coordinates, and canonical fingerprint payload values use deterministic escaping to prevent separator-forgery collisions.
+- **Release dependency metadata**: publishing metadata now marks GriefLogger as optional and no longer advertises GriefLogger's own dependencies as required ItemGraph dependencies.
 
 ## [0.2.0] — 2026-09-20
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-GriefLogger is an **optional additive evidence source** for ItemGraph as of version 0.2.0.
+GriefLogger has been an **optional additive evidence source** for ItemGraph since version 0.2.0.
 
 ## Supported modes
 
