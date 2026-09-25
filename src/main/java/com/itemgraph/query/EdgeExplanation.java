@@ -22,7 +22,7 @@ import java.util.List;
  * @param amount       claimed quantity moved
  * @param timeStart    earliest supporting observation, epoch millis
  * @param timeEnd      latest supporting observation, epoch millis
- * @param confidence   deterministic score in [0, 1]; never 1.0 for a ground bridge
+ * @param confidence   stored deterministic score in [0, 1]; never 1.0 for a ground bridge
  * @param explanation  the scoring narrative stored on the row at inference time
  * @param createdAtMs  when the edge was written
  * @param evidence     the observations cited by {@code ig_edge_evidence}, chronological

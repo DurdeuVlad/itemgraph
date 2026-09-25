@@ -110,12 +110,16 @@ Implemented and available (all require permission level 2):
 /ig trace item <query> [limit] [sinceMinutes]
 /ig trace player <playerName> [limit] [sinceMinutes]
 /ig trace container <x> <y> <z> [limit] [sinceMinutes]
+/ig gui item <query> [sinceMinutes]
+/ig gui player <playerName> [sinceMinutes]
+/ig gui container <dimension> <x> <y> <z> [sinceMinutes]
 ```
 
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
 - `/ig trace item`: accepts numeric fingerprint IDs, item registry names (e.g. `minecraft:netherite_boots` or `netherite`), or custom item names. Shows complete chronological timeline including transformations (`[TRANSFORMATION <type> <- <source>]`).
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
 - `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.
+- `/ig gui`: opens the same item/player/container timelines in a vanilla six-row chest menu. Each page has at most 45 timeline entries; entries distinguish observed from inferred movement, and selecting one opens evidence details. Ambiguous item matches and duplicate player/container nodes require candidate selection rather than silently choosing a target. The menu is permission-level 2, uses no custom client screen or packet, and rejects inventory-movement actions.
 - `limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Query commands and the database-backed portion of `/ig status` run off the server thread and report back on it. `/ig ingest now` queues one complete ingest-and-correlate cycle on the background worker. Full argument table and output format: [Query model](docs/QUERY_MODEL.md).
 
 Sample `/ig trace item` output:

@@ -89,6 +89,10 @@ public final class ExplainQueryService {
                         ? FingerprintRef.missing(fingerprintId)
                         : new FingerprintRef(fingerprintId, itemId, rs.getString("fp_custom_name"), rs.getString("fp_hash"));
 
+                double confidence = rs.getDouble("e_confidence");
+                if (rs.wasNull()) {
+                    throw new SQLException("Inferred edge #" + edgeId + " has no stored confidence.");
+                }
                 List<ObservationDetail> evidence = loadEvidence(conn, edgeId);
                 boolean truncated = evidence.size() > QueryLimits.MAX_EVIDENCE_ROWS;
                 if (truncated) {
@@ -103,7 +107,7 @@ public final class ExplainQueryService {
                         rs.getInt("e_amount"),
                         rs.getLong("e_time_start"),
                         rs.getLong("e_time_end"),
-                        rs.getDouble("e_confidence"),
+                        confidence,
                         rs.getString("e_explanation"),
                         rs.getLong("e_created_at"),
                         evidence,

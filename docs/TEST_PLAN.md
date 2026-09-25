@@ -267,7 +267,7 @@ with:
 
 A stack split/merge scenario with no per-item UUIDs and correct conservation.
 
-## Automated coverage for the M5 repair
+## Automated coverage for M5 and M6 issue #8
 
 Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain test`). All suites use a real SQLite file in a JUnit `@TempDir` with the real migrations applied — no mocked database, because a projection that drops a row on a LEFT-vs-INNER join mistake is exactly the class of bug these tests exist to catch.
 
@@ -281,7 +281,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `TransformationEventListenerTest` | anvil rename/repair, crafting matrix fallback, smelting, client guards, and empty-stack handling (12 tests) |
 | `ArmorStandEventListenerTest` | Phase 8B armor stand interactions: main-hand/off-hand equip, empty-hand unequip, empty stand handling, non-armor-stand and client-side guards (7 tests) |
 | `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, shutdown flush, persistence, endpoint mapping, canceled-drop provenance, and fingerprint dedup (14 tests) |
-| `QueryDispatcherTest` | asynchronous query marshalling, disconnected DB rendering, source lifecycle checks, off-thread execution, and shutdown (11 tests) |
+| `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, and active SQLite cancellation on RCON timeout (20 tests) |
 | `ItemGraphConfigTest` | default values, config paths, range constraints, and NightConfig correction/clamping (5 tests) |
 | `QueryFormatterTest` | forensic labels, confidence/time formatting, session and queue-recovery intervals, source-group labels, trace limits, audit reports, and errors (16 tests) |
 | `ItemEntityEventListenerTest` | successful-spawn-only ground drops, canceled toss/death evidence, pickup quantity, partial-pickup handling, empty/null guards (10 tests) |
@@ -292,13 +292,33 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `DatabaseManagerTest` | migrations V1–V11, interval/group/edge-state schema, dedup constraints, read-only query connection |
 | `EventQueryServiceTest` | found/not-found, dangling references rendering as "no such row", OBSERVED labelling |
 | `ExplainQueryServiceTest` | evidence resolved back to observation detail, no cross-edge evidence leakage, unjustifiable edges reported, evidence cap |
-| `TraceQueryServiceTest` | OBSERVED/INFERRED merge order, session interval overlap, limit capping, truncation, per-line provenance, and active-edge filtering (13 tests) |
+| `TraceQueryServiceTest` | OBSERVED/INFERRED merge order, session intervals, limit capping, exact dimension/coordinates and player labels, ambiguous node/fingerprint/numeric-ID candidates, target-ID pinning, and bidirectional tie-safe cursor pages (20 tests) |
 | `ContainerCapabilityWrapperTest` | capability action labels, UNKNOWN caller/endpoints, open-session reconciliation, and queue rejection recovery (9 tests) |
 | `ContainerInteractionTrackerTest`, `ContainerSessionListenerTest` | open/close net deltas, timestamp intervals, multi-viewer ambiguity, capability-credit subtraction, and zero-net limitation (14 + 1 tests) |
 | `V9InternalObservationDedupTest`, `V10InternalDedupEntityUuidTest` | partial-index, UUID, destination-sensitive dedup, NULL-UUID preservation, and V11 idempotence (5 + 6 tests) |
 | `ItemEntityEventListenerPartialPickupTest` | pending-pickup resolution: emit on reduced count, drop on removal/expiry, keep while unchanged |
+| `FlowBrowserMenuTest` | vanilla six-row menu type, textual provenance/confidence/evidence labels, every click category rejected or handled as navigation/detail only, and permission recheck (2 tests) |
+| `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container command shape, explicit dimension argument, unquoted `id:<id>` parsing, and stale empty-cursor handling (3 tests) |
 
-Total automated test count: **234 tests, 0 failures, 0 skipped** (verified with `./gradlew clean build` on 2026-09-24).
+Total automated test count: **255 tests, 0 failures, 0 skipped** (`./gradlew clean build`, 2026-09-25).
+
+## M6 issue #8: vanilla flow browser verification
+
+Automated coverage includes `TraceQueryServiceTest` forward and reverse keyset pages across
+same-timestamp observations, transformations, and inferred edges; exact player and
+explicit-dimension container resolution, duplicate-target ambiguity, and ID-pinned continuation;
+`QueryDispatcherTest` read-only off-thread page delivery; and
+`FlowBrowserMenuTest` rejection of item-moving click types and permission loss. Run these
+with `./gradlew test`.
+
+The delivery staging check is still required and has not been performed for this feature.
+On a dedicated NeoForge 1.21.1 server with a vanilla client, open all three `/ig gui`
+targets, navigate both directions, inspect observation, transformation, and inferred-edge detail,
+and attempt pickup,
+placement, shift-click, drag, throw, swap, clone, and pickup-all actions while verifying the
+server inventory is unchanged. Repeat representative checks with GriefLogger absent and
+present. Do not perform the GriefLogger-present run against the existing staging database
+until it can be safely isolated; the earlier V11 startup smoke is not GUI verification.
 
 ## Historical live server results (pre-V11 staging `run/`)
 

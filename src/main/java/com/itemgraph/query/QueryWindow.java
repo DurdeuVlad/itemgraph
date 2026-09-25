@@ -35,13 +35,24 @@ public record QueryWindow(Long sinceMs, Long untilMs) {
     /**
      * The last {@code minutes} minutes, ending at {@code nowMs}.
      *
-     * @param minutes size of the window; values below 1 are treated as 1
+     * @param minutes size of the window; values below 1 are treated as 1, and an
+     *                unrepresentable duration is clamped to the widest representable range
      * @param nowMs   the instant the window ends at, passed in rather than read from the
      *                clock so callers and tests share one definition of "now"
      */
     public static QueryWindow lastMinutes(long minutes, long nowMs) {
         long clamped = Math.max(1L, minutes);
-        return new QueryWindow(nowMs - clamped * 60_000L, nowMs);
+        boolean durationOverflow = clamped > Long.MAX_VALUE / 60_000L;
+        long durationMs = durationOverflow ? Long.MAX_VALUE : clamped * 60_000L;
+        long sinceMs;
+        if (durationOverflow) {
+            sinceMs = nowMs >= 0 ? nowMs - Long.MAX_VALUE : Long.MIN_VALUE;
+        } else if (nowMs < Long.MIN_VALUE + durationMs) {
+            sinceMs = Long.MIN_VALUE;
+        } else {
+            sinceMs = nowMs - durationMs;
+        }
+        return new QueryWindow(sinceMs, nowMs);
     }
 
     public boolean bounded() {

@@ -6,6 +6,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -120,6 +121,209 @@ class TraceQueryServiceTest extends QueryTestBase {
         assertEquals(1_000L, result.hops().get(0).timestampMs());
         assertEquals(5_000L, result.hops().get(0).endMs());
         assertTrue(result.hops().get(0).detail().contains("session net delta"));
+    }
+
+    @Test
+    void itemPagesUseStableKeysetAcrossEqualTimestampSources() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long ground = insertGroundNode(20, 64, 20);
+        long diamond = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long emerald = insertFingerprint("minecraft:emerald", "hash-emerald");
+        long timestamp = now - 5_000;
+        for (int i = 0; i < 43; i++) {
+            insertObservation(timestamp, playerA, ground, diamond, "DROP_ITEM", 1);
+        }
+        for (int i = 0; i < 3; i++) {
+            insertEdge(playerA, playerB, diamond, 1, timestamp, timestamp, 0.9, "same-time edge");
+        }
+        try (PreparedStatement pstmt = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations (transformation_type, player_node_id,
+                    source_fingerprint_id, result_fingerprint_id, quantity, timestamp_ms, details)
+                VALUES ('CRAFTING', ?, ?, ?, 1, ?, 'same-time transform')
+                """)) {
+            for (int i = 0; i < 2; i++) {
+                pstmt.setLong(1, playerA);
+                pstmt.setLong(2, diamond);
+                pstmt.setLong(3, emerald);
+                pstmt.setLong(4, timestamp);
+                pstmt.executeUpdate();
+            }
+        }
+
+        TracePage first = service.traceItemPage(conn, "minecraft:diamond", 45,
+                QueryWindow.unbounded(), null);
+        TracePage second = service.traceItemPage(conn, "minecraft:diamond", 45,
+                QueryWindow.unbounded(), first.nextCursor());
+        TracePage previous = service.traceItemPage(conn, "minecraft:diamond", 45,
+                QueryWindow.unbounded(), second.previousCursor(), TracePage.Direction.BACKWARD);
+        List<String> pagedKeys = java.util.stream.Stream.concat(first.hops().stream(), second.hops().stream())
+                .map(TraceQueryServiceTest::stableKey)
+                .toList();
+        TraceResult full = service.trace(conn, diamond, QueryLimits.MAX_LIMIT, QueryWindow.unbounded());
+
+        assertEquals(TracePage.Resolution.RESOLVED, first.resolution());
+        assertEquals(45, first.hops().size());
+        assertTrue(first.hasNext());
+        assertEquals(3, second.hops().size());
+        assertFalse(second.hasNext());
+        assertTrue(second.hasPrevious());
+        assertEquals(first.hops().stream().map(TraceQueryServiceTest::stableKey).toList(),
+                previous.hops().stream().map(TraceQueryServiceTest::stableKey).toList());
+        assertFalse(previous.hasPrevious());
+        assertTrue(previous.hasNext());
+        assertEquals(full.hops().stream().map(TraceQueryServiceTest::stableKey).toList(), pagedKeys);
+        assertEquals(48, new java.util.HashSet<>(pagedKeys).size(), "every table row appears exactly once");
+    }
+
+    private static String stableKey(TraceHop hop) {
+        return hop.kind() + ":" + hop.source() + ":" + hop.refId();
+    }
+
+    @Test
+    void resolvedFingerprintPagesStayPinnedIfLaterIngestionAddsAnotherMatch() throws Exception {
+        long player = insertPlayerNode("AlphaA");
+        long ground = insertGroundNode(20, 64, 20);
+        long diamond = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long timestamp = now - 5_000;
+        for (int i = 0; i < 46; i++) {
+            insertObservation(timestamp + i, player, ground, diamond, "DROP_ITEM", 1);
+        }
+
+        TracePage first = service.traceItemPage(conn, "minecraft:diamond", 45,
+                QueryWindow.unbounded(), null);
+        long laterMatch = insertFingerprint("minecraft:diamond_sword", "hash-sword");
+        TracePage reResolved = service.traceItemPage(conn, "minecraft:diamond", 45,
+                QueryWindow.unbounded(), first.nextCursor());
+        TracePage pinned = service.traceFingerprintPage(conn, diamond, 45,
+                QueryWindow.unbounded(), first.nextCursor(), TracePage.Direction.FORWARD);
+
+        assertTrue(first.hasNext());
+        assertEquals(TracePage.Resolution.AMBIGUOUS, reResolved.resolution());
+        assertEquals(TracePage.Resolution.RESOLVED, pinned.resolution());
+        assertEquals(diamond, pinned.fingerprint().id());
+        assertEquals(1, pinned.hops().size());
+        assertEquals(List.of(laterMatch, diamond),
+                reResolved.candidates().stream().map(FingerprintRef::id).toList());
+    }
+
+    @Test
+    void numericFingerprintQuerySurfacesConflictingTextMatch() throws Exception {
+        long numericId = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long namedFingerprint = insertFingerprint("minecraft:iron_ingot", "hash-iron");
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "UPDATE ig_item_fingerprints SET custom_name = ? WHERE id = ?")) {
+            pstmt.setString(1, Long.toString(numericId));
+            pstmt.setLong(2, namedFingerprint);
+            pstmt.executeUpdate();
+        }
+
+        TracePage page = service.traceItemPage(conn, Long.toString(numericId), 45,
+                QueryWindow.unbounded(), null);
+        TracePage forcedId = service.traceItemPage(conn, "id:" + numericId, 45,
+                QueryWindow.unbounded(), null);
+
+        assertEquals(TracePage.Resolution.AMBIGUOUS, page.resolution());
+        assertEquals(List.of(numericId, namedFingerprint),
+                page.candidates().stream().map(FingerprintRef::id).toList());
+        assertEquals(TracePage.Resolution.RESOLVED, forcedId.resolution());
+        assertEquals(numericId, forcedId.fingerprint().id());
+    }
+
+    @Test
+    void itemPageSurfacesAmbiguousFingerprintCandidatesInsteadOfChoosingOne() throws Exception {
+        long diamond = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long sword = insertFingerprint("minecraft:diamond_sword", "hash-sword");
+
+        TracePage page = service.traceItemPage(conn, "minecraft:diamond", 45,
+                QueryWindow.unbounded(), null);
+
+        assertEquals(TracePage.Resolution.AMBIGUOUS, page.resolution());
+        assertEquals(List.of(sword, diamond), page.candidates().stream().map(FingerprintRef::id).toList());
+        assertTrue(page.hops().isEmpty());
+    }
+
+    @Test
+    void duplicatePlayerAndContainerTargetsRemainAmbiguous() throws Exception {
+        try (PreparedStatement pstmt = conn.prepareStatement("""
+                INSERT INTO ig_nodes (node_type, owner_uuid, level_id, custom_label)
+                VALUES ('PLAYER', ?, 'minecraft:overworld', 'Alex')
+                """)) {
+            pstmt.setString(1, "uuid-alex-a");
+            pstmt.executeUpdate();
+            pstmt.setString(1, "uuid-alex-b");
+            pstmt.executeUpdate();
+        }
+        insertContainerNode(10, 64, 10);
+        insertContainerNode(10, 64, 10);
+
+        TracePage playerPage = service.tracePlayerPage(conn, "Alex", 45,
+                QueryWindow.unbounded(), null);
+        TracePage containerPage = service.traceContainerPage(conn, "minecraft:overworld", 10, 64, 10, 45,
+                QueryWindow.unbounded(), null);
+
+        assertEquals(TracePage.Resolution.AMBIGUOUS, playerPage.resolution());
+        assertEquals(2, playerPage.nodeCandidates().size());
+        assertEquals(TracePage.Resolution.AMBIGUOUS, containerPage.resolution());
+        assertEquals(2, containerPage.nodeCandidates().size());
+        assertTrue(playerPage.hops().isEmpty());
+        assertTrue(containerPage.hops().isEmpty());
+    }
+
+    @Test
+    void playerLookupDoesNotResolveASubstringToAnotherPlayersNode() throws Exception {
+        long alex2 = insertPlayerNode("Alex2");
+        long ground = insertGroundNode(20, 64, 20);
+        long fingerprint = insertFingerprint("minecraft:diamond", "hash-diamond");
+        insertObservation(now - 1_000, alex2, ground, fingerprint, "DROP_ITEM", 1);
+
+        TracePage page = service.tracePlayerPage(conn, "Alex", 45, QueryWindow.unbounded(), null);
+        TraceResult trace = service.tracePlayer(conn, "Alex", QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        assertEquals(TracePage.Resolution.NOT_FOUND, page.resolution());
+        assertTrue(page.hops().isEmpty());
+        assertTrue(trace.hops().isEmpty());
+    }
+
+    @Test
+    void playerAndDimensionQualifiedContainerPagesMatchTheirTraceTargets() throws Exception {
+        long player = insertPlayerNode("AlphaA");
+        long ground = insertGroundNode(20, 64, 20);
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long playerObservation = insertObservation(now - 2_000, player, ground, fp, "DROP_ITEM", 2);
+        long playerEdge = insertEdge(player, ground, fp, 2, now - 2_000, now - 1_000, 0.9, "player timeline");
+        long overworldContainer = insertContainerNode(10, 64, 10);
+        try (PreparedStatement pstmt = conn.prepareStatement("""
+                INSERT INTO ig_nodes (node_type, level_id, x, y, z)
+                VALUES ('CONTAINER', 'minecraft:the_nether', 10.49, 64, 10)
+                """)) {
+            pstmt.executeUpdate();
+        }
+        long netherContainer = insertContainerNode(10, 64, 10);
+        try (PreparedStatement pstmt = conn.prepareStatement("UPDATE ig_nodes SET level_id = 'minecraft:the_nether' WHERE id = ?")) {
+            pstmt.setLong(1, netherContainer);
+            pstmt.executeUpdate();
+        }
+        long overworldEvent = insertObservation(now - 1_000, overworldContainer, player, fp, "REMOVE_ITEM", 1);
+        long netherEvent = insertObservation(now - 900, netherContainer, player, fp, "REMOVE_ITEM", 1);
+
+        TracePage playerPage = service.tracePlayerPage(conn, "AlphaA", 45,
+                QueryWindow.unbounded(), null);
+        TracePage netherPage = service.traceContainerPage(conn, "minecraft:the_nether", 10, 64, 10, 45,
+                QueryWindow.unbounded(), null);
+        TracePage pinnedPlayerPage = service.tracePlayerNodePage(conn, playerPage.targetNode().id(), 45,
+                QueryWindow.unbounded(), null, TracePage.Direction.FORWARD);
+        TracePage pinnedContainerPage = service.traceContainerNodePage(conn, netherPage.targetNode().id(), 45,
+                QueryWindow.unbounded(), null, TracePage.Direction.FORWARD);
+
+        assertEquals(player, playerPage.targetNode().id());
+        assertEquals(netherContainer, netherPage.targetNode().id());
+        assertEquals(playerPage.targetNode(), pinnedPlayerPage.targetNode());
+        assertEquals(netherPage.targetNode(), pinnedContainerPage.targetNode());
+        assertEquals(List.of(playerObservation, playerEdge, overworldEvent, netherEvent),
+                playerPage.hops().stream().map(TraceHop::refId).toList());
+        assertEquals(List.of(netherEvent), netherPage.hops().stream().map(TraceHop::refId).toList());
+        assertFalse(netherPage.hops().stream().anyMatch(hop -> hop.refId() == overworldEvent));
     }
 
     /** A trace is about one fingerprint. Another item's movement must not appear in it. */
@@ -344,6 +548,11 @@ class TraceQueryServiceTest extends QueryTestBase {
         QueryWindow clamped = QueryWindow.lastMinutes(0, now);
         assertEquals(now - 60_000, clamped.sinceMs());
         assertEquals(now, clamped.untilMs());
+
+        QueryWindow huge = QueryWindow.lastMinutes(Long.MAX_VALUE, now);
+        assertEquals(now - Long.MAX_VALUE, huge.sinceMs());
+        assertEquals(now, huge.untilMs());
+        assertDoesNotThrow(huge::describe);
     }
 
     // ------------------------------------------------------------------
@@ -382,7 +591,7 @@ class TraceQueryServiceTest extends QueryTestBase {
                 assertTrue(line.contains("conf=0.9025"), line);
                 assertTrue(line.contains("edge#" + hop.refId()), line);
             } else {
-                assertTrue(line.contains("event#" + hop.refId()), line);
+                assertTrue(line.contains("observation#" + hop.refId()), line);
             }
         }
 

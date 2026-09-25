@@ -183,15 +183,23 @@ class QueryFormatterTest {
         FingerprintRef fp = new FingerprintRef(1, "minecraft:diamond", null, "hash1");
 
         TraceHop hopObs = new TraceHop(TraceHop.Kind.OBSERVED, 1L, p1, p2, 1, 1000L, 1000L, null, "DROP", fp);
+        TraceHop transformation = new TraceHop(TraceHop.Kind.OBSERVED, 3L, p1, p2, 1,
+                1500L, 1500L, null, "TRANSFORMATION CRAFTING", fp, TraceHop.Source.TRANSFORMATION);
         TraceHop hopInf = new TraceHop(TraceHop.Kind.INFERRED, 2L, p1, p2, 1, 2000L, 3000L, 0.9990, "UUID continuity", fp);
 
-        TraceResult result = new TraceResult("item #1", fp, List.of(hopObs, hopInf), window, 50, 100, true);
+        TraceResult result = new TraceResult("item #1", fp, List.of(hopObs, transformation, hopInf), window, 50, 100, true);
+        TraceHop unscored = new TraceHop(TraceHop.Kind.INFERRED, 4L, p1, p2, 1,
+                2500L, 2500L, null, "missing confidence", fp, TraceHop.Source.INFERRED_EDGE);
 
         List<String> lines = QueryFormatter.formatTrace(result);
         assertTrue(lines.stream().anyMatch(l -> l.contains("(capped from 100)")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("[OBSERVED]")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("[INFERRED conf=0.9990]")));
-        assertTrue(lines.stream().anyMatch(l -> l.contains("1 observed hop, 1 inferred hop.")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("2 observed hops, 1 inferred hop.")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("(transformation#3 TRANSFORMATION CRAFTING)")));
+        assertTrue(QueryFormatter.formatHop(unscored).contains("[INFERRED conf=(not recorded)]"));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("Use /ig event <id> only for observation# IDs")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("/ig gui item \"id:1\"")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("TRUNCATED at 50 hops")));
     }
 
@@ -224,5 +232,13 @@ class QueryFormatterTest {
         List<String> candidates = QueryFormatter.formatFingerprintCandidates("sword", List.of(c1));
         assertTrue(candidates.get(0).contains("Query 'sword' matched 1 item fingerprints:"));
         assertTrue(candidates.get(1).contains("#1: 'Sword1' (minecraft:diamond_sword) [hash=h1]"));
+        assertTrue(candidates.get(2).contains("id:<id>"));
+
+        List<String> nodes = QueryFormatter.formatNodeCandidates("player 'Alex'", List.of(
+                new NodeRef(2, "PLAYER", "Alex", "minecraft:overworld", null, null, null),
+                new NodeRef(3, "PLAYER", "Alex", "minecraft:the_nether", null, null, null)));
+        assertTrue(nodes.get(0).contains("player 'Alex' matches multiple stored nodes"));
+        assertTrue(nodes.get(1).contains("node#2"));
+        assertTrue(nodes.get(2).contains("node#3"));
     }
 }

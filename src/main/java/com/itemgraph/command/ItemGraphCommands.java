@@ -13,6 +13,7 @@ import com.itemgraph.listener.ContainerInteractionTracker;
 import com.itemgraph.query.EventQueryService;
 import com.itemgraph.query.ExplainQueryService;
 import com.itemgraph.query.FingerprintRef;
+import com.itemgraph.query.NodeRef;
 import com.itemgraph.query.QueryFormatter;
 import com.itemgraph.query.QueryLimits;
 import com.itemgraph.query.QueryWindow;
@@ -27,7 +28,10 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.ResourceLocationArgument;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
@@ -49,8 +53,10 @@ public final class ItemGraphCommands {
     private ItemGraphCommands() {}
 
     public static void register(RegisterCommandsEvent event) {
-        CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
+        register(event.getDispatcher());
+    }
 
+    static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         LiteralCommandNode<CommandSourceStack> root = dispatcher.register(
                 Commands.literal("itemgraph")
                         .requires(source -> source.hasPermission(2))
@@ -110,6 +116,29 @@ public final class ItemGraphCommands {
                                                                                         LongArgumentType.getLong(ctx, "sinceMinutes"))))))))))
         );
 
+        LiteralCommandNode<CommandSourceStack> gui = Commands.literal("gui")
+                .requires(source -> source.hasPermission(2) && source.getEntity() instanceof ServerPlayer)
+                .then(Commands.literal("item")
+                        .then(Commands.argument("itemQuery", StringArgumentType.string())
+                                .executes(ctx -> guiItem(ctx, null))
+                                .then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                                        .executes(ctx -> guiItem(ctx, LongArgumentType.getLong(ctx, "sinceMinutes"))))))
+                .then(Commands.literal("player")
+                        .then(Commands.argument("player", StringArgumentType.string())
+                                .executes(ctx -> guiPlayer(ctx, null))
+                                .then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                                        .executes(ctx -> guiPlayer(ctx, LongArgumentType.getLong(ctx, "sinceMinutes"))))))
+                .then(Commands.literal("container")
+                        .then(Commands.argument("dimension", ResourceLocationArgument.id())
+                                .then(Commands.argument("x", IntegerArgumentType.integer())
+                                        .then(Commands.argument("y", IntegerArgumentType.integer())
+                                                .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                        .executes(ctx -> guiContainer(ctx, null))
+                                                        .then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                                                                .executes(ctx -> guiContainer(ctx,
+                                                                        LongArgumentType.getLong(ctx, "sinceMinutes")))))))))
+                .build();
+        root.addChild(gui);
         dispatcher.register(Commands.literal("ig").redirect(root));
     }
 
@@ -162,7 +191,15 @@ public final class ItemGraphCommands {
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
 
         return QueryDispatcher.dispatch(ctx.getSource(), "trace player", conn -> {
-            TraceResult result = TRACE_QUERIES.tracePlayer(conn, player, limit, window);
+            List<NodeRef> candidates = TRACE_QUERIES.resolvePlayerNodes(conn, player);
+            if (candidates.isEmpty()) {
+                return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget("player '" + player + "'"));
+            }
+            if (candidates.size() > 1) {
+                return QueryDispatcher.QueryOutput.found(
+                        QueryFormatter.formatNodeCandidates("player '" + player + "'", candidates));
+            }
+            TraceResult result = TRACE_QUERIES.tracePlayerNode(conn, candidates.get(0).id(), limit, window);
             if (result.hops().isEmpty()) {
                 return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget("player '" + player + "'"));
             }
@@ -180,12 +217,39 @@ public final class ItemGraphCommands {
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
 
         return QueryDispatcher.dispatch(ctx.getSource(), "trace container", conn -> {
-            TraceResult result = TRACE_QUERIES.traceContainer(conn, null, x, y, z, limit, window);
+            String target = "container at [" + x + ", " + y + ", " + z + "]";
+            List<NodeRef> candidates = TRACE_QUERIES.resolveContainerNodes(conn, null, x, y, z);
+            if (candidates.isEmpty()) {
+                return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget(target));
+            }
+            if (candidates.size() > 1) {
+                return QueryDispatcher.QueryOutput.found(QueryFormatter.formatNodeCandidates(target, candidates));
+            }
+            TraceResult result = TRACE_QUERIES.traceContainerNode(conn, candidates.get(0).id(), limit, window);
             if (result.hops().isEmpty()) {
-                return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget("container at [" + x + ", " + y + ", " + z + "]"));
+                return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget(target));
             }
             return QueryDispatcher.QueryOutput.found(QueryFormatter.formatTrace(result));
         });
+    }
+
+    private static int guiItem(CommandContext<CommandSourceStack> ctx, Long sinceMinutes) {
+        return FlowBrowserService.openItem(ctx.getSource(),
+                StringArgumentType.getString(ctx, "itemQuery"), sinceMinutes);
+    }
+
+    private static int guiPlayer(CommandContext<CommandSourceStack> ctx, Long sinceMinutes) {
+        return FlowBrowserService.openPlayer(ctx.getSource(),
+                StringArgumentType.getString(ctx, "player"), sinceMinutes);
+    }
+
+    private static int guiContainer(CommandContext<CommandSourceStack> ctx, Long sinceMinutes) {
+        ResourceLocation dimension = ResourceLocationArgument.getId(ctx, "dimension");
+        return FlowBrowserService.openContainer(ctx.getSource(), dimension.toString(),
+                IntegerArgumentType.getInteger(ctx, "x"),
+                IntegerArgumentType.getInteger(ctx, "y"),
+                IntegerArgumentType.getInteger(ctx, "z"),
+                sinceMinutes);
     }
 
     /** /ig audit - database invariant verification */

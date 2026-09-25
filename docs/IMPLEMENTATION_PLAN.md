@@ -124,34 +124,44 @@ Add:
 ```text
 /ig event   <observationId>
 /ig explain <edgeId>
-/ig trace item <fingerprintId> [limit] [sinceMinutes]
+/ig trace item <query> [limit] [sinceMinutes]
+/ig trace player <playerName> [limit] [sinceMinutes]
+/ig trace container <x> <y> <z> [limit] [sinceMinutes]
+/ig gui item <query> [sinceMinutes]
+/ig gui player <playerName> [sinceMinutes]
+/ig gui container <dimension> <x> <y> <z> [sinceMinutes]
 /ig status
 ```
 
-- Bounded output: `limit` defaults to 20 and is capped at 100 (`QueryLimits`), the
-  `/ig explain` evidence listing is capped at 50, and both truncation and capping are
-  stated in the output rather than applied quietly.
-- Bounded time filter: `sinceMinutes` on `/ig trace item` (`QueryWindow`), containment for
-  observations and overlap for time-spanning inferred edges.
-- Readable output with a per-line OBSERVED/INFERRED provenance label and explicit
-  confidence on every inferred line (`QueryFormatter`).
-- Permission level 2 on the whole tree, unchanged from Phase 1.
-- Queries run off the server thread on a dedicated worker and report back via
-  `MinecraftServer.execute` (`QueryDispatcher`), reading through their own read-only
-  connection so they never read inside the ingestion worker's open transaction.
+- `trace item` resolves numeric fingerprint IDs, registry IDs, and custom names; ambiguous
+  string queries list candidates rather than choosing a fingerprint silently.
+- `trace player` and `trace container` use the same database-backed target lookup as the
+  corresponding GUI views. The GUI container target requires an explicit dimension.
+- Chat traces are row-capped (`limit` default 20, hard cap 100); `/ig explain` evidence is
+  capped at 50. `sinceMinutes` is inclusive and uses interval overlap for session observations
+  and inferred edges.
+- The six-row vanilla flow browser shows up to 45 entries per page, labels observed versus
+  inferred movement and confidence, and opens raw event, transformation, or stored
+  edge-explanation details.
+  Composite keyset pagination includes timestamp, provenance kind, row ID, and source kind.
+  All item-movement click paths are rejected; page/detail controls are navigation-only.
+- Permission level 2 is required for the command tree, menu validity, and every menu action.
+- SQL uses the read-only `QueryDispatcher` worker; page/detail results return to the server
+  thread before Minecraft menu state is created or changed. The worker queue accepts at most
+  64 waiting queries and rejects overflow rather than accumulating unbounded work.
+- `./gradlew clean build` passes 255 tests, 0 failures, 0 skipped (2026-09-25).
+- Dedicated vanilla-client GUI staging with GriefLogger absent and present remains pending;
+  see `docs/TEST_PLAN.md`. The existing GriefLogger database has not been used for GUI tests.
 
 ### Deferred out of Phase 6
 
-- Resolving a registry id or custom name to a fingerprint from the command line;
-  `/ig trace item` takes a fingerprint id, surfaced in `/ig event` output.
-- `/ig trace player`, `/ig trace container`, `/ig inspect`.
-- `after` / `before` / `between` filters; next/previous pagination actions.
-- Clickable `ClickEvent` links and metadata hover text — cross-references are plain text.
-- `[AMBIGUOUS]` and `[UNRESOLVED]` markers; ambiguity currently shows as reduced
-  confidence plus the candidate counts inside the stored explanation.
+- `/ig inspect` command-toggled in-world interaction (issue #10).
+- `after` / `before` / `between` filters and click-event links from chat output.
+- Dedicated `[AMBIGUOUS]` and `[UNRESOLVED]` line prefixes; source-group ambiguity and UNKNOWN
+  endpoints are preserved in the current evidence/details instead.
 
-See `docs/QUERY_MODEL.md` for the exact argument table and
-`docs/ARCHITECTURE.md` for the threading and labelling rules.
+See `docs/QUERY_MODEL.md` for argument, GUI, and pagination contracts and
+`docs/ARCHITECTURE.md` for threading and evidence-boundary rules.
 
 ## Phase 7 — Quantity flow
 

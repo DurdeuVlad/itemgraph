@@ -70,6 +70,10 @@ public final class QueryFormatter {
         return hours + "h" + minutes + "m";
     }
 
+    public static String formatConfidence(Double confidence) {
+        return confidence == null ? "(not recorded)" : formatConfidence(confidence.doubleValue());
+    }
+
     /** Four decimals: enough to reproduce the engine's rounded score exactly. */
     public static String formatConfidence(double confidence) {
         return String.format(Locale.ROOT, "%.4f", confidence);
@@ -233,8 +237,13 @@ public final class QueryFormatter {
                     + " hops - more movement matched. Narrow the window or raise the limit (max "
                     + QueryLimits.MAX_LIMIT + ").");
         }
-        lines.add("  [OBSERVED] = one raw evidence row (/ig event <id>). "
-                + "[INFERRED] = reconstructed, see the evidence with /ig explain <id>.");
+        String transformationDetails = result.fingerprint() == null
+                ? "transformation# IDs refer to ig_item_transformations."
+                : "transformation# IDs refer to ig_item_transformations; open /ig gui item \"id:"
+                        + result.fingerprint().id() + "\" and select the row for details.";
+        lines.add("  [OBSERVED] = raw observation or recorded transformation. Use /ig event <id> only "
+                + "for observation# IDs; " + transformationDetails + " [INFERRED] = reconstructed, see "
+                + "the evidence with /ig explain <id>.");
         return lines;
     }
 
@@ -246,11 +255,13 @@ public final class QueryFormatter {
     public static String formatHop(TraceHop hop, boolean showItem) {
         String label = hop.kind() == TraceHop.Kind.OBSERVED
                 ? "[OBSERVED]"
-                : "[INFERRED conf=" + formatConfidence(hop.confidence() == null ? 0.0 : hop.confidence()) + "]";
+                : "[INFERRED conf=" + formatConfidence(hop.confidence()) + "]";
 
-        String reference = hop.kind() == TraceHop.Kind.OBSERVED
-                ? "(event#" + hop.refId() + " " + hop.detail() + ")"
-                : "(edge#" + hop.refId() + " " + hop.detail() + ")";
+        String reference = switch (hop.source()) {
+            case OBSERVATION -> "(observation#" + hop.refId() + " " + hop.detail() + ")";
+            case TRANSFORMATION -> "(transformation#" + hop.refId() + " " + hop.detail() + ")";
+            case INFERRED_EDGE -> "(edge#" + hop.refId() + " " + hop.detail() + ")";
+        };
 
         String itemSuffix = (showItem && hop.item() != null && hop.item().resolved())
                 ? " [" + hop.item().describe() + "]"
@@ -281,7 +292,18 @@ public final class QueryFormatter {
         for (FingerprintRef c : candidates) {
             lines.add("  #" + c.id() + ": " + c.describe() + " [hash=" + c.fingerprintHash() + "]");
         }
-        lines.add("  Run /ig trace item <id> with one of the IDs above to view its timeline.");
+        lines.add("  Use /ig trace item \"id:<id>\" or /ig gui item \"id:<id>\" to select a specific fingerprint.");
+        return lines;
+    }
+
+    public static List<String> formatNodeCandidates(String target, List<NodeRef> candidates) {
+        List<String> lines = new ArrayList<>();
+        lines.add(PREFIX + target + " matches multiple stored nodes; no timeline was selected:");
+        for (NodeRef candidate : candidates) {
+            lines.add("  " + candidate.describe());
+        }
+        lines.add("  Candidate listing is capped at 10 nodes.");
+        lines.add("Use the corresponding /ig gui command to select a specific node.");
         return lines;
     }
 
