@@ -487,6 +487,22 @@ serialize transactions on the shared ItemGraph JDBC connection.
   `RightClickBlock` in the same tick and alias the partner half. Menus without a
   block-entity container (crafting grids, anvils, ender chests) are not watched.
 
+### Command-toggled container inspection (Issue 10)
+
+- `/ig inspect` stores only per-player UUID state in `InspectionService`; it is cleared on
+  logout and server stop and is not persisted.
+- `InspectionListener` handles `PlayerInteractEvent.RightClickBlock` at `HIGHEST` priority.
+  It acts only when inspection is active, the player still has permission level 2, and the
+  clicked block entity implements `Container`. It submits the flow-browser query first; only
+  an accepted query cancels the click with `InteractionResult.SUCCESS`, which prevents both
+  the normal container GUI and held-item use path from running. A rejected query preserves
+  the ordinary container interaction instead of leaving the player with neither screen.
+- Because the click is cancelled before `ContainerSessionListener` records it, inspection
+  is not container-transfer evidence. The opened `FlowBrowserMenu` contains only a
+  `SimpleContainer`, so its Open/Close lifecycle cannot create a block-entity-backed watch.
+- Unsupported blocks and inactive/disabled inspection return `PASS`-equivalent vanilla
+  behavior: the event remains uncancelled and the normal interaction pipeline proceeds.
+
 ### Expanded Query UX
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
 - `/ig trace container <x> <y> <z>`: reconstructs item ingress and egress for a container at coordinates.

@@ -139,6 +139,15 @@ public final class ItemGraphCommands {
                                                                         LongArgumentType.getLong(ctx, "sinceMinutes")))))))))
                 .build();
         root.addChild(gui);
+
+        LiteralCommandNode<CommandSourceStack> inspect = Commands.literal("inspect")
+                .requires(source -> source.hasPermission(2))
+                .executes(ItemGraphCommands::inspectToggle)
+                .then(Commands.literal("on").executes(ctx -> inspectSet(ctx, true)))
+                .then(Commands.literal("off").executes(ctx -> inspectSet(ctx, false)))
+                .then(Commands.literal("status").executes(ItemGraphCommands::inspectStatus))
+                .build();
+        root.addChild(inspect);
         dispatcher.register(Commands.literal("ig").redirect(root));
     }
 
@@ -250,6 +259,56 @@ public final class ItemGraphCommands {
                 IntegerArgumentType.getInteger(ctx, "y"),
                 IntegerArgumentType.getInteger(ctx, "z"),
                 sinceMinutes);
+    }
+
+    /** /ig inspect - toggle the caller's container-inspection mode. */
+    private static int inspectToggle(CommandContext<CommandSourceStack> ctx) {
+        ServerPlayer player = inspectionPlayer(ctx.getSource());
+        if (player == null) {
+            return 0;
+        }
+        boolean enabled = InspectionService.getInstance().toggle(player.getUUID());
+        ctx.getSource().sendSuccess(() -> Component.literal(enabled
+                ? "[ItemGraph] Container inspection enabled. Right-click a supported container to open its read-only flow; use /ig inspect off to disable."
+                : "[ItemGraph] Container inspection disabled."), false);
+        return 1;
+    }
+
+    /** /ig inspect on|off - set the caller's mode deterministically. */
+    private static int inspectSet(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        ServerPlayer player = inspectionPlayer(ctx.getSource());
+        if (player == null) {
+            return 0;
+        }
+        boolean changed = InspectionService.getInstance().setEnabled(player.getUUID(), enabled);
+        ctx.getSource().sendSuccess(() -> Component.literal(enabled
+                ? changed
+                        ? "[ItemGraph] Container inspection enabled. Right-click a supported container to open its read-only flow."
+                        : "[ItemGraph] Container inspection is already enabled."
+                : changed
+                        ? "[ItemGraph] Container inspection disabled."
+                        : "[ItemGraph] Container inspection is already disabled."), false);
+        return 1;
+    }
+
+    /** /ig inspect status - report the caller's current mode without changing it. */
+    private static int inspectStatus(CommandContext<CommandSourceStack> ctx) {
+        ServerPlayer player = inspectionPlayer(ctx.getSource());
+        if (player == null) {
+            return 0;
+        }
+        boolean enabled = InspectionService.getInstance().isEnabled(player.getUUID());
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "[ItemGraph] Container inspection is " + (enabled ? "enabled" : "disabled") + "."), false);
+        return 1;
+    }
+
+    private static ServerPlayer inspectionPlayer(CommandSourceStack source) {
+        if (source.getEntity() instanceof ServerPlayer player) {
+            return player;
+        }
+        source.sendFailure(Component.literal("[ItemGraph] Container inspection requires a player."));
+        return null;
     }
 
     /** /ig audit - database invariant verification */

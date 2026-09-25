@@ -40,6 +40,7 @@ Everything below this heading and above "Not yet implemented" is live.
 /ig gui item <query> [sinceMinutes]
 /ig gui player <playerName> [sinceMinutes]
 /ig gui container <dimension> <x> <y> <z> [sinceMinutes]
+/ig inspect [on|off|status]
 ```
 
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
@@ -90,6 +91,9 @@ tick or two later. Entity-less commands dispatched on the server thread, includi
 RCON, receive an acceptance message and write completed results to the server log because the
 RCON response buffer is returned with the command. Entity-less off-thread callers can receive
 results synchronously within the five-second buffer timeout.
+
+`/ig inspect` changes only per-player volatile state and returns immediately. The subsequent
+container click opens the same asynchronous read-only browser described below.
 
 ### Vanilla flow browser
 
@@ -182,12 +186,19 @@ label, chat lists the candidates and the GUI lets the moderator choose. `/ig gui
 
 ### Inspect a container
 
-**Explicit coordinate traces are implemented.** Use `/ig trace container <x> <y> <z>` for
-chat output or `/ig gui container <dimension> <x> <y> <z> [sinceMinutes]` for the GUI. The
-GUI lookup requires an exact dimension and normalized block coordinates; multiple matching
-nodes are listed for selection rather than silently resolved. The chat form also lists
-multiple coordinate matches, including matches across dimensions. The command-toggled
-in-world `/ig inspect` interaction is still future work tracked by issue #10.
+**Implemented.** Use `/ig trace container <x> <y> <z>` for chat output, `/ig gui container
+<dimension> <x> <y> <z> [sinceMinutes]` for an explicit GUI lookup, or `/ig inspect` for
+in-world selection. `/ig inspect` toggles the caller's mode; `/ig inspect on`, `/ig inspect
+off`, and `/ig inspect status` are deterministic forms.
+
+While active, a server-side right-click on a block whose block entity implements `Container`
+opens that exact dimension/position in the read-only browser. After the browser query is
+accepted, the `RightClickBlock` event is cancelled with `InteractionResult.SUCCESS` at
+`HIGHEST` priority, so the normal container screen and held-item use path do not run. If the
+bounded query queue rejects the request, the vanilla interaction remains intact. Unsupported
+blocks retain vanilla behavior. The mode is per player UUID, requires permission level 2 on
+both command and click, and clears on logout and server stop. Opening ItemGraph's menu is
+not recorded as a container-transfer observation.
 
 ### View an observation
 

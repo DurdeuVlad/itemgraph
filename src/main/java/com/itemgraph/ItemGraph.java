@@ -35,6 +35,9 @@ public class ItemGraph {
         // vanilla container block entities for automated transfer observation.
         // Must register on the mod event bus (RegisterCapabilitiesEvent fires on mod bus).
         modEventBus.register(new com.itemgraph.listener.ContainerCapabilityRegistrar());
+        // Command-toggled inspector: cancels supported container clicks at HIGHEST
+        // priority so the inspection request itself never creates a session watch.
+        NeoForge.EVENT_BUS.register(new com.itemgraph.command.InspectionListener());
         // Container session listener: binds PlayerContainerEvent open/close to
         // ContainerInteractionTracker watches so player-driven transfers are observed
         // as interval-bounded session net deltas (GUI clicks never traverse IItemHandler).
@@ -56,6 +59,7 @@ public class ItemGraph {
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
+        com.itemgraph.command.InspectionService.getInstance().clear();
         com.itemgraph.ingest.InternalObservationService.getInstance().stop();
         com.itemgraph.ingest.IngestionService.getInstance().stop();
         // Stop the query worker before closing the database, so an in-flight /ig trace

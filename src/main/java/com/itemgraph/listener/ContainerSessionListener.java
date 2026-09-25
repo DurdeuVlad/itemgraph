@@ -59,7 +59,7 @@ public class ContainerSessionListener {
     @SubscribeEvent
     public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
         Level level = event.getLevel();
-        if (level.isClientSide()) {
+        if (level.isClientSide() || event.isCanceled()) {
             return;
         }
         // Only remember clicks on blocks that actually hold an inventory; this

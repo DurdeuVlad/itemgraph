@@ -93,6 +93,11 @@ audit totals; `/ig explain <edgeId>` labels them as superseded.
 that leaves zero net change emits no row, and that absence is not evidence that no transfer
 occurred. Multi-viewer attribution remains one ambiguous row, not one row per viewer.
 
+An `/ig inspect` click is an access request, not evidence. `InspectionListener` cancels the
+supported-container interaction before `ContainerSessionListener` records a pending opening,
+and the read-only `FlowBrowserMenu` is backed by `SimpleContainer`; therefore opening it
+creates no block-entity watch, no net-delta row, and no held-item consumption observation.
+
 `CAPABILITY_INSERT` and `CAPABILITY_EXTRACT` mean an item changed through an `IItemHandler`.
 `IItemHandler` does not expose the caller or cause, so the remote endpoint is UNKNOWN and the
 action is not labeled hopper/automation without separate evidence. Queue-rejected capability
