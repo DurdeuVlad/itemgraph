@@ -8,6 +8,7 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Preview API contract**: `docs/API.md` defines the proposed `com.itemgraph.api` PREVIEW_1 boundary for trusted NeoForge mods: immutable direct-observation DTOs, source-mod/event deduplication, durable external-inventory identity, bounded asynchronous results, and explainable flow DTOs. The API itself remains unimplemented until issue #12.
 - **Complete command help/reference**: bare `/itemgraph` or `/ig` and `/ig help [topic]` document every live command with syntax, defaults, permission, asynchronous behavior, evidence semantics, and examples. Player, item-ID, dimension, literal, and topic suggestions are registered, and dispatcher tests cross-check help coverage against the live command tree.
 - **Read-only vanilla flow browser**: permission-level-2 `/ig gui item`, `/ig gui player`, and dimension-qualified `/ig gui container` commands open a vanilla six-row chest menu with 45-entry keyset-paginated timelines, provenance/confidence labels, and event/transformation/edge detail views. Menu actions cannot move items.
 - **Command-toggled container inspector**: `/ig inspect [on|off|status]` stores per-player server-side mode. While enabled, a supported container right-click opens the read-only flow browser for that exact dimension/position without opening the normal container GUI, consuming the held item, or recording a transfer. The mode clears on logout and server stop.
