@@ -1,0 +1,31 @@
+modLoader="javafml"
+loaderVersion="[1,)"
+license="MIT"
+
+[[mods]]
+modId="itemgraph_api_consumer"
+version="0.1.0"
+displayName="ItemGraph API Consumer Example"
+authors="ItemGraph"
+description='''Compiles against the built ItemGraph PREVIEW_1 Java API and submits one stable, directly observed fixture event.'''
+
+[[dependencies.itemgraph_api_consumer]]
+    modId="neoforge"
+    type="required"
+    versionRange="[21.1.0,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.itemgraph_api_consumer]]
+    modId="minecraft"
+    type="required"
+    versionRange="[1.21,1.22)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.itemgraph_api_consumer]]
+    modId="itemgraph"
+    type="required"
+    versionRange="[0.2.0]"
+    ordering="AFTER"
+    side="SERVER"

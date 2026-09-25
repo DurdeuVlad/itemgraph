@@ -289,7 +289,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ItemCanonicalizerTest` | fingerprint determinism and DataComponent decoding (Phase 3) |
 | `NodeManagerTest` | node identity resolution (Phase 4) |
 | `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction, and concurrent shared-connection transaction isolation (5 + 10 tests) |
-| `DatabaseManagerTest` | migrations V1–V11, interval/group/edge-state schema, dedup constraints, read-only query connection |
+| `DatabaseManagerTest` | migrations V1–V12, interval/group/edge-state schema, API source/external-key schema, dedup constraints, read-only query connection |
 | `EventQueryServiceTest` | found/not-found, dangling references rendering as "no such row", OBSERVED labelling |
 | `ExplainQueryServiceTest` | evidence resolved back to observation detail, no cross-edge evidence leakage, unjustifiable edges reported, evidence cap, and SQL NULL confidence rejection (8 tests) |
 | `TraceQueryServiceTest` | OBSERVED/INFERRED merge order, session intervals, limit capping, exact dimension/coordinates and player labels, ambiguous node/fingerprint/numeric-ID candidates, target-ID pinning, and bidirectional tie-safe cursor pages (20 tests) |
@@ -297,12 +297,14 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ContainerInteractionTrackerTest`, `ContainerSessionListenerTest` | open/close net deltas, timestamp intervals, multi-viewer ambiguity, capability-credit subtraction, and zero-net limitation (14 + 1 tests) |
 | `V9InternalObservationDedupTest`, `V10InternalDedupEntityUuidTest` | partial-index, UUID, destination-sensitive dedup, NULL-UUID preservation, and V11 idempotence (5 + 6 tests) |
 | `ItemEntityEventListenerPartialPickupTest` | pending-pickup resolution: emit on reduced count, drop on removal/expiry, keep while unchanged |
-| `FlowBrowserMenuTest` | vanilla six-row menu type, textual provenance/confidence/evidence labels, every click category rejected or handled as navigation/detail only, and permission recheck (2 tests) |
+| `FlowBrowserMenuTest` | vanilla six-row menu type, compact resolved-menu titles, textual provenance/confidence/evidence labels, every click category rejected or handled as navigation/detail only, and permission recheck (3 tests) |
 | `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container and `/ig inspect` command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
 | `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest` | per-player inspect state, deterministic command forms, permission denial, supported/unsupported clicks, browser-queue rejection fallback, logout cleanup, and canceled-click isolation from session tracking (3 + 6 + 2 tests) |
 | `ItemGraphCommandsHelpTest` | bare-root overview, every help topic, invalid-topic diagnostics, permission denial, registered-path/help synchronization, and literal/player/item/dimension suggestions (7 tests) |
+| `ItemGraphApiTest` | service-issued `SourceHandle`, registration idempotency/spoof rejection, deduplication, endpoint/field validation, malformed-map/custom-name validation, stale-source/database/shutdown outcomes, coordinate-less external inventories, opaque evidence refs, ambiguity, player-coordinate suppression, limit/window conversion, canonical separator-forgery resistance, provenance, explanation/supporting evidence, and lifecycle (15 tests) |
+| `V12PreviewApiSourcesAndExternalNodesTest` | `ig_api_sources`, `ig_nodes.external_key`, unique external identity, and coordinate-less `EXTERNAL_INVENTORY` schema (3 tests) |
 
-Total automated test count: **277 tests, 0 failures, 0 skipped** (`./gradlew clean build`, 2026-09-25).
+Total automated test count: **300 tests, 0 failures, 0 skipped** (`./gradlew clean build`, 2026-09-25).
 
 ## M6 issue #8: vanilla flow browser verification
 
@@ -458,6 +460,41 @@ This is a real rendered-client check through MC Pilot, not an unmodified Mojang 
 client. It verifies the server-authoritative interaction and vanilla `GENERIC_9x6` screen
 path on a graphical NeoForge 1.21.1 client. The earlier V11 live-movement scenario remains
 unverified for the reason recorded above.
+
+## M7 issue #12: preview API and consumer fixture
+
+Automated coverage includes `ItemGraphApiTest`, `V12PreviewApiSourcesAndExternalNodesTest`,
+`NodeManagerTest` external-identity cases, `ItemCanonicalizerTest`, and
+`DatabaseManagerTest` schema-version assertions. The API tests use isolated temporary
+ItemGraph databases, not `run/database.db`, and cover source registration/spoof rejection,
+`PERSISTED`/`DUPLICATE`, endpoint and payload validation, queue/shutdown/database status
+mapping, coordinate-less `EXTERNAL_INVENTORY` identity, opaque evidence URIs, ambiguity,
+limits/relative windows, inferred explanations/supporting evidence, and service lifecycle.
+`./gradlew clean build` must remain green before delivery.
+
+`examples/api-consumer` is a separate NeoForge 1.21.1 subproject. It depends on
+`compileOnly files("../../build/libs/itemgraph-0.2.0.jar")`—the built main JAR, not source
+project internals—and `run/mods/itemgraph-api-consumer-0.1.0.jar` was produced by
+`./gradlew :examples:api-consumer:build`. Its `neoforge.mods.toml` declares an `itemgraph`
+runtime dependency. On `ServerStartedEvent` it registers `itemgraph_api_consumer`,
+submits stable source event `1`, then calls `traceItem(ItemQuery.itemId("minecraft:diamond"),
+QueryOptions.defaults())`.
+
+Dedicated staging loopback `127.0.0.1:26417` results:
+
+- With GriefLogger present, `run/logs/latest.log` showed migration V12 applying from
+  schema 11 and `ItemGraph API fixture completed: PERSISTED / query=AMBIGUOUS`. The
+  ItemGraph database persisted `ig_api_sources` row
+  `itemgraph_api_consumer|ItemGraph API Consumer Example|1` and observation source
+  `EXTERNAL_API:itemgraph_api_consumer`, `source_event_id=1`, `TRANSFER_ITEM`. `AMBIGUOUS`
+  is expected because staging has multiple `minecraft:diamond` fingerprint candidates.
+- With `grieflogger-1.2.10-1.21.1-neoforge.jar` temporarily parked outside `run/mods`,
+  ItemGraph started standalone and logged `GriefLogger integration: DISABLED`; the same
+  stable source event returned `DUPLICATE / query=AMBIGUOUS`, proving persisted dedup and
+  query behavior without GriefLogger. The GriefLogger JAR was restored and
+  `run/database.db` remained SHA-256 `f5b98321c4231bfd7d7e833e6c6d59e9687f6cb6ed2b9034afba4f114f0a34dc`.
+- No API consumer code called `server.execute`, JDBC, GriefLogger classes, or ItemGraph
+  internals; lifecycle shutdown ran on `ServerStoppingEvent`.
 
 ## Historical live server results (pre-V11 staging `run/`)
 

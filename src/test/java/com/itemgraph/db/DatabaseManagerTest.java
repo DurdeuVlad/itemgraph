@@ -32,7 +32,7 @@ class DatabaseManagerTest {
 
         assertTrue(dbManager.isInitialized());
         assertTrue(dbManager.isConnected());
-        assertEquals(11, dbManager.getCurrentSchemaVersion());
+        assertEquals(12, dbManager.getCurrentSchemaVersion());
         assertTrue(Files.exists(dbPath));
 
         Connection conn = dbManager.getConnection();
@@ -58,6 +58,16 @@ class DatabaseManagerTest {
         assertTrue(tables.contains("ig_observation_groups"), "ig_observation_groups table must exist");
         assertTrue(tables.contains("ig_observation_group_members"), "ig_observation_group_members table must exist");
         assertTrue(tables.contains("ig_observation_match_checks"), "ig_observation_match_checks table must exist");
+        assertTrue(tables.contains("ig_api_sources"), "ig_api_sources table must exist");
+
+        List<String> nodeColumns = new ArrayList<>();
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("PRAGMA table_info(ig_nodes)")) {
+            while (rs.next()) {
+                nodeColumns.add(rs.getString("name"));
+            }
+        }
+        assertTrue(nodeColumns.contains("external_key"), "ig_nodes.external_key must exist");
 
         // Verify unique constraint on ig_observations(source_type, source_event_id)
         try (Statement stmt = conn.createStatement()) {
@@ -111,7 +121,7 @@ class DatabaseManagerTest {
         // Verify re-initializing does not fail and migrations are idempotent
         dbManager.close();
         dbManager.initialize(dbPath);
-        assertEquals(11, dbManager.getCurrentSchemaVersion());
+        assertEquals(12, dbManager.getCurrentSchemaVersion());
     }
 
     /**

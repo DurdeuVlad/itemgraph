@@ -29,6 +29,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 final class FlowBrowserService {
@@ -220,7 +221,7 @@ final class FlowBrowserService {
                 page.hasNext() && !session.loading
                         ? new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.NEXT_PAGE, 0) : null);
 
-        openMenu(player, shortText("ItemGraph: " + page.targetDescription()), items, actions,
+        openMenu(player, menuTitle(page), items, actions,
                 (clickingPlayer, action) -> handlePageAction(clickingPlayer, session, action));
     }
 
@@ -461,8 +462,24 @@ final class FlowBrowserService {
         return stack;
     }
 
+    static String menuTitle(TracePage page) {
+        if (page.fingerprint() != null && page.fingerprint().resolved()) {
+            return "ItemGraph: item #" + page.fingerprint().id();
+        }
+        if (page.targetNode() != null && page.targetNode().resolved()) {
+            return "ItemGraph: "
+                    + page.targetNode().nodeType().toLowerCase(Locale.ROOT)
+                    + " #" + page.targetNode().id();
+        }
+        return shortText("ItemGraph: " + page.targetDescription(), 40);
+    }
+
     private static String shortText(String line) {
-        return line.length() <= 64 ? line : line.substring(0, 61) + "...";
+        return shortText(line, 64);
+    }
+
+    private static String shortText(String line, int maxLength) {
+        return line.length() <= maxLength ? line : line.substring(0, maxLength - 3) + "...";
     }
 
     private static void openMenu(ServerPlayer player, String title, List<ItemStack> items,

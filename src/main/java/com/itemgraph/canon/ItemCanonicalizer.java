@@ -26,7 +26,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -118,7 +120,23 @@ public class ItemCanonicalizer {
         return extractAndBuild(itemId, stack.getComponentsPatch());
     }
 
+    /** Canonical component strings for the public immutable ItemSnapshot DTO. */
+    public static Map<String, String> canonicalComponents(net.minecraft.world.item.ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> components = new LinkedHashMap<>();
+        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        extractAndBuild(itemId, stack.getComponentsPatch(), components);
+        return Map.copyOf(components);
+    }
+
     private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch) {
+        return extractAndBuild(itemId, patch, null);
+    }
+
+    private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch,
+                                                 Map<String, String> components) {
         String customName = null;
         List<String> sortedEnchantments = new ArrayList<>();
         Integer damage = null;
@@ -204,6 +222,27 @@ public class ItemCanonicalizer {
                 }
             } catch (Throwable t) {
                 LOGGER.debug("Could not extract RARITY for {}: {}", itemId, t.getMessage());
+            }
+        }
+
+        if (components != null) {
+            if (customName != null) {
+                components.put("minecraft:custom_name", customName);
+            }
+            if (!sortedEnchantments.isEmpty()) {
+                components.put("minecraft:enchantments", String.join(",", sortedEnchantments));
+            }
+            if (damage != null) {
+                components.put("minecraft:damage", damage.toString());
+            }
+            if (trimSummary != null && !trimSummary.isEmpty()) {
+                components.put("minecraft:trim", trimSummary);
+            }
+            if (!loreLines.isEmpty()) {
+                components.put("minecraft:lore", String.join("|", loreLines));
+            }
+            if (rarity != null) {
+                components.put("minecraft:rarity", rarity);
             }
         }
 

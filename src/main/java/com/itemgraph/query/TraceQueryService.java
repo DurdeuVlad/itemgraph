@@ -104,11 +104,15 @@ public final class TraceQueryService {
                    origin.custom_label AS origin_label,
                    origin.level_id AS origin_level,
                    origin.x AS origin_x, origin.y AS origin_y, origin.z AS origin_z,
+                   origin.owner_uuid AS origin_owner_uuid,
+                   origin.external_key AS origin_external_key,
                    e.to_node_id AS dest_id,
                    dest.node_type AS dest_type,
                    dest.custom_label AS dest_label,
                    dest.level_id AS dest_level,
                    dest.x AS dest_x, dest.y AS dest_y, dest.z AS dest_z,
+                   dest.owner_uuid AS dest_owner_uuid,
+                   dest.external_key AS dest_external_key,
                    e.fingerprint_id AS fp_id,
                    fp.item_id AS fp_item_id,
                    fp.custom_name AS fp_custom_name,
@@ -321,7 +325,7 @@ public final class TraceQueryService {
 
     private NodeRef findNodeById(Connection conn, long nodeId, String nodeType) throws SQLException {
         try (PreparedStatement pstmt = conn.prepareStatement(
-                "SELECT id, node_type, custom_label, level_id, x, y, z FROM ig_nodes WHERE id = ? AND node_type = ?")) {
+                "SELECT id, node_type, custom_label, level_id, x, y, z, owner_uuid, external_key FROM ig_nodes WHERE id = ? AND node_type = ?")) {
             pstmt.setLong(1, nodeId);
             pstmt.setString(2, nodeType);
             try (ResultSet rs = pstmt.executeQuery()) {
@@ -336,7 +340,7 @@ public final class TraceQueryService {
         }
         List<NodeRef> candidates = new ArrayList<>();
         try (PreparedStatement pstmt = conn.prepareStatement(
-                "SELECT id, node_type, custom_label, level_id, x, y, z FROM ig_nodes WHERE node_type = 'PLAYER' AND custom_label = ? ORDER BY id ASC LIMIT 10")) {
+                "SELECT id, node_type, custom_label, level_id, x, y, z, owner_uuid, external_key FROM ig_nodes WHERE node_type = 'PLAYER' AND custom_label = ? ORDER BY id ASC LIMIT 10")) {
             pstmt.setString(1, playerQuery);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
@@ -376,10 +380,31 @@ public final class TraceQueryService {
         return traceNode(conn, containerNode, title, requestedLimit, window);
     }
 
+    /** Traces any already resolved node id, used by the preview API's external endpoint. */
+    public TraceResult traceNodeId(Connection conn, long nodeId, int requestedLimit,
+                                   QueryWindow window) throws SQLException {
+        NodeRef node = findAnyNodeById(conn, nodeId);
+        if (node == null) {
+            return new TraceResult("node#" + nodeId, null, List.of(), window,
+                    QueryLimits.clampLimit(requestedLimit), requestedLimit, false);
+        }
+        return traceNode(conn, node, node.describe(), requestedLimit, window);
+    }
+
+    private NodeRef findAnyNodeById(Connection conn, long nodeId) throws SQLException {
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "SELECT id, node_type, custom_label, level_id, x, y, z, owner_uuid, external_key FROM ig_nodes WHERE id = ?")) {
+            pstmt.setLong(1, nodeId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next() ? ObservationQueries.node(rs, rs.getLong("id"), "") : null;
+            }
+        }
+    }
+
     public List<NodeRef> resolveContainerNodes(Connection conn, String level, double x, double y, double z)
             throws SQLException {
         List<NodeRef> candidates = new ArrayList<>();
-        String findSql = "SELECT id, node_type, custom_label, level_id, x, y, z FROM ig_nodes WHERE node_type = 'CONTAINER' AND x = ? AND y = ? AND z = ?"
+        String findSql = "SELECT id, node_type, custom_label, level_id, x, y, z, owner_uuid, external_key FROM ig_nodes WHERE node_type = 'CONTAINER' AND x = ? AND y = ? AND z = ?"
                 + (level != null ? " AND level_id = ?" : "") + " ORDER BY id ASC LIMIT 10";
         try (PreparedStatement pstmt = conn.prepareStatement(findSql)) {
             pstmt.setDouble(1, x);
@@ -698,6 +723,8 @@ public final class TraceQueryService {
                    p.custom_label AS p_label,
                    p.level_id AS p_level,
                    p.x AS p_x, p.y AS p_y, p.z AS p_z,
+                   p.owner_uuid AS p_owner_uuid,
+                   p.external_key AS p_external_key,
                    t.source_fingerprint_id AS s_fp_id,
                    s_fp.item_id AS s_item_id,
                    s_fp.custom_name AS s_name,

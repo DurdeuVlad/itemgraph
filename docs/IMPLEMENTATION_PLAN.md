@@ -286,12 +286,12 @@ the existing GriefLogger database remain out of scope for writes.
 
 ## M7 — Preview integration API
 
-Issue #9 defines the public contract in `docs/API.md`; issue #12 implements it after
-maintainer approval. The preview boundary is `com.itemgraph.api` `PREVIEW_1`, shipped in
-the main ItemGraph JAR and consumed by trusted NeoForge mods through local-JAR
-`compileOnly` plus a runtime `itemgraph` mod dependency.
+Issue #9 defined the maintainer-approved public contract in `docs/API.md`; issue #12
+implements it as `com.itemgraph.api` `PREVIEW_1`, shipped in the main ItemGraph JAR and
+consumed by trusted NeoForge mods through local-JAR `compileOnly` plus a runtime
+`itemgraph` mod dependency.
 
-Planned implementation surface:
+Implemented implementation surface:
 
 - immutable source registration and direct-observation DTOs;
 - `(source modId, sourceEventId)` deduplication using the existing non-null source-event
@@ -305,6 +305,13 @@ Planned implementation surface:
   explanations, ambiguity, limits, and truncation;
 - an ItemGraph-owned V12 migration for `ig_api_sources` and `ig_nodes.external_key`;
 - a separate NeoForge 1.21.1 consumer fixture compiled against the built main JAR.
+
+Staging completed both required modes on dedicated loopback `127.0.0.1:26417`: V12 applied
+with GriefLogger present (`PERSISTED / query=AMBIGUOUS`) and ItemGraph ran standalone
+with GriefLogger absent (`DUPLICATE / query=AMBIGUOUS`). The `AMBIGUOUS` query result is
+expected staging evidence because `minecraft:diamond` has multiple fingerprint
+candidates; `run/database.db` remained hash-identical and the GriefLogger JAR was
+restored. Remaining issue-#12 delivery gates are final review and PR/CI/merge.
 
 Non-goals for M7 remain JDBC/schema exposure, GriefLogger API access, caller-provided
 inference, player-facing authorization, a standalone API artifact, and a stable pre-1.0

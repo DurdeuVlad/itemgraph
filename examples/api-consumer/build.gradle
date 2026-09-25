@@ -1,0 +1,38 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.78'
+}
+
+version = '0.1.0'
+group = 'com.example'
+
+base {
+    archivesName = 'itemgraph-api-consumer'
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = rootProject.neo_version
+
+    mods {
+        itemgraph_api_consumer {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Contract under test: a consumer uses the public preview API from the built
+    // ItemGraph mod JAR, not the project's source output or internal packages.
+    compileOnly files(rootProject.layout.buildDirectory.file(
+            "libs/itemgraph-${rootProject.mod_version}.jar"))
+}
+
+tasks.named('compileJava', JavaCompile) {
+    dependsOn ':jar'
+}

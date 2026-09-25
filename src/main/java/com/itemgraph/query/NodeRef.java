@@ -31,12 +31,19 @@ public record NodeRef(
         String levelId,
         Double x,
         Double y,
-        Double z
+        Double z,
+        String ownerUuid,
+        String externalKey
 ) {
+
+    public NodeRef(long id, String nodeType, String label, String levelId,
+                   Double x, Double y, Double z) {
+        this(id, nodeType, label, levelId, x, y, z, null, null);
+    }
 
     /** A node id that has no corresponding {@code ig_nodes} row (dangling reference). */
     public static NodeRef missing(long id) {
-        return new NodeRef(id, null, null, null, null, null, null);
+        return new NodeRef(id, null, null, null, null, null, null, null, null);
     }
 
     public boolean resolved() {

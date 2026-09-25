@@ -52,6 +52,7 @@ public class ItemGraph {
         DatabaseManager.getInstance().initialize();
         com.itemgraph.ingest.InternalObservationService.getInstance().start();
         com.itemgraph.ingest.IngestionService.getInstance().start();
+        com.itemgraph.api.ItemGraphApiLifecycle.start(event.getServer());
         boolean glPresent = net.neoforged.fml.ModList.get().isLoaded("grieflogger");
         LOGGER.info("GriefLogger integration: {}", glPresent
                 ? "ENABLED — reading from GriefLogger database as additive evidence source"
@@ -59,6 +60,7 @@ public class ItemGraph {
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
+        com.itemgraph.api.ItemGraphApiLifecycle.stop(event.getServer());
         com.itemgraph.command.InspectionService.getInstance().clear();
         com.itemgraph.ingest.InternalObservationService.getInstance().stop();
         com.itemgraph.ingest.IngestionService.getInstance().stop();
