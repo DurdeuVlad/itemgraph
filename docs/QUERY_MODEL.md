@@ -29,6 +29,7 @@ Alias:
 Everything below this heading and above "Not yet implemented" is live.
 
 ```text
+/ig help [topic]
 /ig status
 /ig audit
 /ig ingest now
@@ -44,7 +45,9 @@ Everything below this heading and above "Not yet implemented" is live.
 ```
 
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
-under either name. The whole tree requires permission level 2 — the query subcommands
+under either name. Bare `/itemgraph` and bare `/ig` show the command overview. `/ig help
+[topic]` lists the same live tree or one detailed topic; an unknown topic fails with the
+valid topic list. The whole tree requires permission level 2 — the query subcommands
 inherit the same gate as the operational ones rather than relaxing it, because a trace
 names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
 
@@ -52,13 +55,16 @@ names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
 
 | Argument | Type | Default | Notes |
 | --- | --- | --- | --- |
+| `topic` | string | overview | one live help topic; `help`, `status`, `audit`, `ingest`, `ingest now`, `event`, `explain`, `trace`, `trace item`, `trace player`, `trace container`, `gui`, `gui item`, `gui player`, `gui container`, or `inspect` |
 | `observationId` | long ≥ 1 | — | `ig_observations.id` |
 | `edgeId` | long ≥ 1 | — | `ig_inferred_edges.id` |
-| `fingerprintId` | long ≥ 1 | — | `ig_item_fingerprints.id` |
+| `query` | string | — | registry ID, custom-name text, numeric fingerprint candidate, or quoted `"id:<fingerprintId>"`; suggests registered item IDs |
+| `playerName` | string | — | exact stored player label; suggests online players but does not imply a stored observation exists |
+| `fingerprintId` | long ≥ 1 | — | `ig_item_fingerprints.id`; reached through `"id:<fingerprintId>"` or a candidate list |
 | `limit` | int ≥ 1 | 20 | hops returned; **capped at 100** |
 | `sinceMinutes` | long ≥ 1 | unbounded | window is `[now - sinceMinutes, now]`, inclusive; GUI keeps the resolved window constant across pages |
-| `dimension` | resource location | — | required for `/ig gui container`; matches `ig_nodes.level_id` exactly |
-| `x`, `y`, `z` | int | — | block coordinates for `/ig gui container` |
+| `dimension` | resource location | — | required for `/ig gui container`; matches `ig_nodes.level_id` exactly; suggests loaded levels |
+| `x`, `y`, `z` | int | — | block coordinates for `/ig trace container` and `/ig gui container` |
 
 `limit` has no upper bound in the command grammar on purpose. An over-large request is
 **capped, not rejected**: an admin chasing an incident gets the first page of real output
@@ -75,6 +81,16 @@ in the output is the moment the command was run.
 Omitting `sinceMinutes` gives an all-time trace. That is still a bounded query: for a
 single fingerprint the row count is already hard-capped by the limit. The time filter
 narrows a noisy fingerprint; it is not what makes the query safe.
+
+### In-game help and completion
+
+`/ig help` and bare `/ig` enumerate every registered top-level command and leaf command.
+Topic help states syntax, level-2 permission, defaults, asynchronous/read-only behavior,
+observed-versus-inferred semantics, and at least one valid example. Brigadier suggestions
+cover command literals, live help topics, online player names for player arguments,
+registered item IDs for item queries, and loaded dimension IDs for `/ig gui container`.
+The test suite cross-checks the registered command tree against `CommandHelp`, so adding a
+command without help fails `ItemGraphCommandsHelpTest`.
 
 ### Execution model
 

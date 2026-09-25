@@ -102,6 +102,7 @@ The first useful vertical slice should:
 Implemented and available (all require permission level 2):
 
 ```text
+/ig help [topic]
 /ig status
 /ig audit
 /ig ingest now
@@ -116,6 +117,7 @@ Implemented and available (all require permission level 2):
 /ig inspect [on|off|status]
 ```
 
+- `/ig help`: bare `/itemgraph` or `/ig` shows the full live command tree. `/ig help <topic>` shows syntax, permission, defaults, query semantics, and an example; unknown topics list the valid topics.
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
 - `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows the chronological timeline, including transformations (`[TRANSFORMATION <type> <- <source>]`).
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.

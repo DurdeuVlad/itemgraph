@@ -25,17 +25,23 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.ResourceLocationArgument;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * The /itemgraph (alias /ig) command tree.
@@ -60,6 +66,12 @@ public final class ItemGraphCommands {
         LiteralCommandNode<CommandSourceStack> root = dispatcher.register(
                 Commands.literal("itemgraph")
                         .requires(source -> source.hasPermission(2))
+                        .executes(ItemGraphCommands::help)
+                        .then(Commands.literal("help")
+                                .executes(ItemGraphCommands::help)
+                                .then(Commands.argument("topic", StringArgumentType.greedyString())
+                                        .suggests(ItemGraphCommands::suggestHelpTopics)
+                                        .executes(ItemGraphCommands::helpTopic)))
                         .then(Commands.literal("status").executes(ItemGraphCommands::status))
                         .then(Commands.literal("audit").executes(ItemGraphCommands::audit))
                         .then(Commands.literal("ingest")
@@ -80,6 +92,7 @@ public final class ItemGraphCommands {
                                 // /ig trace item <query> [limit] [sinceMinutes]
                                 .then(Commands.literal("item")
                                         .then(Commands.argument("itemQuery", StringArgumentType.string())
+                                                .suggests(ItemGraphCommands::suggestItemIds)
                                                 .executes(ctx -> traceItem(ctx, QueryLimits.DEFAULT_LIMIT, null))
                                                 .then(Commands.argument("limit", IntegerArgumentType.integer(1))
                                                         .executes(ctx -> traceItem(ctx,
@@ -92,6 +105,7 @@ public final class ItemGraphCommands {
                                 // /ig trace player <player> [limit] [sinceMinutes]
                                 .then(Commands.literal("player")
                                         .then(Commands.argument("player", StringArgumentType.string())
+                                                .suggests(ItemGraphCommands::suggestOnlinePlayers)
                                                 .executes(ctx -> tracePlayer(ctx, QueryLimits.DEFAULT_LIMIT, null))
                                                 .then(Commands.argument("limit", IntegerArgumentType.integer(1))
                                                         .executes(ctx -> tracePlayer(ctx,
@@ -120,16 +134,19 @@ public final class ItemGraphCommands {
                 .requires(source -> source.hasPermission(2) && source.getEntity() instanceof ServerPlayer)
                 .then(Commands.literal("item")
                         .then(Commands.argument("itemQuery", StringArgumentType.string())
+                                .suggests(ItemGraphCommands::suggestItemIds)
                                 .executes(ctx -> guiItem(ctx, null))
                                 .then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
                                         .executes(ctx -> guiItem(ctx, LongArgumentType.getLong(ctx, "sinceMinutes"))))))
                 .then(Commands.literal("player")
                         .then(Commands.argument("player", StringArgumentType.string())
+                                .suggests(ItemGraphCommands::suggestOnlinePlayers)
                                 .executes(ctx -> guiPlayer(ctx, null))
                                 .then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
                                         .executes(ctx -> guiPlayer(ctx, LongArgumentType.getLong(ctx, "sinceMinutes"))))))
                 .then(Commands.literal("container")
                         .then(Commands.argument("dimension", ResourceLocationArgument.id())
+                                .suggests(ItemGraphCommands::suggestDimensions)
                                 .then(Commands.argument("x", IntegerArgumentType.integer())
                                         .then(Commands.argument("y", IntegerArgumentType.integer())
                                                 .then(Commands.argument("z", IntegerArgumentType.integer())
@@ -148,7 +165,51 @@ public final class ItemGraphCommands {
                 .then(Commands.literal("status").executes(ItemGraphCommands::inspectStatus))
                 .build();
         root.addChild(inspect);
-        dispatcher.register(Commands.literal("ig").redirect(root));
+        dispatcher.register(Commands.literal("ig")
+                .requires(source -> source.hasPermission(2))
+                .executes(ItemGraphCommands::help)
+                .redirect(root));
+    }
+
+    private static int help(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        CommandHelp.overviewLines().forEach(line ->
+                source.sendSuccess(() -> Component.literal(line), false));
+        return 1;
+    }
+
+    private static int helpTopic(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        String topic = StringArgumentType.getString(ctx, "topic");
+        List<String> lines = CommandHelp.topicLines(topic);
+        if (lines == null) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] Unknown help topic '" + topic + "'. Valid topics: " + CommandHelp.validTopicsText()));
+            return 0;
+        }
+        lines.forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
+        return 1;
+    }
+
+    private static CompletableFuture<Suggestions> suggestHelpTopics(
+            CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggest(CommandHelp.TOPIC_NAMES, builder);
+    }
+
+    private static CompletableFuture<Suggestions> suggestOnlinePlayers(
+            CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggest(ctx.getSource().getOnlinePlayerNames(), builder);
+    }
+
+    private static CompletableFuture<Suggestions> suggestItemIds(
+            CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggestResource(BuiltInRegistries.ITEM.keySet().stream(), builder);
+    }
+
+    private static CompletableFuture<Suggestions> suggestDimensions(
+            CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggestResource(
+                ctx.getSource().levels().stream().map(ResourceKey::location), builder);
     }
 
     /** /ig event <observationId> - one raw observation, labelled OBSERVED. */

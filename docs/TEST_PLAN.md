@@ -300,8 +300,9 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `FlowBrowserMenuTest` | vanilla six-row menu type, textual provenance/confidence/evidence labels, every click category rejected or handled as navigation/detail only, and permission recheck (2 tests) |
 | `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container and `/ig inspect` command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
 | `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest` | per-player inspect state, deterministic command forms, permission denial, supported/unsupported clicks, browser-queue rejection fallback, logout cleanup, and canceled-click isolation from session tracking (3 + 6 + 2 tests) |
+| `ItemGraphCommandsHelpTest` | bare-root overview, every help topic, invalid-topic diagnostics, permission denial, registered-path/help synchronization, and literal/player/item/dimension suggestions (7 tests) |
 
-Total automated test count: **270 tests, 0 failures, 0 skipped** (`./gradlew clean build`, 2026-09-25).
+Total automated test count: **277 tests, 0 failures, 0 skipped** (`./gradlew clean build`, 2026-09-25).
 
 ## M6 issue #8: vanilla flow browser verification
 
