@@ -117,6 +117,8 @@ jobs:
           loaders: |
             neoforge
 
+          environment: dedicated-server
+
           java: |
             21
 
@@ -144,6 +146,8 @@ jobs:
 
           loaders: |
             neoforge
+
+          environment: dedicated-server
 
           java: |
             21
