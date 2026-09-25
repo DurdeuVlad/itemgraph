@@ -19,6 +19,7 @@ Its purpose is to reconstruct plausible item-type and stack-quantity movement ac
 - **Platform:** NeoForge
 - **Target Minecraft version:** 1.21.1
 - **Primary deployment model:** server-side
+- **Preview integration API:** `com.itemgraph.api` `PREVIEW_1` in the main JAR
 - **Tagline:** *Trace item movement through time.*
 
 ## Why ItemGraph exists
@@ -137,6 +138,15 @@ Sample `/ig trace item` output:
 
 Evidence and inference are labelled per line, never once at the top.
 
+## Preview integration API
+
+Trusted server mods can use `com.itemgraph.api` `PREVIEW_1` to register their own source
+identity, submit bounded raw observations, and run asynchronous item/player/container
+queries. The API is shipped in this JAR, uses a service-issued `SourceHandle`, and returns
+immutable DTOs plus opaque evidence URIs—not JDBC, schema IDs, mutable Minecraft state, or
+caller-provided inference. A compiling NeoForge fixture lives in `examples/api-consumer`.
+The complete boundary and authorization rules are in [Preview integration API](docs/API.md).
+
 ## Documentation
 
 - [Business and intended value](Business.md)
@@ -149,7 +159,7 @@ Evidence and inference are labelled per line, never once at the top.
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [MIT license](LICENSE)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Preview API contract](docs/API.md)
+- [Preview integration API](docs/API.md)
 - [Evidence model](docs/EVIDENCE_MODEL.md)
 - [GriefLogger integration](docs/GRIEFLOGGER_INTEGRATION.md)
 - [Query model](docs/QUERY_MODEL.md)

@@ -218,4 +218,59 @@ class NodeManagerTest {
         assertEquals(explicit, implicit, "a null level must normalize to minecraft:overworld");
         assertEquals(1, countNodes(NodeType.GROUND.name()));
     }
+
+    @Test
+    void testExternalInventoryIdentityIgnoresDisplayAndLocation() throws Exception {
+        String key = "storage_mod/Backpack A";
+        long first = nodeManager.getOrCreateExternalInventoryNode(
+                conn, key, "Backpack", OVERWORLD, 10.7, 64.2, -20.5);
+        long second = nodeManager.getOrCreateExternalInventoryNode(
+                conn, key, "Renamed", NETHER, 100.9, 70.1, 200.9);
+
+        assertEquals(first, second);
+        assertEquals(NodeType.EXTERNAL_INVENTORY.name(), nodeTypeOf(first));
+        assertEquals(1, countNodes(NodeType.EXTERNAL_INVENTORY.name()));
+
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT custom_label, level_id, x, y, z FROM ig_nodes WHERE id = ?")) {
+            ps.setLong(1, first);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals("Renamed", rs.getString(1));
+                assertEquals(NETHER, rs.getString(2));
+                assertEquals(100, rs.getInt(3));
+                assertEquals(70, rs.getInt(4));
+                assertEquals(200, rs.getInt(5));
+            }
+        }
+    }
+
+    @Test
+    void testCoordinatelessExternalInventoryRemainsExternal() throws Exception {
+        long id = nodeManager.getOrCreateExternalInventoryNode(
+                conn, "storage_mod/remote", "Remote", null, null, null, null);
+
+        assertEquals(NodeType.EXTERNAL_INVENTORY.name(), nodeTypeOf(id));
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT level_id, x, y, z FROM ig_nodes WHERE id = ?")) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals("external:storage_mod", rs.getString(1));
+                rs.getDouble(2);
+                assertTrue(rs.wasNull());
+            }
+        }
+    }
+
+    @Test
+    void testExternalInventoryIdentityIncludesOwner() throws Exception {
+        long first = nodeManager.getOrCreateExternalInventoryNode(
+                conn, "mod_a/shared-id", "A", null, null, null, null);
+        long second = nodeManager.getOrCreateExternalInventoryNode(
+                conn, "mod_b/shared-id", "B", null, null, null, null);
+
+        assertNotEquals(first, second);
+        assertEquals(2, countNodes(NodeType.EXTERNAL_INVENTORY.name()));
+    }
 }

@@ -293,6 +293,23 @@ can occupy the single worker until SQLite returns; the 64-entry queue remains bo
 rejects additional requests. The five-second timeout/cancellation currently applies to the
 off-thread entity-less response path only.
 
+### Preview mod-integration API worker
+
+`com.itemgraph.api.ItemGraphServiceImpl` exposes the approved `PREVIEW_1` API in the
+main mod JAR. It uses one bounded worker (capacity 1,024) for source registration and
+raw `DirectObservation` persistence, and a second bounded worker (capacity 64) for
+read-only API queries. Saturated submissions return `QUEUE_FULL`; saturated
+registrations return `FAILED`/`QUEUE_FULL` because the approved registration enum has no
+`QUEUE_FULL` status; saturated queries return `QueryStatus.QUEUE_FULL`. Neither worker
+touches Minecraft thread-unsafe state. `ItemGraphApiLifecycle` stops both workers with
+the database on `ServerStoppingEvent`.
+
+API submissions never create inferred edges or caller-controlled confidence. They enter
+the same `InternalObservationService`/SQLite path as raw `EXTERNAL_API` evidence and
+deduplicate on `(source_mod_id, source_event_id)`. `ApiQueryBridge` reuses the existing
+read-only trace/explain services and maps internal rows to immutable API DTOs, preserving
+observed/transformation/inferred provenance and opaque evidence URIs.
+
 ### Why not the ingestion worker
 
 The ingestion worker runs a 60-second ingest-then-correlate cycle. Queueing an admin's

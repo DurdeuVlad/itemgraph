@@ -1,6 +1,6 @@
 # ItemGraph preview API contract
 
-Status: **contract proposal for issue #9** — not yet implemented.
+Status: **implemented for issue #12** — preview boundary; no stable-API guarantee.
 Package: `com.itemgraph.api`
 API version: **`PREVIEW_1`**
 Minecraft: **1.21.1**
@@ -78,15 +78,14 @@ the consumer cannot run without ItemGraph; use `optional` for an optional integr
 ```
 
 The `compileOnly` declaration is intentionally a local-file dependency for M7. Do not
-publish or fetch a separate `itemgraph-api` artifact. The example pins the exact JAR used
-for compilation because a NeoForge `versionRange` cannot express the separate
-`PREVIEW_1` API version; widen it only to releases known to implement `PREVIEW_1`.
+publish or fetch a separate `itemgraph-api` artifact. The working consumer fixture lives
+at `examples/api-consumer/` and pins the built `itemgraph-0.2.0.jar`; widen a runtime
+`versionRange` only to releases known to implement `PREVIEW_1`.
 
 ## Public signatures
 
-The following signatures are the proposed contract. Implementation in issue #12 must keep
-these signatures source-compatible or explicitly record a new preview version in the
-changelog and this document.
+The following signatures are the implemented `PREVIEW_1` contract. Any breaking change
+must increment the preview API number and be named in `CHANGELOG.md` and this document.
 
 ### Entry point and lifecycle
 
@@ -169,7 +168,8 @@ public record SourceRegistration(
 
 public final class SourceHandle {
     // Package-private constructor: only ItemGraphService can issue a handle.
-    SourceHandle(String modId, String displayName, ApiVersion apiVersion) {}
+    SourceHandle(String modId, String displayName, ApiVersion apiVersion,
+                 long serviceGeneration) {}
 
     public String modId();
     public String displayName();
@@ -243,10 +243,12 @@ returns `DUPLICATE`, not a second row.
 
 `timestampMs` must be positive. `timestampEndMs` must be `null` for a point event or
 `>= timestampMs` for an interval such as `CONTAINER_NET_DELTA`. `attributes` must be a
-non-null map (empty is allowed) and is copied into an immutable map; it may contain
-source-specific audit details but must not contain
+non-null map (empty is allowed) and is copied into an immutable map while preserving
+malformed null entries long enough for the service boundary to return `INVALID_INPUT`;
+it may contain source-specific audit details but must not contain
 secrets or unrestricted player data. Its canonical UTF-8 representation is limited to
-**16 KiB**; larger submissions return `INVALID_INPUT`. The record contains no confidence,
+**16 KiB**; larger submissions return `INVALID_INPUT`. The complete serialized raw
+observation is separately bounded to **64 KiB**. The record contains no confidence,
 edge ID, inferred flag, score, or precomputed path — those fields cannot exist in the
 public submission type, so a caller cannot submit an inference as raw evidence. Accepted
 actions persist `action_type` as the exact `ObservationAction.name()` value.
@@ -274,10 +276,12 @@ public record SubmissionResult(
 ```
 
 Submission and source registration use a bounded external-observation queue with capacity
-**1,024** pending tasks. `QUEUE_FULL` means no persistence was claimed. `SHUTDOWN` means
-the task did not complete persistence. If a queued task persists during the bounded
-shutdown drain, it may still return `PERSISTED`; otherwise it returns `SHUTDOWN`. A
-submission is never left in an ambiguous "maybe persisted" state.
+**1,024** pending tasks. Observation saturation returns `QUEUE_FULL`; registration has no
+`QUEUE_FULL` status in its approved enum and returns `FAILED` with errorCode
+`QUEUE_FULL`. In both cases no persistence was claimed. `SHUTDOWN` means the task did not
+complete persistence. If a queued task persists during the bounded shutdown drain, it may
+still return `PERSISTED`; otherwise it returns `SHUTDOWN`. A submission is never left in
+an ambiguous "maybe persisted" state.
 
 ### Endpoint model
 
@@ -413,12 +417,15 @@ public record ItemSnapshot(
 `itemId` must use Minecraft resource-location syntax. `amount` must be positive.
 `customName` is optional and limited to 256 characters. `components` must be a non-null
 map (empty is allowed) whose keys are component-type resource-location strings and whose
-values are canonical SNBT strings. It is copied with `Map.copyOf`; it is a deterministic
-fingerprint summary, not a full NBT
+values are canonical SNBT strings. It is copied into an immutable map while preserving
+malformed null entries long enough for the service boundary to return `INVALID_INPUT`; it
+is a deterministic fingerprint summary, not a full NBT
 dump, and its canonical UTF-8 representation is limited to **32 KiB**. `of(ItemStack)`
 performs the copy while the caller still owns valid Minecraft state; workers only receive
 `ItemSnapshot`. No `ItemStack`, `CompoundTag`, `Container`, `IItemHandler`, `BlockEntity`,
-`Level`, or `ServerPlayer` is retained by a submitted DTO.
+`Level`, or `ServerPlayer` is retained by a submitted DTO. Canonical fingerprint fields
+escape their internal separators so a custom name or component value cannot forge another
+metadata field and collide with a different item identity.
 
 ### Queries
 
@@ -574,16 +581,19 @@ confidence.
 
 `EndpointDescriptor.stableKey` values are:
 
-- `player:<uuid>` for `PLAYER`;
+- `player:<uuid>` for `PLAYER` when a durable UUID is stored; legacy name-only player
+  evidence uses `player-name:<custom_label>` rather than claiming a UUID;
 - `<level>/<x>/<y>/<z>` for `CONTAINER`, `GROUND`, and `ARMOR_STAND`;
 - `external:<ownerModId>:<inventoryId>` for `EXTERNAL_INVENTORY`;
-- `unknown:<level>` for `UNKNOWN`.
+- `unknown:<level>` for `UNKNOWN`;
+- `unresolved-node:<id>` only when a stored coordinate-bearing row is itself corrupt and has
+  no complete coordinate identity to report.
 
 ## Persistence and migration contract
 
-Issue #12 needs an ItemGraph-owned **V12** migration. The design intentionally requires
-schema support for a durable external-node key while reusing the existing numeric source
-event identity.
+Issue #12 adds an ItemGraph-owned **V12** migration. The implementation uses schema
+support for a durable external-node key while reusing the existing numeric source-event
+identity.
 
 ### Source registration and event deduplication
 
@@ -647,11 +657,11 @@ Expected `errorCode` values are stable within a preview version:
 
 | Status | Typical errorCode |
 | --- | --- |
-| `INVALID_INPUT` | `INVALID_MOD_ID`, `INVALID_EVENT_ID`, `INVALID_ENDPOINT`, `INVALID_ITEM`, `INVALID_TIME_RANGE`, `INVALID_QUERY` |
+| `INVALID_INPUT` | `INVALID_MOD_ID`, `INVALID_DISPLAY_NAME`, `INVALID_EVENT_ID`, `INVALID_ENDPOINT`, `INVALID_ITEM`, `INVALID_ATTRIBUTES`, `INVALID_ACTION`, `INVALID_TIME_RANGE`, `INVALID_QUERY`, `INVALID_SOURCE`, `STALE_SOURCE`, `PAYLOAD_TOO_LARGE` |
 | `QUEUE_FULL` | `QUEUE_FULL` |
 | `DATABASE_UNAVAILABLE` | `DATABASE_UNAVAILABLE` |
 | `SHUTDOWN` | `SHUTDOWN` |
-| `FAILED` | `PERSISTENCE_FAILED`, `REGISTRATION_FAILED`, `QUERY_FAILED` |
+| `FAILED` | `PERSISTENCE_FAILED`, `REGISTRATION_FAILED`, `QUERY_FAILED`, `QUEUE_FULL` (registration only) |
 
 `DUPLICATE`, `NOT_FOUND`, and `AMBIGUOUS` are outcomes, not exceptions. `message` is a
 safe operator-facing diagnostic and must not include secrets, stack traces, SQL text, or
@@ -726,9 +736,14 @@ public final class ExampleIntegration {
 }
 ```
 
-The example is illustrative for the contract, not the required sample mod in issue #12.
-Issue #12 must compile a real consumer fixture against the built main JAR and exercise
-submission plus a bounded trace on a dedicated server.
+The example is illustrative. The required issue-#12 fixture is `examples/api-consumer/`:
+it compiles against `build/libs/itemgraph-0.2.0.jar`, declares an `itemgraph` runtime
+dependency, registers `itemgraph_api_consumer`, submits stable source event `1`, and runs
+a bounded `traceItem` query from `ServerStartedEvent` without touching Minecraft state on
+an API worker. Dedicated-server verification passed with GriefLogger present
+(`PERSISTED / query=AMBIGUOUS`) and absent (`DUPLICATE / query=AMBIGUOUS`); `AMBIGUOUS`
+is the correct result because the staging database contains multiple `minecraft:diamond`
+fingerprint candidates.
 
 ## Explicitly rejected designs
 

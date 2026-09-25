@@ -7,6 +7,8 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -55,6 +57,22 @@ class ItemCanonicalizerTest {
         assertEquals(item1.fingerprintHash(), item2.fingerprintHash());
         assertNull(item1.customName());
         assertNull(item1.componentSummary());
+    }
+
+    @Test
+    void testCanonicalComponentsForPublicItemSnapshot() {
+        ItemStack stack = new ItemStack(Items.DIAMOND_SWORD, 2);
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal("Excalibur"));
+
+        var components = ItemCanonicalizer.canonicalComponents(stack);
+        com.itemgraph.api.ItemSnapshot snapshot = com.itemgraph.api.ItemSnapshot.of(stack);
+        CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(stack);
+
+        assertEquals("Excalibur", components.get("minecraft:custom_name"));
+        assertEquals(canonical.itemId(), snapshot.itemId());
+        assertEquals(2, snapshot.amount());
+        assertEquals(canonical.customName(), snapshot.customName());
+        assertEquals(components, snapshot.components());
     }
 
     @Test

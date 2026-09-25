@@ -57,11 +57,15 @@ final class ObservationQueries {
                    origin.custom_label AS origin_label,
                    origin.level_id AS origin_level,
                    origin.x AS origin_x, origin.y AS origin_y, origin.z AS origin_z,
+                   origin.owner_uuid AS origin_owner_uuid,
+                   origin.external_key AS origin_external_key,
                    o.target_node_id AS dest_id,
                    dest.node_type AS dest_type,
                    dest.custom_label AS dest_label,
                    dest.level_id AS dest_level,
                    dest.x AS dest_x, dest.y AS dest_y, dest.z AS dest_z,
+                   dest.owner_uuid AS dest_owner_uuid,
+                   dest.external_key AS dest_external_key,
                    o.fingerprint_id AS o_fingerprint_id,
                    f.item_id AS fp_item_id,
                    f.custom_name AS fp_custom_name,
@@ -151,7 +155,9 @@ final class ObservationQueries {
                 rs.getString(pfx + (pfx.isEmpty() ? "level_id" : "level")),
                 nullableDouble(rs, pfx + "x"),
                 nullableDouble(rs, pfx + "y"),
-                nullableDouble(rs, pfx + "z")
+                nullableDouble(rs, pfx + "z"),
+                rs.getString(pfx + "owner_uuid"),
+                rs.getString(pfx + "external_key")
         );
     }
 

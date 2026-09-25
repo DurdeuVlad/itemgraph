@@ -14,3 +14,5 @@ plugins {
 }
 
 rootProject.name = 'itemgraph'
+
+include 'examples:api-consumer'

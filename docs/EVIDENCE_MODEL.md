@@ -85,6 +85,20 @@ the edge and allocations but changes `edge_state` to `SUPERSEDED_SOURCE_DUPLICAT
 `SUPERSEDED_SOURCE_AMBIGUITY`. Superseded edges are excluded from active traces and capacity
 audit totals; `/ig explain <edgeId>` labels them as superseded.
 
+## Preview API raw observations (V12)
+
+`EXTERNAL_API:<source_mod_id>` observations are direct evidence submitted by a registered
+NeoForge mod through `com.itemgraph.api`. They may carry a bounded display `detail` payload,
+`timestamp_end_ms`, and a durable `(source_mod_id, source_event_id)` deduplication key.
+The API accepts only a single hop's two endpoints and item/quantity facts: callers cannot
+submit inferred edges, confidence, schema IDs, or multi-hop claims. Endpoint kinds are
+`PLAYER`, `WORLD`, `EXTERNAL_INVENTORY`, and `UNKNOWN`. `EXTERNAL_INVENTORY` identity is
+`ig_nodes.external_key = <ownerModId>/<inventoryId>`; mutable display labels or optional
+last-known coordinates do not affect identity. A coordinate-less external inventory
+remains `EXTERNAL_INVENTORY` rather than `UNKNOWN`, and returned API evidence uses opaque
+`itemgraph:observation:<id>` / `itemgraph:transformation:<id>` /
+`itemgraph:inferred-edge:<id>` URIs.
+
 ## Interval and unresolved observations
 
 `timestamp_end_ms` bounds interval observations. A container observation with

@@ -198,6 +198,15 @@ public final class QueryDispatcher {
         return 1;
     }
 
+    /**
+     * Internal API bridge: submits a read-only query to the same bounded worker without
+     * exposing the JDBC {@link Connection} outside {@code com.itemgraph.command}.
+     */
+    static <T> CompletableFuture<T> submitData(DataQuery<T> query) {
+        return CompletableFuture.supplyAsync(
+                () -> executeData(query, new QueryCancellation()), queryExecutor());
+    }
+
     static <T> int dispatchData(CommandSourceStack source, String label, DataQuery<T> query,
                                 BiConsumer<CommandSourceStack, T> consumer) {
         return dispatchData(source, label, query, consumer, () -> {});

@@ -121,7 +121,7 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 
 ## M7: Preview integration API for NeoForge mods
 
-- Status: active; tracked by GitHub milestone #3 and issues #9 and #12.
+- Status: implementation verified on staging; issue #9 contract merged and issue #12 is pending final PR/CI/merge. Tracked by GitHub milestone #3.
 - Outcome: a separate NeoForge mod can submit source-attributed observations and query
   bounded ItemGraph flows without database access.
 - Scope boundary: server-side Java API in the main ItemGraph JAR, preview-only before 1.0.

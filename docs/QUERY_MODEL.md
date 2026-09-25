@@ -359,6 +359,22 @@ Note that the inferred bridge and the two observations underneath it all appear.
 deliberate: hiding the observations would hide the evidence, and hiding the bridge would
 hide the claim.
 
+## Mod API query mapping
+
+`ItemGraphService.traceItem`, `tracePlayer`, and `traceContainer` reuse these same
+read-only query services on a bounded API worker. `ApiQueryBridge` converts internal
+results to immutable `QueryResult<FlowResult>` DTOs without exposing JDBC, schema IDs, or
+`NodeRef` internals. Observed observations retain `EvidenceKind.OBSERVATION` and
+`Provenance.OBSERVED`; transformations retain `EvidenceKind.TRANSFORMATION`; inferred
+hops retain `EvidenceKind.INFERRED_EDGE`, `Provenance.INFERRED`, the stored explanation,
+and bounded supporting observation/transformation refs. Evidence is exposed only through
+opaque URIs (`itemgraph:observation:<id>`, `itemgraph:transformation:<id>`, and
+`itemgraph:inferred-edge:<id>`). API limits are validated separately but share the
+default `20`, hard cap `100`, `requestedLimit`/`appliedLimit`, and `truncated` contract;
+`sinceMinutes` resolves once at query acceptance. `AMBIGUOUS` results contain candidates
+and no hops; `NOT_FOUND` and invalid domains are explicit result statuses rather than
+exceptions.
+
 ## Pagination
 
 Never dump an unbounded result set.

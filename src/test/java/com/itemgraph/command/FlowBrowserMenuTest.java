@@ -2,7 +2,9 @@ package com.itemgraph.command;
 
 import net.minecraft.SharedConstants;
 import com.itemgraph.query.FingerprintRef;
+import com.itemgraph.query.QueryWindow;
 import com.itemgraph.query.TraceHop;
+import com.itemgraph.query.TracePage;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.Bootstrap;
@@ -114,5 +116,17 @@ class FlowBrowserMenuTest {
                 .startsWith("[OBSERVED] TRANSFORMATION #13"));
         assertTrue(transformationItem.get(DataComponents.LORE).lines().stream()
                 .anyMatch(line -> line.getString().contains("Related fingerprint: minecraft:emerald")));
+    }
+
+    @Test
+    void resolvedMenuTitlesStayInsideTheVanillaChestHeader() {
+        FingerprintRef fingerprint = new FingerprintRef(100, "minecraft:netherite_boots",
+                null, "0123456789abcdef".repeat(4));
+        TracePage page = new TracePage(
+                "item " + fingerprint.describeFull(), TracePage.Resolution.RESOLVED,
+                fingerprint, null, List.of(), List.of(), List.of(), QueryWindow.unbounded(),
+                45, null, false, null, false);
+
+        assertEquals("ItemGraph: item #100", FlowBrowserService.menuTitle(page));
     }
 }

@@ -25,6 +25,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *       raw coordinates floor into. Bucketing to a block is deliberate: GriefLogger logs
  *       integer block coordinates for containers, and a dropped stack is spatially
  *       localized to the block it landed on.</li>
+ *   <li>EXTERNAL_INVENTORY — preview-API {@code external_key}, with optional last-known
+ *       coordinates retained as mutable context.</li>
  *   <li>UNKNOWN — one sentinel node per level, with no coordinates at all.</li>
  * </ul>
  *
@@ -37,6 +39,7 @@ public class NodeManager {
     private final Map<String, Long> containerNodeCache = new ConcurrentHashMap<>();
     private final Map<String, Long> groundNodeCache = new ConcurrentHashMap<>();
     private final Map<String, Long> armorStandNodeCache = new ConcurrentHashMap<>();
+    private final Map<String, Long> externalInventoryNodeCache = new ConcurrentHashMap<>();
     private final Map<String, Long> unknownNodeCache = new ConcurrentHashMap<>();
 
     public NodeManager() {
@@ -51,6 +54,7 @@ public class NodeManager {
         containerNodeCache.clear();
         groundNodeCache.clear();
         armorStandNodeCache.clear();
+        externalInventoryNodeCache.clear();
         unknownNodeCache.clear();
     }
 
@@ -257,5 +261,91 @@ public class NodeManager {
         }
 
         throw new SQLException("Failed to create " + type.name() + " node at " + cacheKey);
+    }
+
+    /**
+     * Resolves a preview-API external inventory by durable (ownerModId, inventoryId),
+     * independent of its current display name or last-known location.
+     */
+    public long getOrCreateExternalInventoryNode(Connection conn, String externalKey,
+                                                 String displayName, String levelId,
+                                                 Double x, Double y, Double z) throws SQLException {
+        Long cached = externalInventoryNodeCache.get(externalKey);
+        if (cached != null) {
+            updateExternalInventoryContext(conn, cached, displayName, levelId, x, y, z);
+            return cached;
+        }
+
+        String selectSql = "SELECT id FROM ig_nodes WHERE node_type = ? AND external_key = ? LIMIT 1";
+        try (PreparedStatement pstmt = conn.prepareStatement(selectSql)) {
+            pstmt.setString(1, NodeType.EXTERNAL_INVENTORY.name());
+            pstmt.setString(2, externalKey);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    long id = rs.getLong("id");
+                    externalInventoryNodeCache.put(externalKey, id);
+                    updateExternalInventoryContext(conn, id, displayName, levelId, x, y, z);
+                    return id;
+                }
+            }
+        }
+
+        String nodeLevel = (levelId != null && !levelId.isBlank())
+                ? levelId
+                : "external:" + externalKey.substring(0, externalKey.indexOf('/'));
+        String insertSql = """
+                INSERT INTO ig_nodes
+                    (node_type, level_id, x, y, z, custom_label, external_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (PreparedStatement pstmt = conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
+            pstmt.setString(1, NodeType.EXTERNAL_INVENTORY.name());
+            pstmt.setString(2, nodeLevel);
+            if (x == null) {
+                pstmt.setNull(3, java.sql.Types.REAL);
+                pstmt.setNull(4, java.sql.Types.REAL);
+                pstmt.setNull(5, java.sql.Types.REAL);
+            } else {
+                pstmt.setDouble(3, Math.floor(x));
+                pstmt.setDouble(4, Math.floor(y == null ? 0.0 : y));
+                pstmt.setDouble(5, Math.floor(z == null ? 0.0 : z));
+            }
+            pstmt.setString(6, displayName);
+            pstmt.setString(7, externalKey);
+            pstmt.executeUpdate();
+            try (ResultSet keys = pstmt.getGeneratedKeys()) {
+                if (keys.next()) {
+                    long id = keys.getLong(1);
+                    externalInventoryNodeCache.put(externalKey, id);
+                    return id;
+                }
+            }
+        }
+
+        throw new SQLException("Failed to create EXTERNAL_INVENTORY node " + externalKey);
+    }
+
+    private static void updateExternalInventoryContext(Connection conn, long nodeId, String displayName,
+                                                       String levelId, Double x, Double y, Double z)
+            throws SQLException {
+        if (levelId == null || x == null || y == null || z == null) {
+            try (PreparedStatement pstmt = conn.prepareStatement(
+                    "UPDATE ig_nodes SET custom_label = ? WHERE id = ?")) {
+                pstmt.setString(1, displayName);
+                pstmt.setLong(2, nodeId);
+                pstmt.executeUpdate();
+            }
+            return;
+        }
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "UPDATE ig_nodes SET custom_label = ?, level_id = ?, x = ?, y = ?, z = ? WHERE id = ?")) {
+            pstmt.setString(1, displayName);
+            pstmt.setString(2, levelId);
+            pstmt.setDouble(3, Math.floor(x));
+            pstmt.setDouble(4, Math.floor(y));
+            pstmt.setDouble(5, Math.floor(z));
+            pstmt.setLong(6, nodeId);
+            pstmt.executeUpdate();
+        }
     }
 }

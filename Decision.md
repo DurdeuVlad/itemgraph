@@ -94,7 +94,7 @@ quietly converted into assumptions.
 
 ### D-008: Ship `com.itemgraph.api` as a preview, trusted-mod boundary
 
-- Status: proposed for issue #9; requires maintainer acceptance before issue #12.
+- Status: approved for issue #9 and implemented for issue #12 as `PREVIEW_1`.
 - Context: External NeoForge mods need a stable-enough Java seam for direct
   evidence submission and bounded flow queries, but ItemGraph's internal
   services expose JDBC, schema IDs, mutable Minecraft state, and internal
