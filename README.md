@@ -116,19 +116,19 @@ Implemented and available (all require permission level 2):
 ```
 
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
-- `/ig trace item`: accepts numeric fingerprint IDs, item registry names (e.g. `minecraft:netherite_boots` or `netherite`), or custom item names. Shows complete chronological timeline including transformations (`[TRANSFORMATION <type> <- <source>]`).
+- `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows the chronological timeline, including transformations (`[TRANSFORMATION <type> <- <source>]`).
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
 - `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.
 - `/ig gui`: opens the same item/player/container timelines in a vanilla six-row chest menu. Each page has at most 45 timeline entries; entries distinguish observed from inferred movement, and selecting one opens evidence details. Ambiguous item matches and duplicate player/container nodes require candidate selection rather than silently choosing a target. The menu is permission-level 2, uses no custom client screen or packet, and rejects inventory-movement actions.
-- `limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Query commands and the database-backed portion of `/ig status` run off the server thread and report back on it. `/ig ingest now` queues one complete ingest-and-correlate cycle on the background worker. Full argument table and output format: [Query model](docs/QUERY_MODEL.md).
+- `limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Player query results and the database-backed portion of `/ig status` return on the server thread. Entity-less server-thread console/RCON commands receive an acceptance message; completed query lines are logged because vanilla RCON returns its response buffer before asynchronous work completes. `/ig ingest now` queues one complete ingest-and-correlate cycle on the background worker. Full argument table and output format: [Query model](docs/QUERY_MODEL.md).
 
 Sample `/ig trace item` output:
 
 ```text
-[OBSERVED] CONTAINER 10,64,10 -> AlphaA : 1x at 2026-09-16 14:31:08 UTC (event#8812 REMOVE_ITEM)
-[OBSERVED] AlphaA -> GROUND 20,64,20 : 1x at 2026-09-16 14:31:18 UTC (event#8813 DROP_ITEM)
+[OBSERVED] CONTAINER 10,64,10 -> AlphaA : 1x at 2026-09-16 14:31:08 UTC (observation#8812 REMOVE_ITEM)
+[OBSERVED] AlphaA -> GROUND 20,64,20 : 1x at 2026-09-16 14:31:18 UTC (observation#8813 DROP_ITEM)
 [INFERRED conf=0.9990] AlphaA -> BetaB : 1x at 2026-09-16 14:31:18 UTC (edge#9931 inferred transfer spanning 1m0s)
-[OBSERVED] GROUND 20,64,20 -> BetaB : 1x at 2026-09-16 14:32:18 UTC (event#8814 PICKUP_ITEM)
+[OBSERVED] GROUND 20,64,20 -> BetaB : 1x at 2026-09-16 14:32:18 UTC (observation#8814 PICKUP_ITEM)
 ```
 
 Evidence and inference are labelled per line, never once at the top.

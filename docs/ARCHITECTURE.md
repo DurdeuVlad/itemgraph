@@ -278,10 +278,15 @@ ItemGraph matches both: `CompletableFuture` + `whenComplete` + `getServer().exec
 with the same liveness guards. The only deliberate deviation is the executor — the mods
 above spawn a thread per invocation, whereas ItemGraph uses one shared single-threaded
 executor with at most 64 waiting queries. This serializes SQLite readers and returns an
-explicit queue-full failure instead of growing pending work without bound. Only entity-less
-RCON/console sources use the five-second synchronous buffer path; timeout invokes Xerial
-SQLite's cross-thread database interrupt on that query's dedicated connection (the same
-mechanism used by Xerial 3.46.1.0 [`Statement.cancel()`](https://github.com/xerial/sqlite-jdbc/blob/3.46.1.0/src/main/java/org/sqlite/jdbc3/JDBC3Statement.java)). SQLite documents [`sqlite3_interrupt`](https://www.sqlite.org/c3ref/interrupt.html) as safe from a different thread. An interrupted RCON caller has its interrupt flag restored.
+explicit queue-full failure instead of growing pending work without bound. Entity-less
+off-server-thread callers use a five-second synchronous RCON response path; timeout invokes
+Xerial SQLite's cross-thread database interrupt on that query's dedicated connection (the same
+mechanism used by Xerial 3.46.1.0 [`Statement.cancel()`](https://github.com/xerial/sqlite-jdbc/blob/3.46.1.0/src/main/java/org/sqlite/jdbc3/JDBC3Statement.java)). The dispatcher also checks its cancellation flag before SQL callbacks and installs a per-connection `ProgressHandler` to abort during VM execution, covering the attach-to-statement race. SQLite documents [`sqlite3_interrupt`](https://www.sqlite.org/c3ref/interrupt.html) as safe from a different thread. An interrupted RCON caller has its interrupt flag restored.
+
+Vanilla `DedicatedServer.runCommand` executes RCON commands on the server thread and returns
+the RCON response buffer immediately afterward. Entity-less server-thread sources therefore
+receive a synchronous “query accepted” response; completed query lines are written to the
+server log instead of a response buffer that has already been returned.
 
 ### Why not the ingestion worker
 

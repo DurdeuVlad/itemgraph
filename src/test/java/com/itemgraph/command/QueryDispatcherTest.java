@@ -81,6 +81,7 @@ class QueryDispatcherTest {
 
         CommandSourceStack source = mock(CommandSourceStack.class);
         MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
         CountDownLatch firstQueryStarted = new CountDownLatch(1);
         CountDownLatch releaseFirstQuery = new CountDownLatch(1);
         CountDownLatch callbacksQueued = new CountDownLatch(2);
@@ -88,6 +89,8 @@ class QueryDispatcherTest {
         Thread serverThread = Thread.currentThread();
 
         when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(player);
+        when(player.hasDisconnected()).thenReturn(false);
         when(source.hasPermission(2)).thenReturn(true);
         when(server.getRunningThread()).thenReturn(serverThread);
         when(server.isStopped()).thenReturn(false);
@@ -122,6 +125,54 @@ class QueryDispatcherTest {
         verify(source, timeout(5000)).sendFailure(captor.capture());
         assertEquals("[ItemGraph] Query failed: ItemGraph database is not initialized",
                 captor.getValue().getString());
+    }
+
+    @Test
+    void testEntitylessServerThreadGetsAcknowledgementBeforeAsyncResult(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("server-thread-rcon.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        CountDownLatch queryStarted = new CountDownLatch(1);
+        CountDownLatch releaseQuery = new CountDownLatch(1);
+        CountDownLatch callbackQueued = new CountDownLatch(1);
+        AtomicReference<Runnable> queuedCallback = new AtomicReference<>();
+        List<String> successMessages = new CopyOnWriteArrayList<>();
+        Thread serverThread = Thread.currentThread();
+
+        when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(null);
+        when(source.hasPermission(2)).thenReturn(true);
+        when(server.getRunningThread()).thenReturn(serverThread);
+        when(server.isStopped()).thenReturn(false);
+        doAnswer(invocation -> {
+            java.util.function.Supplier<Component> message = invocation.getArgument(0);
+            successMessages.add(message.get().getString());
+            return null;
+        }).when(source).sendSuccess(any(), anyBoolean());
+        doAnswer(invocation -> {
+            queuedCallback.set(invocation.getArgument(0));
+            callbackQueued.countDown();
+            return null;
+        }).when(server).execute(any(Runnable.class));
+
+        assertEquals(1, QueryDispatcher.dispatch(source, "server-thread-rcon", conn -> {
+            queryStarted.countDown();
+            try {
+                assertTrue(releaseQuery.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new SQLException(e);
+            }
+            return QueryOutput.found(List.of("completed trace"));
+        }));
+        assertTrue(queryStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(successMessages.get(0).contains("accepted"));
+        releaseQuery.countDown();
+        assertTrue(callbackQueued.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        queuedCallback.get().run();
+
+        verify(source, times(1)).sendSuccess(any(), anyBoolean());
+        verify(source, never()).sendFailure(any());
     }
 
     @Test
@@ -210,6 +261,28 @@ class QueryDispatcherTest {
     }
 
     @Test
+    void testRconSqlFailureDoesNotExposeCompletableFutureWrapper(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("rcon-sql-failure.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        AtomicReference<Integer> resultCode = new AtomicReference<>();
+        ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+
+        when(source.getServer()).thenReturn(server);
+        when(server.getRunningThread()).thenReturn(Thread.currentThread());
+        when(server.isStopped()).thenReturn(false);
+        Thread caller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, "rcon-sql-failure",
+                conn -> { throw new SQLException("clean SQL failure"); })));
+        caller.start();
+        caller.join(5_000);
+
+        assertFalse(caller.isAlive());
+        assertEquals(0, resultCode.get());
+        verify(source).sendFailure(failure.capture());
+        assertEquals("[ItemGraph] Query failed: clean SQL failure", failure.getValue().getString());
+    }
+
+    @Test
     void testRconTimeoutInterruptsSqliteQueryAndReleasesWorker(@TempDir Path tempDir) throws Exception {
         DatabaseManager.getInstance().initialize(tempDir.resolve("rcon-timeout-cancel.db"));
         CommandSourceStack source = mock(CommandSourceStack.class);
@@ -265,15 +338,83 @@ class QueryDispatcherTest {
     }
 
     @Test
+    void testRconTimeoutCancelsBeforeNextStatementStarts(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("rcon-timeout-before-statement.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        CountDownLatch queryEntered = new CountDownLatch(1);
+        CountDownLatch releaseStatement = new CountDownLatch(1);
+        CountDownLatch queryFinished = new CountDownLatch(1);
+        AtomicReference<Statement> activeStatement = new AtomicReference<>();
+        AtomicReference<Integer> resultCode = new AtomicReference<>();
+
+        when(source.getServer()).thenReturn(server);
+        when(server.getRunningThread()).thenReturn(Thread.currentThread());
+        when(server.isStopped()).thenReturn(false);
+
+        Thread caller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, "cancel-before-statement", conn -> {
+            queryEntered.countDown();
+            boolean released = false;
+            while (!released) {
+                try {
+                    released = releaseStatement.await(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+                } catch (InterruptedException ignored) {
+                }
+            }
+            try (Statement statement = conn.createStatement()) {
+                activeStatement.set(statement);
+                try (ResultSet rs = statement.executeQuery("""
+                        WITH RECURSIVE counter(x) AS (
+                            VALUES(0)
+                            UNION ALL
+                            SELECT x + 1 FROM counter WHERE x < 1000000000
+                        )
+                        SELECT SUM(x) FROM counter
+                        """)) {
+                    rs.next();
+                }
+            } finally {
+                queryFinished.countDown();
+            }
+            return QueryOutput.found(List.of("query completed"));
+        })));
+        caller.start();
+        assertTrue(queryEntered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        verify(source, timeout(7_000)).sendFailure(any());
+        caller.join(5_000);
+        releaseStatement.countDown();
+        boolean cancelledBeforeStatementCompleted = queryFinished.await(5, java.util.concurrent.TimeUnit.SECONDS);
+        if (!cancelledBeforeStatementCompleted && activeStatement.get() != null) {
+            activeStatement.get().cancel();
+        }
+
+        assertFalse(caller.isAlive());
+        assertEquals(0, resultCode.get());
+        assertTrue(cancelledBeforeStatementCompleted, "a cancelled query must not start long SQL after timeout");
+
+        Thread quickCaller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, "after-cancel", conn ->
+                QueryOutput.found(List.of("worker available")))));
+        quickCaller.start();
+        quickCaller.join(5_000);
+
+        assertFalse(quickCaller.isAlive());
+        assertEquals(1, resultCode.get());
+        verify(source).sendSuccess(any(), anyBoolean());
+    }
+
+    @Test
     void testTextQueryRechecksPermissionBeforeDelivery(@TempDir Path tempDir) throws Exception {
         DatabaseManager.getInstance().initialize(tempDir.resolve("permission-revoked-query.db"));
         CommandSourceStack source = mock(CommandSourceStack.class);
         MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
         CountDownLatch callbackQueued = new CountDownLatch(1);
         AtomicReference<Runnable> queuedTask = new AtomicReference<>();
         Thread serverThread = Thread.currentThread();
 
         when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(player);
+        when(player.hasDisconnected()).thenReturn(false);
         when(source.hasPermission(2)).thenReturn(true);
         when(server.getRunningThread()).thenReturn(serverThread);
         when(server.isStopped()).thenReturn(false);
@@ -492,12 +633,17 @@ class QueryDispatcherTest {
         DatabaseManager.getInstance().initialize(tempDir.resolve("inline-text-query.db"));
         CommandSourceStack source = mock(CommandSourceStack.class);
         MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
         CountDownLatch queryStarted = new CountDownLatch(1);
         CountDownLatch releaseQuery = new CountDownLatch(1);
         CountDownLatch inlineCallbackRan = new CountDownLatch(1);
         Thread serverThread = Thread.currentThread();
 
         when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenAnswer(invocation -> {
+            assertSame(serverThread, Thread.currentThread());
+            return player;
+        });
         when(server.getRunningThread()).thenReturn(serverThread);
         when(server.isStopped()).thenReturn(false);
         doAnswer(invocation -> {
@@ -519,7 +665,8 @@ class QueryDispatcherTest {
         assertTrue(queryStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
         releaseQuery.countDown();
         assertTrue(inlineCallbackRan.await(5, java.util.concurrent.TimeUnit.SECONDS));
-        verify(source, never()).getEntity();
+        verify(source, atLeastOnce()).getEntity();
+        verify(source, never()).hasPermission(2);
         verify(source, never()).sendSuccess(any(), anyBoolean());
         verify(source, never()).sendFailure(any());
     }

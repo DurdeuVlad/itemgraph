@@ -313,7 +313,7 @@ Implemented transformation types:
 In query output, transformations are represented chronologically as:
 
 ```text
-[OBSERVED] PlayerB -> PlayerB : 1x at 2026-09-17 06:55:47 UTC (event#1 [TRANSFORMATION ANVIL_RENAME <- minecraft:netherite_boots] (Renamed on Anvil))
+[OBSERVED] PlayerB -> PlayerB : 1x at 2026-09-17 06:55:47 UTC (transformation#1 [TRANSFORMATION ANVIL_RENAME <- minecraft:netherite_boots] (Renamed on Anvil))
 ```
 
 ## Entity Continuity Tracking (Phase 8)

@@ -85,8 +85,11 @@ worker's writer connection. The shared worker accepts at most 64 waiting queries
 requests receive an explicit queue-full failure. Full rationale and prior art:
 "Query execution: off-thread, reported back on-thread" in `docs/ARCHITECTURE.md`.
 
-A command returns success as soon as the query is *accepted*; the answer arrives a tick or
-two later.
+A player command returns success as soon as the query is *accepted*; the answer arrives a
+tick or two later. Entity-less commands dispatched on the server thread, including vanilla
+RCON, receive an acceptance message and write completed results to the server log because the
+RCON response buffer is returned with the command. Entity-less off-thread callers can receive
+results synchronously within the five-second buffer timeout.
 
 ### Vanilla flow browser
 
@@ -149,13 +152,14 @@ selection menu. String matching is exact-or-substring and returns at most 10 can
 Intended metadata filters and broader matching remain future work:
 
 ```text
-/ig trace item minecraft:iron_chestplate
+/ig trace item "minecraft:iron_chestplate"
+/ig gui item "minecraft:iron_chestplate"
 ```
 
 With metadata:
 
 ```text
-/ig trace item minecraft:iron_chestplate name:"Old Reliable"
+/ig trace item "minecraft:iron_chestplate" name:"Old Reliable"
 ```
 
 Potential filters:
@@ -315,10 +319,10 @@ Implemented line shape for a `/ig trace item` hop:
 Real examples:
 
 ```text
-[OBSERVED] CONTAINER 10,64,10 -> AlphaA : 1x at 2026-09-16 14:31:08 UTC (event#8812 REMOVE_ITEM)
-[OBSERVED] AlphaA -> GROUND 20,64,20 : 1x at 2026-09-16 14:31:18 UTC (event#8813 DROP_ITEM)
+[OBSERVED] CONTAINER 10,64,10 -> AlphaA : 1x at 2026-09-16 14:31:08 UTC (observation#8812 REMOVE_ITEM)
+[OBSERVED] AlphaA -> GROUND 20,64,20 : 1x at 2026-09-16 14:31:18 UTC (observation#8813 DROP_ITEM)
 [INFERRED conf=0.9025] AlphaA -> BetaB : 1x at 2026-09-16 14:31:18 UTC (edge#9931 inferred transfer spanning 1m0s)
-[OBSERVED] GROUND 20,64,20 -> BetaB : 1x at 2026-09-16 14:32:18 UTC (event#8814 PICKUP_ITEM)
+[OBSERVED] GROUND 20,64,20 -> BetaB : 1x at 2026-09-16 14:32:18 UTC (observation#8814 PICKUP_ITEM)
 ```
 
 Provenance comes first on every line, so it is read before the claim it qualifies. The
@@ -339,8 +343,8 @@ Implemented:
   `LIMIT applied + 1` on each side so "there is more" is a fact rather than a guess
 - an explicit `(capped from N)` marker when the request exceeded the ceiling
 - a separate 50-row cap on the `/ig explain` evidence listing, with its own truncation line
-- textual cross-references: every hop names `event#<id>` or `edge#<id>`, and every
-  `/ig explain` evidence entry prints `/ig event <id>`
+- textual cross-references: every hop names `observation#<id>`, `transformation#<id>`, or
+  `edge#<id>`; `/ig event <id>` is for observations and `/ig explain <id>` is for edges
 - GUI paging: `/ig gui` returns at most 45 entries per page using the composite keyset cursor
   described above; equal timestamps are ordered by provenance, row ID, and source table
 

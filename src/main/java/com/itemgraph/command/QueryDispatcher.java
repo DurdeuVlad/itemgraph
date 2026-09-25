@@ -7,6 +7,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import org.sqlite.ProgressHandler;
 import org.sqlite.SQLiteConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -153,9 +154,15 @@ public final class QueryDispatcher {
             return rejectQueue(source);
         }
 
-        // Only an entity-less off-server-thread source (such as an RCON client worker) blocks briefly
-        // so synchronous command collectors receive output before closing the connection. Player sources
-        // always use server-thread delivery, even if an unexpected caller invokes dispatch off-thread.
+        if (server != null && Thread.currentThread() == serverThread && source.getEntity() == null) {
+            source.sendSuccess(() -> Component.literal(
+                    "[ItemGraph] Query accepted; completed results will be written to the server log."), false);
+            future.whenComplete((output, throwable) -> deliver(source, server, serverThread, label, output, throwable));
+            return 1;
+        }
+
+        // Only an entity-less off-server-thread source can block briefly for its response buffer.
+        // Player sources always use server-thread delivery, even if an unexpected caller invokes dispatch off-thread.
         if (server != null && Thread.currentThread() != serverThread && source.getEntity() == null) {
             try {
                 QueryOutput output = future.get(5, TimeUnit.SECONDS);
@@ -179,7 +186,7 @@ public final class QueryDispatcher {
                 source.sendFailure(Component.literal(QueryFormatter.queryFailed("the query timed out")));
                 return 0;
             } catch (Exception e) {
-                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                Throwable cause = unwrap(e);
                 LOGGER.error("ItemGraph query '{}' failed on synchronous worker", label, cause);
                 source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
                 return 0;
@@ -282,10 +289,27 @@ public final class QueryDispatcher {
             if (!cancellation.attach(conn)) {
                 throw new SQLException("query cancelled before execution began");
             }
+            boolean progressHandlerSet = false;
             try {
+                ProgressHandler.setHandler(conn, 10_000, new ProgressHandler() {
+                    @Override
+                    protected int progress() {
+                        return cancellation.isCancelled() ? 1 : 0;
+                    }
+                });
+                progressHandlerSet = true;
+                if (cancellation.isCancelled()) {
+                    throw new SQLException("query cancelled before execution began");
+                }
                 return query.run(conn);
             } finally {
-                cancellation.detach(conn);
+                try {
+                    if (progressHandlerSet) {
+                        ProgressHandler.clearHandler(conn);
+                    }
+                } finally {
+                    cancellation.detach(conn);
+                }
             }
         } catch (SQLException e) {
             throw new QueryFailure(e);
@@ -305,47 +329,36 @@ public final class QueryDispatcher {
                     || !source.hasPermission(2)) {
                 return;
             }
+            boolean entityless = source.getEntity() == null;
 
             if (throwable != null) {
-                // CompletableFuture#supplyAsync wraps any exception thrown by the supplier in a
-                // CompletionException, whose getMessage() returns the wrapped exception's toString()
-                // (class name and all) rather than its plain message - unwrap that first, or the
-                // admin sees "com.itemgraph.command.QueryDispatcher$QueryFailure: <message>" instead
-                // of the clean message. Then peel QueryFailure/SQLException the same way as before.
-                Throwable cause = throwable;
-                while (cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null) {
-                    cause = cause.getCause();
-                }
-                if (cause instanceof QueryFailure && cause.getCause() != null) {
-                    cause = cause.getCause();
-                }
-                if (cause.getCause() instanceof SQLException sql) {
-                    cause = sql;
-                }
+                // CompletableFuture wrappers stringify their causes; unwrap consistently so the
+                // admin sees the underlying SQL message rather than an implementation class name.
+                Throwable cause = unwrap(throwable);
                 LOGGER.error("ItemGraph query '{}' failed", label, cause);
-                source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
+                if (!entityless) {
+                    source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
+                }
                 return;
             }
 
             if (!output.found()) {
-                output.lines().forEach(line -> {
-                    source.sendFailure(Component.literal(line));
-                    if (source.getEntity() == null) {
-                        LOGGER.info("{}", line);
-                    }
-                });
+                if (entityless) {
+                    output.lines().forEach(LOGGER::info);
+                } else {
+                    output.lines().forEach(line -> source.sendFailure(Component.literal(line)));
+                }
                 return;
             }
 
+            if (entityless) {
+                output.lines().forEach(LOGGER::info);
+                return;
+            }
             // false: query output is for the admin who asked, not broadcast to every op.
             // The graph is sensitive (see docs/SECURITY_AND_PERMISSIONS.md) and an item
             // trace names coordinates and players.
-            output.lines().forEach(line -> {
-                source.sendSuccess(() -> Component.literal(line), false);
-                if (source.getEntity() == null) {
-                    LOGGER.info("{}", line);
-                }
-            });
+            output.lines().forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
         });
     }
 
@@ -413,9 +426,23 @@ public final class QueryDispatcher {
         }
     }
 
+    private static Throwable unwrap(Throwable throwable) {
+        Throwable cause = throwable;
+        while ((cause instanceof java.util.concurrent.CompletionException
+                || cause instanceof java.util.concurrent.ExecutionException
+                || cause instanceof QueryFailure) && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause;
+    }
+
     private static final class QueryCancellation {
         private SQLiteConnection activeConnection;
-        private boolean cancelled;
+        private volatile boolean cancelled;
+
+        boolean isCancelled() {
+            return cancelled;
+        }
 
         synchronized boolean attach(Connection connection) throws SQLException {
             if (!(connection instanceof SQLiteConnection sqliteConnection)) {

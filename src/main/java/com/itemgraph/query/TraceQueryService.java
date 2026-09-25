@@ -661,10 +661,7 @@ public final class TraceQueryService {
                 rs.getString("fp_hash")
         );
         long edgeId = rs.getLong("e_id");
-        double confidence = rs.getDouble("e_confidence");
-        if (rs.wasNull()) {
-            throw new SQLException("Inferred edge #" + edgeId + " has no stored confidence.");
-        }
+        double confidence = EdgeConfidence.readRequired(rs, edgeId);
 
         return new TraceHop(
                 TraceHop.Kind.INFERRED,

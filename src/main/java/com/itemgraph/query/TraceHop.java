@@ -22,7 +22,7 @@ import java.util.Comparator;
  * @param amount       stack size moved
  * @param timestampMs  when the hop happened (OBSERVED) or started (INFERRED)
  * @param endMs        event interval end for a session net delta, {@code timestampMs} for point OBSERVED evidence, or {@code time_end} for INFERRED
- * @param confidence   null for OBSERVED or an inferred row missing a stored score
+ * @param confidence   null for OBSERVED or synthetic INFERRED hops; persisted inferred rows require a score
  * @param detail       action type for OBSERVED, short inference description for INFERRED
  * @param item         related fingerprint, or null when unavailable
  * @param source       OBSERVATION, TRANSFORMATION, or INFERRED_EDGE row source
