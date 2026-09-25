@@ -288,6 +288,11 @@ the RCON response buffer immediately afterward. Entity-less server-thread source
 receive a synchronous “query accepted” response; completed query lines are written to the
 server log instead of a response buffer that has already been returned.
 
+Player-originated async queries have no wall-clock cancellation deadline. A pathological query
+can occupy the single worker until SQLite returns; the 64-entry queue remains bounded and
+rejects additional requests. The five-second timeout/cancellation currently applies to the
+off-thread entity-less response path only.
+
 ### Why not the ingestion worker
 
 The ingestion worker runs a 60-second ingest-then-correlate cycle. Queueing an admin's
