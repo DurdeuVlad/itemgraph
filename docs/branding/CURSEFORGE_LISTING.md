@@ -105,11 +105,11 @@ Instead of assigning artificial, invasive UUIDs to every Minecraft item, ItemGra
 #### `/ig trace item <query> [limit] [sinceMinutes]`
 Reconstructs the complete lifecycle of an item by numeric fingerprint ID, item registry ID (e.g. `minecraft:netherite_boots` or `diamond_sword`), or custom name.
 ```text
-[OBSERVED] CONTAINER 10,64,10 -> Alice : 1x at 2026-09-17 12:00:00 UTC (event#14 REMOVE_ITEM)
-[OBSERVED] Alice -> GROUND 15,64,15 : 1x at 2026-09-17 12:00:05 UTC (event#15 DROP_ITEM)
+[OBSERVED] CONTAINER 10,64,10 -> Alice : 1x at 2026-09-17 12:00:00 UTC (observation#14 REMOVE_ITEM)
+[OBSERVED] Alice -> GROUND 15,64,15 : 1x at 2026-09-17 12:00:05 UTC (observation#15 DROP_ITEM)
 [INFERRED conf=0.9990] Alice -> Bob : 1x at 2026-09-17 12:00:05 UTC (edge#8 inferred transfer spanning 3s)
-[OBSERVED] GROUND 15,64,15 -> Bob : 1x at 2026-09-17 12:00:08 UTC (event#16 PICKUP_ITEM)
-[OBSERVED] Bob -> Bob : 1x at 2026-09-17 12:00:30 UTC (event#1 [TRANSFORMATION ANVIL_RENAME <- minecraft:netherite_boots] (Renamed on Anvil))
+[OBSERVED] GROUND 15,64,15 -> Bob : 1x at 2026-09-17 12:00:08 UTC (observation#16 PICKUP_ITEM)
+[OBSERVED] Bob -> Bob : 1x at 2026-09-17 12:00:30 UTC (transformation#1 [TRANSFORMATION ANVIL_RENAME <- minecraft:netherite_boots] (Renamed on Anvil))
 ```
 
 #### `/ig explain <edgeId>`

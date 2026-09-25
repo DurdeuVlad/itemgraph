@@ -7,16 +7,22 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import org.sqlite.ProgressHandler;
+import org.sqlite.SQLiteConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BiConsumer;
 
 /**
  * Runs a historical ItemGraph query off the server thread and delivers its output back
@@ -57,17 +63,16 @@ import java.util.concurrent.TimeUnit;
  * ingest-then-correlate cycle; queueing an admin's lookup behind it would mean an
  * incident query that answers a minute later, or not until the current cycle finishes.
  * A separate single-threaded executor keeps command latency independent of the
- * background pipeline. It is single-threaded (not a pool) so that concurrent admin
- * queries serialise rather than opening an unbounded number of SQLite readers.
+ * background pipeline. Its bounded queue serializes admin queries without opening an
+ * unbounded number of SQLite readers or accumulating unbounded pending work.
  */
 public final class QueryDispatcher {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(QueryDispatcher.class);
 
-    /**
-     * Created on first use and reused; queries are rare and short, so there is no reason
-     * to hold a thread for a server that never runs one.
-     */
+    private static final int MAX_QUEUED_QUERIES = 64;
+
+    /** Created on first use and reused; the single worker accepts a bounded queue. */
     private static volatile ExecutorService executor;
 
     private QueryDispatcher() {}
@@ -83,6 +88,16 @@ public final class QueryDispatcher {
     @FunctionalInterface
     public interface Query {
         QueryOutput run(Connection conn) throws SQLException;
+    }
+
+    @FunctionalInterface
+    interface DataQuery<T> {
+        T run(Connection conn) throws SQLException;
+    }
+
+    @FunctionalInterface
+    private interface ConnectionQuery<T> {
+        T run(Connection conn) throws SQLException;
     }
 
     /**
@@ -130,14 +145,25 @@ public final class QueryDispatcher {
         }
 
         MinecraftServer server = source.getServer();
-        CompletableFuture<QueryOutput> future = CompletableFuture
-                .supplyAsync(() -> execute(query), queryExecutor());
+        Thread serverThread = server == null ? null : server.getRunningThread();
+        QueryCancellation cancellation = new QueryCancellation();
+        CompletableFuture<QueryOutput> future;
+        try {
+            future = CompletableFuture.supplyAsync(() -> execute(query, cancellation), queryExecutor());
+        } catch (RejectedExecutionException e) {
+            return rejectQueue(source);
+        }
 
-        // If the query is dispatched from an off-server-thread context (such as an RCON client worker),
-        // we can safely block the off-thread caller up to a short timeout so synchronous command
-        // collectors (like Minecraft's RCON buffer) receive the output before closing the connection.
-        // If called on the Minecraft server thread, we NEVER block: we marshal back via server.execute().
-        if (server != null && Thread.currentThread() != server.getRunningThread()) {
+        if (server != null && Thread.currentThread() == serverThread && source.getEntity() == null) {
+            source.sendSuccess(() -> Component.literal(
+                    "[ItemGraph] Query accepted; completed results will be written to the server log."), false);
+            future.whenComplete((output, throwable) -> deliver(source, server, serverThread, label, output, throwable));
+            return 1;
+        }
+
+        // Only an entity-less off-server-thread source can block briefly for its response buffer.
+        // Player sources always use server-thread delivery, even if an unexpected caller invokes dispatch off-thread.
+        if (server != null && Thread.currentThread() != serverThread && source.getEntity() == null) {
             try {
                 QueryOutput output = future.get(5, TimeUnit.SECONDS);
                 if (output.found()) {
@@ -146,16 +172,95 @@ public final class QueryDispatcher {
                     output.lines().forEach(line -> source.sendFailure(Component.literal(line)));
                 }
                 return output.found() ? 1 : 0;
+            } catch (InterruptedException e) {
+                cancellation.cancel();
+                future.cancel(true);
+                Thread.currentThread().interrupt();
+                LOGGER.warn("ItemGraph query '{}' was interrupted on synchronous worker", label);
+                source.sendFailure(Component.literal(QueryFormatter.queryFailed("the query was interrupted")));
+                return 0;
+            } catch (TimeoutException e) {
+                cancellation.cancel();
+                future.cancel(true);
+                LOGGER.warn("ItemGraph query '{}' timed out on synchronous worker", label);
+                source.sendFailure(Component.literal(QueryFormatter.queryFailed("the query timed out")));
+                return 0;
             } catch (Exception e) {
-                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                Throwable cause = unwrap(e);
                 LOGGER.error("ItemGraph query '{}' failed on synchronous worker", label, cause);
                 source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
                 return 0;
             }
         }
 
-        future.whenComplete((output, throwable) -> deliver(source, label, output, throwable));
+        future.whenComplete((output, throwable) -> deliver(source, server, serverThread, label, output, throwable));
 
+        return 1;
+    }
+
+    static <T> int dispatchData(CommandSourceStack source, String label, DataQuery<T> query,
+                                BiConsumer<CommandSourceStack, T> consumer) {
+        return dispatchData(source, label, query, consumer, () -> {});
+    }
+
+    static <T> int dispatchData(CommandSourceStack source, String label, DataQuery<T> query,
+                                BiConsumer<CommandSourceStack, T> consumer, Runnable failureConsumer) {
+        DatabaseManager db = DatabaseManager.getInstance();
+        if (!db.isInitialized()) {
+            source.sendFailure(Component.literal(QueryFormatter.queryFailed(
+                    "the ItemGraph database is not connected"
+                            + (db.getLastError() != null ? " (" + db.getLastError() + ")" : "")
+                            + ". See /ig status.")));
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            source.sendFailure(Component.literal(QueryFormatter.queryFailed("the server is not available")));
+            return 0;
+        }
+        Thread serverThread = server.getRunningThread();
+        QueryCancellation cancellation = new QueryCancellation();
+        CompletableFuture<T> future;
+        try {
+            future = CompletableFuture.supplyAsync(() -> executeData(query, cancellation), queryExecutor());
+        } catch (RejectedExecutionException e) {
+            return rejectQueue(source);
+        }
+        future.whenComplete((result, throwable) -> server.execute(() -> {
+            if (Thread.currentThread() != serverThread) {
+                failureConsumer.run();
+                return;
+            }
+            if (!canStillReport(source, server)) {
+                failureConsumer.run();
+                return;
+            }
+            if (!source.hasPermission(2)) {
+                source.sendFailure(Component.literal("[ItemGraph] Permission level 2 is required to view this flow."));
+                failureConsumer.run();
+                return;
+            }
+            if (throwable != null) {
+                Throwable cause = throwable;
+                while (cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                if (cause instanceof QueryFailure && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                LOGGER.error("ItemGraph data query '{}' failed", label, cause);
+                source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
+                failureConsumer.run();
+                return;
+            }
+            try {
+                consumer.accept(source, result);
+            } catch (RuntimeException e) {
+                LOGGER.error("ItemGraph data query '{}' delivery failed", label, e);
+                source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(e.getMessage()))));
+                failureConsumer.run();
+            }
+        }));
         return 1;
     }
 
@@ -166,17 +271,53 @@ public final class QueryDispatcher {
      * {@link DatabaseManager#openReadOnlyConnection()} for why reading through the
      * ingestion worker's connection could show an admin uncommitted rows.
      */
-    private static QueryOutput execute(Query query) {
+    private static QueryOutput execute(Query query, QueryCancellation cancellation) {
+        return executeReadOnly(query::run, cancellation);
+    }
+
+    private static int rejectQueue(CommandSourceStack source) {
+        source.sendFailure(Component.literal("[ItemGraph] Query worker queue is full or shutting down; retry shortly."));
+        return 0;
+    }
+
+    private static <T> T executeData(DataQuery<T> query, QueryCancellation cancellation) {
+        return executeReadOnly(query::run, cancellation);
+    }
+
+    private static <T> T executeReadOnly(ConnectionQuery<T> query, QueryCancellation cancellation) {
         try (Connection conn = DatabaseManager.getInstance().openReadOnlyConnection()) {
-            return query.run(conn);
+            if (!cancellation.attach(conn)) {
+                throw new SQLException("query cancelled before execution began");
+            }
+            boolean progressHandlerSet = false;
+            try {
+                ProgressHandler.setHandler(conn, 10_000, new ProgressHandler() {
+                    @Override
+                    protected int progress() {
+                        return cancellation.isCancelled() ? 1 : 0;
+                    }
+                });
+                progressHandlerSet = true;
+                if (cancellation.isCancelled()) {
+                    throw new SQLException("query cancelled before execution began");
+                }
+                return query.run(conn);
+            } finally {
+                try {
+                    if (progressHandlerSet) {
+                        ProgressHandler.clearHandler(conn);
+                    }
+                } finally {
+                    cancellation.detach(conn);
+                }
+            }
         } catch (SQLException e) {
-            // Rethrown so whenComplete reports it; wrapped because the lambda is a Supplier.
             throw new QueryFailure(e);
         }
     }
 
-    private static void deliver(CommandSourceStack source, String label, QueryOutput output, Throwable throwable) {
-        MinecraftServer server = source.getServer();
+    private static void deliver(CommandSourceStack source, MinecraftServer server, Thread serverThread,
+                                String label, QueryOutput output, Throwable throwable) {
         if (server == null) {
             LOGGER.warn("Dropping /ig {} result: the command source has no server.", label);
             return;
@@ -184,50 +325,40 @@ public final class QueryDispatcher {
 
         // The hop back onto the server thread. Everything below this line runs on it.
         server.execute(() -> {
-            if (!canStillReport(source, server)) {
+            if (Thread.currentThread() != serverThread || !canStillReport(source, server)
+                    || !source.hasPermission(2)) {
                 return;
             }
+            boolean entityless = source.getEntity() == null;
 
             if (throwable != null) {
-                // CompletableFuture#supplyAsync wraps any exception thrown by the supplier in a
-                // CompletionException, whose getMessage() returns the wrapped exception's toString()
-                // (class name and all) rather than its plain message - unwrap that first, or the
-                // admin sees "com.itemgraph.command.QueryDispatcher$QueryFailure: <message>" instead
-                // of the clean message. Then peel QueryFailure/SQLException the same way as before.
-                Throwable cause = throwable;
-                while (cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null) {
-                    cause = cause.getCause();
-                }
-                if (cause instanceof QueryFailure && cause.getCause() != null) {
-                    cause = cause.getCause();
-                }
-                if (cause.getCause() instanceof SQLException sql) {
-                    cause = sql;
-                }
+                // CompletableFuture wrappers stringify their causes; unwrap consistently so the
+                // admin sees the underlying SQL message rather than an implementation class name.
+                Throwable cause = unwrap(throwable);
                 LOGGER.error("ItemGraph query '{}' failed", label, cause);
-                source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
+                if (!entityless) {
+                    source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
+                }
                 return;
             }
 
             if (!output.found()) {
-                output.lines().forEach(line -> {
-                    source.sendFailure(Component.literal(line));
-                    if (source.getEntity() == null) {
-                        LOGGER.info("{}", line);
-                    }
-                });
+                if (entityless) {
+                    output.lines().forEach(LOGGER::info);
+                } else {
+                    output.lines().forEach(line -> source.sendFailure(Component.literal(line)));
+                }
                 return;
             }
 
+            if (entityless) {
+                output.lines().forEach(LOGGER::info);
+                return;
+            }
             // false: query output is for the admin who asked, not broadcast to every op.
             // The graph is sensitive (see docs/SECURITY_AND_PERMISSIONS.md) and an item
             // trace names coordinates and players.
-            output.lines().forEach(line -> {
-                source.sendSuccess(() -> Component.literal(line), false);
-                if (source.getEntity() == null) {
-                    LOGGER.info("{}", line);
-                }
-            });
+            output.lines().forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
         });
     }
 
@@ -256,11 +387,12 @@ public final class QueryDispatcher {
         }
         synchronized (QueryDispatcher.class) {
             if (executor == null) {
-                executor = Executors.newSingleThreadExecutor(r -> {
-                    Thread t = new Thread(r, "ItemGraph-Query-Worker");
-                    t.setDaemon(true);
-                    return t;
-                });
+                executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                        new ArrayBlockingQueue<>(MAX_QUEUED_QUERIES), r -> {
+                            Thread t = new Thread(r, "ItemGraph-Query-Worker");
+                            t.setDaemon(true);
+                            return t;
+                        }, new ThreadPoolExecutor.AbortPolicy());
             }
             return executor;
         }
@@ -291,6 +423,53 @@ public final class QueryDispatcher {
     private static final class QueryFailure extends RuntimeException {
         QueryFailure(SQLException cause) {
             super(cause.getMessage(), cause);
+        }
+    }
+
+    private static Throwable unwrap(Throwable throwable) {
+        Throwable cause = throwable;
+        while ((cause instanceof java.util.concurrent.CompletionException
+                || cause instanceof java.util.concurrent.ExecutionException
+                || cause instanceof QueryFailure) && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause;
+    }
+
+    private static final class QueryCancellation {
+        private SQLiteConnection activeConnection;
+        private volatile boolean cancelled;
+
+        boolean isCancelled() {
+            return cancelled;
+        }
+
+        synchronized boolean attach(Connection connection) throws SQLException {
+            if (!(connection instanceof SQLiteConnection sqliteConnection)) {
+                throw new SQLException("The read-only query connection is not SQLite-backed");
+            }
+            if (cancelled) {
+                return false;
+            }
+            activeConnection = sqliteConnection;
+            return true;
+        }
+
+        synchronized void detach(Connection connection) {
+            if (activeConnection == connection) {
+                activeConnection = null;
+            }
+        }
+
+        synchronized void cancel() {
+            cancelled = true;
+            if (activeConnection != null) {
+                try {
+                    activeConnection.getDatabase().interrupt();
+                } catch (SQLException | RuntimeException e) {
+                    LOGGER.warn("Unable to interrupt a timed-out ItemGraph SQLite query", e);
+                }
+            }
         }
     }
 }

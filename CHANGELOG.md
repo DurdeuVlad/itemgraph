@@ -6,6 +6,10 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Added
+
+- **Read-only vanilla flow browser**: permission-level-2 `/ig gui item`, `/ig gui player`, and dimension-qualified `/ig gui container` commands open a vanilla six-row chest menu with 45-entry keyset-paginated timelines, provenance/confidence labels, and event/transformation/edge detail views. Menu actions cannot move items.
+
 ## [0.2.0] — 2026-09-20
 
 ### Summary

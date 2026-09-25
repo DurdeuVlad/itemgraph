@@ -2,11 +2,16 @@ package com.itemgraph.query;
 
 import org.junit.jupiter.api.Test;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * {@code /ig explain <edgeId>}: the charter's forensic-integrity requirement, executed.
@@ -20,6 +25,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ExplainQueryServiceTest extends QueryTestBase {
 
     private final ExplainQueryService service = new ExplainQueryService();
+
+    @Test
+    void confidenceReaderRejectsSqlNullInsteadOfFabricatingZero() throws Exception {
+        ResultSet rs = mock(ResultSet.class);
+        when(rs.getDouble("e_confidence")).thenReturn(0.0);
+        when(rs.wasNull()).thenReturn(true);
+
+        SQLException error = assertThrows(SQLException.class, () -> EdgeConfidence.readRequired(rs, 42));
+
+        assertEquals("Inferred edge #42 has no stored confidence.", error.getMessage());
+    }
 
     /** The MVP ground bridge: one edge, two cited observations, both fully resolved. */
     @Test

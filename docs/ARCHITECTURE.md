@@ -239,7 +239,7 @@ server thread            ItemGraph-Query-Worker           server thread
 -------------            ----------------------           -------------
 parse arguments     ->   open read-only connection    ->   sendSuccess /
 resolve the window       run SQL                           sendFailure
-dispatch, return 1       format to List<String>
+dispatch, return 1       format lines or TracePage          open/update menu
 ```
 
 ### Marshalling back
@@ -251,8 +251,15 @@ mechanism NeoForge's `enqueueWork` uses for parallel-dispatch events.
 
 One caveat is handled explicitly: `MinecraftServer.scheduleExecutables()` returns false
 once the server is stopping, and `BlockableEventLoop.execute` then runs the task *inline
-on the calling thread* rather than queueing it. `QueryDispatcher` therefore checks
-`server.isStopped()` (and `ServerPlayer.hasDisconnected()`) before sending anything.
+on the calling thread* rather than queueing it. Both query-delivery paths capture the server
+thread before submission and compare `Thread.currentThread()` with that captured thread before
+touching a command source, player, or menu. On the server thread, `canStillReport` then rejects
+stopped servers and disconnected players.
+
+`QueryDispatcher.dispatchData` uses the same read-only worker boundary for GUI page/detail
+DTOs. Its callback opens or updates `FlowBrowserMenu` only on the server thread. That menu
+uses vanilla `MenuType.GENERIC_9x6`; its server-side click handler never delegates item
+movement to `ChestMenu`, and every GUI action rechecks permission level 2.
 
 ### Prior art
 
@@ -270,8 +277,21 @@ first principles:
 ItemGraph matches both: `CompletableFuture` + `whenComplete` + `getServer().execute(...)`,
 with the same liveness guards. The only deliberate deviation is the executor — the mods
 above spawn a thread per invocation, whereas ItemGraph uses one shared single-threaded
-executor so that concurrent admin queries serialise instead of opening an unbounded number
-of SQLite readers.
+executor with at most 64 waiting queries. This serializes SQLite readers and returns an
+explicit queue-full failure instead of growing pending work without bound. Entity-less
+off-server-thread callers use a five-second synchronous RCON response path; timeout invokes
+Xerial SQLite's cross-thread database interrupt on that query's dedicated connection (the same
+mechanism used by Xerial 3.46.1.0 [`Statement.cancel()`](https://github.com/xerial/sqlite-jdbc/blob/3.46.1.0/src/main/java/org/sqlite/jdbc3/JDBC3Statement.java)). The dispatcher also checks its cancellation flag before SQL callbacks and installs a per-connection `ProgressHandler` to abort during VM execution, covering the attach-to-statement race. SQLite documents [`sqlite3_interrupt`](https://www.sqlite.org/c3ref/interrupt.html) as safe from a different thread. An interrupted RCON caller has its interrupt flag restored.
+
+Vanilla `DedicatedServer.runCommand` executes RCON commands on the server thread and returns
+the RCON response buffer immediately afterward. Entity-less server-thread sources therefore
+receive a synchronous “query accepted” response; completed query lines are written to the
+server log instead of a response buffer that has already been returned.
+
+Player-originated async queries have no wall-clock cancellation deadline. A pathological query
+can occupy the single worker until SQLite returns; the 64-entry queue remains bounded and
+rejects additional requests. The five-second timeout/cancellation currently applies to the
+off-thread entity-less response path only.
 
 ### Why not the ingestion worker
 

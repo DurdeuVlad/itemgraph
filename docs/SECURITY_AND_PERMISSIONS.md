@@ -114,6 +114,11 @@ Queries should have:
 - pagination
 - rate limits if necessary
 
+The `/ig gui` browser remains level-2 only. `FlowBrowserMenu` rechecks permission while
+open and on every click, and the menu never delegates an item-movement action to
+`ChestMenu`; it handles only page navigation, flow selection, detail display, and close.
+All page/detail SQL runs through the read-only `QueryDispatcher` connection.
+
 ## Privacy-aware explanation
 
 `/ig explain` should show enough evidence for moderation without automatically revealing unrelated sensitive data.

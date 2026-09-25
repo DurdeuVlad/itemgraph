@@ -19,6 +19,8 @@ public final class QueryLimits {
     /** Absolute ceiling, applied even if the caller explicitly asks for more. */
     public static final int MAX_LIMIT = 100;
 
+    public static final int MAX_GUI_PAGE_SIZE = 45;
+
     /**
      * Ceiling on evidence rows resolved for a single {@code /ig explain}.
      *
