@@ -343,12 +343,61 @@ changed from `commands=0`, `sessions=45`, `users=12`, `items=25` to `commands=7`
 `sessions=51`, `users=13`, `items=26`. ItemGraph's own database changed from 2,793
 observations / 10 fingerprints / 44 nodes to 2,795 / 11 / 46.
 
-Mineflayer is a real protocol client, not the Mojang vanilla graphical client. Therefore this
+Mineflayer is a real protocol client, not the Mojang vanilla graphical client. Therefore that
 run verifies the vanilla `GENERIC_9x6` server protocol and read-only click handling with
-GriefLogger present, but it is not a visual vanilla-launcher test. The GriefLogger-absent
-staging pass and any separately required vanilla-client visual pass remain pending. The
-earlier V11 startup smoke is not GUI verification and the V11 live-movement scenario remains
-unverified.
+GriefLogger present, but it is not visual-client proof. The earlier V11 startup smoke is not
+GUI verification and the V11 live-movement scenario remains unverified.
+
+A graphical MC Pilot pass was then run on 2026-09-25 using the source-built MC Pilot CLI at
+commit `87b9da4` (upstream `0.15.0`; the published npm package could not resolve an upstream
+`workspace:*` dependency with npm 11). It launched real Minecraft 1.21.1 NeoForge client
+`itemgraph-gui` (`neoforge-21.1.235`, non-headless) against staging `127.0.0.1:26417`.
+Screenshots were captured under the ignored directory `run/mcpilot-screenshots/`.
+
+GriefLogger-present visual checks:
+
+- `/ig gui item stone` rendered the vanilla six-row chest screen, `minecraft:stone`
+  fingerprint 103 and `minecraft:cobblestone` fingerprint 102 candidates, page metadata, and
+  the unchanged player inventory (`8 dirt`, `2 wheat seeds`, `1 sugar cane`).
+- Selecting fingerprint 103 rendered a 45-entry timeline; next-page displayed `Page 2` and
+  previous-page restored `Page 1`.
+- `/ig gui item netherite_boots` rendered both raw and named fingerprints; selecting raw
+  fingerprint 100 rendered observed, inferred (`conf=0.9990`), and transformation entries.
+  Observation detail `#65`, inference-edge detail `#8` (including its warning and two
+  supporting observations), and transformation detail `#1` rendered correctly.
+- `/ig gui player PlayerA` rendered duplicate nodes `PLAYER node#1` and `PLAYER node#100`;
+  selecting node 1 opened the player timeline.
+- `/ig gui container minecraft:overworld -39 112 -8` rendered node `node#109` and a 45-entry
+  timeline.
+- `/ig gui item definitely_not_an_item` rendered the explicit `No matching target` state.
+- Real-client mutation attempts covered right-click, middle-click, shift-left/right,
+  hotbar-key swap, player-inventory click/shift-click/hotbar-key swap, left/right GUI drag,
+  `q` throw, outside-window click, player-inventory double-click pickup-all, raw mouse drag,
+  and number-key input. After server resync, display contents, player inventory, and cursor
+  remained unchanged. A raw drag beginning on an occupied entry intentionally invoked the
+  allowed left-click detail action; follow-up raw drag/key checks from empty slots left the
+  view unchanged.
+- `deop IGBotGui` while a browser was open invalidated and closed the GUI; a subsequent click
+  returned `GUI_NOT_OPEN` rather than navigating.
+- No ItemGraph error/exception appeared in `run/logs/latest.log`. Client disconnect produced
+  only the expected Netty `Connection reset` log.
+- GriefLogger wrote its own normal staging telemetry. `run/database.db` SHA-256 changed from
+  `239b57f9317493b791b59993a53e46faafe0229759667a33174074e838b055fa` to
+  `f5b98321c4231bfd7d7e833e6c6d59e9687f6cb6ed2b9034afba4f114f0a34dc`; representative counts
+  changed to `commands=14`, `sessions=52`, `users=13`, `items=26`. ItemGraph's database showed
+  2,798 observations, 13 fingerprints, and 49 nodes after the two client sessions.
+
+For the GriefLogger-absent pass, `run/mods/grieflogger-1.2.10-1.21.1-neoforge.jar` was
+temporarily moved to `run/mods.disabled/` and restored afterward. Startup showed only
+Architectury, ItemGraph, Minecraft, NeoForge, and SuperMartijn642 Config Library, and logged
+`GriefLogger integration: DISABLED`. The same real MC Pilot client then passed item
+candidate selection, page forward/back, player-node candidates, container timeline,
+observation detail, and representative right/shift/inventory/`q` mutation rejection checks.
+The preserved GriefLogger jar SHA-256 remained
+`ed26d5ad6f3c6cf0425a3b55aa41f84a61197f030d78be5b70eae2a71b7c6e89`, and
+`run/database.db` remained `f5b98321c4231bfd7d7e833e6c6d59e9687f6cb6ed2b9034afba4f114f0a34dc`
+with no WAL/SHM sidecar. Both runs restored `server-ip=` and left no server or client listener
+running.
 
 ## Historical live server results (pre-V11 staging `run/`)
 
