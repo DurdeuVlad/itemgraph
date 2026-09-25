@@ -284,6 +284,32 @@ V11 startup migration succeeded on loopback, but player scenarios were not run b
 available safe tools cannot disable the GriefLogger mod without moving its jar. Production and
 the existing GriefLogger database remain out of scope for writes.
 
+## M7 — Preview integration API
+
+Issue #9 defines the public contract in `docs/API.md`; issue #12 implements it after
+maintainer approval. The preview boundary is `com.itemgraph.api` `PREVIEW_1`, shipped in
+the main ItemGraph JAR and consumed by trusted NeoForge mods through local-JAR
+`compileOnly` plus a runtime `itemgraph` mod dependency.
+
+Planned implementation surface:
+
+- immutable source registration and direct-observation DTOs;
+- `(source modId, sourceEventId)` deduplication using the existing non-null source-event
+  uniqueness model;
+- durable `EXTERNAL_INVENTORY` nodes keyed by `(ownerModId, inventoryId)`, including a
+  coordinate-less identity distinct from `UNKNOWN`;
+- bounded asynchronous submission and query results with explicit `PERSISTED`,
+  `DUPLICATE`, `INVALID_INPUT`, `QUEUE_FULL`, `DATABASE_UNAVAILABLE`, `SHUTDOWN`, and
+  `FAILED` outcomes;
+- flow DTOs preserving observed/inferred provenance, evidence refs, confidence, stored
+  explanations, ambiguity, limits, and truncation;
+- an ItemGraph-owned V12 migration for `ig_api_sources` and `ig_nodes.external_key`;
+- a separate NeoForge 1.21.1 consumer fixture compiled against the built main JAR.
+
+Non-goals for M7 remain JDBC/schema exposure, GriefLogger API access, caller-provided
+inference, player-facing authorization, a standalone API artifact, and a stable pre-1.0
+API promise.
+
 ## Git strategy
 
 Prefer small commits such as:

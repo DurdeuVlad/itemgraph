@@ -149,6 +149,7 @@ Evidence and inference are labelled per line, never once at the top.
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [MIT license](LICENSE)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Preview API contract](docs/API.md)
 - [Evidence model](docs/EVIDENCE_MODEL.md)
 - [GriefLogger integration](docs/GRIEFLOGGER_INTEGRATION.md)
 - [Query model](docs/QUERY_MODEL.md)

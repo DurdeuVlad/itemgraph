@@ -125,6 +125,16 @@ loss clears that player's inspection mode without suppressing the ordinary block
 Inspection opens only ItemGraph's read-only menu; it does not grant access to the clicked
 container's contents and does not relax any GUI permission checks.
 
+## Preview API boundary
+
+`docs/API.md` proposes a `com.itemgraph.api` `PREVIEW_1` Java boundary for installed
+server mods, not a player-facing permission grant. Trusted consumers may submit direct
+observations and read full flow results, but they remain responsible for checking the
+receiving player's permissions before displaying player UUIDs, coordinates, hidden
+inventories, or custom metadata. The API must not expose JDBC, schema objects, GriefLogger
+access, mutable Minecraft state, or caller-provided inferred edges. This boundary is a
+proposal until issue #12 implements the approved contract.
+
 ## Privacy-aware explanation
 
 `/ig explain` should show enough evidence for moderation without automatically revealing unrelated sensitive data.

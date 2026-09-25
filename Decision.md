@@ -92,6 +92,30 @@ quietly converted into assumptions.
   the official distribution projects.
 - Revisit when: Governance, ownership, or release automation changes.
 
+### D-008: Ship `com.itemgraph.api` as a preview, trusted-mod boundary
+
+- Status: proposed for issue #9; requires maintainer acceptance before issue #12.
+- Context: External NeoForge mods need a stable-enough Java seam for direct
+  evidence submission and bounded flow queries, but ItemGraph's internal
+  services expose JDBC, schema IDs, mutable Minecraft state, and internal
+  worker ownership.
+- Decision: Publish a `com.itemgraph.api` preview package in the main JAR,
+  versioned independently as `PREVIEW_1`. Public signatures use immutable API
+  DTOs, opaque evidence references, numeric source event IDs scoped by source
+  mod ID, and bounded asynchronous results. No JDBC connection, ItemGraph
+  schema object, inferred-edge submission, or stable pre-1.0 compatibility is
+  part of the contract.
+- Rationale: A narrow preview lets real consumers integrate without freezing
+  internals or weakening evidence integrity. Trusted mods may submit facts,
+  but only ItemGraph may infer movement; trusted consumers remain responsible
+  for player-facing permission checks.
+- Consequences: Issue #12 implements the approved signatures; a V12 ItemGraph
+  migration is required for API source registration and durable
+  `EXTERNAL_INVENTORY` external keys. Breaking preview changes must be called
+  out in the changelog.
+- Revisit when: A maintainer rejects the signatures/identity model, or enough
+  consumers exist to justify a stable API milestone.
+
 ## Open questions
 
 - Which permission API should provide the final server-specific access
