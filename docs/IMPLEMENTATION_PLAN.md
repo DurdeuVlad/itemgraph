@@ -150,8 +150,10 @@ Add:
   thread before Minecraft menu state is created or changed. The worker queue accepts at most
   64 waiting queries and rejects overflow rather than accumulating unbounded work.
 - `./gradlew clean build` passes 259 tests, 0 failures, 0 skipped (2026-09-25).
-- Dedicated vanilla-client GUI staging with GriefLogger absent and present remains pending;
-  see `docs/TEST_PLAN.md`. The existing GriefLogger database has not been used for GUI tests.
+- A GriefLogger-present Mineflayer protocol-client GUI staging pass completed 12/12 checks;
+  see `docs/TEST_PLAN.md`. It is not a Mojang vanilla graphical-client pass. The
+  GriefLogger-absent staging pass and any separately required vanilla-client visual check
+  remain pending.
 
 ### Deferred out of Phase 6
 

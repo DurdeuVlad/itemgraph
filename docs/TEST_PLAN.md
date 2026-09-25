@@ -311,14 +311,44 @@ explicit-dimension container resolution, duplicate-target ambiguity, and ID-pinn
 `FlowBrowserMenuTest` rejection of item-moving click types and permission loss. Run these
 with `./gradlew test`.
 
-The delivery staging check is still required and has not been performed for this feature.
-On a dedicated NeoForge 1.21.1 server with a vanilla client, open all three `/ig gui`
-targets, navigate both directions, inspect observation, transformation, and inferred-edge detail,
-and attempt pickup,
-placement, shift-click, drag, throw, swap, clone, and pickup-all actions while verifying the
-server inventory is unchanged. Repeat representative checks with GriefLogger absent and
-present. Do not perform the GriefLogger-present run against the existing staging database
-until it can be safely isolated; the earlier V11 startup smoke is not GUI verification.
+A GriefLogger-present protocol-client staging pass was run on 2026-09-25 on
+`E:\Github2\itemgraph\run` with `./gradlew runServer`, NeoForge 21.1.248, Minecraft
+1.21.1, GriefLogger 1.2.10 enabled, and Mineflayer 4.39.0 client `IGBotGui`. The ignored
+driver `run/livebot/ig_gui_staging.js` passed **12/12 checks**:
+
+- `/ig gui item stone` opened `minecraft:generic_9x6`; its ambiguous text match presented
+  `minecraft:stone` fingerprint 103 and `minecraft:cobblestone` fingerprint 102. Selecting
+  fingerprint 103 pinned the resolved target and displayed 45 timeline entries.
+- Next-page and previous-page clicks opened a distinct page 2 and restored the exact page-1
+  top-inventory signature.
+- An observation entry opened its evidence detail view.
+- Raw 1.21.1 `window_click` packets for right-click, shift-click, number-key swap, clone,
+  throw-one, throw-stack, pickup-all, player-inventory left/right/shift/number clicks,
+  outside-window click, and left/right drag sequences were sent. A full server resync showed
+  no change to the 54 display slots, the player inventory, or the client cursor.
+- `/ig gui item netherite_boots` presented both fingerprint candidates; selecting
+  fingerprint 100 opened its timeline, including inferred-edge and observed-transformation
+  detail views.
+- `/ig gui player PlayerA` presented both duplicate `PlayerA` nodes; selecting node 1 opened
+  the resolved player timeline.
+- `/ig gui container minecraft:overworld -39 112 -8` opened a resolved 45-entry flow page.
+- The same mutation-click set was replayed against the container browser without changing
+  display slots, player inventory, or cursor state.
+
+GriefLogger was enabled and wrote its own additive staging telemetry during this authorized
+live pass. `run/database.db` changed from SHA-256
+`50be0d7c234f1327eb9df2ff594c842e8499467a6ba5c6c100d40fd975fae594` to
+`239b57f9317493b791b59993a53e46faafe0229759667a33174074e838b055fa`; representative counts
+changed from `commands=0`, `sessions=45`, `users=12`, `items=25` to `commands=7`,
+`sessions=51`, `users=13`, `items=26`. ItemGraph's own database changed from 2,793
+observations / 10 fingerprints / 44 nodes to 2,795 / 11 / 46.
+
+Mineflayer is a real protocol client, not the Mojang vanilla graphical client. Therefore this
+run verifies the vanilla `GENERIC_9x6` server protocol and read-only click handling with
+GriefLogger present, but it is not a visual vanilla-launcher test. The GriefLogger-absent
+staging pass and any separately required vanilla-client visual pass remain pending. The
+earlier V11 startup smoke is not GUI verification and the V11 live-movement scenario remains
+unverified.
 
 ## Historical live server results (pre-V11 staging `run/`)
 
