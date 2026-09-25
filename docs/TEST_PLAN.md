@@ -298,9 +298,10 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `V9InternalObservationDedupTest`, `V10InternalDedupEntityUuidTest` | partial-index, UUID, destination-sensitive dedup, NULL-UUID preservation, and V11 idempotence (5 + 6 tests) |
 | `ItemEntityEventListenerPartialPickupTest` | pending-pickup resolution: emit on reduced count, drop on removal/expiry, keep while unchanged |
 | `FlowBrowserMenuTest` | vanilla six-row menu type, textual provenance/confidence/evidence labels, every click category rejected or handled as navigation/detail only, and permission recheck (2 tests) |
-| `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
+| `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container and `/ig inspect` command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
+| `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest` | per-player inspect state, deterministic command forms, permission denial, supported/unsupported clicks, browser-queue rejection fallback, logout cleanup, and canceled-click isolation from session tracking (3 + 6 + 2 tests) |
 
-Total automated test count: **259 tests, 0 failures, 0 skipped** (`./gradlew clean build`, 2026-09-25).
+Total automated test count: **270 tests, 0 failures, 0 skipped** (`./gradlew clean build`, 2026-09-25).
 
 ## M6 issue #8: vanilla flow browser verification
 
@@ -398,6 +399,64 @@ The preserved GriefLogger jar SHA-256 remained
 `run/database.db` remained `f5b98321c4231bfd7d7e833e6c6d59e9687f6cb6ed2b9034afba4f114f0a34dc`
 with no WAL/SHM sidecar. Both runs restored `server-ip=` and left no server or client listener
 running.
+
+## M6 issue #10: command-toggled inspector verification
+
+Automated coverage now includes `InspectionServiceTest`, `InspectionListenerTest`, and
+`ItemGraphCommandsInspectTest`: UUID-scoped state, bare toggle and deterministic
+`on`/`off`/`status`, permission denial, supported-container cancellation, inactive and
+unsupported clicks, browser-queue rejection fallback, logout cleanup, and isolation from
+`ContainerSessionListener` pending clicks. `./gradlew clean build` passed **270 tests, 0
+failures, 0 skipped** on 2026-09-25.
+
+A GriefLogger-present graphical staging pass ran on `E:\Github2\itemgraph\run` with
+`./gradlew runServer`, NeoForge 21.1.248, Minecraft 1.21.1, GriefLogger
+`1.2.10-1.21.1-neoforge`, and the real non-headless MC Pilot NeoForge 1.21.1 client
+`itemgraph-gui` (`neoforge-21.1.235`). Fixtures were placed at `minecraft:overworld`
+`(-48..-45, 64, -23)`: chest, hopper, furnace, and a crafting table as the non-`Container`
+control. Screenshots were captured under the ignored directory `run/mcpilot-screenshots/`.
+
+Observed checks:
+
+- With inspection off, ordinary vanilla screens opened: chest `minecraft:generic_9x3`
+  (`26-off-chest.png`), hopper `minecraft:hopper` (`24-off-hopper.png`), and furnace
+  `minecraft:furnace` (`25-off-furnace.png`).
+- With inspection on, the unsupported crafting table still opened `minecraft:crafting`
+  (`20-inspect-unsupported-crafting.png`).
+- With inspection on, chest, hopper, and furnace each opened the read-only
+  `minecraft:generic_9x6` ItemGraph browser with exact-coordinate titles
+  `[-48, 64, -23]`, `[-47, 64, -23]`, and `[-46, 64, -23]` (`21-23`, then non-empty
+  `28-30` screenshots).
+- `/ig inspect` toggled enabled→disabled; `/ig inspect status` reported without changing
+  state; repeated `/ig inspect on` and `/ig inspect off` were idempotent. Event output used
+  the deterministic enabled/disabled messages rather than changing state implicitly.
+- After fixtures were populated via server-side test commands (`dirt×5`, `wheat_seeds×3`,
+  `sugar_cane×1`), inspection clicks opened only ItemGraph's browser. `data get block`
+  returned the same item/count/slot triple afterward, and the held `dirt×8` stack stayed
+  unchanged.
+- `deop IGBotGui` while inspection was enabled cleared the mode on the next click: the
+  chest opened vanilla `minecraft:generic_9x3`, `/ig inspect status` was rejected as a
+  permission-gated command, and after re-op status reported disabled
+  (`27-deopped-chest-vanilla.png`).
+- Reconnect cleanup was verified by enabling inspection, running `client reconnect`, and
+  receiving `Container inspection is disabled` from `/ig inspect status` after rejoin.
+- Server-stop cleanup was verified by enabling inspection, stopping with RCON `stop`,
+  restarting `./gradlew runServer`, reconnecting, and receiving
+  `Container inspection is disabled`.
+- ItemGraph's read-only database inspection showed `ig_observations=2798`,
+  `ADD_ITEM`/`REMOVE_ITEM` count `26`, and `max(id)=2798` before and after the inspection
+  browser opens; the menu did not create a container-transfer observation.
+- GriefLogger wrote its own normal staging telemetry while enabled. `run/database.db`
+  SHA-256 changed from `f5b98321c4231bfd7d7e833e6c6d59e9687f6cb6ed2b9034afba4f114f0a34dc`
+  to `1f47bd0ff5b28c45ad2d4faba735aeb07d38e8e4b619bb5b9dac9fd695f6f388`; the GriefLogger
+  jar remained `ed26d5ad6f3c6cf0425a3b55aa41f84a61197f030d78be5b70eae2a71b7c6e89`.
+- After verification, `server-ip=` was restored to blank, and no staging server, RCON, or
+  MC Pilot client listener remained.
+
+This is a real rendered-client check through MC Pilot, not an unmodified Mojang launcher
+client. It verifies the server-authoritative interaction and vanilla `GENERIC_9x6` screen
+path on a graphical NeoForge 1.21.1 client. The earlier V11 live-movement scenario remains
+unverified for the reason recorded above.
 
 ## Historical live server results (pre-V11 staging `run/`)
 

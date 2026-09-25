@@ -130,6 +130,7 @@ Add:
 /ig gui item <query> [sinceMinutes]
 /ig gui player <playerName> [sinceMinutes]
 /ig gui container <dimension> <x> <y> <z> [sinceMinutes]
+/ig inspect [on|off|status]
 /ig status
 ```
 
@@ -137,6 +138,10 @@ Add:
   string queries list candidates rather than choosing a fingerprint silently.
 - `trace player` and `trace container` use the same database-backed target lookup as the
   corresponding GUI views. The GUI container target requires an explicit dimension.
+- `inspect` stores per-player UUID state only, clears on logout/server stop, and requires
+  permission level 2 for command and click. `InspectionListener` cancels a supported
+  `RightClickBlock` container interaction at `HIGHEST` priority with `SUCCESS`, opens the
+  read-only flow browser, and does not record the click as a transfer.
 - Chat traces are row-capped (`limit` default 20, hard cap 100); `/ig explain` evidence is
   capped at 50. `sinceMinutes` is inclusive and uses interval overlap for session observations
   and inferred edges.
@@ -149,17 +154,19 @@ Add:
 - SQL uses the read-only `QueryDispatcher` worker; page/detail results return to the server
   thread before Minecraft menu state is created or changed. The worker queue accepts at most
   64 waiting queries and rejects overflow rather than accumulating unbounded work.
-- `./gradlew clean build` passes 259 tests, 0 failures, 0 skipped (2026-09-25).
+- `./gradlew clean build` passes 270 tests, 0 failures, 0 skipped (2026-09-25).
 - A GriefLogger-present Mineflayer protocol-client GUI staging pass completed 12/12 checks,
   and graphical MC Pilot staging passed with GriefLogger both present and temporarily absent;
   see `docs/TEST_PLAN.md`. The MC Pilot runs used a real non-headless NeoForge 1.21.1 client,
   verified all three `/ig gui` entry points, ambiguity, pagination, observation/
   transformation/inference details, unresolved state, permission revocation, and read-only
   mutation rejection.
+- A separate issue-#10 MC Pilot pass verified `/ig inspect` against chest, hopper, furnace,
+  and crafting-table controls, including permission loss, reconnect/server-stop cleanup,
+  non-empty-container preservation, and no new ItemGraph observations from browser opens.
 
 ### Deferred out of Phase 6
 
-- `/ig inspect` command-toggled in-world interaction (issue #10).
 - `after` / `before` / `between` filters and click-event links from chat output.
 - Dedicated `[AMBIGUOUS]` and `[UNRESOLVED]` line prefixes; source-group ambiguity and UNKNOWN
   endpoints are preserved in the current evidence/details instead.

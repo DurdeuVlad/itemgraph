@@ -119,6 +119,12 @@ open and on every click, and the menu never delegates an item-movement action to
 `ChestMenu`; it handles only page navigation, flow selection, detail display, and close.
 All page/detail SQL runs through the read-only `QueryDispatcher` connection.
 
+`/ig inspect` is likewise level-2 only. The command cannot be enabled by a non-operator,
+`InspectionListener` rechecks permission on every supported-container click, and permission
+loss clears that player's inspection mode without suppressing the ordinary block interaction.
+Inspection opens only ItemGraph's read-only menu; it does not grant access to the clicked
+container's contents and does not relax any GUI permission checks.
+
 ## Privacy-aware explanation
 
 `/ig explain` should show enough evidence for moderation without automatically revealing unrelated sensitive data.

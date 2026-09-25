@@ -27,6 +27,11 @@ class ItemGraphCommandsGuiTest {
         assertNotNull(gui.getChild("player").getChild("player"));
         CommandNode<CommandSourceStack> container = gui.getChild("container").getChild("dimension");
         assertNotNull(container.getChild("x").getChild("y").getChild("z").getChild("sinceMinutes"));
+        CommandNode<CommandSourceStack> inspect = root.getChild("inspect");
+        assertNotNull(inspect);
+        assertNotNull(inspect.getChild("on"));
+        assertNotNull(inspect.getChild("off"));
+        assertNotNull(inspect.getChild("status"));
         assertNotNull(dispatcher.getRoot().getChild("ig"));
         assertSame(root, dispatcher.getRoot().getChild("ig").getRedirect());
     }
