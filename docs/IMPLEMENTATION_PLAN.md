@@ -336,7 +336,10 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   ledger, and projectile spawn usage as non-quantity audit evidence; Fabric captures
   join/quit, chat, block break/interaction, player-kill events through Fabric API callbacks,
   fresh player-owned projectile spawns through `ServerLevelMixin`, and completed
-  `BlockItem.place` actions through `BlockItemMixin`.
+  `BlockItem.place` actions through `BlockItemMixin`. Fabric also captures normal
+  player drops and full or partial pickups through server-only `ServerPlayer.drop`
+  and `ItemEntity.playerTouch` return hooks; the returned entity UUID and stack
+  count delta are retained as the quantity evidence.
 - `/ig lookup <eventType> [limit] [sinceMinutes]` and
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
   bounded native audit evidence; `/ig lookup near` adds exact dimension and
@@ -364,7 +367,13 @@ semantics are also documented by NeoForge's
 and the Fabric API limitation is documented by Fabric's
 [`ServerMessageEvents`](https://raw.githubusercontent.com/FabricMC/fabric-api/0.116.12+1.21.1/fabric-message-api-v1/src/main/java/net/fabricmc/fabric/api/message/v1/ServerMessageEvents.java),
 whose server command event covers broadcast messages rather than general command
-execution.
+execution. Fabric's drop and pickup hooks use the same narrow boundary rule:
+`ServerPlayer.drop` is paired with the `ServerLevel.addFreshEntity` boolean
+result before a ground entity is recorded, while the `ItemEntity.playerTouch`
+before/after count delta proves how many items were actually absorbed. Drops
+observed while `ServerPlayer.isDeadOrDying()` are labeled `DEATH_DROP`; custom
+death-event additions and non-player automation still need loader-native
+coverage before this matrix can be marked complete.
 
 ### Remaining parity slices
 

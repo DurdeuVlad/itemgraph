@@ -1,6 +1,8 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.ingest.InternalObservationService;
+import com.itemgraph.canon.CanonicalItem;
+import com.itemgraph.canon.ItemCanonicalizer;
 import com.mojang.brigadier.ParseResults;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -17,6 +19,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ItemSupplier;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -30,8 +33,12 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Fabric-native non-quantity audit capture. Each callback copies only immutable
@@ -39,6 +46,11 @@ import java.util.Map;
  */
 public final class FabricNativeAuditEventListener {
     private static final int MAX_DETAIL_LENGTH = 16_384;
+    private static final int MAX_DROP_CAPTURE_DEPTH = 32;
+    private static final ThreadLocal<Deque<DropCapture>> PENDING_PLAYER_DROPS = new ThreadLocal<>();
+
+    private record DropCapture(Set<ItemEntity> addedEntities, String actionType) {
+    }
 
     private FabricNativeAuditEventListener() {
     }
@@ -139,6 +151,99 @@ public final class FabricNativeAuditEventListener {
                 new InternalObservationService.InternalAuditEvent(
                         System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
                         x, y, z, itemId, "projectile=" + projectileId + " evidence=spawned_by_player", null));
+    }
+
+    /** Starts a nested-safe drop capture until the addFreshEntity result is known. */
+    public static void beginItemDropCapture(ServerPlayer player) {
+        Deque<DropCapture> pending = PENDING_PLAYER_DROPS.get();
+        if (pending == null) {
+            pending = new java.util.ArrayDeque<>();
+            PENDING_PLAYER_DROPS.set(pending);
+        }
+        if (pending.size() >= MAX_DROP_CAPTURE_DEPTH) {
+            // A thrown mod callback can skip ServerPlayer.drop's RETURN hook.
+            // Bound stale contexts so repeated failures cannot retain entities.
+            pending.clear();
+        }
+        String actionType = player != null && player.isDeadOrDying() ? "DEATH_DROP" : "DROP_ITEM";
+        pending.push(new DropCapture(Collections.newSetFromMap(new IdentityHashMap<>()), actionType));
+    }
+
+    /** Associates a successful server-level item insertion with the current drop call. */
+    public static void onItemEntityAdded(Entity entity, boolean added) {
+        if (!added || !(entity instanceof ItemEntity itemEntity)) {
+            return;
+        }
+        Deque<DropCapture> pending = PENDING_PLAYER_DROPS.get();
+        if (pending != null && !pending.isEmpty()) {
+            pending.peek().addedEntities().add(itemEntity);
+        }
+    }
+
+    /** Finishes a drop capture and records only an entity accepted by addFreshEntity. */
+    public static String finishItemDropCapture(ServerPlayer player, ItemEntity itemEntity,
+                                                ItemStack originalStack) {
+        Deque<DropCapture> pending = PENDING_PLAYER_DROPS.get();
+        DropCapture capture = pending == null || pending.isEmpty() ? null : pending.pop();
+        if (pending != null && pending.isEmpty()) {
+            PENDING_PLAYER_DROPS.remove();
+        }
+        if (capture == null || !capture.addedEntities().contains(itemEntity)) {
+            return null;
+        }
+        onItemDropped(player, itemEntity, originalStack, capture.actionType());
+        return capture.actionType();
+    }
+
+    /** Records a drop only after ServerPlayer.drop and addFreshEntity both succeed. */
+    public static void onItemDropped(ServerPlayer player, ItemEntity itemEntity, ItemStack originalStack) {
+        onItemDropped(player, itemEntity, originalStack, "DROP_ITEM");
+    }
+
+    private static void onItemDropped(ServerPlayer player, ItemEntity itemEntity,
+                                      ItemStack originalStack, String actionType) {
+        if (player == null || itemEntity == null || originalStack == null || originalStack.isEmpty()
+                || actionType == null || player.level().isClientSide() || itemEntity.isRemoved()) {
+            return;
+        }
+        CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(originalStack);
+        recordItemObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
+                player.level().dimension().location().toString(),
+                player.getX(), player.getY(), player.getZ(),
+                itemEntity.getX(), itemEntity.getY(), itemEntity.getZ(),
+                "GROUND", canonical, itemEntity.getItem().getCount(), itemEntity.getUUID().toString());
+    }
+
+    /** Records the exact count delta consumed by a successful item-entity pickup. */
+    public static void onItemPickedUp(ServerPlayer player, ItemEntity itemEntity,
+                                      ItemStack originalStack, int currentCount) {
+        if (player == null || itemEntity == null || originalStack == null || originalStack.isEmpty()
+                || player.level().isClientSide()) {
+            return;
+        }
+        int amount = originalStack.getCount() - Math.max(0, currentCount);
+        if (amount <= 0) {
+            return;
+        }
+        CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(originalStack);
+        recordItemObservation("PICKUP_ITEM", player.getUUID().toString(), player.getGameProfile().getName(),
+                player.level().dimension().location().toString(),
+                itemEntity.getX(), itemEntity.getY(), itemEntity.getZ(),
+                player.getX(), player.getY(), player.getZ(),
+                "GROUND", canonical, amount, itemEntity.getUUID().toString());
+    }
+
+    static void recordItemObservation(String actionType, String playerUuid, String playerName,
+                                       String levelName, double sourceX, double sourceY, double sourceZ,
+                                       double targetX, double targetY, double targetZ, String targetType,
+                                       CanonicalItem canonical, int amount, String itemEntityUuid) {
+        if (actionType == null || playerUuid == null || levelName == null || canonical == null || amount <= 0) {
+            return;
+        }
+        InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+                System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
+                sourceX, sourceY, sourceZ, levelName, targetX, targetY, targetZ,
+                targetType, canonical, amount, itemEntityUuid));
     }
 
     /**

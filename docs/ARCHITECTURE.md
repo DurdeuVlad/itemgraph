@@ -511,6 +511,15 @@ serialize transactions on the shared ItemGraph JDBC connection.
   pending entry so full pickups are never double-counted; entries on removed
   entities are dropped without emitting (merge/despawn indistinguishable from
   absorb) and all entries expire after 1s under a 512-entry bound.
+- Fabric normal player drops and pickups use server-only hooks in
+  `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin`. A returned
+  drop entity is recorded only when `ServerLevel.addFreshEntity` returns true,
+  with its returned stack count and UUID. Pickup records the exact before/after
+  stack-count delta, including partial absorption, and maps the ground endpoint
+  through the same `GROUND` persistence branch. Drops observed while
+  `ServerPlayer.isDeadOrDying()` are labeled `DEATH_DROP`; custom death-event
+  additions and automated non-player item movement remain unimplemented until a
+  loader-native hook can prove their source and destination.
 
 ### Automated container transfers (Issue 4)
 - `ContainerCapabilityRegistrar` registers `ContainerCapabilityWrapper` providers
