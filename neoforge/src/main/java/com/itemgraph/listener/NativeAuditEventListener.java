@@ -59,7 +59,8 @@ public final class NativeAuditEventListener {
             return;
         }
         var parse = event.getParseResults();
-        if (parse == null || !(parse.getContext().getSource().getEntity() instanceof ServerPlayer player)) {
+        if (parse == null || parse.getContext() == null || parse.getContext().getSource() == null
+                || !(parse.getContext().getSource().getEntity() instanceof ServerPlayer player)) {
             return;
         }
         String command = parse.getReader().getString();

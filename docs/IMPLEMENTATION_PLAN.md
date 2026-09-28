@@ -328,7 +328,9 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
 ### Delivered in the current slice
 
 - V13 creates the ItemGraph-owned `ig_audit_events` table and indexes.
-- NeoForge captures player join/quit, chat, command attempts, block place,
+- NeoForge captures player join/quit, chat, and command attempts; Fabric captures
+  the same command-dispatch attempt through a narrowly scoped `CommandsMixin`.
+  NeoForge also captures block place,
   block break, block interaction, and player-kill events asynchronously.
 - NeoForge captures consume and durability break into the existing quantity-flow
   ledger, and projectile spawn usage as non-quantity audit evidence; Fabric captures
@@ -340,6 +342,18 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
 - Canceled chat, command, death, and block events are excluded; command and block
   callbacks are labeled attempts where the loader hook is pre-action, and canceled
   actions remain distinct from completed evidence.
+
+The Fabric mixin is deliberate: Fabric API's server message callbacks cover only
+command-generated broadcasts, not general command execution. The mixin records the
+Minecraft `Commands.performCommand` entry boundary and never labels a command as
+successful. It is isolated to the Fabric adapter and covered by a recorder regression
+test; replacing it with a broader mixin would increase the false-success surface.
+The pre-execution semantics are documented by NeoForge's
+[`CommandEvent`](https://raw.githubusercontent.com/neoforged/NeoForge/1.21.1/src/main/java/net/neoforged/neoforge/event/CommandEvent.java),
+and the Fabric API limitation is documented by Fabric's
+[`ServerMessageEvents`](https://raw.githubusercontent.com/FabricMC/fabric-api/0.116.12+1.21.1/fabric-message-api-v1/src/main/java/net/fabricmc/fabric/api/message/v1/ServerMessageEvents.java),
+whose server command event covers broadcast messages rather than general command
+execution.
 
 ### Remaining parity slices
 
