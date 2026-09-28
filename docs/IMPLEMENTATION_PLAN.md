@@ -335,7 +335,8 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   break/interaction, and player-kill events through Fabric API callbacks.
 - `/ig lookup <eventType> [limit] [sinceMinutes]` and
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
-  bounded native audit evidence.
+  bounded native audit evidence; `/ig lookup near` adds exact dimension and
+  bounded radius filters.
 - Canceled chat, command, death, and block events are excluded; canceled actions
   remain distinct from completed evidence.
 
@@ -344,8 +345,7 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
 - Projectile throw, crossbow projectile, Fabric command execution, native
   block-placement hooks where the loader callback exposes a completed action,
   and interactive chat page navigation.
-- Radius/dimension lookup filters and interactive page navigation.
-- Block-history inspector output, including multi-block structures.
+- Interactive chat page navigation.
 - Staging verification with GriefLogger absent and a migration/retention plan.
 
 Prefer small commits such as:

@@ -19,7 +19,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | Armor stand equip/unequip | `ArmorStandEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
 | Consume, break, throw, shoot item actions | `NativeItemActionEventListener`, `ItemEntityEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Consume, break, and bow shoot captured natively; throw-item and crossbow projectile hooks still pending |
 | Location/action filtered lookup | `AuditEventQueryService` | `ig_audit_events` | `/ig lookup`, `/ig lookup near` | Action/player/time and exact dimension/radius filters implemented; staging verification pending |
-| Block/container inspector history | ItemGraph read-only container inspector | `ig_observations` | `/ig inspect` | Container flow implemented; block history pending |
+| Block/container inspector history | `InspectionListener`, `FlowBrowserService`, `TraceQueryService` | `ig_observations` | `/ig inspect`, `/ig trace container` | Read-only coordinate history and paginated flow browser implemented; staging verification pending |
 | Paginated generic audit results | ItemGraph flow browser pagination | — | Generic audit pagination pending | Gap |
 | MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite | — | Deliberate scope boundary |
 
