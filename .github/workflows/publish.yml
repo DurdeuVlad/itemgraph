@@ -80,6 +80,37 @@ jobs:
             exit 1
           fi
 
+      - name: Check Modrinth project availability
+        id: modrinth_gate
+        shell: bash
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${MODRINTH_TOKEN}" ]]; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "status=missing-token" >> "${GITHUB_OUTPUT}"
+            echo "Modrinth publication disabled: MODRINTH_TOKEN is not configured."
+            exit 0
+          fi
+
+          project_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: ${MODRINTH_TOKEN}" \
+            "https://api.modrinth.com/v2/project/itemgraph" 2>/dev/null || true)"
+          versions_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: ${MODRINTH_TOKEN}" \
+            "https://api.modrinth.com/v2/project/itemgraph/version" 2>/dev/null || true)"
+
+          echo "status=project:${project_status},versions:${versions_status}" >> "${GITHUB_OUTPUT}"
+          if [[ "${project_status}" =~ ^2[0-9][0-9]$ && "${versions_status}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+            echo "Modrinth publication enabled: project and versions APIs returned successful responses."
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "Modrinth publication disabled: project=${project_status}, versions=${versions_status}."
+          fi
+
       - name: Publish all jars to GitHub Releases
         id: publish_github
         uses: Kir-Antipov/mc-publish@v3.3
@@ -103,8 +134,8 @@ jobs:
         with:
           curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-id: ${{ steps.modrinth_gate.outputs.enabled == 'true' && 'itemgraph' || '' }}
+          modrinth-token: ${{ steps.modrinth_gate.outputs.enabled == 'true' && secrets.MODRINTH_TOKEN || '' }}
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
           modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1)
@@ -130,8 +161,8 @@ jobs:
         with:
           curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-id: ${{ steps.modrinth_gate.outputs.enabled == 'true' && 'itemgraph' || '' }}
+          modrinth-token: ${{ steps.modrinth_gate.outputs.enabled == 'true' && secrets.MODRINTH_TOKEN || '' }}
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
           modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
@@ -157,8 +188,8 @@ jobs:
         with:
           curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-id: ${{ steps.modrinth_gate.outputs.enabled == 'true' && 'itemgraph' || '' }}
+          modrinth-token: ${{ steps.modrinth_gate.outputs.enabled == 'true' && secrets.MODRINTH_TOKEN || '' }}
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
           modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
@@ -184,8 +215,8 @@ jobs:
         with:
           curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-id: ${{ steps.modrinth_gate.outputs.enabled == 'true' && 'itemgraph' || '' }}
+          modrinth-token: ${{ steps.modrinth_gate.outputs.enabled == 'true' && secrets.MODRINTH_TOKEN || '' }}
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
           modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
@@ -209,6 +240,7 @@ jobs:
         shell: bash
         env:
           GITHUB_URL: ${{ steps.publish_github.outputs.github-url }}
+          MODRINTH_STATUS: ${{ steps.modrinth_gate.outputs.status }}
           FABRIC_CURSEFORGE_URL: ${{ steps.publish_fabric.outputs.curseforge-url }}
           FABRIC_MODRINTH_URL: ${{ steps.publish_fabric.outputs.modrinth-url }}
           FABRIC_GL_CURSEFORGE_URL: ${{ steps.publish_fabric_grieflogger.outputs.curseforge-url }}
@@ -222,6 +254,7 @@ jobs:
             echo "## Publication results"
             echo
             echo "- GitHub: ${GITHUB_URL:-not published}"
+            echo "- Modrinth gate: ${MODRINTH_STATUS:-not evaluated}"
             echo "- CurseForge Fabric: ${FABRIC_CURSEFORGE_URL:-not published}"
             echo "- Modrinth Fabric: ${FABRIC_MODRINTH_URL:-not published}"
             echo "- CurseForge Fabric GriefLogger-compatible: ${FABRIC_GL_CURSEFORGE_URL:-not published}"

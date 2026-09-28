@@ -113,13 +113,23 @@ jobs:
             exit 1
           fi
 
-      - name: Ensure selected Modrinth versions are not already published
+      - name: Check Modrinth availability and selected versions
+        id: modrinth_gate
         shell: bash
         env:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
           VERSION: ${{ steps.version_data.outputs.version }}
           VARIANT: ${{ inputs.variant }}
         run: |
+          set -euo pipefail
+
+          if [[ -z "${MODRINTH_TOKEN}" ]]; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "status=missing-token" >> "${GITHUB_OUTPUT}"
+            echo "Modrinth retry disabled: MODRINTH_TOKEN is not configured."
+            exit 0
+          fi
+
           case "${VARIANT}" in
             all) VERSIONS=("${VERSION}+fabric" "${VERSION}+fabric-gl" "${VERSION}+neoforge" "${VERSION}+neoforge-gl") ;;
             fabric) VERSIONS=("${VERSION}+fabric") ;;
@@ -129,9 +139,20 @@ jobs:
             *) echo "Unsupported variant: ${VARIANT}" >&2; exit 1 ;;
           esac
 
-          PUBLISHED_VERSIONS="$(curl --fail-with-body --silent --show-error \
+          project_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: ${MODRINTH_TOKEN}" \
-            "https://api.modrinth.com/v2/project/itemgraph/version")"
+            "https://api.modrinth.com/v2/project/itemgraph" 2>/dev/null || true)"
+          versions_file="$(mktemp)"
+          versions_status="$(curl --silent --show-error --output "${versions_file}" --write-out '%{http_code}' \
+            --header "Authorization: ${MODRINTH_TOKEN}" \
+            "https://api.modrinth.com/v2/project/itemgraph/version" 2>/dev/null || true)"
+
+          echo "status=project:${project_status},versions:${versions_status}" >> "${GITHUB_OUTPUT}"
+          if [[ ! "${project_status}" =~ ^2[0-9][0-9]$ || ! "${versions_status}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "Modrinth retry disabled: project=${project_status}, versions=${versions_status}."
+            exit 0
+          fi
 
           if ! python3 -c '
           import json
@@ -143,13 +164,16 @@ jobs:
           if duplicates:
               print("Modrinth versions already exist: " + ", ".join(duplicates) + "; select only missing variants.", file=sys.stderr)
               sys.exit(1)
-          ' "${VERSIONS[@]}" <<< "${PUBLISHED_VERSIONS}"; then
+          ' "${VERSIONS[@]}" < "${versions_file}"; then
             exit 1
           fi
 
+          echo "enabled=true" >> "${GITHUB_OUTPUT}"
+          echo "Modrinth retry enabled: project and versions APIs returned successful responses."
+
       - name: Publish Fabric standard build to Modrinth
         id: publish_fabric
-        if: ${{ inputs.variant == 'all' || inputs.variant == 'fabric' }}
+        if: ${{ steps.modrinth_gate.outputs.enabled == 'true' && (inputs.variant == 'all' || inputs.variant == 'fabric') }}
         uses: Kir-Antipov/mc-publish@v3.3
         with:
           modrinth-id: itemgraph
@@ -171,7 +195,7 @@ jobs:
 
       - name: Publish Fabric GriefLogger-compatible build to Modrinth
         id: publish_fabric_grieflogger
-        if: ${{ inputs.variant == 'all' || inputs.variant == 'fabric-grieflogger-compatible' }}
+        if: ${{ steps.modrinth_gate.outputs.enabled == 'true' && (inputs.variant == 'all' || inputs.variant == 'fabric-grieflogger-compatible') }}
         uses: Kir-Antipov/mc-publish@v3.3
         with:
           modrinth-id: itemgraph
@@ -193,7 +217,7 @@ jobs:
 
       - name: Publish NeoForge standard build to Modrinth
         id: publish_neoforge
-        if: ${{ inputs.variant == 'all' || inputs.variant == 'neoforge' }}
+        if: ${{ steps.modrinth_gate.outputs.enabled == 'true' && (inputs.variant == 'all' || inputs.variant == 'neoforge') }}
         uses: Kir-Antipov/mc-publish@v3.3
         with:
           modrinth-id: itemgraph
@@ -215,7 +239,7 @@ jobs:
 
       - name: Publish NeoForge GriefLogger-compatible build to Modrinth
         id: publish_neoforge_grieflogger
-        if: ${{ inputs.variant == 'all' || inputs.variant == 'neoforge-grieflogger-compatible' }}
+        if: ${{ steps.modrinth_gate.outputs.enabled == 'true' && (inputs.variant == 'all' || inputs.variant == 'neoforge-grieflogger-compatible') }}
         uses: Kir-Antipov/mc-publish@v3.3
         with:
           modrinth-id: itemgraph
@@ -239,6 +263,7 @@ jobs:
         if: ${{ always() }}
         shell: bash
         env:
+          MODRINTH_STATUS: ${{ steps.modrinth_gate.outputs.status }}
           FABRIC_URL: ${{ steps.publish_fabric.outputs.modrinth-url }}
           FABRIC_GL_URL: ${{ steps.publish_fabric_grieflogger.outputs.modrinth-url }}
           NEOFORGE_URL: ${{ steps.publish_neoforge.outputs.modrinth-url }}
@@ -247,6 +272,7 @@ jobs:
           {
             echo "## Modrinth publication results"
             echo
+            echo "- Modrinth gate: ${MODRINTH_STATUS:-not evaluated}"
             echo "- Fabric: ${FABRIC_URL:-not published}"
             echo "- Fabric GriefLogger-compatible: ${FABRIC_GL_URL:-not published}"
             echo "- NeoForge: ${NEOFORGE_URL:-not published}"

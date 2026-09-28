@@ -6,6 +6,10 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Changed
+
+- **Modrinth publication gate**: tagged releases and the Modrinth-only retry workflow now check both project API endpoints before publishing. A non-2xx response disables Modrinth steps cleanly while GitHub and CurseForge publication continue; publication resumes automatically after both endpoints return successful responses.
+
 ## [0.3.2] — 2026-09-28
 
 ### Added
