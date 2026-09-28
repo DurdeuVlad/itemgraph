@@ -62,11 +62,16 @@ A node is not necessarily permanent. Some are long-lived, such as a chest at fix
 ### Native audit events
 
 `ig_observations` is reserved for item quantity-flow evidence. Native block,
-session, chat, command, and entity audit records are stored in the separate
+session, chat, command, entity, and projectile-use audit records are stored in the separate
 `ig_audit_events` ledger so they cannot be mistaken for item transfers. The
 ledger uses the same bounded asynchronous persistence service and read-only query
-dispatcher as item evidence. NeoForge consume, durability-break, and bow-shoot
-events remain quantity-flow observations because they carry item identity and amount.
+dispatcher as item evidence. NeoForge consume and durability-break events remain
+quantity-flow observations because they carry an observed item identity and amount.
+NeoForge projectile spawn callbacks record only the spawned projectile type, source
+item ID, and location as audit evidence: they do not assert that one item left an
+inventory or that the projectile reached the ground. This preserves quantity
+conservation for Infinity bows, multishot, and throwable items without a matching
+inventory delta.
 
 ### Observations
 

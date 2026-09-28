@@ -514,13 +514,16 @@ public final class ItemGraphCommands {
     private static int lookupAuditPage(CommandContext<CommandSourceStack> ctx, String eventType,
                                        int page, int limit, Long sinceMinutes) {
         int clampedLimit = QueryLimits.clampLimit(limit);
-        long requestedOffset = ((long) Math.max(1, page) - 1L) * clampedLimit;
+        int requestedPage = Math.max(1, page);
+        long requestedOffset = ((long) requestedPage - 1L) * clampedLimit;
         int offset = QueryLimits.clampOffset(requestedOffset > Integer.MAX_VALUE
                 ? Integer.MAX_VALUE : (int) requestedOffset);
+        int effectivePage = offset / clampedLimit + 1;
         QueryWindow window = sinceMinutes == null
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
-        String filter = "type=" + eventType + " page=" + page + " limit=" + clampedLimit
+        String filter = "type=" + eventType + " page=" + effectivePage + " limit=" + clampedLimit
+                + (effectivePage == requestedPage ? "" : " requestedPage=" + requestedPage + " offset=" + offset)
                 + " window=" + window.describe();
         return QueryDispatcher.dispatch(ctx.getSource(), "lookup audit", conn ->
                 QueryDispatcher.QueryOutput.found(QueryFormatter.formatAuditEvents(

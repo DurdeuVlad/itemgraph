@@ -97,7 +97,7 @@ public final class NativeAuditEventListener {
                 || !(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
-        submit("INTERACT_BLOCK", player, level, event.getPos(),
+        submit("INTERACT_BLOCK_ATTEMPT", player, level, event.getPos(),
                 blockId(level.getBlockState(event.getPos())), null);
     }
 

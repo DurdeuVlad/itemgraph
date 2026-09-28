@@ -82,7 +82,7 @@ final class CommandHelp {
                 "[ItemGraph] Example: /ig audit"));
         List<String> lookup = List.of(
                 "[ItemGraph] Syntax: /ig lookup <eventType> [limit] [sinceMinutes]",
-                "[ItemGraph] eventType: all, PLAYER_JOIN, PLAYER_QUIT, CHAT_MESSAGE, COMMAND_EXECUTED, PLACE_BLOCK, BREAK_BLOCK, INTERACT_BLOCK, INTERACT_BLOCK_ATTEMPT, or KILL_ENTITY.",
+                "[ItemGraph] eventType: all, PLAYER_JOIN, PLAYER_QUIT, CHAT_MESSAGE, COMMAND_EXECUTED, PLACE_BLOCK, BREAK_BLOCK, INTERACT_BLOCK, INTERACT_BLOCK_ATTEMPT, KILL_ENTITY, THROW_ITEM, or SHOOT_ITEM.",
                 "[ItemGraph] Results are native OBSERVED evidence from ig_audit_events; limit defaults to 20 and is capped at 100.",
                 "[ItemGraph] /ig lookup near clamps radius to 1..1024 blocks and requires an exact dimension id.",
                 "[ItemGraph] Pages are 1-based; offsets are capped at 10,000 rows.",
