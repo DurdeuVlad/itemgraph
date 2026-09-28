@@ -3,6 +3,8 @@ package com.itemgraph.fabric;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
+import com.itemgraph.command.FlowBrowserService;
+import com.itemgraph.command.InspectionService;
 import com.mojang.brigadier.ParseResults;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -17,6 +19,7 @@ import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -63,6 +66,7 @@ public final class FabricNativeAuditEventListener {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayer player = handler.getPlayer();
             submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
+            InspectionService.getInstance().clear(player.getUUID());
         });
         ServerMessageEvents.CHAT_MESSAGE.register(FabricNativeAuditEventListener::onChat);
         PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
@@ -73,6 +77,13 @@ public final class FabricNativeAuditEventListener {
         });
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
+                InteractionResult inspectionResult = tryOpenInspection(
+                        InspectionService.getInstance(),
+                        FabricNativeAuditEventListener::openFlowBrowser,
+                        serverPlayer, serverLevel, hit.getBlockPos());
+                if (inspectionResult != null) {
+                    return inspectionResult;
+                }
                 submit("INTERACT_BLOCK_ATTEMPT", serverPlayer, serverLevel, hit.getBlockPos(),
                         BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit.getBlockPos()).getBlock()).toString(), null);
             }
@@ -85,6 +96,41 @@ public final class FabricNativeAuditEventListener {
                         BuiltInRegistries.ENTITY_TYPE.getKey(victim.getType()).toString(), null);
             }
         });
+    }
+
+    @FunctionalInterface
+    interface BrowserOpener {
+        int open(ServerPlayer player, ServerLevel level, BlockPos pos);
+    }
+
+    /**
+     * Handles the Fabric equivalent of NeoForge's high-priority inspection
+     * listener. A supported container click is consumed only after the async
+     * flow-browser request is accepted; unsupported blocks remain ordinary
+     * interactions and are still recorded as audit evidence.
+     */
+    static InteractionResult tryOpenInspection(InspectionService inspections,
+                                                BrowserOpener browserOpener,
+                                                ServerPlayer player,
+                                                ServerLevel level,
+                                                BlockPos pos) {
+        if (inspections == null || browserOpener == null || player == null || level == null || pos == null
+                || !inspections.isEnabled(player.getUUID())) {
+            return null;
+        }
+        if (!player.createCommandSourceStack().hasPermission(2)) {
+            inspections.clear(player.getUUID());
+            return null;
+        }
+        if (!(level.getBlockEntity(pos) instanceof Container)) {
+            return null;
+        }
+        return browserOpener.open(player, level, pos) == 0 ? null : InteractionResult.SUCCESS;
+    }
+
+    private static int openFlowBrowser(ServerPlayer player, ServerLevel level, BlockPos pos) {
+        return FlowBrowserService.openContainer(player.createCommandSourceStack(),
+                level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ(), null);
     }
 
     /**
