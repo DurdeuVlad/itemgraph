@@ -8,6 +8,13 @@ Its purpose is to reconstruct plausible item-type and stack-quantity movement ac
 
 **GriefLogger is optional.** Without it, ItemGraph uses its own storage and supported native NeoForge observations. When GriefLogger is installed, ItemGraph reads its SQLite database strictly read-only as additive evidence.
 
+For GriefLogger `1.2.10-1.21.1`, install the CI/release artifact ending in
+`-grieflogger-compatible.jar`. GriefLogger embeds SQLite classes in its main mod
+module, which conflicts with the SQLite JarJar library in ItemGraph's standard
+standalone JAR. The compatible artifact omits that library and declares the tested
+GriefLogger version as required. The standard JAR remains for installations without
+GriefLogger.
+
 > Evidence first. Inference second. Confidence explicit. Every conclusion traceable.
 
 ## Project identity

@@ -6,6 +6,12 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-09-28
+
+### Added
+
+- **GriefLogger-compatible server artifact**: CI and tagged releases now produce and distribute a separate `-grieflogger-compatible.jar` for GriefLogger `1.2.10-1.21.1`. It omits ItemGraph's SQLite Jar-in-Jar copy to avoid the `org.sqlite.*` module collision. CurseForge publishes this as a separately labeled file with GriefLogger required; use it when running GriefLogger and use the standard JAR without GriefLogger.
+
 ## [0.3.0] — 2026-09-25
 
 ### Added

@@ -54,8 +54,8 @@ jobs:
           echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
-      - name: Run automated test suite and build release jar
-        run: ./gradlew clean build
+      - name: Run automated test suite and build release jars
+        run: ./gradlew clean build verifyGriefLoggerCompatibleJar
 
       - name: Extract release changelog
         shell: bash
@@ -103,10 +103,9 @@ jobs:
           curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
 
-          files: |
-            build/libs/!(*-@(dev|sources|javadoc)).jar
+          files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}.jar
 
-          name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
+          name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, no GriefLogger)
           version: ${{ steps.version_data.outputs.version }}
           version-type: release
           changelog-file: release-notes.md
@@ -125,18 +124,17 @@ jobs:
           dependencies: |
             grieflogger(optional){curseforge:435029}
 
-      - name: Publish to Modrinth
-        id: publish_modrinth
+      - name: Publish GriefLogger-compatible artifact to CurseForge
+        id: publish_curseforge_grieflogger
         if: ${{ !cancelled() }}
         uses: Kir-Antipov/mc-publish@v3.3
         with:
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
 
-          files: |
-            build/libs/!(*-@(dev|sources|javadoc)).jar
+          files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-grieflogger-compatible.jar
 
-          name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
+          name: ItemGraph ${{ steps.version_data.outputs.version }} (GriefLogger 1.2.10 compatible)
           version: ${{ steps.version_data.outputs.version }}
           version-type: release
           changelog-file: release-notes.md
@@ -153,7 +151,7 @@ jobs:
             21
 
           dependencies: |
-            grieflogger(optional){curseforge:435029}
+            grieflogger@1.2.10-1.21.1(required){curseforge:435029}
 
       - name: Write publication summary
         if: ${{ always() }}
@@ -162,13 +160,13 @@ jobs:
           GITHUB_URL: ${{ steps.publish_github.outputs.github-url }}
           CURSEFORGE_URL: ${{ steps.publish_curseforge.outputs.curseforge-url }}
           CURSEFORGE_VERSION: ${{ steps.publish_curseforge.outputs.curseforge-version }}
-          MODRINTH_URL: ${{ steps.publish_modrinth.outputs.modrinth-url }}
-          MODRINTH_VERSION: ${{ steps.publish_modrinth.outputs.modrinth-version }}
+          CURSEFORGE_GRIEFLOGGER_URL: ${{ steps.publish_curseforge_grieflogger.outputs.curseforge-url }}
+          CURSEFORGE_GRIEFLOGGER_VERSION: ${{ steps.publish_curseforge_grieflogger.outputs.curseforge-version }}
         run: |
           {
             echo "## Publication results"
             echo
             echo "- GitHub: ${GITHUB_URL:-not published}"
             echo "- CurseForge: ${CURSEFORGE_URL:-not published} (${CURSEFORGE_VERSION:-no file id})"
-            echo "- Modrinth: ${MODRINTH_URL:-not published} (${MODRINTH_VERSION:-no version id})"
+            echo "- CurseForge GriefLogger-compatible: ${CURSEFORGE_GRIEFLOGGER_URL:-not published} (${CURSEFORGE_GRIEFLOGGER_VERSION:-no file id})"
           } >> "${GITHUB_STEP_SUMMARY}"

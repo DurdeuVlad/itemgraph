@@ -72,11 +72,9 @@ if (!devSqliteProvided.get()) {
 
 dependencies {
     // Bundle sqlite-jdbc via NeoForge JarJar so ItemGraph is self-sufficient
-    // when GriefLogger is absent. When GriefLogger IS present, JarJar's version
-    // negotiation deduplicates on the same group:artifact coordinates — only the
-    // highest version within both mods' declared ranges is placed on the module
-    // path, eliminating the "two modules export org.sqlite" JPMS split-package
-    // conflict that occurred with plain `implementation`.
+    // when GriefLogger is absent. GriefLogger 1.2.10 embeds SQLite in its main
+    // mod module, so JarJar negotiation cannot deduplicate it. The dedicated
+    // griefloggerCompatibleJar below omits our JarJar copy for that installation.
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version {
             prefer '3.46.1.0'
@@ -96,25 +94,110 @@ tasks.named('test', Test) {
     useJUnitPlatform()
 }
 
+def modMetadataProperties = [
+    minecraft_version             : project.minecraft_version,
+    minecraft_version_range       : project.minecraft_version_range,
+    neo_version                   : project.neo_version,
+    neo_version_range             : project.neo_version_range,
+    loader_version_range          : project.loader_version_range,
+    mod_id                        : project.mod_id,
+    mod_name                      : project.mod_name,
+    mod_license                   : project.mod_license,
+    mod_version                   : project.mod_version,
+    mod_authors                   : project.mod_authors,
+    mod_description               : project.mod_description,
+    grieflogger_dependency_type   : 'optional',
+    grieflogger_version_range     : '[1.2.10,)',
+    grieflogger_dependency_reason : 'Optional evidence source; ItemGraph records its supported native observations without it.'
+]
 
-tasks.withType(ProcessResources).configureEach {
-    var replaceProperties = [
-        minecraft_version      : project.minecraft_version,
-        minecraft_version_range: project.minecraft_version_range,
-        neo_version            : project.neo_version,
-        neo_version_range      : project.neo_version_range,
-        loader_version_range   : project.loader_version_range,
-        mod_id                 : project.mod_id,
-        mod_name               : project.mod_name,
-        mod_license            : project.mod_license,
-        mod_version            : project.mod_version,
-        mod_authors            : project.mod_authors,
-        mod_description        : project.mod_description
-    ]
-    inputs.properties replaceProperties
+def griefloggerCompatibleMetadataProperties = modMetadataProperties + [
+    grieflogger_dependency_type   : 'required',
+    grieflogger_version_range     : '[1.2.10-1.21.1]',
+    grieflogger_dependency_reason : 'Required compatibility provider for the SQLite driver bundled in GriefLogger 1.2.10-1.21.1.'
+]
+
+tasks.named('processResources', ProcessResources) {
+    inputs.properties modMetadataProperties
 
     filesMatching(['META-INF/neoforge.mods.toml']) {
-        expand replaceProperties
+        expand modMetadataProperties
+    }
+}
+
+tasks.register('processGriefLoggerCompatibleResources', ProcessResources) {
+    inputs.properties griefloggerCompatibleMetadataProperties
+    from(sourceSets.main.resources)
+    include 'META-INF/neoforge.mods.toml'
+    into layout.buildDirectory.dir('generated/grieflogger-compatible-resources')
+
+    filesMatching(['META-INF/neoforge.mods.toml']) {
+        expand griefloggerCompatibleMetadataProperties
+    }
+}
+
+tasks.register('griefloggerCompatibleJar', Jar) {
+    group = 'build'
+    description = 'Builds an ItemGraph jar that requires GriefLogger 1.2.10-1.21.1 and uses its SQLite driver.'
+    dependsOn tasks.named('classes'), tasks.named('processGriefLoggerCompatibleResources')
+    archiveClassifier = 'grieflogger-compatible'
+
+    from(sourceSets.main.output) {
+        exclude 'META-INF/neoforge.mods.toml'
+    }
+    from(tasks.named('processGriefLoggerCompatibleResources'))
+}
+
+tasks.register('verifyGriefLoggerCompatibleJar') {
+    group = 'verification'
+    description = 'Checks that the GriefLogger-compatible jar requires the tested GriefLogger version and has no bundled SQLite copy.'
+    dependsOn tasks.named('griefloggerCompatibleJar'), tasks.named('jarJar')
+
+    doLast {
+        def artifact = tasks.named('griefloggerCompatibleJar', Jar).get().archiveFile.get().asFile
+        def standardArtifact = tasks.named('jar', Jar).get().archiveFile.get().asFile
+        def archive = new java.util.zip.ZipFile(artifact)
+        def standardArchive = new java.util.zip.ZipFile(standardArtifact)
+        try {
+            def entryNames = java.util.Collections.list(archive.entries()).collect { it.name }
+            if (entryNames.any { it.startsWith('org/sqlite/') || it.contains('sqlite-jdbc-') || it == 'META-INF/jarjar/metadata.json' }) {
+                throw new GradleException("${artifact.name} unexpectedly contains a bundled SQLite driver")
+            }
+
+            def standardEntryNames = java.util.Collections.list(standardArchive.entries()).collect { it.name }
+            if (!standardEntryNames.contains('META-INF/jarjar/metadata.json')
+                    || !standardEntryNames.any { it.contains('sqlite-jdbc-') }) {
+                throw new GradleException("${standardArtifact.name} must retain its standalone SQLite JarJar dependency")
+            }
+
+            def metadataEntry = archive.getEntry('META-INF/neoforge.mods.toml')
+            if (metadataEntry == null) {
+                throw new GradleException("${artifact.name} is missing META-INF/neoforge.mods.toml")
+            }
+
+            def metadata = archive.getInputStream(metadataEntry).getText('UTF-8')
+            def griefloggerBlock = metadata.split(/(?=\[\[dependencies\.)/).find { it.contains('modId="grieflogger"') }
+            if (griefloggerBlock == null
+                    || !griefloggerBlock.contains('type="required"')
+                    || !griefloggerBlock.contains('versionRange="[1.2.10-1.21.1]"')) {
+                throw new GradleException("${artifact.name} must require GriefLogger 1.2.10-1.21.1")
+            }
+
+            def standardMetadataEntry = standardArchive.getEntry('META-INF/neoforge.mods.toml')
+            if (standardMetadataEntry == null) {
+                throw new GradleException("${standardArtifact.name} is missing META-INF/neoforge.mods.toml")
+            }
+            def standardMetadata = standardArchive.getInputStream(standardMetadataEntry).getText('UTF-8')
+            def standardGriefLoggerBlock = standardMetadata.split(/(?=\[\[dependencies\.)/).find { it.contains('modId="grieflogger"') }
+            if (standardGriefLoggerBlock == null || !standardGriefLoggerBlock.contains('type="optional"')) {
+                throw new GradleException("${standardArtifact.name} must keep GriefLogger optional")
+            }
+        } finally {
+            archive.close()
+            standardArchive.close()
+        }
+
+        logger.lifecycle("Verified GriefLogger-compatible artifact: ${artifact.name}")
     }
 }
 

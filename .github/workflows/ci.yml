@@ -36,4 +36,11 @@ jobs:
           chmod +x ./gradlew
 
       - name: Run tests and build
-        run: ./gradlew clean build
+        run: ./gradlew clean build verifyGriefLoggerCompatibleJar
+
+      - name: Upload GriefLogger-compatible artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: itemgraph-grieflogger-compatible
+          path: build/libs/*-grieflogger-compatible.jar
+          if-no-files-found: error

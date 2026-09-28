@@ -13,6 +13,27 @@ GriefLogger has been an **optional additive evidence source** for ItemGraph sinc
 
 These are additive modes, not an either/or switch. GriefLogger is not required for ItemGraph to boot or run.
 
+## Artifact selection and SQLite module compatibility
+
+The standard `itemgraph-<version>.jar` bundles `org.xerial:sqlite-jdbc` with
+NeoForge Jar-in-Jar and keeps GriefLogger optional. GriefLogger
+`1.2.10-1.21.1` packages `org.sqlite.*` in its main mod module; when both standard
+artifacts load, Java module resolution sees two modules exporting `org.sqlite.util`
+and aborts server startup. Jar-in-Jar version negotiation cannot remove classes
+embedded in GriefLogger's main JAR.
+
+For servers running GriefLogger `1.2.10-1.21.1`, use
+`itemgraph-<version>-grieflogger-compatible.jar`. It omits ItemGraph's SQLite
+Jar-in-Jar dependency, uses GriefLogger's SQLite classes, and declares that exact
+GriefLogger version as required in `META-INF/neoforge.mods.toml`. Do not install
+both ItemGraph artifacts together. CI builds and structurally verifies both; the
+release workflow attaches both to GitHub Releases and publishes each CurseForge
+file with matching dependency metadata.
+
+The compatibility artifact's tested scope is GriefLogger `1.2.10-1.21.1` on
+Minecraft 1.21.1 / NeoForge 21.1.248. Other GriefLogger versions need a separate
+compatibility check before widening this artifact's declared version range.
+
 ## Integration principle
 
 ```text

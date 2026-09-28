@@ -35,12 +35,13 @@ description='''${mod_description}'''
 # ItemGraph records its supported native NeoForge events and capability changes.
 # When GriefLogger IS present, ItemGraph reads its SQLite database read-only and
 # groups confirmed copies so both raw rows remain auditable but add one capacity.
-# ItemGraph bundles its own sqlite-jdbc via JarJar; JarJar version negotiation
-# deduplicates with GriefLogger's bundled copy when both are present.
+# The standard ItemGraph artifact bundles sqlite-jdbc via JarJar. GriefLogger
+# 1.2.10 also embeds SQLite in its main mod module, so use the dedicated
+# grieflogger-compatible artifact when that version is installed.
 [[dependencies.${mod_id}]]
     modId="grieflogger"
-    type="optional"
-    reason="Optional evidence source; ItemGraph records its supported native observations without it."
-    versionRange="[1.2.10,)"
+    type="${grieflogger_dependency_type}"
+    reason="${grieflogger_dependency_reason}"
+    versionRange="${grieflogger_version_range}"
     ordering="AFTER"
     side="BOTH"
