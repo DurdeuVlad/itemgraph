@@ -310,6 +310,81 @@ public final class FabricNativeAuditEventListener {
         recordUnknownItemObservation(player, "BREAK_ITEM", originalStack.copy(), 1);
     }
 
+    /** Records a crafting result taken from a server-side crafting result slot. */
+    public static void onCrafted(ServerPlayer player, Container matrix, ItemStack output) {
+        if (player == null || output == null || output.isEmpty() || player.level().isClientSide()) {
+            return;
+        }
+        CanonicalItem source = firstContainerItem(matrix);
+        if (source == null) {
+            source = syntheticSource("minecraft:ingredient");
+        }
+        CanonicalItem result = ItemCanonicalizer.canonicalizeStack(output);
+        submitTransformation(player, "CRAFT", source, result, output.getCount(),
+                "Crafted " + output.getCount() + "x " + result.itemId() + " from " + source.itemId());
+    }
+
+    /** Records a furnace, blast-furnace, or smoker result taken by a player. */
+    public static void onSmelted(ServerPlayer player, ItemStack output) {
+        if (player == null || output == null || output.isEmpty() || player.level().isClientSide()) {
+            return;
+        }
+        CanonicalItem result = ItemCanonicalizer.canonicalizeStack(output);
+        CanonicalItem source = syntheticSource("minecraft:smelt_ingredient");
+        submitTransformation(player, "SMELT", source, result, output.getCount(),
+                "Smelted " + output.getCount() + "x " + result.itemId());
+    }
+
+    /** Records an anvil rename or repair before the input slots are consumed. */
+    public static void onAnvilResult(ServerPlayer player, Container inputs, ItemStack output) {
+        if (player == null || inputs == null || output == null || output.isEmpty()
+                || player.level().isClientSide()) {
+            return;
+        }
+        ItemStack left = inputs.getItem(0);
+        if (left == null || left.isEmpty()) {
+            return;
+        }
+        CanonicalItem source = ItemCanonicalizer.canonicalizeStack(left);
+        CanonicalItem result = ItemCanonicalizer.canonicalizeStack(output);
+        String sourceName = source.customName();
+        String resultName = result.customName();
+        boolean renamed = sourceName == null ? resultName != null : !sourceName.equals(resultName);
+        String type = renamed ? "ANVIL_RENAME" : "ANVIL_REPAIR";
+        String details = renamed
+                ? "Renamed '" + (sourceName == null ? source.itemId() : sourceName)
+                + "' -> '" + (resultName == null ? result.itemId() : resultName) + "'"
+                : "Anvil repair/combine on " + output.getItem();
+        submitTransformation(player, type, source, result, output.getCount(), details);
+    }
+
+    private static CanonicalItem firstContainerItem(Container container) {
+        if (container == null) {
+            return null;
+        }
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (stack != null && !stack.isEmpty()) {
+                return ItemCanonicalizer.canonicalizeStack(stack);
+            }
+        }
+        return null;
+    }
+
+    private static CanonicalItem syntheticSource(String itemId) {
+        return new CanonicalItem(itemId, ItemCanonicalizer.sha256Hex("id=" + itemId), null, null, null);
+    }
+
+    private static void submitTransformation(ServerPlayer player, String type, CanonicalItem source,
+                                              CanonicalItem result, int quantity, String details) {
+        String level = player.level().dimension().location().toString();
+        InternalObservationService.getInstance().submitTransformation(
+                new InternalObservationService.InternalTransformation(
+                        System.currentTimeMillis(), type,
+                        player.getUUID().toString(), player.getGameProfile().getName(), level,
+                        player.getX(), player.getY(), player.getZ(), source, result, quantity, details));
+    }
+
     static void recordUnknownItemObservation(ServerPlayer player, String actionType,
                                               ItemStack stack, int amount) {
         if (player == null || stack == null || stack.isEmpty() || amount <= 0

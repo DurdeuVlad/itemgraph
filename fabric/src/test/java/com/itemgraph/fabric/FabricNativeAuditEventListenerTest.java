@@ -348,6 +348,45 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
+    void craftingResultRecordsTransformationWithPrimaryIngredient() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        CanonicalItem source = new CanonicalItem("minecraft:wheat", "fp-wheat", null, null, null);
+        CanonicalItem result = new CanonicalItem("minecraft:bread", "fp-bread", null, null, null);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        Container matrix = mock(Container.class);
+        UUID playerUuid = UUID.randomUUID();
+        ItemStack ingredient = new ItemStack(Items.WHEAT, 3);
+        ItemStack output = new ItemStack(Items.BREAD, 1);
+        when(player.level()).thenReturn(level);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getX()).thenReturn(1.0);
+        when(player.getY()).thenReturn(2.0);
+        when(player.getZ()).thenReturn(3.0);
+        when(matrix.getContainerSize()).thenReturn(1);
+        when(matrix.getItem(0)).thenReturn(ingredient);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(ingredient)).thenReturn(source);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(output)).thenReturn(result);
+            FabricNativeAuditEventListener.onCrafted(player, matrix, output);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalTransformation> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalTransformation.class);
+        verify(service).submitTransformation(captured.capture());
+        assertEquals("CRAFT", captured.getValue().transformationType());
+        assertEquals(source, captured.getValue().sourceItem());
+        assertEquals(result, captured.getValue().resultItem());
+        assertEquals(1, captured.getValue().quantity());
+    }
+
+    @Test
     void dropCaptureRequiresAcceptedEntityAndSupportsNesting() {
         ItemEntity outer = mock(ItemEntity.class);
         ItemEntity inner = mock(ItemEntity.class);

@@ -345,6 +345,9 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   bounded nested capture and records only a consumed result. `ItemStackMixin`
   captures durability breaks at the `hurtAndBreak` shrink boundary, before the
   broken stack is removed.
+- Fabric result-slot mixins capture crafting, furnace-family smelting, and anvil
+  rename/repair results into `ig_item_transformations` with canonical source and
+  result fingerprints.
 - Both loaders expose the same read-only container inspector: NeoForge uses its
   high-priority `InspectionListener`, while Fabric uses `UseBlockCallback` and the
   shared `FlowBrowserService`. A click is consumed only after the asynchronous query
