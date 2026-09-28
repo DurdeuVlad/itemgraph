@@ -356,7 +356,10 @@ before/after snapshot. Fabric's
 official [1.21.1 event documentation](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md)
 says areas without API hooks should use a mixin;
 there is no completed block-placement callback in the interaction events.
-The pre-execution semantics are documented by NeoForge's
+GriefLogger's [command documentation](https://daqem.com/projects/grieflogger/wiki/player-actions/chat-commands)
+states that every command attempt is recorded regardless of permission or command
+success, so the pre-execution semantics are the parity target. The pre-execution
+semantics are also documented by NeoForge's
 [`CommandEvent`](https://raw.githubusercontent.com/neoforged/NeoForge/1.21.1/src/main/java/net/neoforged/neoforge/event/CommandEvent.java),
 and the Fabric API limitation is documented by Fabric's
 [`ServerMessageEvents`](https://raw.githubusercontent.com/FabricMC/fabric-api/0.116.12+1.21.1/fabric-message-api-v1/src/main/java/net/fabricmc/fabric/api/message/v1/ServerMessageEvents.java),
@@ -365,7 +368,6 @@ execution.
 
 ### Remaining parity slices
 
-- Fabric post-execution command results.
 - Staging verification with GriefLogger absent and a migration/retention plan.
 
 Prefer small commits such as:
