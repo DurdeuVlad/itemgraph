@@ -134,13 +134,30 @@ jobs:
         with:
           curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          modrinth-id: ${{ steps.modrinth_gate.outputs.enabled == 'true' && 'itemgraph' || '' }}
-          modrinth-token: ${{ steps.modrinth_gate.outputs.enabled == 'true' && secrets.MODRINTH_TOKEN || '' }}
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
-          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1)
-          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1)
           curseforge-version: ${{ steps.version_data.outputs.version }}
+          version-type: release
+          changelog-file: release-notes.md
+          game-versions: |
+            1.21.1
+          loaders: |
+            fabric
+          environment: dedicated-server
+          java: |
+            21
+          dependencies: |
+            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
+
+      - name: Publish Fabric standard build to Modrinth
+        id: publish_fabric_modrinth
+        if: ${{ !cancelled() && steps.modrinth_gate.outputs.enabled == 'true' }}
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          modrinth-id: itemgraph
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
+          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1)
           modrinth-version: '${{ steps.version_data.outputs.version }}+fabric'
           version-type: release
           changelog-file: release-notes.md
@@ -161,13 +178,30 @@ jobs:
         with:
           curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          modrinth-id: ${{ steps.modrinth_gate.outputs.enabled == 'true' && 'itemgraph' || '' }}
-          modrinth-token: ${{ steps.modrinth_gate.outputs.enabled == 'true' && secrets.MODRINTH_TOKEN || '' }}
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
-          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
-          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
           curseforge-version: ${{ steps.version_data.outputs.version }}
+          version-type: release
+          changelog-file: release-notes.md
+          game-versions: |
+            1.21.1
+          loaders: |
+            fabric
+          environment: dedicated-server
+          java: |
+            21
+          dependencies: |
+            grieflogger@1.2.10-1.21.1(required){modrinth:grieflogger}{curseforge:435029}
+
+      - name: Publish Fabric GriefLogger-compatible build to Modrinth
+        id: publish_fabric_grieflogger_modrinth
+        if: ${{ !cancelled() && steps.modrinth_gate.outputs.enabled == 'true' }}
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          modrinth-id: itemgraph
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
+          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
           modrinth-version: '${{ steps.version_data.outputs.version }}+fabric-gl'
           version-type: release
           changelog-file: release-notes.md
@@ -188,13 +222,30 @@ jobs:
         with:
           curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          modrinth-id: ${{ steps.modrinth_gate.outputs.enabled == 'true' && 'itemgraph' || '' }}
-          modrinth-token: ${{ steps.modrinth_gate.outputs.enabled == 'true' && secrets.MODRINTH_TOKEN || '' }}
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
-          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
-          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
           curseforge-version: ${{ steps.version_data.outputs.version }}
+          version-type: release
+          changelog-file: release-notes.md
+          game-versions: |
+            1.21.1
+          loaders: |
+            neoforge
+          environment: dedicated-server
+          java: |
+            21
+          dependencies: |
+            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
+
+      - name: Publish NeoForge standard build to Modrinth
+        id: publish_neoforge_modrinth
+        if: ${{ !cancelled() && steps.modrinth_gate.outputs.enabled == 'true' }}
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          modrinth-id: itemgraph
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
+          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
           modrinth-version: '${{ steps.version_data.outputs.version }}+neoforge'
           version-type: release
           changelog-file: release-notes.md
@@ -215,13 +266,30 @@ jobs:
         with:
           curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          modrinth-id: ${{ steps.modrinth_gate.outputs.enabled == 'true' && 'itemgraph' || '' }}
-          modrinth-token: ${{ steps.modrinth_gate.outputs.enabled == 'true' && secrets.MODRINTH_TOKEN || '' }}
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
-          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
-          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
           curseforge-version: ${{ steps.version_data.outputs.version }}
+          version-type: release
+          changelog-file: release-notes.md
+          game-versions: |
+            1.21.1
+          loaders: |
+            neoforge
+          environment: dedicated-server
+          java: |
+            21
+          dependencies: |
+            grieflogger@1.2.10-1.21.1(required){modrinth:grieflogger}{curseforge:435029}
+
+      - name: Publish NeoForge GriefLogger-compatible build to Modrinth
+        id: publish_neoforge_grieflogger_modrinth
+        if: ${{ !cancelled() && steps.modrinth_gate.outputs.enabled == 'true' }}
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          modrinth-id: itemgraph
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
+          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
           modrinth-version: '${{ steps.version_data.outputs.version }}+neoforge-gl'
           version-type: release
           changelog-file: release-notes.md
@@ -242,13 +310,13 @@ jobs:
           GITHUB_URL: ${{ steps.publish_github.outputs.github-url }}
           MODRINTH_STATUS: ${{ steps.modrinth_gate.outputs.status }}
           FABRIC_CURSEFORGE_URL: ${{ steps.publish_fabric.outputs.curseforge-url }}
-          FABRIC_MODRINTH_URL: ${{ steps.publish_fabric.outputs.modrinth-url }}
+          FABRIC_MODRINTH_URL: ${{ steps.publish_fabric_modrinth.outputs.modrinth-url }}
           FABRIC_GL_CURSEFORGE_URL: ${{ steps.publish_fabric_grieflogger.outputs.curseforge-url }}
-          FABRIC_GL_MODRINTH_URL: ${{ steps.publish_fabric_grieflogger.outputs.modrinth-url }}
+          FABRIC_GL_MODRINTH_URL: ${{ steps.publish_fabric_grieflogger_modrinth.outputs.modrinth-url }}
           NEOFORGE_CURSEFORGE_URL: ${{ steps.publish_neoforge.outputs.curseforge-url }}
-          NEOFORGE_MODRINTH_URL: ${{ steps.publish_neoforge.outputs.modrinth-url }}
+          NEOFORGE_MODRINTH_URL: ${{ steps.publish_neoforge_modrinth.outputs.modrinth-url }}
           NEOFORGE_GL_CURSEFORGE_URL: ${{ steps.publish_neoforge_grieflogger.outputs.curseforge-url }}
-          NEOFORGE_GL_MODRINTH_URL: ${{ steps.publish_neoforge_grieflogger.outputs.modrinth-url }}
+          NEOFORGE_GL_MODRINTH_URL: ${{ steps.publish_neoforge_grieflogger_modrinth.outputs.modrinth-url }}
         run: |
           {
             echo "## Publication results"
