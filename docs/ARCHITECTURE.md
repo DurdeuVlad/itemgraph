@@ -24,14 +24,15 @@ neoforge adapter┘
 The adapters expose different event APIs but both now have native audit capture. NeoForge
 adds native container, item-entity, armor-stand, transformation, and item-action listeners;
 Fabric adds its supported session, chat, block, death, command-dispatch, fresh-projectile,
-completed-consumption, and container-inspection callbacks.
+completed-consumption, durability-break, and container-inspection callbacks.
 NeoForge command callbacks and the Fabric `CommandsMixin` are stored as
 `COMMAND_ATTEMPT` because both hooks run before command execution. This matches
 GriefLogger's documented command-attempt behavior and avoids inventing a success result.
 NeoForge-only inventory hooks remain an explicit platform coverage boundary in
 `docs/GRIEFLOGGER_PARITY.md`; Fabric `BlockItemMixin` captures completed BlockItem
-placements, `LivingEntityMixin` captures completed eat/drink uses, and Fabric projectile
-callbacks are non-quantity spawn evidence. Both loaders
+placements, `LivingEntityMixin` captures completed eat/drink uses, `ItemStackMixin` captures
+durability breaks at the shrink boundary, and Fabric projectile callbacks are non-quantity
+spawn evidence. Both loaders
 share the read-only `FlowBrowserService` for coordinate inspection; GriefLogger ingestion
 remains optional and read-only on both loaders.
 

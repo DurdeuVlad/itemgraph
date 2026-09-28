@@ -316,6 +316,38 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
+    void durabilityBreakRecordsTheBrokenServerPlayerItem() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond_pickaxe", "fingerprint", null, null, null);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        UUID playerUuid = UUID.randomUUID();
+        when(player.level()).thenReturn(level);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getX()).thenReturn(1.0);
+        when(player.getY()).thenReturn(2.0);
+        when(player.getZ()).thenReturn(3.0);
+        ItemStack original = new ItemStack(Items.DIAMOND_PICKAXE);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(original)).thenReturn(canonical);
+            FabricNativeAuditEventListener.onItemDestroyed(player, original);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalObservation.class);
+        verify(service).submit(captured.capture());
+        assertEquals("BREAK_ITEM", captured.getValue().actionType());
+        assertEquals(1, captured.getValue().amount());
+        assertEquals("UNKNOWN", captured.getValue().targetType());
+    }
+
+    @Test
     void dropCaptureRequiresAcceptedEntityAndSupportsNesting() {
         ItemEntity outer = mock(ItemEntity.class);
         ItemEntity inner = mock(ItemEntity.class);

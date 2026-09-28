@@ -299,6 +299,15 @@ public final class FabricNativeAuditEventListener {
         recordUnknownItemObservation(player, "CONSUME_ITEM", originalStack.copy(), 1);
     }
 
+    /** Records the authoritative durability-break boundary before ItemStack shrinks the stack. */
+    public static void onItemDestroyed(ServerPlayer player, ItemStack originalStack) {
+        if (player == null || originalStack == null || originalStack.isEmpty()
+                || player.level().isClientSide()) {
+            return;
+        }
+        recordUnknownItemObservation(player, "BREAK_ITEM", originalStack.copy(), 1);
+    }
+
     static void recordUnknownItemObservation(ServerPlayer player, String actionType,
                                               ItemStack stack, int amount) {
         if (player == null || stack == null || stack.isEmpty() || amount <= 0

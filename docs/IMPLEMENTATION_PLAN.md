@@ -342,8 +342,9 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   count delta are retained as the quantity evidence.
 - Fabric captures completed eat/drink consumption through `LivingEntityMixin` at
   `completeUsingItem`'s return boundary. It preserves the original stack in a
-  bounded nested capture and records only a consumed result; durability-break
-  events still require a separate authoritative hook.
+  bounded nested capture and records only a consumed result. `ItemStackMixin`
+  captures durability breaks at the `hurtAndBreak` shrink boundary, before the
+  broken stack is removed.
 - Both loaders expose the same read-only container inspector: NeoForge uses its
   high-priority `InspectionListener`, while Fabric uses `UseBlockCallback` and the
   shared `FlowBrowserService`. A click is consumed only after the asynchronous query
