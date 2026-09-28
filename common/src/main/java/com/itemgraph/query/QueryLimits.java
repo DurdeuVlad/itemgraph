@@ -19,6 +19,9 @@ public final class QueryLimits {
     /** Absolute ceiling, applied even if the caller explicitly asks for more. */
     public static final int MAX_LIMIT = 100;
 
+    /** Maximum page offset accepted by a bounded historical lookup. */
+    public static final int MAX_OFFSET = 10_000;
+
     public static final int MAX_GUI_PAGE_SIZE = 45;
 
     /**
@@ -38,5 +41,9 @@ public final class QueryLimits {
             return 1;
         }
         return Math.min(requested, MAX_LIMIT);
+    }
+
+    public static int clampOffset(int requested) {
+        return Math.max(0, Math.min(requested, MAX_OFFSET));
     }
 }

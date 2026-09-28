@@ -20,7 +20,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | Consume, break, throw, shoot item actions | `NativeItemActionEventListener`, `ItemEntityEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Consume, break, and bow shoot captured natively; throw-item and crossbow projectile hooks still pending |
 | Location/action filtered lookup | `AuditEventQueryService` | `ig_audit_events` | `/ig lookup`, `/ig lookup near` | Action/player/time and exact dimension/radius filters implemented; staging verification pending |
 | Block/container inspector history | `InspectionListener`, `FlowBrowserService`, `TraceQueryService` | `ig_observations` | `/ig inspect`, `/ig trace container` | Read-only coordinate history and paginated flow browser implemented; staging verification pending |
-| Paginated generic audit results | ItemGraph flow browser pagination | — | Generic audit pagination pending | Gap |
+| Paginated generic audit results | `AuditEventQueryService` offset paging | `ig_audit_events` | `/ig lookup page <page> ...` | Bounded 1-based page offsets implemented; interactive chat controls remain pending |
 | MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite | — | Deliberate scope boundary |
 
 ## Data boundary
@@ -44,7 +44,8 @@ after native coverage and staging verification meet this matrix.
 3. A permission-level-2 lookup command returns those rows with player, location,
    subject, timestamp, and detail fields, with a bounded result limit. `/ig lookup near`
    applies exact dimension and a radius clamped to 1..1024 blocks. Interactive chat
-   pagination remains the next parity slice.
+   `/ig lookup page` continues pages with a 10,000-row offset ceiling; interactive
+   chat controls remain a later UX slice.
 4. The existing item-flow tests remain green and the GriefLogger database is not
    opened by the native-only path.
 

@@ -222,7 +222,33 @@ public final class ItemGraphCommands {
                         .then(playerType)));
 
         lookup.then(buildNearLookupCommand());
+        lookup.then(buildPagedLookupCommand());
         return lookup;
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> buildPagedLookupCommand() {
+        var since = Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAuditPage(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "page"),
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes")));
+        var limit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAuditPage(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "page"),
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        limit.then(since);
+        var eventType = Commands.argument("eventType", StringArgumentType.word())
+                .suggests(ItemGraphCommands::suggestAuditEventTypes)
+                .executes(ctx -> lookupAuditPage(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "page"),
+                        QueryLimits.DEFAULT_LIMIT, null));
+        eventType.then(limit);
+        var page = Commands.argument("page", IntegerArgumentType.integer(1));
+        page.then(eventType);
+        return Commands.literal("page").then(page);
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> buildNearLookupCommand() {
@@ -483,6 +509,23 @@ public final class ItemGraphCommands {
                 DoubleArgumentType.getDouble(ctx, "y"),
                 DoubleArgumentType.getDouble(ctx, "z"),
                 DoubleArgumentType.getDouble(ctx, "radius"));
+    }
+
+    private static int lookupAuditPage(CommandContext<CommandSourceStack> ctx, String eventType,
+                                       int page, int limit, Long sinceMinutes) {
+        int clampedLimit = QueryLimits.clampLimit(limit);
+        long requestedOffset = ((long) Math.max(1, page) - 1L) * clampedLimit;
+        int offset = QueryLimits.clampOffset(requestedOffset > Integer.MAX_VALUE
+                ? Integer.MAX_VALUE : (int) requestedOffset);
+        QueryWindow window = sinceMinutes == null
+                ? QueryWindow.unbounded()
+                : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
+        String filter = "type=" + eventType + " page=" + page + " limit=" + clampedLimit
+                + " window=" + window.describe();
+        return QueryDispatcher.dispatch(ctx.getSource(), "lookup audit", conn ->
+                QueryDispatcher.QueryOutput.found(QueryFormatter.formatAuditEvents(
+                        AUDIT_EVENT_QUERIES.find(conn, eventType, null, window,
+                                null, null, null, null, null, clampedLimit, offset), filter)));
     }
 
     private static int lookupAudit(CommandContext<CommandSourceStack> ctx, String eventType,
