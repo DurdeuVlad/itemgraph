@@ -99,7 +99,10 @@ target_node_id = DESTINATION  (where the item went TO)
 
 This is ItemGraph's modeling decision, not something GriefLogger states. GriefLogger's `items` table is player-centric — every row records an action a player performed, naming only the player. Recording that literally (origin = player, destination = unset, for every action) loses direction entirely: a drop and the pickup that recovers the same stack would share no node, leaving correlation nothing to join on.
 
-The implemented node types are `PLAYER`, `CONTAINER`, `GROUND`, `ARMOR_STAND`, and `UNKNOWN` (`com.itemgraph.graph.NodeType`), resolved to stable identities by `com.itemgraph.graph.NodeManager`:
+The implemented node types are `PLAYER`, `CONTAINER`, `GROUND`, `ARMOR_STAND`, and `UNKNOWN` (`com.itemgraph.graph.NodeType`), resolved to stable identities by `com.itemgraph.graph.NodeManager`.
+The endpoint table below applies to quantity rows imported from GriefLogger's
+`items` and `containers` tables. Native projectile spawn callbacks are stored in
+`ig_audit_events` and make no origin, destination, or quantity claim:
 
 | Source | Action | Origin | Destination |
 | --- | --- | --- | --- |
@@ -176,7 +179,8 @@ Only the fourth link genuinely needs inference, and only because `GROUND` is an 
 
 ### Matching rules
 
-For a `DROP_ITEM` / `THROW_ITEM` / `SHOOT_ITEM` observation, a candidate `PICKUP_ITEM` must:
+For an imported GriefLogger `DROP_ITEM` / `THROW_ITEM` / `SHOOT_ITEM` observation,
+a candidate `PICKUP_ITEM` must:
 
 - originate at the **same `GROUND` node** (same dimension + block),
 - carry the **same `fingerprint_id`** (exact canonical metadata equality),
