@@ -24,7 +24,17 @@ public final class AuditEventQueryService {
                                        QueryWindow window, String levelId,
                                        Double centerX, Double centerY, Double centerZ,
                                        Double requestedRadius, int requestedLimit) throws SQLException {
+        return find(conn, eventType, playerName, window, levelId,
+                centerX, centerY, centerZ, requestedRadius, requestedLimit, 0);
+    }
+
+    public List<AuditEventDetail> find(Connection conn, String eventType, String playerName,
+                                       QueryWindow window, String levelId,
+                                       Double centerX, Double centerY, Double centerZ,
+                                       Double requestedRadius, int requestedLimit,
+                                       int requestedOffset) throws SQLException {
         int limit = QueryLimits.clampLimit(requestedLimit);
+        int offset = QueryLimits.clampOffset(requestedOffset);
         StringBuilder sql = new StringBuilder("""
                 SELECT id, event_type, timestamp_ms, player_uuid, player_name,
                        level_id, x, y, z, subject_id, detail
@@ -63,8 +73,9 @@ public final class AuditEventQueryService {
             args.add(centerZ);
             args.add(radius * radius);
         }
-        sql.append(" ORDER BY timestamp_ms DESC, id DESC LIMIT ?");
+        sql.append(" ORDER BY timestamp_ms DESC, id DESC LIMIT ? OFFSET ?");
         args.add(limit);
+        args.add(offset);
 
         try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
             for (int i = 0; i < args.size(); i++) {

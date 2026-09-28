@@ -148,4 +148,27 @@ class AuditEventQueryServiceTest {
         assertEquals("minecraft:overworld", nearby.get(0).levelName());
         assertEquals(3.0, nearby.get(0).x());
     }
+
+    @Test
+    void pageOffsetUsesStableTimestampAndIdOrdering() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement(
+                "INSERT INTO ig_audit_events (event_type, timestamp_ms, detail) VALUES ('CHAT_MESSAGE', ?, ?)")) {
+            for (int i = 0; i < 3; i++) {
+                insert.setLong(1, 10_000L);
+                insert.setString(2, "message-" + i);
+                insert.executeUpdate();
+            }
+        }
+
+        List<AuditEventDetail> first = service.find(
+                conn, "CHAT_MESSAGE", null, QueryWindow.unbounded(),
+                null, null, null, null, null, 2, 0);
+        List<AuditEventDetail> second = service.find(
+                conn, "CHAT_MESSAGE", null, QueryWindow.unbounded(),
+                null, null, null, null, null, 2, 2);
+
+        assertEquals(2, first.size());
+        assertEquals(1, second.size());
+        assertNotEquals(first.get(1).id(), second.get(0).id());
+    }
 }
