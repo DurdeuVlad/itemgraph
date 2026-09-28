@@ -1,0 +1,16 @@
+// Pure Java domain and port contracts. This module must never depend on a game
+// runtime, Minecraft classes, Brigadier, or a loader API.
+
+tasks.register('verifyCoreArchitecture') {
+    group = 'verification'
+    description = 'Rejects Minecraft, loader, SQLite, and JDBC imports from the pure core module.'
+    doLast {
+        def forbidden = ~/^\s*import\s+(net\.minecraft\.|net\.neoforged\.|net\.fabricmc\.|com\.mojang\.brigadier\.|org\.sqlite\.|java\.sql\.)/
+        def offenders = fileTree('src/main/java').matching { include '**/*.java' }.files.findAll { source ->
+            source.readLines().any { it ==~ forbidden }
+        }
+        if (!offenders.empty) {
+            throw new GradleException("Core boundary violation; forbidden imports found in: ${offenders}")
+        }
+    }
+}

@@ -1,0 +1,40 @@
+plugins {
+    id 'fabric-loom' version '1.10.5'
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${rootProject.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    implementation project(':core')
+    compileOnly 'org.xerial:sqlite-jdbc:3.46.1.0'
+}
+
+loom {
+    runs {
+        server {
+            server()
+            runDir '../run/common-server'
+        }
+    }
+}
+
+tasks.named('jar') {
+    enabled = false
+}
+tasks.named('remapJar') {
+    enabled = false
+}
+
+tasks.register('verifySharedLoaderBoundary') {
+    group = 'verification'
+    description = 'Rejects direct Fabric and NeoForge API imports from shared runtime code.'
+    doLast {
+        def forbidden = ~/^\s*import\s+(net\.neoforged\.|com\.neoforged\.|net\.fabricmc\.)/
+        def offenders = fileTree('src/main/java').matching { include '**/*.java' }.files.findAll { source ->
+            source.readLines().any { it ==~ forbidden }
+        }
+        if (!offenders.empty) {
+            throw new GradleException("Shared loader boundary violation; forbidden imports found in: ${offenders}")
+        }
+    }
+}

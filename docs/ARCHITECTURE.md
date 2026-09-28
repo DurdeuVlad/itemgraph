@@ -4,6 +4,27 @@
 
 ItemGraph reconstructs plausible movement of Minecraft items and stack quantities through inventories over time.
 
+## Loader boundary (0.3.2)
+
+The Gradle build is a multi-project build with this dependency direction:
+
+```text
+fabric adapter ─┐
+                ├──> common runtime ───> core
+neoforge adapter┘
+```
+
+- `core/` contains Java-only domain records (`CanonicalItem`, `CorrelationResult`, and `NodeType`) and loader-neutral ports. It must not import Minecraft, Brigadier, Fabric, NeoForge, SQLite, or JDBC packages. `verifyCoreArchitecture` enforces that source boundary.
+- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. SQLite persistence and GriefLogger's read-only adapter are shared runtime components here.
+- `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite as a nested Fabric jar; its compatible jar replaces the metadata to require GriefLogger and strips the nested SQLite jar.
+- `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite; its compatible jar requires GriefLogger and omits the Jar-in-Jar SQLite module.
+
+`RuntimeInformationPort` is declared in `core` and is implemented by both loader composition roots. `ItemGraphCommands` and API validation use this port for the mod version and installed-mod lookup instead of calling either loader's discovery API. Both adapters initialize the shared runtime with platform-owned config paths, server registry access, and server lifecycle callbacks.
+
+The adapter difference is deliberate: NeoForge has ItemGraph's native supplemental event listeners for containers, item entities, armor stands, and transformations. Fabric currently relies on GriefLogger's supported event database or preview API submissions for evidence collection; the Fabric build does not claim NeoForge-only supplemental event coverage. Install GriefLogger and select the matching Fabric compatibility jar for the supported Fabric evidence path.
+
+The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the jars that require GriefLogger `1.2.10-1.21.1`.
+
 The architecture is designed around four requirements:
 
 1. Preserve authoritative raw evidence.

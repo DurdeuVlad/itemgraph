@@ -351,3 +351,37 @@ MVP is complete when:
 - performance is acceptable on staging
 - Phases 1 through 10 fully implemented and verified
 
+# Release 0.3.2 Multi-Loader and Hexagonal Migration
+
+## Reconnaissance snapshot (2026-09-28)
+
+- Repository: `DurdeuVlad/itemgraph`, remote `origin` at `https://github.com/DurdeuVlad/itemgraph`.
+- Starting point: published tag `v0.3.1`, commit `b937563`; work branch `feature/hexagonal-fabric-032`.
+- The only local untracked path at the start was `.vscode/`; it is user workspace data and must remain untracked.
+- Runtime/build: Java 21, starting Gradle wrapper 8.10.2, Minecraft 1.21.1, NeoForge 21.1.248, ItemGraph 0.3.1. Fabric Loom 1.10.5 refuses Gradle 8.10.2 and requires Gradle 8.12, so the wrapper is being raised to 8.12.1.
+- Current loader support: NeoForge only. There is no Fabric module, Fabric metadata, Fabric Loom plugin, or Fabric CI job.
+- Current Gradle model: root `build.gradle` applies ModDevGradle 2.0.78 to the root `src/main/java` source set. The root project is therefore the NeoForge mod rather than a platform-neutral application.
+- Source coupling: 101 production Java sources across `api`, `audit`, `canon`, `command`, `config`, `correlation`, `db`, `graph`, `ingest`, `listener`, `query`, and `tracker`. 24 source files directly import Minecraft, NeoForge, or Brigadier types. Loader-specific code currently includes the mod entry point, config, database path resolution, canonicalization, commands/UI, API lifecycle/facade, and event listeners.
+- CI `.github/workflows/ci.yml` runs `clean build verifyGriefLoggerCompatibleJar` on PRs and pushes to `main`, and uploads only the GriefLogger-compatible NeoForge jar.
+- Release `.github/workflows/publish.yml` builds on `v*` tags, checks the tag against `gradle.properties`, extracts the matching `CHANGELOG.md` section, publishes GitHub and two CurseForge files, and currently has no Modrinth step. `origin/main` at 0.3.0 contains the previous Modrinth publishing step and project slug `itemgraph`; this is evidence to restore it for the next release, not approval for removing it.
+- Release artifact requirements: Fabric 1.21.1 standard; Fabric 1.21.1 GriefLogger 1.2.10-compatible; NeoForge 1.21.1 standard; NeoForge 1.21.1 GriefLogger 1.2.10-compatible. Both compatible variants omit ItemGraph's nested/bundled SQLite and declare GriefLogger required. This mirrors GriefLogger's own Fabric/NeoForge builds, which use loader-specific jars and shade SQLite into the Fabric artifact (official source: [GriefLogger Fabric build](https://github.com/DAQEM/GriefLogger/blob/master/fabric/build.gradle)).
+- Prior staging reconnaissance is recorded in `docs/PHASE0_RECON_REPORT.md` and dated 2026-09-15. It reports GriefLogger 1.2.10, SQLite, and event coverage, but this release task has not reconnected to staging; the older observations are not represented as freshly verified.
+
+## Hexagonal target and adapter boundaries
+
+Use a pure Java core containing domain records, deterministic correlation/query logic, application use cases, and ports. The core must not import `net.minecraft.*`, `net.neoforged.*`, `net.fabricmc.*`, Brigadier, or loader lifecycle classes. Persistence and platform integrations implement ports outside the core. Gradle must build independent Fabric and NeoForge mod jars from their own entry points and metadata; neither jar may contain the other loader's metadata or classes.
+
+The Fabric and NeoForge adapters provide server lifecycle, command registration, item/component canonicalization, event capture, server path/config access, and Minecraft-specific API conversions. Shared JDBC persistence, GriefLogger read-only ingestion, graph reconstruction, and query use cases stay in loader-neutral shared code where their dependencies allow it. Fabric reads GriefLogger's database or accepts preview API observations, but does not yet provide the supplemental native event listeners present in NeoForge. Both loaders have a GriefLogger 1.2.10-1.21.1-compatible artifact.
+
+Reference pattern: the maintained multi-loader Minecraft template uses a loader-free `common` module plus separate `fabric` and `neoforge` projects; Fabric Loom documents that multi-project mods list all participating source sets in `loom.mods`. ItemGraph's hexagonal boundary is stricter than the template's common source set: only adapter projects may bind to loader APIs, and the core is plain Java. Source references: [Player005 multi-loader template for 1.21.1](https://github.com/Player005/multiloader-mod-template/tree/1.21.1) and [Fabric Loom classpath groups](https://docs.fabricmc.net/develop/loom/classpath-groups).
+
+## Release naming and publication contract
+
+- Git tag and changelog heading: `v0.3.2` and `## [0.3.2]`.
+- Archive names must expose loader and provider: `itemgraph-0.3.2-fabric.jar`, `itemgraph-0.3.2-fabric-grieflogger-compatible.jar`, `itemgraph-0.3.2-neoforge.jar`, and `itemgraph-0.3.2-neoforge-grieflogger-compatible.jar`.
+- CurseForge: publish each archive as a separate file with Minecraft `1.21.1`, the correct loader tag (`Fabric` or `NeoForge`), dedicated-server environment, and an explicit display name naming loader and GriefLogger status. Only the two compatible files declare GriefLogger `1.2.10-1.21.1` required; each standard file retains optional dependency metadata.
+- Modrinth: publish four separately named versions with exact loader arrays and Minecraft `1.21.1`. Use distinct SemVer build metadata numbers (`0.3.2+fabric`, `0.3.2+fabric-grieflogger-compatible`, `0.3.2+neoforge`, and `0.3.2+neoforge-grieflogger-compatible`) because loader/dependency variants are separate Modrinth versions. Restore publishing on the existing project slug `itemgraph`.
+- GitHub Release: attach all four archives and include the exact 0.3.2 changelog section.
+- CI verification must assert each artifact's loader metadata, mod ID, Minecraft range, version, filename, and absence of foreign-loader metadata. It must assert each GriefLogger-compatible jar requires `1.2.10-1.21.1` and omits SQLite, while each standard jar retains its standalone SQLite dependency.
+- Verification status: `.\\gradlew.bat clean build` completed successfully on 2026-09-28. This runs the NeoForge test suite, compiles Fabric, verifies all four output jars, and checks the `core` and `common` loader boundaries. `git diff --check`, YAML parsing of both workflows, four-jar contents/metadata inspection, and the 0.3.2 changelog heading check passed. Both GriefLogger-compatible release jars also started dedicated 1.21.1 staging servers on loopback only with GriefLogger `1.2.10-1.21.1`, initialized ItemGraph SQLite schema 12, reached `Done`, and shut down cleanly. The Fabric fresh-database first pass logged two missing-table reads during initial setup; a second start against the initialized GriefLogger database reached `Done` without those warnings. The release workflow retains four Modrinth publication steps on the existing `itemgraph` project alongside GitHub Releases and CurseForge. The GitHub Actions run after the `v0.3.2` tag is pushed is still required to confirm approval/publication status and the actual publisher URLs and file/version identifiers.
+

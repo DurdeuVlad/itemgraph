@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "${mod_id}",
+  "version": "${mod_version}",
+  "name": "${mod_name}",
+  "description": "${mod_description}",
+  "authors": ["${mod_authors}"],
+  "license": ["${mod_license}"],
+  "environment": "server",
+  "entrypoints": {
+    "main": ["com.itemgraph.fabric.ItemGraphFabric"]
+  },
+  "depends": {
+    "fabricloader": ">=${fabric_loader_version}",
+    "minecraft": "${fabric_minecraft_version_range}",
+    "java": ">=21",
+    "fabric-api": "*"
+  },
+  "custom": {
+    "mc-publish": {
+      "modrinth": "itemgraph",
+      "loaders": ["fabric"]
+    }
+  }
+}
