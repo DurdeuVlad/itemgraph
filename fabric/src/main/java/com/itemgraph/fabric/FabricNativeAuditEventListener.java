@@ -30,6 +30,7 @@ import net.minecraft.world.entity.projectile.ThrowableItemProjectile;
 import net.minecraft.world.entity.projectile.ThrownTrident;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.UseAnim;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -277,6 +278,40 @@ public final class FabricNativeAuditEventListener {
                 itemEntity.getX(), itemEntity.getY(), itemEntity.getZ(),
                 player.getX(), player.getY(), player.getZ(),
                 "GROUND", canonical, amount, itemEntity.getUUID().toString());
+    }
+
+    /** Records a completed eat/drink action at LivingEntity.completeUsingItem's return boundary. */
+    public static void onItemUseFinished(ServerPlayer player, ItemStack originalStack, ItemStack resultStack) {
+        if (player == null || originalStack == null || originalStack.isEmpty()
+                || resultStack == null || player.level().isClientSide()) {
+            return;
+        }
+        UseAnim animation = originalStack.getUseAnimation();
+        if (animation != UseAnim.EAT && animation != UseAnim.DRINK) {
+            return;
+        }
+        boolean consumed = resultStack.isEmpty()
+                || resultStack.getCount() < originalStack.getCount()
+                || !ItemStack.isSameItemSameComponents(originalStack, resultStack);
+        if (!consumed) {
+            return;
+        }
+        recordUnknownItemObservation(player, "CONSUME_ITEM", originalStack.copy(), 1);
+    }
+
+    static void recordUnknownItemObservation(ServerPlayer player, String actionType,
+                                              ItemStack stack, int amount) {
+        if (player == null || stack == null || stack.isEmpty() || amount <= 0
+                || player.level().isClientSide()) {
+            return;
+        }
+        CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(stack);
+        String level = player.level().dimension().location().toString();
+        InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+                System.currentTimeMillis(), actionType,
+                player.getUUID().toString(), player.getGameProfile().getName(), level,
+                player.getX(), player.getY(), player.getZ(),
+                level, null, null, null, "UNKNOWN", canonical, amount, null));
     }
 
     static void recordItemObservation(String actionType, String playerUuid, String playerName,

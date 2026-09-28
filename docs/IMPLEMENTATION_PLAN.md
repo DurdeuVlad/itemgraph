@@ -340,6 +340,10 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   player drops and full or partial pickups through server-only `ServerPlayer.drop`
   and `ItemEntity.playerTouch` return hooks; the returned entity UUID and stack
   count delta are retained as the quantity evidence.
+- Fabric captures completed eat/drink consumption through `LivingEntityMixin` at
+  `completeUsingItem`'s return boundary. It preserves the original stack in a
+  bounded nested capture and records only a consumed result; durability-break
+  events still require a separate authoritative hook.
 - Both loaders expose the same read-only container inspector: NeoForge uses its
   high-priority `InspectionListener`, while Fabric uses `UseBlockCallback` and the
   shared `FlowBrowserService`. A click is consumed only after the asynchronous query

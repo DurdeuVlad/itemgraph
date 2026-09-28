@@ -8,6 +8,7 @@
     "ServerLevelMixin",
     "BlockItemMixin",
     "ServerPlayerMixin",
-    "ItemEntityMixin"
+    "ItemEntityMixin",
+    "LivingEntityMixin"
   ]
 }
