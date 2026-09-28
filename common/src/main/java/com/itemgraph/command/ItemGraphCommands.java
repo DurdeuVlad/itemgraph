@@ -550,7 +550,7 @@ public final class ItemGraphCommands {
         CommandSourceStack source = ctx.getSource();
         String modVersion = runtimeInformation.modVersion();
         boolean griefLoggerLoaded = runtimeInformation.isModLoaded("grieflogger");
-        boolean glDbAvailable = IngestionService.getInstance().getAdapter().isDatabaseAvailable();
+        boolean glDbAvailable = IngestionService.getInstance().getAdapter().isSupportedSchemaAvailable();
         String glStatus = !griefLoggerLoaded ? "DISABLED (not installed)"
                 : glDbAvailable ? "ENABLED (database reachable)"
                 : "DISABLED (mod present but database not found)";

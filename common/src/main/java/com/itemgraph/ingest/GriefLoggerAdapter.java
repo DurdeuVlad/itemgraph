@@ -46,6 +46,36 @@ public class GriefLoggerAdapter {
     }
 
     /**
+     * Returns true only when the read-only file contains the tables required by
+     * the supported GriefLogger schema. A random SQLite file at the configured
+     * path must not enter ingestion and produce one warning per table each cycle.
+     */
+    public boolean isSupportedSchemaAvailable() {
+        if (!isDatabaseAvailable()) {
+            return false;
+        }
+        try (Connection conn = openReadOnlyConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?, ?)")) {
+            stmt.setString(1, "items");
+            stmt.setString(2, "containers");
+            stmt.setString(3, "users");
+            stmt.setString(4, "levels");
+            stmt.setString(5, "materials");
+            java.util.Set<String> tables = new java.util.HashSet<>();
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    tables.add(rs.getString(1));
+                }
+            }
+            return tables.size() == 5;
+        } catch (SQLException e) {
+            LOGGER.debug("GriefLogger schema check failed for {}: {}", databasePath, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Opens a strictly read-only JDBC connection to the GriefLogger database.
      * Enforces read-only via JDBC URI parameter (?mode=ro), SQLiteConfig read-only flag,
      * busy timeout, and PRAGMA query_only = true.
