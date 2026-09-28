@@ -15,7 +15,14 @@ import net.minecraft.network.chat.ChatType;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.projectile.AbstractArrow;
+import net.minecraft.world.entity.projectile.ItemSupplier;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.ThrowableItemProjectile;
+import net.minecraft.world.entity.projectile.ThrownTrident;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
 /**
@@ -80,6 +87,50 @@ public final class FabricNativeAuditEventListener {
                 new InternalObservationService.InternalAuditEvent(
                         System.currentTimeMillis(), "COMMAND_ATTEMPT", playerUuid, playerName,
                         levelName, pos.getX(), pos.getY(), pos.getZ(), null, bounded(command), null));
+    }
+
+    /**
+     * Records a newly added server projectile as non-quantity audit evidence.
+     * The source item is copied only when the projectile exposes it; no
+     * inventory decrement or ground-flow edge is inferred here.
+     */
+    public static void onProjectileSpawn(Entity entity) {
+        if (!(entity instanceof Projectile projectile)
+                || entity.level().isClientSide()
+                || !(projectile.getOwner() instanceof ServerPlayer player)) {
+            return;
+        }
+        ItemStack stack = projectile instanceof AbstractArrow arrow
+                ? arrow.getPickupItemStackOrigin()
+                : projectile instanceof ItemSupplier supplier ? supplier.getItem() : ItemStack.EMPTY;
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+        String actionType = projectile instanceof ThrowableItemProjectile || projectile instanceof ThrownTrident
+                ? "THROW_ITEM" : "SHOOT_ITEM";
+        recordProjectileAudit(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
+                player.level().dimension().location().toString(), projectile.getX(), projectile.getY(),
+                projectile.getZ(), BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString());
+    }
+
+    /**
+     * Applies the addFreshEntity result before recording spawn evidence. A
+     * rejected or duplicate registration is not a durable spawn observation.
+     */
+    public static void onProjectileAdded(Entity entity, boolean added) {
+        if (added) {
+            onProjectileSpawn(entity);
+        }
+    }
+
+    static void recordProjectileAudit(String actionType, String playerUuid, String playerName,
+                                      String levelName, double x, double y, double z,
+                                      String itemId, String projectileId) {
+        InternalObservationService.getInstance().submitAuditEvent(
+                new InternalObservationService.InternalAuditEvent(
+                        System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
+                        x, y, z, itemId, "projectile=" + projectileId + " evidence=spawned_by_player", null));
     }
 
     private static void onChat(PlayerChatMessage message, ServerPlayer player, ChatType.Bound boundType) {
