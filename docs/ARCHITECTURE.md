@@ -21,7 +21,12 @@ neoforge adapter┘
 
 `RuntimeInformationPort` is declared in `core` and is implemented by both loader composition roots. `ItemGraphCommands` and API validation use this port for the mod version and installed-mod lookup instead of calling either loader's discovery API. Both adapters initialize the shared runtime with platform-owned config paths, server registry access, and server lifecycle callbacks.
 
-The adapter difference is deliberate: NeoForge has ItemGraph's native supplemental event listeners for containers, item entities, armor stands, and transformations. Fabric currently relies on GriefLogger's supported event database or preview API submissions for evidence collection; the Fabric build does not claim NeoForge-only supplemental event coverage. Install GriefLogger and select the matching Fabric compatibility jar for the supported Fabric evidence path.
+The adapters expose different event APIs but both now have native audit capture. NeoForge
+adds native container, item-entity, armor-stand, transformation, and item-action listeners;
+Fabric adds its supported session, chat, block, and death callbacks. Fabric command
+execution, block placement completion, projectile actions, and NeoForge-only inventory hooks remain explicit
+parity gaps in `docs/GRIEFLOGGER_PARITY.md`. GriefLogger ingestion remains optional and
+read-only on both loaders.
 
 The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the jars that require GriefLogger `1.2.10-1.21.1`.
 
@@ -53,6 +58,15 @@ Candidate node classes:
 - Unknown/unresolved holder
 
 A node is not necessarily permanent. Some are long-lived, such as a chest at fixed coordinates. Others are ephemeral, such as a ground item entity.
+
+### Native audit events
+
+`ig_observations` is reserved for item quantity-flow evidence. Native block,
+session, chat, command, and entity audit records are stored in the separate
+`ig_audit_events` ledger so they cannot be mistaken for item transfers. The
+ledger uses the same bounded asynchronous persistence service and read-only query
+dispatcher as item evidence. NeoForge consume, durability-break, and bow-shoot
+events remain quantity-flow observations because they carry item identity and amount.
 
 ### Observations
 

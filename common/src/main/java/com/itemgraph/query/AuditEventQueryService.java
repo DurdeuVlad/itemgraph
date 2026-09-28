@@ -1,0 +1,76 @@
+package com.itemgraph.query;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+
+/** Read-only queries for native GriefLogger-parity audit events. */
+public final class AuditEventQueryService {
+    public static final List<String> EVENT_TYPES = List.of(
+            "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_EXECUTED",
+            "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK", "INTERACT_BLOCK_ATTEMPT", "KILL_ENTITY");
+
+    public List<AuditEventDetail> find(Connection conn, String eventType, String playerName,
+                                       QueryWindow window, int requestedLimit) throws SQLException {
+        int limit = QueryLimits.clampLimit(requestedLimit);
+        StringBuilder sql = new StringBuilder("""
+                SELECT id, event_type, timestamp_ms, player_uuid, player_name,
+                       level_id, x, y, z, subject_id, detail
+                FROM ig_audit_events
+                WHERE 1 = 1
+                """);
+        List<Object> args = new ArrayList<>();
+        if (eventType != null && !eventType.isBlank() && !"all".equalsIgnoreCase(eventType)) {
+            sql.append(" AND event_type = ?");
+            args.add(eventType.toUpperCase(java.util.Locale.ROOT));
+        }
+        if (playerName != null && !playerName.isBlank() && !"*".equals(playerName)) {
+            sql.append(" AND player_name = ?");
+            args.add(playerName);
+        }
+        if (window != null && window.sinceMs() != null) {
+            sql.append(" AND timestamp_ms >= ?");
+            args.add(window.sinceMs());
+        }
+        if (window != null && window.untilMs() != null) {
+            sql.append(" AND timestamp_ms <= ?");
+            args.add(window.untilMs());
+        }
+        sql.append(" ORDER BY timestamp_ms DESC, id DESC LIMIT ?");
+        args.add(limit);
+
+        try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+            for (int i = 0; i < args.size(); i++) {
+                Object arg = args.get(i);
+                if (arg instanceof Long value) {
+                    pstmt.setLong(i + 1, value);
+                } else if (arg instanceof Integer value) {
+                    pstmt.setInt(i + 1, value);
+                } else {
+                    pstmt.setString(i + 1, (String) arg);
+                }
+            }
+            try (ResultSet rs = pstmt.executeQuery()) {
+                List<AuditEventDetail> result = new ArrayList<>();
+                while (rs.next()) {
+                    result.add(new AuditEventDetail(
+                            rs.getLong("id"),
+                            rs.getString("event_type"),
+                            rs.getLong("timestamp_ms"),
+                            rs.getString("player_uuid"),
+                            rs.getString("player_name"),
+                            rs.getString("level_id"),
+                            rs.getDouble("x"),
+                            rs.getDouble("y"),
+                            rs.getDouble("z"),
+                            rs.getString("subject_id"),
+                            rs.getString("detail")));
+                }
+                return List.copyOf(result);
+            }
+        }
+    }
+}

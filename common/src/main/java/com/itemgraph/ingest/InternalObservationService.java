@@ -108,13 +108,43 @@ public class InternalObservationService {
             String details
     ) {}
 
+    /**
+     * Native audit evidence outside the quantity-flow graph. The record is
+     * immutable before it enters the bounded queue so loader event handlers do
+     * not expose mutable Minecraft state to the persistence worker.
+     */
+    public record InternalAuditEvent(
+            long timestampMs,
+            String eventType,
+            String playerUuid,
+            String playerName,
+            String levelName,
+            double x,
+            double y,
+            double z,
+            String subjectId,
+            String detail,
+            byte[] rawData
+    ) {
+        public InternalAuditEvent {
+            rawData = rawData == null ? null : rawData.clone();
+        }
+
+        @Override
+        public byte[] rawData() {
+            return rawData == null ? null : rawData.clone();
+        }
+    }
+
     private final BlockingQueue<InternalObservation> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
     private final BlockingQueue<InternalTransformation> transformationQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+    private final BlockingQueue<InternalAuditEvent> auditEventQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final java.util.concurrent.atomic.AtomicLong totalEnqueued = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalPersisted = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalDropped = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalTransformations = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong totalAuditEvents = new java.util.concurrent.atomic.AtomicLong(0);
     private Thread workerThread;
 
     private InternalObservationService() {}
@@ -167,8 +197,25 @@ public class InternalObservationService {
         return ok;
     }
 
+    public boolean submitAuditEvent(InternalAuditEvent event) {
+        if (event == null) {
+            return false;
+        }
+        boolean ok = auditEventQueue.offer(event);
+        if (ok) {
+            totalEnqueued.incrementAndGet();
+        } else {
+            long dropped = totalDropped.incrementAndGet();
+            if (dropped == 1 || dropped % 1000 == 0) {
+                LOGGER.warn("Native audit event queue is full — dropped {} ({} dropped total; evidence loss)",
+                        event.eventType(), dropped);
+            }
+        }
+        return ok;
+    }
+
     public int getQueueSize() {
-        return queue.size() + transformationQueue.size();
+        return queue.size() + transformationQueue.size() + auditEventQueue.size();
     }
 
     public long getTotalEnqueued() {
@@ -187,13 +234,19 @@ public class InternalObservationService {
         return totalTransformations.get();
     }
 
+    public long getTotalAuditEvents() {
+        return totalAuditEvents.get();
+    }
+
     public synchronized void clear() {
         queue.clear();
         transformationQueue.clear();
+        auditEventQueue.clear();
         totalEnqueued.set(0);
         totalPersisted.set(0);
         totalDropped.set(0);
         totalTransformations.set(0);
+        totalAuditEvents.set(0);
     }
 
     private void drainQueueSafely() {
@@ -219,6 +272,20 @@ public class InternalObservationService {
                     totalTransformations.addAndGet(transBatch.size());
                     totalPersisted.addAndGet(transBatch.size());
                     transBatch.clear();
+                }
+
+                InternalAuditEvent firstAudit = auditEventQueue.poll();
+                if (firstAudit != null) {
+                    List<InternalAuditEvent> auditBatch = new ArrayList<>(100);
+                    auditBatch.add(firstAudit);
+                    auditEventQueue.drainTo(auditBatch, 99);
+                    try {
+                        persistAuditEvents(auditBatch);
+                        totalAuditEvents.addAndGet(auditBatch.size());
+                        totalPersisted.addAndGet(auditBatch.size());
+                    } catch (Exception e) {
+                        requeueAuditBatch(auditBatch, e);
+                    }
                 }
             } catch (InterruptedException e) {
                 break;
@@ -250,6 +317,113 @@ public class InternalObservationService {
             } catch (Exception e) {
                 LOGGER.error("Error flushing transformations on shutdown", e);
             }
+        }
+
+        List<InternalAuditEvent> remainingAudit = new ArrayList<>();
+        auditEventQueue.drainTo(remainingAudit);
+        if (!remainingAudit.isEmpty()) {
+            try {
+                persistAuditEvents(remainingAudit);
+                totalAuditEvents.addAndGet(remainingAudit.size());
+                totalPersisted.addAndGet(remainingAudit.size());
+            } catch (Exception e) {
+                // The worker is stopped at this point, so retaining rows in memory
+                // would not provide a future retry after the database closes.
+                reportAuditBatchLoss(remainingAudit, e);
+            }
+        }
+    }
+
+    /**
+     * Puts an audit batch back behind any events that arrived while the write was in
+     * progress. The queue is bounded, so an event that cannot be retained is counted
+     * as dropped and never reported as persisted.
+     */
+    private void requeueAuditBatch(List<InternalAuditEvent> batch, Exception failure) {
+        LOGGER.error("Could not persist {} native audit events; retaining them for retry", batch.size(), failure);
+        int retained = 0;
+        for (InternalAuditEvent event : batch) {
+            if (auditEventQueue.offer(event)) {
+                retained++;
+            } else {
+                long dropped = totalDropped.incrementAndGet();
+                if (dropped == 1 || dropped % 1000 == 0) {
+                    LOGGER.warn("Native audit queue remained full while retrying; dropped {} ({} dropped total; evidence loss)",
+                            event.eventType(), dropped);
+                }
+            }
+        }
+        if (retained > 0 && running.get()) {
+            try {
+                Thread.sleep(25L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void reportAuditBatchLoss(List<InternalAuditEvent> batch, Exception failure) {
+        long dropped = totalDropped.addAndGet(batch.size());
+        LOGGER.error("Could not persist {} native audit events during shutdown; {} events were dropped",
+                batch.size(), dropped, failure);
+    }
+
+    private void persistAuditEvents(List<InternalAuditEvent> batch) throws SQLException {
+        if (batch.isEmpty()) {
+            return;
+        }
+        DatabaseManager db = DatabaseManager.getInstance();
+        if (!db.isInitialized()) {
+            throw new SQLException("ItemGraph database is not initialized");
+        }
+
+        Connection conn = db.getConnection();
+        synchronized (conn) {
+            boolean originalAutoCommit = conn.getAutoCommit();
+            try {
+                conn.setAutoCommit(false);
+                String insertSql = """
+                    INSERT INTO ig_audit_events (
+                        event_type, timestamp_ms, player_uuid, player_name,
+                        level_id, x, y, z, subject_id, detail, source_type, source_event_id, raw_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ITEMGRAPH_INTERNAL', NULL, ?)
+                """;
+                try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
+                    for (InternalAuditEvent event : batch) {
+                        pstmt.setString(1, event.eventType());
+                        pstmt.setLong(2, event.timestampMs());
+                        setNullableString(pstmt, 3, event.playerUuid());
+                        setNullableString(pstmt, 4, event.playerName());
+                        setNullableString(pstmt, 5, event.levelName());
+                        pstmt.setDouble(6, event.x());
+                        pstmt.setDouble(7, event.y());
+                        pstmt.setDouble(8, event.z());
+                        setNullableString(pstmt, 9, event.subjectId());
+                        setNullableString(pstmt, 10, event.detail());
+                        if (event.rawData() == null) {
+                            pstmt.setNull(11, Types.BLOB);
+                        } else {
+                            pstmt.setBytes(11, event.rawData());
+                        }
+                        pstmt.addBatch();
+                    }
+                    pstmt.executeBatch();
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(originalAutoCommit);
+            }
+        }
+    }
+
+    private static void setNullableString(PreparedStatement pstmt, int index, String value) throws SQLException {
+        if (value == null) {
+            pstmt.setNull(index, Types.VARCHAR);
+        } else {
+            pstmt.setString(index, value);
         }
     }
 

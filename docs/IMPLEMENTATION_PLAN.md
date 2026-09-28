@@ -320,6 +320,33 @@ API promise.
 
 ## Git strategy
 
+## Phase 11 — Native GriefLogger replacement parity
+
+The native replacement is staged by evidence category. `ig_observations` remains
+the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
+
+### Delivered in the current slice
+
+- V13 creates the ItemGraph-owned `ig_audit_events` table and indexes.
+- NeoForge captures successful player join/quit, chat, command, block place,
+  block break, block interaction, and player-kill events asynchronously.
+- NeoForge captures consume, durability break, and bow shoot item actions into
+  the existing quantity-flow ledger; Fabric captures join/quit, chat, block
+  break/interaction, and player-kill events through Fabric API callbacks.
+- `/ig lookup <eventType> [limit] [sinceMinutes]` and
+  `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
+  bounded native audit evidence.
+- Canceled chat, command, death, and block events are excluded; canceled actions
+  remain distinct from completed evidence.
+
+### Remaining parity slices
+
+- Projectile throw, crossbow projectile, Fabric command execution, and native
+  block-placement hooks where the loader callback exposes a completed action.
+- Radius/dimension lookup filters and interactive page navigation.
+- Block-history inspector output, including multi-block structures.
+- Staging verification with GriefLogger absent and a migration/retention plan.
+
 Prefer small commits such as:
 
 ```text
@@ -371,7 +398,7 @@ MVP is complete when:
 
 Use a pure Java core containing domain records, deterministic correlation/query logic, application use cases, and ports. The core must not import `net.minecraft.*`, `net.neoforged.*`, `net.fabricmc.*`, Brigadier, or loader lifecycle classes. Persistence and platform integrations implement ports outside the core. Gradle must build independent Fabric and NeoForge mod jars from their own entry points and metadata; neither jar may contain the other loader's metadata or classes.
 
-The Fabric and NeoForge adapters provide server lifecycle, command registration, item/component canonicalization, event capture, server path/config access, and Minecraft-specific API conversions. Shared JDBC persistence, GriefLogger read-only ingestion, graph reconstruction, and query use cases stay in loader-neutral shared code where their dependencies allow it. Fabric reads GriefLogger's database or accepts preview API observations, but does not yet provide the supplemental native event listeners present in NeoForge. Both loaders have a GriefLogger 1.2.10-1.21.1-compatible artifact.
+The Fabric and NeoForge adapters provide server lifecycle, command registration, item/component canonicalization, event capture, server path/config access, and Minecraft-specific API conversions. Shared JDBC persistence, GriefLogger read-only ingestion, graph reconstruction, and query use cases stay in loader-neutral shared code where their dependencies allow it. Fabric and NeoForge both provide native audit callbacks; loader-specific gaps are tracked in `docs/GRIEFLOGGER_PARITY.md`. Both loaders have a GriefLogger 1.2.10-1.21.1-compatible artifact.
 
 Reference pattern: the maintained multi-loader Minecraft template uses a loader-free `common` module plus separate `fabric` and `neoforge` projects; Fabric Loom documents that multi-project mods list all participating source sets in `loom.mods`. ItemGraph's hexagonal boundary is stricter than the template's common source set: only adapter projects may bind to loader APIs, and the core is plain Java. Source references: [Player005 multi-loader template for 1.21.1](https://github.com/Player005/multiloader-mod-template/tree/1.21.1) and [Fabric Loom classpath groups](https://docs.fabricmc.net/develop/loom/classpath-groups).
 

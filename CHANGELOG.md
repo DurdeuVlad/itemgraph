@@ -8,6 +8,7 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Changed
 
+- **Native audit ledger:** ItemGraph now has its own `ig_audit_events` schema and native NeoForge/Fabric capture paths for supported player session, chat, block, and entity actions. NeoForge also records commands plus consume, durability-break, and bow-shoot item actions in the existing quantity-flow ledger. Fabric command execution and the remaining loader-specific projectile and inspector work are tracked in `docs/GRIEFLOGGER_PARITY.md`.
 - **Modrinth publication gate**: tagged releases and the Modrinth-only retry workflow now check both project API endpoints before publishing. A non-2xx response disables Modrinth steps cleanly while GitHub and CurseForge publication continue; a later release or manual retry becomes eligible after both endpoints return successful responses.
 - **GriefLogger component decode handling**: undecodable historical `DataComponentPatch` rows no longer emit a per-row WARN or repeat the same codec failure for every duplicate row while its entry remains in the bounded cache. ItemGraph keeps the raw BLOB, records an opaque SHA-256 fingerprint so distinct payloads do not collapse into one item-ID fingerprint, and emits one DEBUG diagnostic per payload and registry context. Replacing the server registry context clears the cache and permits a retry.
 
