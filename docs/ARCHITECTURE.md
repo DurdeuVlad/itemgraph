@@ -23,12 +23,12 @@ neoforge adapter┘
 
 The adapters expose different event APIs but both now have native audit capture. NeoForge
 adds native container, item-entity, armor-stand, transformation, and item-action listeners;
-Fabric adds its supported session, chat, block, and death callbacks. NeoForge command
-callbacks are stored as `COMMAND_ATTEMPT` because the callback runs before command
-execution. Fabric command execution, block placement completion, projectile actions,
-and NeoForge-only inventory hooks remain explicit parity gaps in
-`docs/GRIEFLOGGER_PARITY.md`. GriefLogger ingestion remains optional and read-only on
-both loaders.
+Fabric adds its supported session, chat, block, death, and command-dispatch callbacks.
+NeoForge command callbacks and the Fabric `CommandsMixin` are stored as
+`COMMAND_ATTEMPT` because both hooks run before command execution. Fabric block
+placement completion, projectile actions, and NeoForge-only inventory hooks remain
+explicit parity gaps in `docs/GRIEFLOGGER_PARITY.md`. GriefLogger ingestion remains
+optional and read-only on both loaders.
 
 The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the jars that require GriefLogger `1.2.10-1.21.1`.
 

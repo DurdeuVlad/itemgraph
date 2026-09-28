@@ -1,6 +1,7 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.ingest.InternalObservationService;
+import com.mojang.brigadier.ParseResults;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
@@ -8,6 +9,7 @@ import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.network.chat.ChatType;
 import net.minecraft.server.level.ServerLevel;
@@ -20,7 +22,7 @@ import net.minecraft.world.level.Level;
  * Fabric-native non-quantity audit capture. Each callback copies only immutable
  * identifiers and text before handing the record to ItemGraph's bounded worker.
  */
-final class FabricNativeAuditEventListener {
+public final class FabricNativeAuditEventListener {
     private static final int MAX_DETAIL_LENGTH = 16_384;
 
     private FabricNativeAuditEventListener() {
@@ -56,6 +58,28 @@ final class FabricNativeAuditEventListener {
                         BuiltInRegistries.ENTITY_TYPE.getKey(victim.getType()).toString(), null);
             }
         });
+    }
+
+    /**
+     * Records the command dispatch boundary exposed by the Fabric mixin.
+     * Minecraft's command dispatcher has no result callback here, so this is
+     * deliberately an attempt rather than completed command evidence.
+     */
+    public static void onCommandAttempt(ParseResults<CommandSourceStack> parse, String command) {
+        if (parse == null || parse.getContext() == null || parse.getContext().getSource() == null
+                || !(parse.getContext().getSource().getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+        recordCommandAttempt(player.getUUID().toString(), player.getGameProfile().getName(),
+                player.level().dimension().location().toString(), player.blockPosition(), command);
+    }
+
+    static void recordCommandAttempt(String playerUuid, String playerName, String levelName,
+                                      BlockPos pos, String command) {
+        InternalObservationService.getInstance().submitAuditEvent(
+                new InternalObservationService.InternalAuditEvent(
+                        System.currentTimeMillis(), "COMMAND_ATTEMPT", playerUuid, playerName,
+                        levelName, pos.getX(), pos.getY(), pos.getZ(), null, bounded(command), null));
     }
 
     private static void onChat(PlayerChatMessage message, ServerPlayer player, ChatType.Bound boundType) {
