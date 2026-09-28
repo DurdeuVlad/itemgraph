@@ -108,6 +108,7 @@ tasks.register('verifyFabricJar') {
                         || !names.contains('com/itemgraph/fabric/ItemGraphFabric.class')
                         || !names.contains('com/itemgraph/fabric/mixin/CommandsMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/ServerLevelMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/BlockItemMixin.class')
                         || !names.contains('com/itemgraph/query/TraceQueryService.class')
                         || (nestedSqlite == check.compatible)) {
                     throw new GradleException("${artifact.name} is missing Fabric/shared classes, contains NeoForge metadata, or has incorrect SQLite bundling")

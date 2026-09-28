@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import com.itemgraph.command.QueryDispatcher.QueryOutput;
+import com.itemgraph.command.QueryDispatcher.QueryAction;
 import com.itemgraph.db.DatabaseManager;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
@@ -72,6 +73,23 @@ class QueryDispatcherTest {
                 failureText);
 
         verify(source, never()).sendSuccess(any(), anyBoolean());
+    }
+
+    @Test
+    void interactiveQueryActionCarriesAPlayerScopedRunCommand() {
+        CommandSourceStack source = mock(CommandSourceStack.class);
+
+        QueryDispatcher.sendActions(source,
+                List.of(new QueryAction("Next", "/ig lookup page 2 CHAT_MESSAGE 20")));
+
+        ArgumentCaptor<java.util.function.Supplier<Component>> captor =
+                ArgumentCaptor.forClass(java.util.function.Supplier.class);
+        verify(source).sendSuccess(captor.capture(), eq(false));
+        Component controls = captor.getValue().get();
+        assertEquals("[ItemGraph] [Next]", controls.getString());
+        assertNotNull(controls.getSiblings().get(0).getStyle().getClickEvent());
+        assertEquals("/ig lookup page 2 CHAT_MESSAGE 20",
+                controls.getSiblings().get(0).getStyle().getClickEvent().getValue());
     }
 
     @Test

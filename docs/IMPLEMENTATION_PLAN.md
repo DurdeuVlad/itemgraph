@@ -335,7 +335,8 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
 - NeoForge captures consume and durability break into the existing quantity-flow
   ledger, and projectile spawn usage as non-quantity audit evidence; Fabric captures
   join/quit, chat, block break/interaction, player-kill events through Fabric API callbacks,
-  and fresh player-owned projectile spawns through `ServerLevelMixin`.
+  fresh player-owned projectile spawns through `ServerLevelMixin`, and completed
+  `BlockItem.place` actions through `BlockItemMixin`.
 - `/ig lookup <eventType> [limit] [sinceMinutes]` and
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
   bounded native audit evidence; `/ig lookup near` adds exact dimension and
@@ -344,11 +345,17 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   callbacks are labeled attempts where the loader hook is pre-action, and canceled
   actions remain distinct from completed evidence.
 
-The Fabric mixin is deliberate: Fabric API's server message callbacks cover only
+The Fabric mixins are deliberate: Fabric API's server message callbacks cover only
 command-generated broadcasts, not general command execution. The mixin records the
 Minecraft `Commands.performCommand` entry boundary and never labels a command as
 successful. It is isolated to the Fabric adapter and covered by a recorder regression
 test; replacing it with a broader mixin would increase the false-success surface.
+The placement mixin follows the same boundary rule: it records only a successful
+`BlockItem.place` return and the newly occupied cells in its bounded 5x5x5
+before/after snapshot. Fabric's
+official [1.21.1 event documentation](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md)
+says areas without API hooks should use a mixin;
+there is no completed block-placement callback in the interaction events.
 The pre-execution semantics are documented by NeoForge's
 [`CommandEvent`](https://raw.githubusercontent.com/neoforged/NeoForge/1.21.1/src/main/java/net/neoforged/neoforge/event/CommandEvent.java),
 and the Fabric API limitation is documented by Fabric's
@@ -358,8 +365,7 @@ execution.
 
 ### Remaining parity slices
 
-- Fabric post-execution command results and native block-placement hooks where the loader
-  callback exposes a completed action, and interactive chat page navigation.
+- Fabric post-execution command results.
 - Staging verification with GriefLogger absent and a migration/retention plan.
 
 Prefer small commits such as:

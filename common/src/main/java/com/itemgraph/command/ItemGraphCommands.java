@@ -12,6 +12,7 @@ import com.itemgraph.listener.ContainerInteractionTracker;
 import com.itemgraph.query.EventQueryService;
 import com.itemgraph.query.ExplainQueryService;
 import com.itemgraph.query.AuditEventQueryService;
+import com.itemgraph.query.AuditEventDetail;
 import com.itemgraph.query.FingerprintRef;
 import com.itemgraph.query.NodeRef;
 import com.itemgraph.query.QueryFormatter;
@@ -523,10 +524,35 @@ public final class ItemGraphCommands {
         String filter = "type=" + eventType + " page=" + effectivePage + " limit=" + clampedLimit
                 + (effectivePage == requestedPage ? "" : " requestedPage=" + requestedPage + " offset=" + offset)
                 + " window=" + window.describe();
-        return QueryDispatcher.dispatch(ctx.getSource(), "lookup audit", conn ->
-                QueryDispatcher.QueryOutput.found(QueryFormatter.formatAuditEvents(
-                        AUDIT_EVENT_QUERIES.find(conn, eventType, null, window,
-                                null, null, null, null, null, clampedLimit, offset), filter)));
+        return QueryDispatcher.dispatch(ctx.getSource(), "lookup audit", conn -> {
+            List<AuditEventDetail> events = AUDIT_EVENT_QUERIES.find(
+                    conn, eventType, null, window, null, null, null, null, null, clampedLimit, offset);
+            List<QueryDispatcher.QueryAction> actions = new java.util.ArrayList<>();
+            if (effectivePage > 1) {
+                actions.add(new QueryDispatcher.QueryAction("Previous", auditPageCommand(
+                        effectivePage - 1, eventType, clampedLimit, sinceMinutes)));
+            }
+            if (shouldOfferNextAuditPage(effectivePage, clampedLimit, offset, events.size())) {
+                actions.add(new QueryDispatcher.QueryAction("Next", auditPageCommand(
+                        effectivePage + 1, eventType, clampedLimit, sinceMinutes)));
+            }
+            return QueryDispatcher.QueryOutput.found(
+                    QueryFormatter.formatAuditEvents(events, filter), actions);
+        });
+    }
+
+    private static String auditPageCommand(int page, String eventType, int limit, Long sinceMinutes) {
+        return "/ig lookup page " + Math.max(1, page) + " " + eventType + " " + limit
+                + (sinceMinutes == null ? "" : " " + sinceMinutes);
+    }
+
+    static boolean shouldOfferNextAuditPage(int effectivePage, int clampedLimit,
+                                             int offset, int returnedRows) {
+        if (returnedRows != clampedLimit) {
+            return false;
+        }
+        int nextOffset = QueryLimits.clampPageOffset(effectivePage + 1, clampedLimit);
+        return nextOffset > offset;
     }
 
     private static int lookupAudit(CommandContext<CommandSourceStack> ctx, String eventType,
