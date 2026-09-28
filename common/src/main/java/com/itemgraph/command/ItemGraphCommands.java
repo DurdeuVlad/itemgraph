@@ -515,9 +515,7 @@ public final class ItemGraphCommands {
                                        int page, int limit, Long sinceMinutes) {
         int clampedLimit = QueryLimits.clampLimit(limit);
         int requestedPage = Math.max(1, page);
-        long requestedOffset = ((long) requestedPage - 1L) * clampedLimit;
-        int offset = QueryLimits.clampOffset(requestedOffset > Integer.MAX_VALUE
-                ? Integer.MAX_VALUE : (int) requestedOffset);
+        int offset = QueryLimits.clampPageOffset(requestedPage, clampedLimit);
         int effectivePage = offset / clampedLimit + 1;
         QueryWindow window = sinceMinutes == null
                 ? QueryWindow.unbounded()

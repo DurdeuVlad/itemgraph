@@ -46,4 +46,18 @@ public final class QueryLimits {
     public static int clampOffset(int requested) {
         return Math.max(0, Math.min(requested, MAX_OFFSET));
     }
+
+    /**
+     * Computes a bounded, page-aligned SQL offset for a one-based page request.
+     * Aligning after the absolute offset cap keeps the reported effective page
+     * consistent with the first row returned by the query.
+     */
+    public static int clampPageOffset(int requestedPage, int requestedLimit) {
+        int limit = clampLimit(requestedLimit);
+        int page = Math.max(1, requestedPage);
+        long requestedOffset = ((long) page - 1L) * limit;
+        int boundedOffset = clampOffset(requestedOffset > Integer.MAX_VALUE
+                ? Integer.MAX_VALUE : (int) requestedOffset);
+        return boundedOffset - boundedOffset % limit;
+    }
 }
