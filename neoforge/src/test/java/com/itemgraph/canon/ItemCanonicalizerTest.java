@@ -78,6 +78,21 @@ class ItemCanonicalizerTest {
     }
 
     @Test
+    void repeatedMalformedPatchUsesOnePerRegistryFailureEntry() {
+        ItemCanonicalizer.clearOpaqueDecodeFailureCache();
+        byte[] malformedPatch = HexFormat.of().parseHex("0500000004");
+
+        ItemCanonicalizer.canonicalize("minecraft:diamond_sword", malformedPatch, registryAccess);
+        ItemCanonicalizer.canonicalize("minecraft:diamond_sword", malformedPatch, registryAccess);
+
+        assertEquals(1, ItemCanonicalizer.opaqueDecodeFailureCacheSize());
+
+        // A new server registry context must permit a legitimate retry.
+        ItemCanonicalizer.setRegistryAccess(registryAccess);
+        assertEquals(0, ItemCanonicalizer.opaqueDecodeFailureCacheSize());
+    }
+
+    @Test
     void testCanonicalComponentsForPublicItemSnapshot() {
         ItemStack stack = new ItemStack(Items.DIAMOND_SWORD, 2);
         stack.set(DataComponents.CUSTOM_NAME, Component.literal("Excalibur"));
