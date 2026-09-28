@@ -43,6 +43,17 @@ ItemGraph               = native event coverage, reconstruction, and graph infer
 
 GriefLogger must always be treated as read-only. Ingestion skips gracefully with no log spam when the database is absent.
 
+### Historical component blobs
+
+GriefLogger stores `DataComponentPatch.STREAM_CODEC` bytes. A blob written with a
+different Minecraft/mod component registry can fail to decode after the server's
+modpack changes. ItemGraph preserves the original blob and continues ingestion with
+an opaque SHA-256 fingerprint for that row, so distinct undecodable payloads do not
+collapse into one item-ID fingerprint. Component-level distinctions remain
+unresolved until the blob can be decoded with a compatible registry. These expected
+historical compatibility failures are recorded at DEBUG level with the raw hash;
+they do not produce per-row WARN spam.
+
 ## Reconnaissance checklist
 
 Before coding the integration, inspect the actual staging installation and record:

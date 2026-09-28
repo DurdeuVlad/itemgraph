@@ -55,7 +55,9 @@ import java.util.Optional;
  * 6. lore: ordered list of strings joined by "|" from DataComponents.LORE.
  *
  * Items with null, empty, or unpatched DataComponentPatch produce "id=<registry_id>",
- * ensuring standard vanilla items share identical canonical fingerprints.
+ * ensuring standard vanilla items share identical canonical fingerprints. A raw patch
+ * that cannot be decoded is represented by "id=<registry_id>;opaque_data_sha256=<hash>"
+ * so the source evidence remains distinct and explicitly unresolved.
  */
 public class ItemCanonicalizer {
     private static final Logger LOGGER = LoggerFactory.getLogger(ItemCanonicalizer.class);
@@ -74,6 +76,7 @@ public class ItemCanonicalizer {
         String itemId = resolveRegistryId(rawItemId);
 
         DataComponentPatch patch = DataComponentPatch.EMPTY;
+        String opaqueDataHash = null;
         if (rawData != null && rawData.length > 0) {
             RegistryAccess regAccess = registryAccess;
             if (regAccess == null) {
@@ -87,17 +90,28 @@ public class ItemCanonicalizer {
                 }
             }
 
+            RegistryFriendlyByteBuf buf = null;
             try {
-                RegistryFriendlyByteBuf buf = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(rawData), regAccess);
+                buf = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(rawData), regAccess);
                 patch = DataComponentPatch.STREAM_CODEC.decode(buf);
+                if (buf.isReadable()) {
+                    throw new IllegalArgumentException("DataComponentPatch has " + buf.readableBytes()
+                            + " trailing bytes");
+                }
             } catch (Exception e) {
-                LOGGER.warn("Failed to decode DataComponentPatch for item '{}' ({} bytes): {}",
-                        itemId, rawData.length, e.getMessage());
+                opaqueDataHash = sha256Hex(rawData);
+                LOGGER.debug("Could not decode GriefLogger DataComponentPatch for item '{}' ({} bytes); "
+                                + "raw data SHA-256={} and component metadata remain unresolved",
+                        itemId, rawData.length, opaqueDataHash, e);
                 patch = DataComponentPatch.EMPTY;
+            } finally {
+                if (buf != null) {
+                    buf.release();
+                }
             }
         }
 
-        return extractAndBuild(itemId, patch);
+        return extractAndBuild(itemId, patch, null, opaqueDataHash);
     }
 
     /**
@@ -132,11 +146,16 @@ public class ItemCanonicalizer {
     }
 
     private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch) {
-        return extractAndBuild(itemId, patch, null);
+        return extractAndBuild(itemId, patch, null, null);
     }
 
     private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch,
                                                  Map<String, String> components) {
+        return extractAndBuild(itemId, patch, components, null);
+    }
+
+    private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch,
+                                                 Map<String, String> components, String opaqueDataHash) {
         String customName = null;
         List<String> sortedEnchantments = new ArrayList<>();
         Integer damage = null;
@@ -264,6 +283,9 @@ public class ItemCanonicalizer {
         if (!loreLines.isEmpty()) {
             canon.append(";lore=").append(String.join("|", loreLines));
         }
+        if (opaqueDataHash != null) {
+            canon.append(";opaque_data_sha256=").append(opaqueDataHash);
+        }
 
         String fingerprintHash = sha256Hex(canon.toString());
 
@@ -283,6 +305,9 @@ public class ItemCanonicalizer {
         }
         if (!loreLines.isEmpty()) {
             summaryParts.add("lore=[" + String.join(", ", loreLines) + "]");
+        }
+        if (opaqueDataHash != null) {
+            summaryParts.add("component_decode=UNRESOLVED;raw_data_sha256=" + opaqueDataHash);
         }
         String componentSummary = summaryParts.isEmpty() ? null : String.join("; ", summaryParts);
 
@@ -337,9 +362,13 @@ public class ItemCanonicalizer {
     }
 
     public static String sha256Hex(String input) {
+        return sha256Hex(input.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String sha256Hex(byte[] input) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(input);
             StringBuilder hexString = new StringBuilder();
             for (byte b : hash) {
                 String hex = Integer.toHexString(0xff & b);
