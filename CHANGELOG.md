@@ -9,6 +9,7 @@ The project follows a simple pre-1.0 development changelog model.
 ### Changed
 
 - **Modrinth publication gate**: tagged releases and the Modrinth-only retry workflow now check both project API endpoints before publishing. A non-2xx response disables Modrinth steps cleanly while GitHub and CurseForge publication continue; a later release or manual retry becomes eligible after both endpoints return successful responses.
+- **GriefLogger component decode handling**: undecodable historical `DataComponentPatch` rows no longer emit a per-row WARN. ItemGraph keeps the raw BLOB, records an opaque SHA-256 fingerprint so distinct payloads do not collapse into one item-ID fingerprint, and emits a DEBUG diagnostic with the registry-compatibility failure.
 
 ## [0.3.2] — 2026-09-28
 

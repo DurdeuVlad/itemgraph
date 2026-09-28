@@ -60,6 +60,24 @@ class ItemCanonicalizerTest {
     }
 
     @Test
+    void malformedPatchGetsAnOpaqueFingerprint() {
+        byte[] malformedPatch = HexFormat.of().parseHex("0500000004");
+
+        CanonicalItem fallback = ItemCanonicalizer.canonicalize(
+                "minecraft:diamond_sword", malformedPatch, registryAccess);
+        CanonicalItem withoutPatch = ItemCanonicalizer.canonicalize(
+                "minecraft:diamond_sword", null, registryAccess);
+
+        String rawHash = ItemCanonicalizer.sha256Hex(malformedPatch);
+        assertNotEquals(withoutPatch.fingerprintHash(), fallback.fingerprintHash());
+        assertEquals(ItemCanonicalizer.sha256Hex(
+                "id=minecraft:diamond_sword;opaque_data_sha256=" + rawHash), fallback.fingerprintHash());
+        assertNull(fallback.customName());
+        assertTrue(fallback.componentSummary().contains("component_decode=UNRESOLVED"));
+        assertTrue(fallback.componentSummary().contains(rawHash));
+    }
+
+    @Test
     void testCanonicalComponentsForPublicItemSnapshot() {
         ItemStack stack = new ItemStack(Items.DIAMOND_SWORD, 2);
         stack.set(DataComponents.CUSTOM_NAME, Component.literal("Excalibur"));
@@ -144,5 +162,18 @@ class ItemCanonicalizerTest {
             assertEquals("Okhotnik za Golovami", item.customName());
             assertTrue(item.componentSummary().contains("Okhotnik za Golovami"));
         }
+    }
+
+    @Test
+    void trailingPatchBytesAreKeptOpaque() {
+        // 00 00 is a valid empty STREAM_CODEC patch; the final byte must not be ignored.
+        byte[] withTrailingByte = HexFormat.of().parseHex("000001");
+
+        CanonicalItem item = ItemCanonicalizer.canonicalize(
+                "minecraft:diamond_sword", withTrailingByte, registryAccess);
+
+        assertNull(item.customName());
+        assertTrue(item.componentSummary().contains("component_decode=UNRESOLVED"));
+        assertTrue(item.componentSummary().contains(ItemCanonicalizer.sha256Hex(withTrailingByte)));
     }
 }
