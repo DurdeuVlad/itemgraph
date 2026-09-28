@@ -51,8 +51,11 @@ modpack changes. ItemGraph preserves the original blob and continues ingestion w
 an opaque SHA-256 fingerprint for that row, so distinct undecodable payloads do not
 collapse into one item-ID fingerprint. Component-level distinctions remain
 unresolved until the blob can be decoded with a compatible registry. These expected
-historical compatibility failures are recorded at DEBUG level with the raw hash;
-they do not produce per-row WARN spam.
+historical compatibility failures are recorded at DEBUG level with the raw hash; the
+same raw hash is decoded and diagnosed once while its entry remains in the bounded
+registry-aware cache, so repeated source rows do not produce log or codec spam. The
+cache is cleared when the server supplies a new registry context, allowing a retry
+after the compatible modpack is restored.
 
 ## Reconnaissance checklist
 
