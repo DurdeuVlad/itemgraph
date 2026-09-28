@@ -18,7 +18,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | Player-killed entities | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
 | Armor stand equip/unequip | `ArmorStandEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
 | Consume, break, throw, shoot item actions | `NativeItemActionEventListener`, `ItemEntityEventListener`, Fabric `ServerLevelMixin` | `ig_observations` for consume/break; `ig_audit_events` for native projectile spawn evidence | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record fresh player-owned projectile spawns as non-quantity `THROW_ITEM`/`SHOOT_ITEM` audit evidence, so Infinity and multishot cannot fabricate quantities; Fabric staging verification is pending |
-| Location/action filtered lookup | `AuditEventQueryService` | `ig_audit_events` | `/ig lookup`, `/ig lookup near` | Action/player/time and exact dimension/radius filters implemented; staging verification pending |
+| Location/action filtered lookup | `AuditLookupFilters`, `AuditEventQueryService` | `ig_audit_events` | `/ig lookup`, `/ig lookup near`, `/ig lookup filters` | GriefLogger-style action/user/include/exclude/time/radius filters implemented for native audit actions with five-filter cap, required bounded cube radius, and conflict validation; quantity-flow drop/pickup actions remain under `/ig trace`; staging verification pending |
 | Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `FlowBrowserService`, `TraceQueryService` | `ig_observations` | `/ig inspect`, `/ig trace container` | Read-only coordinate history and paginated flow browser implemented on both loaders; staging verification pending |
 | Paginated generic audit results | `AuditEventQueryService` offset paging | `ig_audit_events` | `/ig lookup page <page> ...` | Bounded 1-based page offsets and server-generated Previous/Next chat controls implemented |
 | MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite | — | Deliberate scope boundary |
@@ -53,6 +53,15 @@ after native coverage and staging verification meet this matrix.
   `Container`; an accepted query returns `SUCCESS` and suppresses the normal GUI,
   while unsupported blocks, rejected queries, and permission loss preserve ordinary
   interaction. Disconnect and server-stop cleanup are covered by the adapter lifecycle.
+- **2026-09-29, filtered lookup implementation:** `/ig lookup filters` accepts up
+  to five `name.value` filters matching GriefLogger's action, user, include,
+  exclude, time, and radius vocabulary. Radius is required, clamped to 1..1024,
+  centered on the issuing player, and applied as a cube; include/exclude conflicts
+  are rejected before the asynchronous SQL query. Native subject IDs are normalized
+  so bare Minecraft IDs such as `diamond_ore` match `minecraft:diamond_ore`.
+  Quantity-flow actions such as `drop_item` and `pickup_item` are rejected on this
+  native-audit command rather than being misclassified as projectile events; those
+  records remain available through `/ig trace`.
 
 ## Acceptance gates
 
@@ -68,7 +77,8 @@ after native coverage and staging verification meet this matrix.
    subject, timestamp, and detail fields, with a bounded result limit. `/ig lookup near`
    applies exact dimension and a radius clamped to 1..1024 blocks. Interactive chat
    `/ig lookup page` controls continue pages with a 10,000-row offset ceiling and
-   rerun the same bounded filters as the original query.
+   rerun the same bounded filters as the original query. `/ig lookup filters` accepts
+   the five-filter GriefLogger syntax and uses a required cube radius around the player.
 4. The existing item-flow tests remain green and the GriefLogger database is not
    opened by the native-only path.
 

@@ -589,6 +589,10 @@ serialize transactions on the shared ItemGraph JDBC connection.
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
 - `/ig trace container <x> <y> <z>`: reconstructs item ingress and egress for a container at coordinates.
 - `/ig trace item <query>`: resolves string queries by numeric ID, item registry ID, or custom name.
+- `/ig lookup filters <filter1> ... <filter5>`: applies GriefLogger's `name.value`
+  action, user, include, exclude, time, and required radius filters to native
+  audit rows. The radius is a bounded cube around the issuing player and runs
+  asynchronously on the read-only query worker.
 
 ## Transformation Lineage (Phase 9)
 

@@ -6,6 +6,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /** Read-only queries for native GriefLogger-parity audit events. */
 public final class AuditEventQueryService {
@@ -108,6 +109,122 @@ public final class AuditEventQueryService {
                             rs.getString("detail")));
                 }
                 return List.copyOf(result);
+            }
+        }
+    }
+
+    /**
+     * Executes the bounded GriefLogger-style lookup against native audit rows.
+     * The radius is a cube, matching GriefLogger's documented six-direction
+     * radius semantics; the legacy {@link #find} overload retains its spherical
+     * near-query behavior for compatibility.
+     */
+    public List<AuditEventDetail> findFiltered(Connection conn, AuditLookupFilters filters,
+                                               String levelId, double centerX, double centerY,
+                                               double centerZ, int requestedLimit, int requestedOffset)
+            throws SQLException {
+        if (filters == null) {
+            throw new IllegalArgumentException("filters are required");
+        }
+        int limit = QueryLimits.clampLimit(requestedLimit);
+        int offset = QueryLimits.clampOffset(requestedOffset);
+        StringBuilder sql = new StringBuilder("""
+                SELECT id, event_type, timestamp_ms, player_uuid, player_name,
+                       level_id, x, y, z, subject_id, detail
+                FROM ig_audit_events
+                WHERE 1 = 1
+                """);
+        List<Object> args = new ArrayList<>();
+        if (!filters.eventTypes().isEmpty()) {
+            appendPlaceholders(sql, " AND event_type IN (", filters.eventTypes().size(), ")");
+            args.addAll(filters.eventTypes());
+        }
+        if (!filters.playerNames().isEmpty()) {
+            appendPlaceholders(sql, " AND LOWER(player_name) IN (", filters.playerNames().size(), ")");
+            args.addAll(filters.playerNames().stream().map(value -> value.toLowerCase(Locale.ROOT)).toList());
+        }
+        if (filters.window() != null && filters.window().sinceMs() != null) {
+            sql.append(" AND timestamp_ms >= ?");
+            args.add(filters.window().sinceMs());
+        }
+        if (filters.window() != null && filters.window().untilMs() != null) {
+            sql.append(" AND timestamp_ms <= ?");
+            args.add(filters.window().untilMs());
+        }
+        if (levelId == null || levelId.isBlank()) {
+            throw new IllegalArgumentException("dimension is required for a radius lookup");
+        }
+        sql.append(" AND level_id = ?");
+        args.add(levelId);
+        double radius = filters.radiusBlocks();
+        sql.append(" AND ABS(x - ?) <= ? AND ABS(y - ?) <= ? AND ABS(z - ?) <= ?");
+        args.add(centerX);
+        args.add(radius);
+        args.add(centerY);
+        args.add(radius);
+        args.add(centerZ);
+        args.add(radius);
+        appendSubjectFilter(sql, args, "subject_id", filters.includeSubjects(), false);
+        appendSubjectFilter(sql, args, "subject_id", filters.excludeSubjects(), true);
+        sql.append(" ORDER BY timestamp_ms DESC, id DESC LIMIT ? OFFSET ?");
+        args.add(limit);
+        args.add(offset);
+
+        try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+            bind(pstmt, args);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                List<AuditEventDetail> result = new ArrayList<>();
+                while (rs.next()) {
+                    result.add(new AuditEventDetail(
+                            rs.getLong("id"), rs.getString("event_type"), rs.getLong("timestamp_ms"),
+                            rs.getString("player_uuid"), rs.getString("player_name"), rs.getString("level_id"),
+                            rs.getDouble("x"), rs.getDouble("y"), rs.getDouble("z"),
+                            rs.getString("subject_id"), rs.getString("detail")));
+                }
+                return List.copyOf(result);
+            }
+        }
+    }
+
+    private static void appendPlaceholders(StringBuilder sql, String prefix, int count, String suffix) {
+        sql.append(prefix);
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                sql.append(", ");
+            }
+            sql.append("?");
+        }
+        sql.append(suffix);
+    }
+
+    private static void appendSubjectFilter(StringBuilder sql, List<Object> args, String column,
+                                            List<String> values, boolean exclude) {
+        if (values.isEmpty()) {
+            return;
+        }
+        sql.append(exclude ? " AND (" + column + " IS NULL OR LOWER(" + column + ") NOT IN ("
+                : " AND LOWER(" + column + ") IN (");
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                sql.append(", ");
+            }
+            sql.append("?");
+            args.add(values.get(i));
+        }
+        sql.append(exclude ? "))" : ")");
+    }
+
+    private static void bind(PreparedStatement pstmt, List<Object> args) throws SQLException {
+        for (int i = 0; i < args.size(); i++) {
+            Object arg = args.get(i);
+            if (arg instanceof Long value) {
+                pstmt.setLong(i + 1, value);
+            } else if (arg instanceof Integer value) {
+                pstmt.setInt(i + 1, value);
+            } else if (arg instanceof Double value) {
+                pstmt.setDouble(i + 1, value);
+            } else {
+                pstmt.setString(i + 1, (String) arg);
             }
         }
     }
