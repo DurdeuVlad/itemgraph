@@ -53,6 +53,11 @@ after native coverage and staging verification meet this matrix.
   `Container`; an accepted query returns `SUCCESS` and suppresses the normal GUI,
   while unsupported blocks, rejected queries, and permission loss preserve ordinary
   interaction. Disconnect and server-stop cleanup are covered by the adapter lifecycle.
+- **2026-09-29, Fabric container sessions:** server menu initialization and close
+  hooks now reuse the shared interval tracker for block containers and double chests;
+  an orderly server stop flushes active session deltas before ItemGraph closes its
+  database. Automated transfers remain outside Fabric's player-session attribution
+  boundary.
 - **2026-09-29, filtered lookup implementation:** `/ig lookup filters` accepts up
   to five `name.value` filters matching GriefLogger's action, user, include,
   exclude, time, and radius vocabulary. Radius is required, clamped to 1..1024,

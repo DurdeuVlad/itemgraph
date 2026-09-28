@@ -67,6 +67,7 @@ public final class ItemGraphFabric implements ModInitializer {
 
     private void onServerStopping(MinecraftServer server) {
         ItemGraphApiLifecycle.stop(server);
+        FabricContainerSessionListener.flushAll();
         com.itemgraph.command.InspectionService.getInstance().clear();
         InternalObservationService.getInstance().stop();
         IngestionService.getInstance().stop();

@@ -12,6 +12,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Tracks open player container sessions and capability-mediated deltas (0.2.0 — Issue 3).
@@ -40,6 +42,7 @@ import java.util.function.Supplier;
  * <p>All callers run on the server thread. The maps remain safe for concurrent access.
  */
 public class ContainerInteractionTracker {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ContainerInteractionTracker.class);
     public static final String UNKNOWN_CALLER_UUID = "00000000-0000-0000-0000-000000000000";
     public static final String UNKNOWN_CALLER_NAME = "[capability caller unknown]";
 
@@ -201,6 +204,29 @@ public class ContainerInteractionTracker {
         if (watch.sessions.isEmpty()) {
             watches.remove(watch.key);
             aliases.values().removeIf(watch.key::equals);
+        }
+    }
+
+    /**
+     * Flushes every active session at server shutdown using the container key as
+     * the final position anchor. This preserves the last interval delta when a
+     * disconnect callback is skipped during an orderly lifecycle stop.
+     */
+    public void closeAllSessions() {
+        try {
+            for (Map.Entry<UUID, ContainerKey> entry : new ArrayList<>(playerSessions.entrySet())) {
+                ContainerKey key = entry.getValue();
+                try {
+                    closeSession(entry.getKey(), key.x(), key.y(), key.z());
+                } catch (RuntimeException e) {
+                    LOGGER.warn("ItemGraph: failed to flush container session for {} at {}: {}",
+                            entry.getKey(), key, e.toString());
+                }
+            }
+        } finally {
+            watches.clear();
+            aliases.clear();
+            playerSessions.clear();
         }
     }
 
