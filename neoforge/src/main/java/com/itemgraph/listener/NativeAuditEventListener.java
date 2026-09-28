@@ -81,6 +81,13 @@ public final class NativeAuditEventListener {
                 || !(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
+        if (event instanceof BlockEvent.EntityMultiPlaceEvent multiPlace) {
+            String placedBlock = blockId(event.getPlacedBlock());
+            for (var snapshot : multiPlace.getReplacedBlockSnapshots()) {
+                submit("PLACE_BLOCK", player, level, snapshot.getPos(), placedBlock, null);
+            }
+            return;
+        }
         submit("PLACE_BLOCK", player, level, event.getPos(), blockId(event.getPlacedBlock()), null);
     }
 
