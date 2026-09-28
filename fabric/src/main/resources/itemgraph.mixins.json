@@ -9,6 +9,7 @@
     "BlockItemMixin",
     "ServerPlayerMixin",
     "ItemEntityMixin",
-    "LivingEntityMixin"
+    "LivingEntityMixin",
+    "ItemStackMixin"
   ]
 }
