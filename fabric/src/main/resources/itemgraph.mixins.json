@@ -5,6 +5,7 @@
   "compatibilityLevel": "JAVA_21",
   "server": [
     "CommandsMixin",
-    "ServerLevelMixin"
+    "ServerLevelMixin",
+    "BlockItemMixin"
   ]
 }

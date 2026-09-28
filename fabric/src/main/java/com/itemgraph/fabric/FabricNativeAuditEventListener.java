@@ -7,11 +7,11 @@ import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.network.chat.ChatType;
+import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
@@ -22,8 +22,16 @@ import net.minecraft.world.entity.projectile.ItemSupplier;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.projectile.ThrowableItemProjectile;
 import net.minecraft.world.entity.projectile.ThrownTrident;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Fabric-native non-quantity audit capture. Each callback copies only immutable
@@ -131,6 +139,69 @@ public final class FabricNativeAuditEventListener {
                 new InternalObservationService.InternalAuditEvent(
                         System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
                         x, y, z, itemId, "projectile=" + projectileId + " evidence=spawned_by_player", null));
+    }
+
+    /**
+     * Records every newly occupied cell in a completed BlockItem placement. The
+     * before-state snapshot is bounded by the mixin and includes the adjacent
+     * cells used by vanilla two-cell and multi-cell blocks.
+     */
+    public static void onBlockItemPlaced(BlockPlaceContext context, BlockItem item,
+                                         InteractionResult result,
+                                         Map<BlockPos, BlockState> beforeStates) {
+        if (context == null || item == null || result == null || !result.consumesAction()
+                || beforeStates == null || beforeStates.isEmpty()
+                || !(context.getPlayer() instanceof ServerPlayer player)
+                || !(context.getLevel() instanceof ServerLevel level)) {
+            return;
+        }
+        Map<BlockPos, BlockState> afterStates = beforeStates.keySet().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        BlockPos::immutable,
+                        level::getBlockState,
+                        (left, right) -> right,
+                        java.util.LinkedHashMap::new));
+        for (BlockPos pos : changedBlockPositions(beforeStates, afterStates, item.getBlock())) {
+            BlockState state = afterStates.get(pos);
+            recordBlockPlacement(player.getUUID().toString(), player.getGameProfile().getName(),
+                    level.dimension().location().toString(), pos,
+                    BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+        }
+    }
+
+    /**
+     * Returns every before/after cell changed to the placed block. This pure
+     * helper keeps multi-cell placement coverage deterministic and testable.
+     */
+    static List<BlockPos> changedBlockPositions(Map<BlockPos, BlockState> beforeStates,
+                                                 Map<BlockPos, BlockState> afterStates,
+                                                 Block placedBlock) {
+        if (beforeStates == null || afterStates == null || placedBlock == null) {
+            return List.of();
+        }
+        List<BlockPos> changed = new ArrayList<>();
+        for (Map.Entry<BlockPos, BlockState> entry : afterStates.entrySet()) {
+            BlockPos pos = entry.getKey();
+            BlockState after = entry.getValue();
+            BlockState before = beforeStates.get(pos);
+            if (after != null && after.getBlock() == placedBlock
+                    && (before == null || before.getBlock() != placedBlock)
+                    && !after.equals(before)) {
+                changed.add(pos.immutable());
+            }
+        }
+        return List.copyOf(changed);
+    }
+
+    static void recordBlockPlacement(String playerUuid, String playerName, String levelName,
+                                      BlockPos pos, String blockId) {
+        if (pos == null || blockId == null || blockId.isBlank()) {
+            return;
+        }
+        InternalObservationService.getInstance().submitAuditEvent(
+                new InternalObservationService.InternalAuditEvent(
+                        System.currentTimeMillis(), "PLACE_BLOCK", playerUuid, playerName, levelName,
+                        pos.getX(), pos.getY(), pos.getZ(), blockId, null, null));
     }
 
     private static void onChat(PlayerChatMessage message, ServerPlayer player, ChatType.Bound boundType) {

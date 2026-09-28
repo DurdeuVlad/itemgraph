@@ -26,10 +26,10 @@ adds native container, item-entity, armor-stand, transformation, and item-action
 Fabric adds its supported session, chat, block, death, command-dispatch, and fresh-projectile
 callbacks.
 NeoForge command callbacks and the Fabric `CommandsMixin` are stored as
-`COMMAND_ATTEMPT` because both hooks run before command execution. Fabric block
-placement completion, post-execution command results, and NeoForge-only inventory hooks remain
-explicit parity gaps in `docs/GRIEFLOGGER_PARITY.md`; Fabric projectile callbacks are
-non-quantity spawn evidence. GriefLogger ingestion remains
+`COMMAND_ATTEMPT` because both hooks run before command execution. Fabric post-execution
+command results and NeoForge-only inventory hooks remain explicit parity gaps in
+`docs/GRIEFLOGGER_PARITY.md`; Fabric `BlockItemMixin` captures completed BlockItem
+placements and Fabric projectile callbacks are non-quantity spawn evidence. GriefLogger ingestion remains
 optional and read-only on both loaders.
 
 The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the jars that require GriefLogger `1.2.10-1.21.1`.

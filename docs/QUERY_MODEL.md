@@ -390,6 +390,8 @@ Implemented:
   `edge#<id>`; `/ig event <id>` is for observations and `/ig explain <id>` is for edges
 - GUI paging: `/ig gui` returns at most 45 entries per page using the composite keyset cursor
   described above; equal timestamps are ordered by provenance, row ID, and source table
+- audit lookup paging: `/ig lookup page` adds permission-checked Previous/Next chat actions
+  that rerun the same bounded event-type and time-window filters
 
 Not yet implemented:
 
