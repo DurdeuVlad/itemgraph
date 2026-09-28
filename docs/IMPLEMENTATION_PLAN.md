@@ -348,6 +348,11 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
   bounded native audit evidence; `/ig lookup near` adds exact dimension and
   bounded radius filters.
+- `/ig lookup filters <filter1> ... <filter5>` implements the published
+  GriefLogger `name.value` vocabulary for action, user, include, exclude, time,
+  and required radius filters. The query is bounded to 20 rows, runs off-thread,
+  uses a 1..1024 cube around the issuing player, and rejects include/exclude
+  conflicts before SQL dispatch.
 - Canceled chat, command, death, and block events are excluded; command and block
   callbacks are labeled attempts where the loader hook is pre-action, and canceled
   actions remain distinct from completed evidence.

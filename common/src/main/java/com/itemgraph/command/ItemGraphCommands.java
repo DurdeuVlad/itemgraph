@@ -13,6 +13,7 @@ import com.itemgraph.query.EventQueryService;
 import com.itemgraph.query.ExplainQueryService;
 import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.query.AuditEventDetail;
+import com.itemgraph.query.AuditLookupFilters;
 import com.itemgraph.query.FingerprintRef;
 import com.itemgraph.query.NodeRef;
 import com.itemgraph.query.QueryFormatter;
@@ -224,6 +225,10 @@ public final class ItemGraphCommands {
 
         lookup.then(buildNearLookupCommand());
         lookup.then(buildPagedLookupCommand());
+        lookup.then(Commands.literal("filters")
+                .then(Commands.argument("filters", StringArgumentType.greedyString())
+                        .executes(ctx -> lookupAuditFilters(ctx,
+                                StringArgumentType.getString(ctx, "filters")))));
         return lookup;
     }
 
@@ -510,6 +515,35 @@ public final class ItemGraphCommands {
                 DoubleArgumentType.getDouble(ctx, "y"),
                 DoubleArgumentType.getDouble(ctx, "z"),
                 DoubleArgumentType.getDouble(ctx, "radius"));
+    }
+
+    /** Executes the GriefLogger-compatible name.value filter form around the issuing player. */
+    private static int lookupAuditFilters(CommandContext<CommandSourceStack> ctx, String expression) {
+        CommandSourceStack source = ctx.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] Filtered lookup requires a permission-level-2 player so radius can use the current position."));
+            return 0;
+        }
+        AuditLookupFilters filters;
+        try {
+            filters = AuditLookupFilters.parse(expression, System.currentTimeMillis());
+        } catch (IllegalArgumentException e) {
+            source.sendFailure(Component.literal("[ItemGraph] Invalid lookup filter: " + e.getMessage()));
+            return 0;
+        }
+        String levelId = player.level().dimension().location().toString();
+        double centerX = player.getX();
+        double centerY = player.getY();
+        double centerZ = player.getZ();
+        String filterDescription = filters.describe()
+                + " dimension=" + levelId
+                + " center=" + centerX + "," + centerY + "," + centerZ;
+        return QueryDispatcher.dispatch(source, "lookup filtered audit", conn ->
+                QueryDispatcher.QueryOutput.found(QueryFormatter.formatAuditEvents(
+                        AUDIT_EVENT_QUERIES.findFiltered(conn, filters, levelId,
+                                centerX, centerY, centerZ, QueryLimits.DEFAULT_LIMIT, 0),
+                        filterDescription)));
     }
 
     private static int lookupAuditPage(CommandContext<CommandSourceStack> ctx, String eventType,

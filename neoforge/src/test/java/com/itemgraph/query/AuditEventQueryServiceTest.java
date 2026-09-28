@@ -171,4 +171,81 @@ class AuditEventQueryServiceTest {
         assertEquals(1, second.size());
         assertNotEquals(first.get(1).id(), second.get(0).id());
     }
+
+    @Test
+    void griefLoggerStyleFiltersUseNativeActionsUsersSubjectsAndCubeRadius() throws Exception {
+        long now = 10_000_000L;
+        try (PreparedStatement insert = conn.prepareStatement("""
+                INSERT INTO ig_audit_events
+                    (event_type, timestamp_ms, player_name, level_id, x, y, z, subject_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """)) {
+            insert.setString(1, "BREAK_BLOCK");
+            insert.setLong(2, now - 30 * 60_000L);
+            insert.setString(3, "Alex");
+            insert.setString(4, "minecraft:overworld");
+            insert.setDouble(5, 5);
+            insert.setDouble(6, 5);
+            insert.setDouble(7, 5);
+            insert.setString(8, "minecraft:diamond_ore");
+            insert.executeUpdate();
+
+            insert.setString(1, "BREAK_BLOCK");
+            insert.setLong(2, now - 30 * 60_000L);
+            insert.setString(3, "Alex");
+            insert.setString(4, "minecraft:overworld");
+            insert.setDouble(5, 6);
+            insert.setDouble(6, 0);
+            insert.setDouble(7, 0);
+            insert.setString(8, "minecraft:diamond_ore");
+            insert.executeUpdate();
+
+            insert.setString(1, "PLACE_BLOCK");
+            insert.setLong(2, now - 30 * 60_000L);
+            insert.setString(3, "Alex");
+            insert.setString(4, "minecraft:overworld");
+            insert.setDouble(5, 0);
+            insert.setDouble(6, 0);
+            insert.setDouble(7, 0);
+            insert.setString(8, "minecraft:diamond_ore");
+            insert.executeUpdate();
+
+            insert.setString(1, "BREAK_BLOCK");
+            insert.setLong(2, now - 2 * 60 * 60_000L);
+            insert.setString(3, "Alex");
+            insert.setString(4, "minecraft:overworld");
+            insert.setDouble(5, 0);
+            insert.setDouble(6, 0);
+            insert.setDouble(7, 0);
+            insert.setString(8, "minecraft:diamond_ore");
+            insert.executeUpdate();
+        }
+
+        AuditLookupFilters filters = AuditLookupFilters.parse(
+                "action.break_block user.Alex include.diamond_ore time.1h radius.5", now);
+        List<AuditEventDetail> matched = service.findFiltered(
+                conn, filters, "minecraft:overworld", 0, 0, 0, 100, 0);
+
+        assertEquals(1, matched.size());
+        assertEquals(5.0, matched.get(0).x());
+        assertEquals(List.of("BREAK_BLOCK"), filters.eventTypes());
+        assertEquals(List.of("minecraft:diamond_ore"), filters.includeSubjects());
+    }
+
+    @Test
+    void filterParserRejectsConflictingOrUnboundedRequests() {
+        assertThrows(IllegalArgumentException.class,
+                () -> AuditLookupFilters.parse("include.stone exclude.dirt radius.5", 1_000L));
+        assertThrows(IllegalArgumentException.class,
+                () -> AuditLookupFilters.parse("action.break_block user.Alex include.stone time.1h radius.5 extra.x", 1_000L));
+        assertThrows(IllegalArgumentException.class,
+                () -> AuditLookupFilters.parse("action.break_block", 1_000L));
+        assertThrows(IllegalArgumentException.class,
+                () -> AuditLookupFilters.parse("action.drop_item radius.5", 1_000L));
+        assertThrows(IllegalArgumentException.class,
+                () -> AuditLookupFilters.parse("action.pickup_item radius.5", 1_000L));
+        AuditLookupFilters dotted = AuditLookupFilters.parse(
+                "include.modid:item.variant radius.5", 1_000L);
+        assertEquals(List.of("modid:item.variant"), dotted.includeSubjects());
+    }
 }
