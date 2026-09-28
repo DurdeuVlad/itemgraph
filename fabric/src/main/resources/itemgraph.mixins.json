@@ -6,6 +6,8 @@
   "server": [
     "CommandsMixin",
     "ServerLevelMixin",
-    "BlockItemMixin"
+    "BlockItemMixin",
+    "ServerPlayerMixin",
+    "ItemEntityMixin"
   ]
 }

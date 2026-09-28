@@ -8,7 +8,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | GriefLogger capability | ItemGraph native source | Storage | Query/UI status | Evidence status |
 | --- | --- | --- | --- | --- |
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
-| Item drop/pickup/death drops | `ItemEntityEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
+| Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge drop/pickup/death-drop paths and Fabric normal plus vanilla player-death inventory drops are implemented and unit-tested; custom death-event additions and automation remain parity gaps |
 | Crafting, smelting, anvil rename/repair | `TransformationEventListener` | `ig_item_transformations` | Item lineage in trace | Implemented and tested |
 | Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
 | Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
@@ -40,6 +40,13 @@ after native coverage and staging verification meet this matrix.
   native listeners. This verifies startup and isolation; player-action replay and
   row-by-row capture checks remain required before marking the event rows fully
   staging-verified.
+- **2026-09-29, Fabric item-flow implementation:** normal player drops and
+  pickups now use server-only `ServerPlayer.drop` and `ItemEntity.playerTouch`
+  return hooks. Drop rows require the `addFreshEntity` acceptance result; pickup
+  rows use the entity stack count delta, so partial pickups cannot manufacture
+  quantity. Drops observed while `ServerPlayer.isDeadOrDying()` are labeled
+  `DEATH_DROP`; custom death-event additions and non-player automation remain
+  outside this slice.
 
 ## Acceptance gates
 
