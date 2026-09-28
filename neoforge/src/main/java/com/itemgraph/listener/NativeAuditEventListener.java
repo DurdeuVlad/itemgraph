@@ -23,8 +23,9 @@ import net.neoforged.neoforge.event.level.BlockEvent;
  *
  * <p>Handlers run on NeoForge's server event bus and enqueue immutable values;
  * SQLite work remains on {@link InternalObservationService}'s worker thread.
- * Canceled events are excluded so the ledger describes completed actions rather
- * than rejected attempts.</p>
+ * Canceled events are excluded. Hooks that run before the game action completes
+ * are labeled as attempts, so the ledger never presents a pre-action callback as
+ * completed evidence.</p>
  */
 public final class NativeAuditEventListener {
     private static final int MAX_DETAIL_LENGTH = 16_384;
@@ -62,7 +63,7 @@ public final class NativeAuditEventListener {
             return;
         }
         String command = parse.getReader().getString();
-        submit("COMMAND_EXECUTED", player, player.level(), player.blockPosition(),
+        submit("COMMAND_ATTEMPT", player, player.level(), player.blockPosition(),
                 null, bounded(command));
     }
 

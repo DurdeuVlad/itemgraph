@@ -1,24 +1,85 @@
 package com.itemgraph.listener;
 
 import com.itemgraph.ingest.InternalObservationService;
+import com.mojang.brigadier.ParseResults;
+import com.mojang.brigadier.StringReader;
+import com.mojang.brigadier.context.CommandContextBuilder;
+import net.minecraft.SharedConstants;
 import net.neoforged.neoforge.event.CommandEvent;
 import net.neoforged.neoforge.event.ServerChatEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.world.level.Level;
+import net.neoforged.fml.loading.LoadingModList;
+import com.mojang.authlib.GameProfile;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
+
+import java.util.UUID;
+import java.util.List;
+import java.util.Map;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.verify;
 
 class NativeAuditEventListenerTest {
 
+    @BeforeAll
+    static void initMinecraft() {
+        if (LoadingModList.get() == null) {
+            LoadingModList.of(List.of(), List.of(), List.of(), List.of(), Map.of());
+        }
+        SharedConstants.tryDetectVersion();
+        try {
+            Bootstrap.bootStrap();
+        } catch (Throwable ignored) {
+        }
+    }
+
     @Test
-    void canceledCommandIsNotRecordedAsExecuted() {
+    void canceledCommandIsNotRecordedAsAttempt() {
         CommandEvent event = mock(CommandEvent.class);
         when(event.isCanceled()).thenReturn(true);
         assertNotRecorded(listener -> listener.onCommand(event));
+    }
+
+    @Test
+    void commandHookRecordsAnAttemptBecauseTheEventPrecedesExecution() {
+        ParseResults<CommandSourceStack> parse = mock(ParseResults.class);
+        CommandContextBuilder<CommandSourceStack> context = mock(CommandContextBuilder.class);
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        net.minecraft.server.level.ServerPlayer player = mock(net.minecraft.server.level.ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(parse.getContext()).thenReturn(context);
+        when(parse.getReader()).thenReturn(new StringReader("give Alex dirt"));
+        when(context.getSource()).thenReturn(source);
+        when(source.getEntity()).thenReturn(player);
+        when(player.level()).thenReturn(level);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.blockPosition()).thenReturn(BlockPos.ZERO);
+        UUID playerUuid = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onCommand(new CommandEvent(parse));
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("COMMAND_ATTEMPT", captured.getValue().eventType());
     }
 
     @Test
