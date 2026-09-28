@@ -137,7 +137,7 @@ jobs:
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
           modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
           curseforge-version: ${{ steps.version_data.outputs.version }}
-          modrinth-version: '${{ steps.version_data.outputs.version }}+fabric-grieflogger-compatible'
+          modrinth-version: '${{ steps.version_data.outputs.version }}+fabric-gl'
           version-type: release
           changelog-file: release-notes.md
           game-versions: |
@@ -191,7 +191,7 @@ jobs:
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
           modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
           curseforge-version: ${{ steps.version_data.outputs.version }}
-          modrinth-version: '${{ steps.version_data.outputs.version }}+neoforge-grieflogger-compatible'
+          modrinth-version: '${{ steps.version_data.outputs.version }}+neoforge-gl'
           version-type: release
           changelog-file: release-notes.md
           game-versions: |
