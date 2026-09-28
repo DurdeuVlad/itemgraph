@@ -1,6 +1,7 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.canon.CanonicalItem;
+import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.SharedConstants;
@@ -12,7 +13,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.AfterEach;
@@ -260,6 +264,55 @@ class FabricNativeAuditEventListenerTest {
                     1, 2, 3, 4, 5, 6, "GROUND", canonical, 0, "entity-uuid");
             verifyNoInteractions(service);
         }
+    }
+
+    @Test
+    void completedFoodUseRecordsOnlyConsumedServerPlayerItems() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        CanonicalItem canonical = new CanonicalItem("minecraft:apple", "fingerprint", null, null, null);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        UUID playerUuid = UUID.randomUUID();
+        when(player.level()).thenReturn(level);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getX()).thenReturn(1.0);
+        when(player.getY()).thenReturn(2.0);
+        when(player.getZ()).thenReturn(3.0);
+        ItemStack original = new ItemStack(Items.APPLE);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(original)).thenReturn(canonical);
+            FabricNativeAuditEventListener.onItemUseFinished(player, original, ItemStack.EMPTY);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalObservation.class);
+        verify(service).submit(captured.capture());
+        assertEquals("CONSUME_ITEM", captured.getValue().actionType());
+        assertEquals(1, captured.getValue().amount());
+        assertEquals("UNKNOWN", captured.getValue().targetType());
+    }
+
+    @Test
+    void completedFoodUseSkipsUnchangedStack() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(player.level()).thenReturn(level);
+        when(level.isClientSide()).thenReturn(false);
+        ItemStack original = new ItemStack(Items.APPLE, 2);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            FabricNativeAuditEventListener.onItemUseFinished(player, original, original.copy());
+        }
+
+        verifyNoInteractions(service);
     }
 
     @Test
