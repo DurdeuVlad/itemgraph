@@ -121,4 +121,31 @@ class AuditEventQueryServiceTest {
         assertTrue(formatted.contains("detail=hello\\nworld\\t\\\\quoted"));
         assertFalse(formatted.contains("detail=hello\nworld"));
     }
+
+    @Test
+    void dimensionAndRadiusFiltersAreAppliedBeforeTheResultLimit() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement(
+                "INSERT INTO ig_audit_events (event_type, timestamp_ms, level_id, x, y, z) VALUES ('BREAK_BLOCK', ?, ?, ?, 64, 0)")) {
+            insert.setLong(1, 1L);
+            insert.setString(2, "minecraft:overworld");
+            insert.setDouble(3, 3);
+            insert.executeUpdate();
+            insert.setLong(1, 2L);
+            insert.setString(2, "minecraft:overworld");
+            insert.setDouble(3, 30);
+            insert.executeUpdate();
+            insert.setLong(1, 3L);
+            insert.setString(2, "minecraft:the_nether");
+            insert.setDouble(3, 2);
+            insert.executeUpdate();
+        }
+
+        List<AuditEventDetail> nearby = service.find(
+                conn, "BREAK_BLOCK", null, QueryWindow.unbounded(),
+                "minecraft:overworld", 0.0, 64.0, 0.0, 5.0, 100);
+
+        assertEquals(1, nearby.size());
+        assertEquals("minecraft:overworld", nearby.get(0).levelName());
+        assertEquals(3.0, nearby.get(0).x());
+    }
 }

@@ -24,6 +24,7 @@ import com.itemgraph.core.port.RuntimeInformationPort;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
@@ -219,7 +220,38 @@ public final class ItemGraphCommands {
         lookup.then(Commands.literal("player")
                 .then(Commands.argument("playerName", StringArgumentType.string())
                         .then(playerType)));
+
+        lookup.then(buildNearLookupCommand());
         return lookup;
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> buildNearLookupCommand() {
+        var since = Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAuditNear(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes")));
+        var limit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAuditNear(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        limit.then(since);
+        var eventType = Commands.argument("eventType", StringArgumentType.word())
+                .suggests(ItemGraphCommands::suggestAuditEventTypes)
+                .executes(ctx -> lookupAuditNear(ctx,
+                        StringArgumentType.getString(ctx, "eventType"), QueryLimits.DEFAULT_LIMIT, null));
+        eventType.then(limit);
+        var radius = Commands.argument("radius", DoubleArgumentType.doubleArg(0.1));
+        radius.then(eventType);
+        var z = Commands.argument("z", DoubleArgumentType.doubleArg());
+        z.then(radius);
+        var y = Commands.argument("y", DoubleArgumentType.doubleArg());
+        y.then(z);
+        var x = Commands.argument("x", DoubleArgumentType.doubleArg());
+        x.then(y);
+        var dimension = Commands.argument("dimension", StringArgumentType.word());
+        dimension.then(x);
+        return Commands.literal("near").then(dimension);
     }
 
     private static int help(CommandContext<CommandSourceStack> ctx) {
@@ -439,15 +471,36 @@ public final class ItemGraphCommands {
     /** /ig lookup <eventType> [limit] [sinceMinutes] and /ig lookup player ... */
     private static int lookupAudit(CommandContext<CommandSourceStack> ctx, String eventType,
                                    String playerName, int limit, Long sinceMinutes) {
+        return lookupAudit(ctx, eventType, playerName, limit, sinceMinutes,
+                null, null, null, null, null);
+    }
+
+    private static int lookupAuditNear(CommandContext<CommandSourceStack> ctx, String eventType,
+                                       int limit, Long sinceMinutes) {
+        return lookupAudit(ctx, eventType, null, limit, sinceMinutes,
+                StringArgumentType.getString(ctx, "dimension"),
+                DoubleArgumentType.getDouble(ctx, "x"),
+                DoubleArgumentType.getDouble(ctx, "y"),
+                DoubleArgumentType.getDouble(ctx, "z"),
+                DoubleArgumentType.getDouble(ctx, "radius"));
+    }
+
+    private static int lookupAudit(CommandContext<CommandSourceStack> ctx, String eventType,
+                                   String playerName, int limit, Long sinceMinutes,
+                                   String levelId, Double centerX, Double centerY, Double centerZ,
+                                   Double radius) {
         QueryWindow window = sinceMinutes == null
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
         String filter = "type=" + eventType
                 + (playerName == null ? "" : " player=" + playerName)
+                + (levelId == null ? "" : " dimension=" + levelId)
+                + (radius == null ? "" : " center=" + centerX + "," + centerY + "," + centerZ + " radius=" + radius)
                 + " window=" + window.describe();
         return QueryDispatcher.dispatch(ctx.getSource(), "lookup audit", conn ->
                 QueryDispatcher.QueryOutput.found(QueryFormatter.formatAuditEvents(
-                        AUDIT_EVENT_QUERIES.find(conn, eventType, playerName, window, limit), filter)));
+                        AUDIT_EVENT_QUERIES.find(conn, eventType, playerName, window,
+                                levelId, centerX, centerY, centerZ, radius, limit), filter)));
     }
 
     private static int status(CommandContext<CommandSourceStack> ctx) {

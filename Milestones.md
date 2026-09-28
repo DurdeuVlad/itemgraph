@@ -150,8 +150,8 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   persistence; action/player/time lookup; tests proving the ledger is separate from item
   transfers.
 - Remaining: projectile throw/crossbow hooks, Fabric command execution and completed
-  block-placement hooks, radius and dimension filters, block history inspector,
-  interactive generic pagination, and staging verification with the GriefLogger JAR absent.
+  block-placement hooks, block history inspector, interactive generic pagination, and
+  staging verification with the GriefLogger JAR absent.
 - Acceptance evidence: `docs/GRIEFLOGGER_PARITY.md`, V13 migration tests, native audit
   persistence/query tests, and a dedicated staging event matrix.
 
