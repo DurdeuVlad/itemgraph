@@ -149,7 +149,7 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   join/quit, chat, block break/interact, and player-killed entities; asynchronous
   persistence; action/player/time lookup; tests proving the ledger is separate from item
   transfers.
-- Remaining: projectile throw/crossbow hooks, Fabric command execution and completed
+- Remaining: Fabric projectile hooks, Fabric command execution and completed
   block-placement hooks, interactive chat pagination controls, and
   staging verification with the GriefLogger JAR absent.
 - Acceptance evidence: `docs/GRIEFLOGGER_PARITY.md`, V13 migration tests, native audit

@@ -342,7 +342,7 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
 
 ### Remaining parity slices
 
-- Projectile throw, crossbow projectile, Fabric command execution, native
+- Fabric projectile, command execution, and native
   block-placement hooks where the loader callback exposes a completed action,
   and interactive chat page navigation.
 - Staging verification with GriefLogger absent and a migration/retention plan.
