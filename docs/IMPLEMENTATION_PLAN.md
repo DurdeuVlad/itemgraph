@@ -340,6 +340,10 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   player drops and full or partial pickups through server-only `ServerPlayer.drop`
   and `ItemEntity.playerTouch` return hooks; the returned entity UUID and stack
   count delta are retained as the quantity evidence.
+- Both loaders expose the same read-only container inspector: NeoForge uses its
+  high-priority `InspectionListener`, while Fabric uses `UseBlockCallback` and the
+  shared `FlowBrowserService`. A click is consumed only after the asynchronous query
+  is accepted, and inspection state is cleared on disconnect and server stop.
 - `/ig lookup <eventType> [limit] [sinceMinutes]` and
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
   bounded native audit evidence; `/ig lookup near` adds exact dimension and
@@ -378,6 +382,8 @@ coverage before this matrix can be marked complete.
 ### Remaining parity slices
 
 - Staging verification with GriefLogger absent and a migration/retention plan.
+- Fabric coverage for custom death-event item additions and automated non-player
+  movement remains outside the current loader-native hooks.
 
 Prefer small commits such as:
 

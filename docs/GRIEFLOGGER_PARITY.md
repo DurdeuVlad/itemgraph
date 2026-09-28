@@ -19,7 +19,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | Armor stand equip/unequip | `ArmorStandEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
 | Consume, break, throw, shoot item actions | `NativeItemActionEventListener`, `ItemEntityEventListener`, Fabric `ServerLevelMixin` | `ig_observations` for consume/break; `ig_audit_events` for native projectile spawn evidence | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record fresh player-owned projectile spawns as non-quantity `THROW_ITEM`/`SHOOT_ITEM` audit evidence, so Infinity and multishot cannot fabricate quantities; Fabric staging verification is pending |
 | Location/action filtered lookup | `AuditEventQueryService` | `ig_audit_events` | `/ig lookup`, `/ig lookup near` | Action/player/time and exact dimension/radius filters implemented; staging verification pending |
-| Block/container inspector history | `InspectionListener`, `FlowBrowserService`, `TraceQueryService` | `ig_observations` | `/ig inspect`, `/ig trace container` | Read-only coordinate history and paginated flow browser implemented; staging verification pending |
+| Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `FlowBrowserService`, `TraceQueryService` | `ig_observations` | `/ig inspect`, `/ig trace container` | Read-only coordinate history and paginated flow browser implemented on both loaders; staging verification pending |
 | Paginated generic audit results | `AuditEventQueryService` offset paging | `ig_audit_events` | `/ig lookup page <page> ...` | Bounded 1-based page offsets and server-generated Previous/Next chat controls implemented |
 | MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite | — | Deliberate scope boundary |
 
@@ -47,6 +47,12 @@ after native coverage and staging verification meet this matrix.
   quantity. Drops observed while `ServerPlayer.isDeadOrDying()` are labeled
   `DEATH_DROP`; custom death-event additions and non-player automation remain
   outside this slice.
+- **2026-09-29, Fabric inspector implementation:** the Fabric `UseBlockCallback`
+  now matches NeoForge inspection semantics. An enabled permission-level-2 player
+  receives the shared read-only flow browser only for a block entity implementing
+  `Container`; an accepted query returns `SUCCESS` and suppresses the normal GUI,
+  while unsupported blocks, rejected queries, and permission loss preserve ordinary
+  interaction. Disconnect and server-stop cleanup are covered by the adapter lifecycle.
 
 ## Acceptance gates
 

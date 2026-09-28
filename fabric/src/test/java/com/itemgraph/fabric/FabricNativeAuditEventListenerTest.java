@@ -1,14 +1,21 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.canon.CanonicalItem;
+import com.itemgraph.command.InspectionService;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.SharedConstants;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
@@ -16,9 +23,13 @@ import org.mockito.MockedStatic;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
@@ -27,6 +38,84 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 class FabricNativeAuditEventListenerTest {
+    private final InspectionService inspections = InspectionService.getInstance();
+
+    @AfterEach
+    void clearInspectionState() {
+        inspections.clear();
+    }
+
+    @Test
+    void activeSupportedFabricInspectionConsumesClickAfterBrowserAccepts() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        BlockPos pos = BlockPos.ZERO;
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
+                inspections,
+                (openingPlayer, openingLevel, clickedPos) -> {
+                    assertSame(player, openingPlayer);
+                    assertSame(level, openingLevel);
+                    assertEquals(pos, clickedPos);
+                    opens.incrementAndGet();
+                    return 1;
+                },
+                player, level, pos);
+
+        assertEquals(InteractionResult.SUCCESS, result);
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void inactiveUnsupportedAndRejectedFabricInspectionPreserveVanillaBehavior() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel unsupportedLevel = org.mockito.Mockito.mock(ServerLevel.class);
+        when(unsupportedLevel.getBlockEntity(BlockPos.ZERO)).thenReturn(mock(BlockEntity.class));
+        AtomicInteger opens = new AtomicInteger();
+
+        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> { opens.incrementAndGet(); return 1; },
+                player, unsupportedLevel, BlockPos.ZERO));
+
+        inspections.setEnabled(playerUuid, true);
+        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> { opens.incrementAndGet(); return 0; },
+                player, serverLevelWithContainer(), BlockPos.ZERO));
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void FabricInspectionPermissionLossDisablesMode() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, false);
+
+        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> 1, player, serverLevelWithContainer(), BlockPos.ZERO));
+        assertFalse(inspections.isEnabled(playerUuid));
+    }
+
+    private ServerPlayer playerWithPermission(UUID uuid, boolean permitted) {
+        ServerPlayer player = mock(ServerPlayer.class);
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        when(player.getUUID()).thenReturn(uuid);
+        when(player.createCommandSourceStack()).thenReturn(source);
+        when(source.hasPermission(2)).thenReturn(permitted);
+        return player;
+    }
+
+    private ServerLevel serverLevelWithContainer() {
+        ServerLevel level = mock(ServerLevel.class);
+        BlockEntity container = mock(BlockEntity.class,
+                org.mockito.Mockito.withSettings().extraInterfaces(Container.class));
+        when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(container);
+        return level;
+    }
+
     @Test
     void nullCommandParseIsIgnored() {
         InternalObservationService service = mock(InternalObservationService.class);
