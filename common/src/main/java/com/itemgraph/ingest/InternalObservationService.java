@@ -30,6 +30,9 @@ public class InternalObservationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(InternalObservationService.class);
     private static final InternalObservationService INSTANCE = new InternalObservationService();
     private static final int QUEUE_CAPACITY = 10_000;
+    private static final long AUDIT_RETRY_INITIAL_BACKOFF_MS = 25L;
+    private static final long AUDIT_RETRY_MAX_BACKOFF_MS = 5_000L;
+    private static final long AUDIT_RETRY_LOG_INTERVAL_MS = 10_000L;
 
     public static InternalObservationService getInstance() {
         return INSTANCE;
@@ -145,6 +148,8 @@ public class InternalObservationService {
     private final java.util.concurrent.atomic.AtomicLong totalDropped = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalTransformations = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalAuditEvents = new java.util.concurrent.atomic.AtomicLong(0);
+    private volatile long auditRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
+    private volatile long lastAuditRetryLogMs;
     private Thread workerThread;
 
     private InternalObservationService() {}
@@ -247,6 +252,7 @@ public class InternalObservationService {
         totalDropped.set(0);
         totalTransformations.set(0);
         totalAuditEvents.set(0);
+        resetAuditRetryState();
     }
 
     private void drainQueueSafely() {
@@ -281,6 +287,7 @@ public class InternalObservationService {
                     auditEventQueue.drainTo(auditBatch, 99);
                     try {
                         persistAuditEvents(auditBatch);
+                        resetAuditRetryState();
                         totalAuditEvents.addAndGet(auditBatch.size());
                         totalPersisted.addAndGet(auditBatch.size());
                     } catch (Exception e) {
@@ -324,6 +331,7 @@ public class InternalObservationService {
         if (!remainingAudit.isEmpty()) {
             try {
                 persistAuditEvents(remainingAudit);
+                resetAuditRetryState();
                 totalAuditEvents.addAndGet(remainingAudit.size());
                 totalPersisted.addAndGet(remainingAudit.size());
             } catch (Exception e) {
@@ -340,12 +348,15 @@ public class InternalObservationService {
      * as dropped and never reported as persisted.
      */
     private void requeueAuditBatch(List<InternalAuditEvent> batch, Exception failure) {
-        LOGGER.error("Could not persist {} native audit events; retaining them for retry", batch.size(), failure);
-        int retained = 0;
+        long now = System.currentTimeMillis();
+        long lastLog = lastAuditRetryLogMs;
+        if (lastLog == 0L || now - lastLog >= AUDIT_RETRY_LOG_INTERVAL_MS) {
+            lastAuditRetryLogMs = now;
+            LOGGER.error("Could not persist {} native audit events; retaining them for retry (backoff={} ms)",
+                    batch.size(), auditRetryBackoffMs, failure);
+        }
         for (InternalAuditEvent event : batch) {
-            if (auditEventQueue.offer(event)) {
-                retained++;
-            } else {
+            if (!auditEventQueue.offer(event)) {
                 long dropped = totalDropped.incrementAndGet();
                 if (dropped == 1 || dropped % 1000 == 0) {
                     LOGGER.warn("Native audit queue remained full while retrying; dropped {} ({} dropped total; evidence loss)",
@@ -353,13 +364,20 @@ public class InternalObservationService {
                 }
             }
         }
-        if (retained > 0 && running.get()) {
+        if (running.get()) {
+            long backoff = auditRetryBackoffMs;
+            auditRetryBackoffMs = Math.min(AUDIT_RETRY_MAX_BACKOFF_MS, backoff * 2L);
             try {
-                Thread.sleep(25L);
+                Thread.sleep(backoff);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             }
         }
+    }
+
+    private void resetAuditRetryState() {
+        auditRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
+        lastAuditRetryLogMs = 0L;
     }
 
     private void reportAuditBatchLoss(List<InternalAuditEvent> batch, Exception failure) {

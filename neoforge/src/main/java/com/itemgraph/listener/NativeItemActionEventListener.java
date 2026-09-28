@@ -3,7 +3,7 @@ package com.itemgraph.listener;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.ingest.InternalObservationService;
-import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ItemSupplier;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -69,8 +69,7 @@ public final class NativeItemActionEventListener {
         }
         String actionType = projectile instanceof ThrowableItemProjectile || projectile instanceof ThrownTrident
                 ? "THROW_ITEM" : "SHOOT_ITEM";
-        submitGround(player, actionType, stack.copy(), 1,
-                projectile.getX(), projectile.getY(), projectile.getZ());
+        submitProjectileAudit(player, actionType, stack, projectile);
     }
 
     private static void submitUnknown(ServerPlayer player, String actionType, ItemStack stack, int amount) {
@@ -83,16 +82,16 @@ public final class NativeItemActionEventListener {
                 level, null, null, null, "UNKNOWN", canonical, amount, null));
     }
 
-    private static void submitGround(ServerPlayer player, String actionType, ItemStack stack, int amount,
-                                      double x, double y, double z) {
-        CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(stack);
+    private static void submitProjectileAudit(ServerPlayer player, String actionType, ItemStack stack,
+                                               Projectile projectile) {
         String level = player.level().dimension().location().toString();
-        BlockPos pos = BlockPos.containing(x, y, z);
-        InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        String projectileId = BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString();
+        InternalObservationService.getInstance().submitAuditEvent(
+                new InternalObservationService.InternalAuditEvent(
                 System.currentTimeMillis(), actionType,
                 player.getUUID().toString(), player.getGameProfile().getName(), level,
-                player.getX(), player.getY(), player.getZ(),
-                level, (double) pos.getX(), (double) pos.getY(), (double) pos.getZ(),
-                "GROUND", canonical, amount, null));
+                projectile.getX(), projectile.getY(), projectile.getZ(), itemId,
+                "projectile=" + projectileId + " evidence=spawned_by_player", null));
     }
 }
