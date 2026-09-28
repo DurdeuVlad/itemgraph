@@ -28,6 +28,7 @@ final class CommandHelp {
                 "[ItemGraph] /ig status — show mod, GriefLogger, database, ingestion, and inference state.",
                 "[ItemGraph] /ig audit — verify ItemGraph database invariants asynchronously.",
                 "[ItemGraph] /ig lookup <eventType> [limit] [sinceMinutes] — query native audit events.",
+                "[ItemGraph] /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes] — bound results to a location.",
                 "[ItemGraph] /ig lookup player <playerName> <eventType> [limit] [sinceMinutes] — filter native audit events by player.",
                 "[ItemGraph] /ig ingest now — queue one complete ingest and correlate cycle.",
                 "[ItemGraph] /ig event <observationId> — show one raw observed evidence row.",
@@ -82,6 +83,7 @@ final class CommandHelp {
                 "[ItemGraph] Syntax: /ig lookup <eventType> [limit] [sinceMinutes]",
                 "[ItemGraph] eventType: all, PLAYER_JOIN, PLAYER_QUIT, CHAT_MESSAGE, COMMAND_EXECUTED, PLACE_BLOCK, BREAK_BLOCK, INTERACT_BLOCK, INTERACT_BLOCK_ATTEMPT, or KILL_ENTITY.",
                 "[ItemGraph] Results are native OBSERVED evidence from ig_audit_events; limit defaults to 20 and is capped at 100.",
+                "[ItemGraph] /ig lookup near clamps radius to 1..1024 blocks and requires an exact dimension id.",
                 "[ItemGraph] Example: /ig lookup BREAK_BLOCK 50 120");
         topics.put("lookup", lookup);
         topics.put("lookup player", List.of(

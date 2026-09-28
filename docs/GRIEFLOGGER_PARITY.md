@@ -18,7 +18,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | Player-killed entities | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
 | Armor stand equip/unequip | `ArmorStandEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
 | Consume, break, throw, shoot item actions | `NativeItemActionEventListener`, `ItemEntityEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Consume, break, and bow shoot captured natively; throw-item and crossbow projectile hooks still pending |
-| Location/action filtered lookup | Action/player filters in `AuditEventQueryService` | `ig_audit_events` | `/ig lookup` | Action/player/time implemented; radius/location pending |
+| Location/action filtered lookup | `AuditEventQueryService` | `ig_audit_events` | `/ig lookup`, `/ig lookup near` | Action/player/time and exact dimension/radius filters implemented; staging verification pending |
 | Block/container inspector history | ItemGraph read-only container inspector | `ig_observations` | `/ig inspect` | Container flow implemented; block history pending |
 | Paginated generic audit results | ItemGraph flow browser pagination | — | Generic audit pagination pending | Gap |
 | MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite | — | Deliberate scope boundary |
@@ -42,8 +42,9 @@ after native coverage and staging verification meet this matrix.
    attempt; Fabric command execution requires a dedicated loader hook before it can
    be marked complete.
 3. A permission-level-2 lookup command returns those rows with player, location,
-   subject, timestamp, and detail fields, with a bounded result limit. Radius and
-   interactive chat pagination remain the next parity slice.
+   subject, timestamp, and detail fields, with a bounded result limit. `/ig lookup near`
+   applies exact dimension and a radius clamped to 1..1024 blocks. Interactive chat
+   pagination remains the next parity slice.
 4. The existing item-flow tests remain green and the GriefLogger database is not
    opened by the native-only path.
 

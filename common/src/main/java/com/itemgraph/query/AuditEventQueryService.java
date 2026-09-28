@@ -9,12 +9,21 @@ import java.util.List;
 
 /** Read-only queries for native GriefLogger-parity audit events. */
 public final class AuditEventQueryService {
+    public static final double MAX_RADIUS_BLOCKS = 1_024.0;
     public static final List<String> EVENT_TYPES = List.of(
             "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_EXECUTED",
             "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK", "INTERACT_BLOCK_ATTEMPT", "KILL_ENTITY");
 
     public List<AuditEventDetail> find(Connection conn, String eventType, String playerName,
                                        QueryWindow window, int requestedLimit) throws SQLException {
+        return find(conn, eventType, playerName, window, null,
+                null, null, null, null, requestedLimit);
+    }
+
+    public List<AuditEventDetail> find(Connection conn, String eventType, String playerName,
+                                       QueryWindow window, String levelId,
+                                       Double centerX, Double centerY, Double centerZ,
+                                       Double requestedRadius, int requestedLimit) throws SQLException {
         int limit = QueryLimits.clampLimit(requestedLimit);
         StringBuilder sql = new StringBuilder("""
                 SELECT id, event_type, timestamp_ms, player_uuid, player_name,
@@ -39,6 +48,21 @@ public final class AuditEventQueryService {
             sql.append(" AND timestamp_ms <= ?");
             args.add(window.untilMs());
         }
+        if (levelId != null && !levelId.isBlank()) {
+            sql.append(" AND level_id = ?");
+            args.add(levelId);
+        }
+        if (centerX != null && centerY != null && centerZ != null && requestedRadius != null) {
+            double radius = Math.max(1.0, Math.min(MAX_RADIUS_BLOCKS, requestedRadius));
+            sql.append(" AND ((x - ?) * (x - ?) + (y - ?) * (y - ?) + (z - ?) * (z - ?)) <= ?");
+            args.add(centerX);
+            args.add(centerX);
+            args.add(centerY);
+            args.add(centerY);
+            args.add(centerZ);
+            args.add(centerZ);
+            args.add(radius * radius);
+        }
         sql.append(" ORDER BY timestamp_ms DESC, id DESC LIMIT ?");
         args.add(limit);
 
@@ -49,6 +73,8 @@ public final class AuditEventQueryService {
                     pstmt.setLong(i + 1, value);
                 } else if (arg instanceof Integer value) {
                     pstmt.setInt(i + 1, value);
+                } else if (arg instanceof Double value) {
+                    pstmt.setDouble(i + 1, value);
                 } else {
                     pstmt.setString(i + 1, (String) arg);
                 }
