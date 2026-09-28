@@ -12,7 +12,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | Crafting, smelting, anvil rename/repair | `TransformationEventListener` | `ig_item_transformations` | Item lineage in trace | Implemented and tested |
 | Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
 | Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
-| Player commands | `NativeAuditEventListener`; Fabric execution hook pending | `ig_audit_events` | `/ig lookup` | NeoForge capture/query implemented; Fabric API exposes command broadcast messages, not a general execution-complete callback |
+| Player commands | `NativeAuditEventListener`; Fabric execution hook pending | `ig_audit_events` | `/ig lookup` | NeoForge records `COMMAND_ATTEMPT` because `CommandEvent` fires before execution; Fabric API exposes command broadcast messages, not a general execution-complete callback; `COMMAND_EXECUTED` remains reserved for a future post-execution hook/legacy rows |
 | Block place/break | `NativeAuditEventListener`, Fabric break callback | `ig_audit_events` | `/ig lookup` | NeoForge place/break and Fabric break capture/query implemented; Fabric completed placement pending |
 | Block interaction | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Both loaders record `INTERACT_BLOCK_ATTEMPT`; the pre-action callbacks do not claim that the block use completed |
 | Player-killed entities | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
@@ -37,10 +37,10 @@ after native coverage and staging verification meet this matrix.
    for canceled command, chat, death, or block actions; persistence failures must
    retain the batch or count its loss without incrementing persisted counters.
 2. A staging server with the GriefLogger JAR absent records join, quit, chat,
-   command, block, entity-kill, container, consume, break, shoot, and item events
-   in ItemGraph storage. Fabric's interaction callback records the observed callback
-   attempt; Fabric command execution requires a dedicated loader hook before it can
-   be marked complete.
+   command attempt, block, entity-kill, container, consume, break, shoot, and item
+   events in ItemGraph storage. Fabric's interaction callback records the observed
+   callback attempt; both loaders require a post-execution command hook before a
+   command can be labeled `COMMAND_EXECUTED`.
 3. A permission-level-2 lookup command returns those rows with player, location,
    subject, timestamp, and detail fields, with a bounded result limit. `/ig lookup near`
    applies exact dimension and a radius clamped to 1..1024 blocks. Interactive chat

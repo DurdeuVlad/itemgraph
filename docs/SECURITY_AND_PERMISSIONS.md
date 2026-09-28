@@ -116,7 +116,7 @@ Queries should have:
 - rate limits if necessary
 
 `/ig lookup` is an operator-only audit query. `CHAT_MESSAGE` and
-`COMMAND_EXECUTED` rows can contain private conversation, command arguments, or
+`COMMAND_ATTEMPT` and `COMMAND_EXECUTED` rows can contain private conversation, command arguments, or
 credentials accidentally typed into chat, so they must remain restricted to the
 audit permission and must never be included in player-facing flow views.
 

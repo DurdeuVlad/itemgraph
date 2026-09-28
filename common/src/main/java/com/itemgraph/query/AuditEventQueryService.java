@@ -11,7 +11,7 @@ import java.util.List;
 public final class AuditEventQueryService {
     public static final double MAX_RADIUS_BLOCKS = 1_024.0;
     public static final List<String> EVENT_TYPES = List.of(
-            "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_EXECUTED",
+            "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_ATTEMPT", "COMMAND_EXECUTED",
             "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK", "INTERACT_BLOCK_ATTEMPT",
             "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM");
 

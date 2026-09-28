@@ -328,17 +328,18 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
 ### Delivered in the current slice
 
 - V13 creates the ItemGraph-owned `ig_audit_events` table and indexes.
-- NeoForge captures successful player join/quit, chat, command, block place,
+- NeoForge captures player join/quit, chat, command attempts, block place,
   block break, block interaction, and player-kill events asynchronously.
-- NeoForge captures consume, durability break, and bow shoot item actions into
-  the existing quantity-flow ledger; Fabric captures join/quit, chat, block
-  break/interaction, and player-kill events through Fabric API callbacks.
+- NeoForge captures consume and durability break into the existing quantity-flow
+  ledger, and projectile spawn usage as non-quantity audit evidence; Fabric captures
+  join/quit, chat, block break/interaction, and player-kill events through Fabric API callbacks.
 - `/ig lookup <eventType> [limit] [sinceMinutes]` and
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
   bounded native audit evidence; `/ig lookup near` adds exact dimension and
   bounded radius filters.
-- Canceled chat, command, death, and block events are excluded; canceled actions
-  remain distinct from completed evidence.
+- Canceled chat, command, death, and block events are excluded; command and block
+  callbacks are labeled attempts where the loader hook is pre-action, and canceled
+  actions remain distinct from completed evidence.
 
 ### Remaining parity slices
 
