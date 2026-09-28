@@ -9,7 +9,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | --- | --- | --- | --- | --- |
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
 | Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge drop/pickup/death-drop paths and Fabric normal plus vanilla player-death inventory drops are implemented and unit-tested; custom death-event additions and automation remain parity gaps |
-| Crafting, smelting, anvil rename/repair | `TransformationEventListener` | `ig_item_transformations` | Item lineage in trace | Implemented and tested |
+| Crafting, smelting, anvil rename/repair | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | Both loaders capture crafting, furnace-family smelting, and anvil rename/repair results at server result-take boundaries; Fabric staging verification remains pending |
 | Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
 | Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
 | Player commands | `NativeAuditEventListener`, Fabric `CommandsMixin` | `ig_audit_events` | `/ig lookup` | Both loaders record `COMMAND_ATTEMPT` at the pre-execution dispatch boundary, matching GriefLogger's documented behavior of recording attempts regardless of permission or command success; `COMMAND_EXECUTED` remains reserved for legacy rows and is never fabricated |
@@ -58,6 +58,10 @@ after native coverage and staging verification meet this matrix.
   an orderly server stop flushes active session deltas before ItemGraph closes its
   database. Automated transfers remain outside Fabric's player-session attribution
   boundary.
+- **2026-09-29, Fabric transformations:** result-slot hooks capture crafting,
+  furnace-family smelting, and anvil rename/repair outputs with source/result
+  canonical fingerprints. Staging action replay remains required for row-level
+  verification.
 - **2026-09-29, filtered lookup implementation:** `/ig lookup filters` accepts up
   to five `name.value` filters matching GriefLogger's action, user, include,
   exclude, time, and radius vocabulary. Radius is required, clamped to 1..1024,

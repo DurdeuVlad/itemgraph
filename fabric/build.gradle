@@ -113,6 +113,10 @@ tasks.register('verifyFabricJar') {
                         || !names.contains('com/itemgraph/fabric/mixin/ItemEntityMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/LivingEntityMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/ItemStackMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/ResultSlotMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/FurnaceResultSlotMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/AnvilMenuMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/ItemCombinerMenuAccessor.class')
                         || !names.contains('com/itemgraph/query/TraceQueryService.class')
                         || (nestedSqlite == check.compatible)) {
                     throw new GradleException("${artifact.name} is missing Fabric/shared classes, contains NeoForge metadata, or has incorrect SQLite bundling")

@@ -10,6 +10,10 @@
     "ServerPlayerMixin",
     "ItemEntityMixin",
     "LivingEntityMixin",
-    "ItemStackMixin"
+    "ItemStackMixin",
+    "ResultSlotMixin",
+    "FurnaceResultSlotMixin",
+    "AnvilMenuMixin",
+    "ItemCombinerMenuAccessor"
   ]
 }
