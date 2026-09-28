@@ -537,3 +537,25 @@ was present after stop, but no pre-start hash was captured; this is not a hash-v
 no-write claim. Standalone live movement scenarios remain blocked until GriefLogger can be
 isolated without modifying its existing database.
 
+## GriefLogger-compatible artifact smoke test (isolated RustiCraft clone)
+
+On 2026-09-28, `java -classpath gradle/wrapper/gradle-wrapper.jar
+org.gradle.wrapper.GradleWrapperMain clean build verifyGriefLoggerCompatibleJar`
+completed successfully on Java 21.0.12. The build created
+`build/libs/itemgraph-0.3.0-grieflogger-compatible.jar`; the verification task
+confirmed that it has no SQLite classes/JarJar metadata, requires GriefLogger
+`1.2.10-1.21.1`, and that the standard JAR still bundles SQLite and keeps
+GriefLogger optional.
+
+The built compatibility artifact was run in the isolated copy
+`run/rusticraft-itemgraph-smoke-20260928`, with GriefLogger
+`1.2.10-1.21.1-neoforge.jar`, Minecraft 1.21.1, NeoForge 21.1.248, and a fresh
+world `itemgraph-smoke-world` bound only to `127.0.0.1:27991`. The server reached
+`Done (17.953s)`, ItemGraph applied schema migrations through V12 and initialized
+its own database, and GriefLogger was detected as enabled. The original failing
+ItemGraph JAR was preserved outside `mods` as
+`mods-repro/itemgraph-0.3.0-conflicting.jar`; the source clone's world and GriefLogger
+database were not copied or accessed. This startup smoke establishes that the module
+resolution crash is gone. The isolated folder had no GriefLogger database schema,
+so this run does not verify event ingestion against the source clone's existing DB.
+

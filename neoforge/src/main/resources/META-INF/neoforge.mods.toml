@@ -1,0 +1,47 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+issueTrackerURL="https://github.com/DurdeuVlad/itemgraph/issues"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+# Path is absolute from the resource root (src/main/resources), per NeoForge's
+# neoforge.mods.toml reference. logoBlur=false forces nearest-neighbour scaling
+# on the mods list screen - the icon is hand-placed pixel art and the default
+# (true, linear filtering) would smear it.
+logoFile="itemgraph_icon.png"
+logoBlur=false
+description='''${mod_description}'''
+
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="${neo_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+# GriefLogger is an OPTIONAL evidence source. ItemGraph operates without it:
+# GriefLogger ingestion cycles are skipped when the database file is absent, and
+# ItemGraph records its supported native NeoForge events and capability changes.
+# When GriefLogger IS present, ItemGraph reads its SQLite database read-only and
+# groups confirmed copies so both raw rows remain auditable but add one capacity.
+# The standard ItemGraph artifact bundles sqlite-jdbc via JarJar. GriefLogger
+# 1.2.10 also embeds SQLite in its main mod module, so use the dedicated
+# grieflogger-compatible artifact when that version is installed.
+[[dependencies.${mod_id}]]
+    modId="grieflogger"
+    type="${grieflogger_dependency_type}"
+    reason="${grieflogger_dependency_reason}"
+    versionRange="${grieflogger_version_range}"
+    ordering="AFTER"
+    side="BOTH"

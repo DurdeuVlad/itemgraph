@@ -6,6 +6,30 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Changed
+
+- **Modrinth publication gate**: tagged releases and the Modrinth-only retry workflow now check both project API endpoints before publishing. A non-2xx response disables Modrinth steps cleanly while GitHub and CurseForge publication continue; a later release or manual retry becomes eligible after both endpoints return successful responses.
+
+## [0.3.2] — 2026-09-28
+
+### Added
+
+- **Fabric 1.21.1 server build**: adds a Fabric Loom adapter and Fabric metadata while sharing ItemGraph query, API, database, and ingestion code. The Fabric adapter uses the same GriefLogger database as an additive read-only evidence source; configure `grieflogger_database_path` in `config/itemgraph.properties`.
+- **GriefLogger-compatible artifacts for both loaders**: Fabric and NeoForge each build a separate `-grieflogger-compatible.jar` that requires GriefLogger `1.2.10-1.21.1` and omits ItemGraph's embedded SQLite driver. The regular Fabric and NeoForge jars retain their own SQLite dependency.
+- **Hexagonal loader boundary**: adds a Java-only `core` module with the `RuntimeInformationPort`; Fabric and NeoForge adapters provide loader facts without a loader API dependency in shared code.
+- **Multi-loader CI and release metadata**: the root build compiles/tests both loader modules, verifies all four loader/provider artifacts, and publishes loader-specific files to GitHub, CurseForge, and Modrinth.
+
+### Changed
+
+- **Artifact names include loader and provider**: release jars now use `itemgraph-<version>-<loader>[-grieflogger-compatible].jar`.
+- **Gradle wrapper**: upgrades to 8.12.1 because Fabric Loom 1.10.5 requires Gradle 8.12 or later.
+
+## [0.3.1] — 2026-09-28
+
+### Added
+
+- **GriefLogger-compatible server artifact**: CI and tagged releases now produce and distribute a separate `-grieflogger-compatible.jar` for GriefLogger `1.2.10-1.21.1`. It omits ItemGraph's SQLite Jar-in-Jar copy to avoid the `org.sqlite.*` module collision. CurseForge publishes this as a separately labeled file with GriefLogger required; use it when running GriefLogger and use the standard JAR without GriefLogger.
+
 ## [0.3.0] — 2026-09-25
 
 ### Added

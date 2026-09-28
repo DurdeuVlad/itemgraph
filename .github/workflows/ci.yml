@@ -35,5 +35,24 @@ jobs:
           sed -i 's/\r$//' ./gradlew
           chmod +x ./gradlew
 
-      - name: Run tests and build
+      - name: Read project version
+        id: version_data
+        shell: bash
+        run: |
+          VERSION="$(awk -F= '$1 == "mod_version" {print $2; exit}' gradle.properties | tr -d '\r')"
+          test -n "${VERSION}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Test and build all loader artifacts
         run: ./gradlew clean build
+
+      - name: Upload all server artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: itemgraph-server-artifacts
+          path: |
+            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
+            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
+            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
+            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
+          if-no-files-found: error

@@ -2,11 +2,26 @@
 
 **Trace item movement through time.**
 
-ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **NeoForge 1.21.1**.
+ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **Fabric and NeoForge 1.21.1**.
 
 Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time. It does **not** assign a permanent UUID to every item. Instead, it combines raw evidence from existing logging systems such as GriefLogger with carefully selected supplemental event hooks, then builds an explainable temporal item-flow graph.
 
-**GriefLogger is optional.** Without it, ItemGraph uses its own storage and supported native NeoForge observations. When GriefLogger is installed, ItemGraph reads its SQLite database strictly read-only as additive evidence.
+**GriefLogger is optional.** The NeoForge build records supported native events and can also read GriefLogger's SQLite database strictly read-only. The Fabric build shares the graph, API, database, query, and GriefLogger ingestion code; its out-of-the-box event evidence source is GriefLogger or observations submitted through the preview API.
+
+Each loader has a standard build and a GriefLogger-compatible build. For GriefLogger
+`1.2.10-1.21.1`, install the artifact ending in
+`-<loader>-grieflogger-compatible.jar`; it omits ItemGraph's SQLite dependency and
+requires that exact GriefLogger release. Use the standard loader jar when GriefLogger
+is absent. The four release files are:
+
+- `itemgraph-<version>-fabric.jar`
+- `itemgraph-<version>-fabric-grieflogger-compatible.jar`
+- `itemgraph-<version>-neoforge.jar`
+- `itemgraph-<version>-neoforge-grieflogger-compatible.jar`
+
+On Fabric, configure `grieflogger_database_path` in `config/itemgraph.properties`
+to point at GriefLogger's database file. The database remains read-only from
+ItemGraph.
 
 > Evidence first. Inference second. Confidence explicit. Every conclusion traceable.
 
@@ -16,9 +31,9 @@ Its purpose is to reconstruct plausible item-type and stack-quantity movement ac
 - **Mod ID:** `itemgraph`
 - **Primary command:** `/itemgraph`
 - **Alias:** `/ig`
-- **Platform:** NeoForge
+- **Platforms:** Fabric, NeoForge
 - **Target Minecraft version:** 1.21.1
-- **Primary deployment model:** server-side
+- **Primary deployment model:** dedicated server
 - **Preview integration API:** `com.itemgraph.api` `PREVIEW_1` in the main JAR
 - **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 - **Tagline:** *Trace item movement through time.*
