@@ -79,6 +79,56 @@ public final class QueryFormatter {
         return String.format(Locale.ROOT, "%.4f", confidence);
     }
 
+    /** Formats native non-quantity audit evidence for {@code /ig lookup}. */
+    public static List<String> formatAuditEvents(List<AuditEventDetail> events, String filterDescription) {
+        List<String> lines = new ArrayList<>();
+        lines.add(PREFIX + "=== NATIVE AUDIT EVENTS (" + filterDescription + ") ===");
+        if (events.isEmpty()) {
+            lines.add(PREFIX + "No native audit events matched the requested filters.");
+            return lines;
+        }
+        for (AuditEventDetail event : events) {
+            String actor = event.playerName() == null ? "(unknown player)" : event.playerName();
+            String subject = event.subjectId() == null ? "" : " subject=" + event.subjectId();
+            String detail = event.detail() == null ? "" : " detail=" + escapeDetail(event.detail());
+            lines.add(PREFIX + "[OBSERVED] audit#" + event.id() + " " + event.eventType()
+                    + " actor=" + actor + " at " + event.levelName()
+                    + " [" + formatCoordinate(event.x()) + ", "
+                    + formatCoordinate(event.y()) + ", " + formatCoordinate(event.z()) + "]"
+                    + " time=" + formatTime(event.timestampMs()) + subject + detail);
+        }
+        return lines;
+    }
+
+    private static String formatCoordinate(double coordinate) {
+        if (coordinate == Math.rint(coordinate)) {
+            return Long.toString((long) coordinate);
+        }
+        return String.format(Locale.ROOT, "%.2f", coordinate);
+    }
+
+    /** Keeps chat and command payloads on one operator-console line without changing stored evidence. */
+    private static String escapeDetail(String detail) {
+        StringBuilder escaped = new StringBuilder(detail.length());
+        for (int i = 0; i < detail.length(); i++) {
+            char character = detail.charAt(i);
+            switch (character) {
+                case '\\' -> escaped.append("\\\\");
+                case '\r' -> escaped.append("\\r");
+                case '\n' -> escaped.append("\\n");
+                case '\t' -> escaped.append("\\t");
+                default -> {
+                    if (Character.isISOControl(character)) {
+                        escaped.append(String.format(Locale.ROOT, "\\u%04x", (int) character));
+                    } else {
+                        escaped.append(character);
+                    }
+                }
+            }
+        }
+        return escaped.toString();
+    }
+
     private static String node(NodeRef ref) {
         return ref == null ? "(none recorded)" : ref.describe();
     }

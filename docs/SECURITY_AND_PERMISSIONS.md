@@ -32,6 +32,7 @@ itemgraph.trace.player
 itemgraph.trace.container
 itemgraph.event.view
 itemgraph.explain
+itemgraph.lookup.audit
 itemgraph.status
 itemgraph.export
 ```
@@ -113,6 +114,11 @@ Queries should have:
 - permission checks before resolving sensitive nodes
 - pagination
 - rate limits if necessary
+
+`/ig lookup` is an operator-only audit query. `CHAT_MESSAGE` and
+`COMMAND_EXECUTED` rows can contain private conversation, command arguments, or
+credentials accidentally typed into chat, so they must remain restricted to the
+audit permission and must never be included in player-facing flow views.
 
 The `/ig gui` browser remains level-2 only. `FlowBrowserMenu` rechecks permission while
 open and on every click, and the menu never delegates an item-movement action to

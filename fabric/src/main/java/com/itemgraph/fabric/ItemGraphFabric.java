@@ -46,6 +46,7 @@ public final class ItemGraphFabric implements ModInitializer {
                 ItemGraphCommands.register(dispatcher));
         ServerLifecycleEvents.SERVER_STARTING.register(this::onServerStarting);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
+        FabricNativeAuditEventListener.register();
         LOGGER.info("ItemGraph Fabric adapter initialized for Minecraft 1.21.1");
     }
 

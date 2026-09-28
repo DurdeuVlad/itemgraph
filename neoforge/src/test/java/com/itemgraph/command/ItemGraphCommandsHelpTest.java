@@ -60,14 +60,14 @@ class ItemGraphCommandsHelpTest {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandNode<CommandSourceStack> root = dispatcher.getRoot().getChild("itemgraph");
         assertNotNull(root);
-        assertEquals(Set.of("help", "status", "audit", "ingest", "event", "explain", "trace", "gui", "inspect"),
+        assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "trace", "gui", "inspect"),
                 root.getChildren().stream().map(CommandNode::getName).collect(Collectors.toSet()));
         assertEquals(Set.of("now"), childNames(root, "ingest"));
         assertEquals(Set.of("item", "player", "container"), childNames(root, "trace"));
         assertEquals(Set.of("item", "player", "container"), childNames(root, "gui"));
         assertEquals(Set.of("on", "off", "status"), childNames(root, "inspect"));
 
-        for (String topLevel : Set.of("help", "status", "audit", "ingest", "event", "explain", "trace", "gui", "inspect")) {
+        for (String topLevel : Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "trace", "gui", "inspect")) {
             assertNotNull(CommandHelp.topicLines(topLevel), "missing help topic for /ig " + topLevel);
         }
         for (String path : List.of("ingest now", "trace item", "trace player", "trace container",
@@ -163,7 +163,8 @@ class ItemGraphCommandsHelpTest {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();
 
-        assertSuggestions(dispatcher, source, "itemgraph ", "help", "status", "trace", "gui", "inspect");
+        assertSuggestions(dispatcher, source, "itemgraph ", "help", "status", "audit", "lookup", "trace", "gui", "inspect");
+        assertSuggestions(dispatcher, source, "itemgraph lookup ", "all", "BREAK_BLOCK", "CHAT_MESSAGE");
         assertSuggestions(dispatcher, source, "itemgraph help ", "trace item", "gui container", "inspect");
         assertSuggestions(dispatcher, source, "itemgraph inspect ", "on", "off", "status");
         assertSuggestions(dispatcher, source, "itemgraph trace player ", "Alex", "Steve");

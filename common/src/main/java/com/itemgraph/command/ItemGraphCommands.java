@@ -11,6 +11,7 @@ import com.itemgraph.ingest.SourceCheckpoint;
 import com.itemgraph.listener.ContainerInteractionTracker;
 import com.itemgraph.query.EventQueryService;
 import com.itemgraph.query.ExplainQueryService;
+import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.query.FingerprintRef;
 import com.itemgraph.query.NodeRef;
 import com.itemgraph.query.QueryFormatter;
@@ -28,6 +29,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.mojang.brigadier.tree.LiteralCommandNode;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -50,6 +52,7 @@ import java.util.concurrent.CompletableFuture;
 public final class ItemGraphCommands {
 
     private static final EventQueryService EVENT_QUERIES = new EventQueryService();
+    private static final AuditEventQueryService AUDIT_EVENT_QUERIES = new AuditEventQueryService();
     private static final ExplainQueryService EXPLAIN_QUERIES = new ExplainQueryService();
     private static final TraceQueryService TRACE_QUERIES = new TraceQueryService();
     private static final AuditService AUDIT_SERVICE = new AuditService();
@@ -76,6 +79,7 @@ public final class ItemGraphCommands {
                                         .executes(ItemGraphCommands::helpTopic)))
                         .then(Commands.literal("status").executes(ItemGraphCommands::status))
                         .then(Commands.literal("audit").executes(ItemGraphCommands::audit))
+                        .then(buildLookupCommand())
                         .then(Commands.literal("ingest")
                                 .then(Commands.literal("now").executes(ItemGraphCommands::ingestNow)))
 
@@ -173,6 +177,51 @@ public final class ItemGraphCommands {
                 .redirect(root));
     }
 
+    private static LiteralArgumentBuilder<CommandSourceStack> buildLookupCommand() {
+        LiteralArgumentBuilder<CommandSourceStack> lookup = Commands.literal("lookup");
+
+        var type = Commands.argument("eventType", StringArgumentType.word())
+                .suggests(ItemGraphCommands::suggestAuditEventTypes)
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"), null,
+                        QueryLimits.DEFAULT_LIMIT, null));
+        var typeLimit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"), null,
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        typeLimit.then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"), null,
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes"))));
+        type.then(typeLimit);
+        lookup.then(type);
+
+        var playerType = Commands.argument("eventType", StringArgumentType.word())
+                .suggests(ItemGraphCommands::suggestAuditEventTypes)
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        StringArgumentType.getString(ctx, "playerName"),
+                        QueryLimits.DEFAULT_LIMIT, null));
+        var playerLimit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        StringArgumentType.getString(ctx, "playerName"),
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        playerLimit.then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        StringArgumentType.getString(ctx, "playerName"),
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes"))));
+        playerType.then(playerLimit);
+
+        lookup.then(Commands.literal("player")
+                .then(Commands.argument("playerName", StringArgumentType.string())
+                        .then(playerType)));
+        return lookup;
+    }
+
     private static int help(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
         CommandHelp.overviewLines().forEach(line ->
@@ -212,6 +261,11 @@ public final class ItemGraphCommands {
             CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
         return SharedSuggestionProvider.suggestResource(
                 ctx.getSource().levels().stream().map(ResourceKey::location), builder);
+    }
+
+    private static CompletableFuture<Suggestions> suggestAuditEventTypes(
+            CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggest(AuditEventQueryService.EVENT_TYPES, builder);
     }
 
     /** /ig event <observationId> - one raw observation, labelled OBSERVED. */
@@ -382,6 +436,20 @@ public final class ItemGraphCommands {
         });
     }
 
+    /** /ig lookup <eventType> [limit] [sinceMinutes] and /ig lookup player ... */
+    private static int lookupAudit(CommandContext<CommandSourceStack> ctx, String eventType,
+                                   String playerName, int limit, Long sinceMinutes) {
+        QueryWindow window = sinceMinutes == null
+                ? QueryWindow.unbounded()
+                : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
+        String filter = "type=" + eventType
+                + (playerName == null ? "" : " player=" + playerName)
+                + " window=" + window.describe();
+        return QueryDispatcher.dispatch(ctx.getSource(), "lookup audit", conn ->
+                QueryDispatcher.QueryOutput.found(QueryFormatter.formatAuditEvents(
+                        AUDIT_EVENT_QUERIES.find(conn, eventType, playerName, window, limit), filter)));
+    }
+
     private static int status(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
         String modVersion = runtimeInformation.modVersion();
@@ -420,6 +488,11 @@ public final class ItemGraphCommands {
                 rs.next();
                 totalObservations = rs.getLong(1);
             }
+            long totalAuditEvents;
+            try (var stmt = conn.createStatement(); var rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_audit_events")) {
+                rs.next();
+                totalAuditEvents = rs.getLong(1);
+            }
             long activeEdges = 0;
             long supersededEdges = 0;
             try (var stmt = conn.createStatement();
@@ -445,6 +518,7 @@ public final class ItemGraphCommands {
                             + " deferred, " + lastCorrelation.durationMs() + "ms)"),
                     "[ItemGraph] ingestion: running=" + ingestion.isRunning()
                             + " totalObservations=" + totalObservations
+                            + " nativeAuditEvents=" + totalAuditEvents
                             + " checkpoints=" + checkpoints
                             + " lastCycle=" + (lastResult == null ? "never run yet"
                             : (lastResult.success() ? "OK" : "ERROR (" + lastResult.errorMessage() + ")")
@@ -456,7 +530,8 @@ public final class ItemGraphCommands {
                             + " persisted=" + internalObs.getTotalPersisted()
                             + " dropped=" + internalObs.getTotalDropped()
                             + " capabilityQueueRejections=" + capabilityQueueRejections
-                            + " transformations=" + internalObs.getTotalTransformations(),
+                            + " transformations=" + internalObs.getTotalTransformations()
+                            + " auditEvents=" + internalObs.getTotalAuditEvents(),
                     "[ItemGraph] entity tracking: active=" + entityTracker.getActiveEntityCount()
                             + " drops=" + entityTracker.getDropCount()
                             + " pickups=" + entityTracker.getPickupCount()

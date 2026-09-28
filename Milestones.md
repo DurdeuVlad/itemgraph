@@ -137,20 +137,21 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Risk: external source identity, inventory identity, backpressure, and sensitive query
   results require explicit contracts and consumer-side permission checks.
 
-## M8: Drop-in GriefLogger parity
+## M8: Native GriefLogger replacement parity
 
-- Status: planned; GitHub milestone https://github.com/DurdeuVlad/itemgraph/milestone/4.
-- Outcome: ItemGraph keeps `/ig` and `/itemgraph` while matching GriefLogger behavior
-  for commands, filters, inspector, events, read-only history import, storage, and
-  operations. `/gl` and `/grieflogger` are not aliases.
-- Proof: the compatibility registry, cross-loader tests, backend tests, and native-only
-  staging replay tracked by issues #23–#31.
-
-## M9: ItemGraph audit++ performance and extra events
-
-- Status: planned; GitHub milestone https://github.com/DurdeuVlad/itemgraph/milestone/5.
-- Outcome: measured performance controls, extra administrative/world/entity events,
-  modded inventory adapters, cross-loader APIs, and tamper-evident exports.
-- Proof: reproducible CI benchmarks, conservation reports, adapter fixtures, and export
-  verification tracked by issues #32–#37.
+- Status: in progress; V13 native audit ledger and bounded `/ig lookup` are implemented
+  for NeoForge and the shared Fabric adapter now captures its supported audit events.
+- Outcome: ItemGraph owns the server audit evidence needed to retire GriefLogger as a
+  runtime dependency. Item-flow evidence stays in `ig_observations`; block, session,
+  chat, command, and entity events use `ig_audit_events`.
+- Delivered: NeoForge capture for join/quit, chat, commands, block place/break/interact,
+  player-killed entities, consume, durability break, and bow shoot; Fabric capture for
+  join/quit, chat, block break/interact, and player-killed entities; asynchronous
+  persistence; action/player/time lookup; tests proving the ledger is separate from item
+  transfers.
+- Remaining: projectile throw/crossbow hooks, Fabric command execution and completed
+  block-placement hooks, radius and dimension filters, block history inspector,
+  interactive generic pagination, and staging verification with the GriefLogger JAR absent.
+- Acceptance evidence: `docs/GRIEFLOGGER_PARITY.md`, V13 migration tests, native audit
+  persistence/query tests, and a dedicated staging event matrix.
 
