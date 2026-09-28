@@ -334,7 +334,8 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   block break, block interaction, and player-kill events asynchronously.
 - NeoForge captures consume and durability break into the existing quantity-flow
   ledger, and projectile spawn usage as non-quantity audit evidence; Fabric captures
-  join/quit, chat, block break/interaction, and player-kill events through Fabric API callbacks.
+  join/quit, chat, block break/interaction, player-kill events through Fabric API callbacks,
+  and fresh player-owned projectile spawns through `ServerLevelMixin`.
 - `/ig lookup <eventType> [limit] [sinceMinutes]` and
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
   bounded native audit evidence; `/ig lookup near` adds exact dimension and
@@ -357,9 +358,8 @@ execution.
 
 ### Remaining parity slices
 
-- Fabric projectile, command execution, and native
-  block-placement hooks where the loader callback exposes a completed action,
-  and interactive chat page navigation.
+- Fabric post-execution command results and native block-placement hooks where the loader
+  callback exposes a completed action, and interactive chat page navigation.
 - Staging verification with GriefLogger absent and a migration/retention plan.
 
 Prefer small commits such as:

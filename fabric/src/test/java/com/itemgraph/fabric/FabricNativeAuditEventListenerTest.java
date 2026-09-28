@@ -39,4 +39,33 @@ class FabricNativeAuditEventListenerTest {
         assertEquals("give Alex dirt", captured.getValue().detail());
         assertEquals("player-uuid", captured.getValue().playerUuid());
     }
+
+    @Test
+    void projectileRecorderStoresEvidenceWithoutQuantityFlow() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            FabricNativeAuditEventListener.recordProjectileAudit(
+                    "SHOOT_ITEM", "player-uuid", "Alex", "minecraft:overworld",
+                    1.5, 64.0, -2.5, "minecraft:bow", "minecraft:arrow");
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("SHOOT_ITEM", captured.getValue().eventType());
+        assertEquals("minecraft:bow", captured.getValue().subjectId());
+        assertEquals("projectile=minecraft:arrow evidence=spawned_by_player",
+                captured.getValue().detail());
+    }
+
+    @Test
+    void rejectedProjectileRegistrationDoesNotRecordEvidence() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            FabricNativeAuditEventListener.onProjectileAdded(null, false);
+            verifyNoInteractions(service);
+        }
+    }
 }
