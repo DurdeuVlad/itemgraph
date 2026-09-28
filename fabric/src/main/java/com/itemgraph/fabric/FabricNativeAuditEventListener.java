@@ -67,6 +67,7 @@ public final class FabricNativeAuditEventListener {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayer player = handler.getPlayer();
             submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
+            FabricContainerSessionListener.onMenuClosing(player);
             InspectionService.getInstance().clear(player.getUUID());
         });
         ServerMessageEvents.CHAT_MESSAGE.register(FabricNativeAuditEventListener::onChat);
@@ -85,6 +86,7 @@ public final class FabricNativeAuditEventListener {
                 if (inspectionResult != null) {
                     return inspectionResult;
                 }
+                FabricContainerSessionListener.rememberClick(serverPlayer, serverLevel, hit.getBlockPos());
                 submit("INTERACT_BLOCK_ATTEMPT", serverPlayer, serverLevel, hit.getBlockPos(),
                         BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit.getBlockPos()).getBlock()).toString(), null);
             }

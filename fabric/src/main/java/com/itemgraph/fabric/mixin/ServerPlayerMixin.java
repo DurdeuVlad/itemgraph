@@ -1,12 +1,15 @@
 package com.itemgraph.fabric.mixin;
 
 import com.itemgraph.fabric.FabricNativeAuditEventListener;
+import com.itemgraph.fabric.FabricContainerSessionListener;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -30,5 +33,15 @@ public abstract class ServerPlayerMixin {
                 ? ItemStack.EMPTY : itemEntity.getItem().copy();
         FabricNativeAuditEventListener.finishItemDropCapture((ServerPlayer) (Object) this,
                 itemEntity, original);
+    }
+
+    @Inject(method = "initMenu", at = @At("RETURN"))
+    private void itemgraph$openContainerMenu(AbstractContainerMenu menu, CallbackInfo callback) {
+        FabricContainerSessionListener.onMenuOpened((ServerPlayer) (Object) this, menu);
+    }
+
+    @Inject(method = "doCloseContainer", at = @At("HEAD"))
+    private void itemgraph$closeContainerMenu(CallbackInfo callback) {
+        FabricContainerSessionListener.onMenuClosing((ServerPlayer) (Object) this);
     }
 }

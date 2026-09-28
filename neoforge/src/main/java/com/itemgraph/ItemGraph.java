@@ -85,6 +85,7 @@ public class ItemGraph {
 
     private void onServerStopping(ServerStoppingEvent event) {
         com.itemgraph.api.ItemGraphApiLifecycle.stop(event.getServer());
+        com.itemgraph.listener.ContainerInteractionTracker.getInstance().closeAllSessions();
         com.itemgraph.command.InspectionService.getInstance().clear();
         com.itemgraph.ingest.InternalObservationService.getInstance().stop();
         com.itemgraph.ingest.IngestionService.getInstance().stop();
