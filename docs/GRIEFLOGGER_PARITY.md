@@ -31,6 +31,16 @@ cannot be misrepresented as an item transfer. Both tables are owned by ItemGraph
 the GriefLogger database remains read-only during migration and can be removed
 after native coverage and staging verification meet this matrix.
 
+## Verification notes
+
+- **2026-09-29, Fabric native-only smoke:** the dedicated loopback staging server
+  started with no GriefLogger JAR, applied the ItemGraph schema 13 migrations,
+  loaded the Fabric mixins, and reached `Done` on port 27992. The ingestion worker
+  correctly reported the GriefLogger source as unavailable and continued with
+  native listeners. This verifies startup and isolation; player-action replay and
+  row-by-row capture checks remain required before marking the event rows fully
+  staging-verified.
+
 ## Acceptance gates
 
 1. Native capture tests prove one immutable row for each event category and no row
