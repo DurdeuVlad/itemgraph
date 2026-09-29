@@ -135,9 +135,10 @@ claiming that the two are identical.
 
 `ig_observations` remains the item quantity-flow ledger. `ig_audit_events` stores
 non-quantity evidence so a chat message, command, block action, or session event
-cannot be misrepresented as an item transfer. Both tables are owned by ItemGraph;
-the GriefLogger database remains read-only during migration and can be removed
-after native coverage and staging verification meet this matrix.
+cannot be misrepresented as an item transfer. Both tables are owned by ItemGraph.
+The GriefLogger database remains read-only during migration and is not removed
+as part of native-only cutover; only the runtime jar/config is retired after the
+checksummed source copy and rollback evidence are approved.
 
 GriefLogger stores chat and command rows for external review and does not include
 them in its in-game lookup merge. ItemGraph's unified lookup intentionally extends
@@ -154,6 +155,14 @@ record those transfers.
 
 ## Native-only cutover and retention plan
 
+The cutover decision is binary: ItemGraph may retire the compatible artifacts
+only after every M8 parity gate is closed and the evidence below is recorded.
+Until then, the standard and compatible loader jars remain distinct so an
+operator can choose a dependency-safe migration path. After cutover, the
+standard ItemGraph jar is the only supported runtime artifact; GriefLogger is
+not a runtime dependency. The read-only importer remains available for a
+checksummed historical database when an operator explicitly configures it.
+
 1. Before cutover, stop the staging server and make an immutable, checksummed
    copy of the GriefLogger database. ItemGraph may read the source during the
    comparison window, but never writes to it.
@@ -168,8 +177,10 @@ record those transfers.
    `grieflogger_database_path` unset for native-only operation.
 5. Rollback is bounded: restore the GriefLogger JAR and its immutable database
    copy, leave ItemGraph's database untouched, and re-run the staging checks
-   before any production decision. This plan does not authorize production
-   changes.
+   before any production decision. The recorded rollback evidence is the source
+   checksum, the restore command and timestamp, the successful read-only schema
+   check, and the post-restore staging acceptance report. This plan does not
+   authorize production changes.
 
 ## Verification notes
 
