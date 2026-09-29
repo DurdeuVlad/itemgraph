@@ -57,7 +57,11 @@ public final class EnderChestInteractionTracker {
         // A menu switch can skip a loader close callback. Flush a block-container
         // watch before replacing it with this player-owned inventory session.
         ContainerInteractionTracker.getInstance().closeSession(playerUuid, Double.NaN, Double.NaN, Double.NaN);
-        closeSession(playerUuid, Double.NaN, Double.NaN, Double.NaN);
+        if (!closeSession(playerUuid, Double.NaN, Double.NaN, Double.NaN)) {
+            // Preserve the old session when its final snapshot failed. Replacing
+            // it would discard the only retryable evidence window.
+            return;
+        }
         ContainerInteractionTracker.InventoryTotals totals = snapshotSource.get();
         sessions.put(playerUuid, new Session(
                 playerName == null ? "" : playerName,
@@ -69,10 +73,10 @@ public final class EnderChestInteractionTracker {
     }
 
     /** Closes a session and emits signed Ender Chest quantity deltas. */
-    public void closeSession(UUID playerUuid, double x, double y, double z) {
+    public boolean closeSession(UUID playerUuid, double x, double y, double z) {
         Session session = sessions.get(playerUuid);
         if (session == null) {
-            return;
+            return true;
         }
         double resolvedX = Double.isFinite(x) ? x : session.lastX();
         double resolvedY = Double.isFinite(y) ? y : session.lastY();
@@ -88,7 +92,7 @@ public final class EnderChestInteractionTracker {
         } catch (RuntimeException e) {
             LOGGER.warn("ItemGraph: failed to snapshot Ender Chest session for {}: {}",
                     playerUuid, e.toString());
-            return;
+            return false;
         }
         long endMs = System.currentTimeMillis();
         Map<String, Long> delta = computeDelta(session.baseline(), current.counts());
@@ -118,6 +122,7 @@ public final class EnderChestInteractionTracker {
             }
         }
         sessions.remove(playerUuid, session);
+        return true;
     }
 
     static Map<String, Long> computeDelta(Map<String, Long> baseline, Map<String, Long> current) {
@@ -145,6 +150,11 @@ public final class EnderChestInteractionTracker {
             } catch (RuntimeException e) {
                 LOGGER.warn("ItemGraph: failed to flush Ender Chest session for {}: {}",
                         playerUuid, e.toString());
+            } finally {
+                // Shutdown cannot retry a server-thread snapshot after the
+                // world is stopping; do not carry a stale session into the next
+                // server lifecycle.
+                sessions.remove(playerUuid);
             }
         }
     }
