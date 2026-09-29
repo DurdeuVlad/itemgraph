@@ -242,31 +242,31 @@ class ItemGraphCommandsHelpTest {
         assertParsedCompletely(radiusOnly, "one-token GriefLogger filter syntax");
         assertTrue(radiusOnly.getContext().getNodes().stream()
                         .anyMatch(node -> node.getNode().getName().equals("lookupFilters")),
-                "radius-only filter was routed to the native event-type argument");
+                "radius-only filter was routed to the direct filter branch");
 
         var nativeLookup = dispatcher.parse("itemgraph lookup BREAK_BLOCK 50 60", source);
         assertParsedCompletely(nativeLookup, "native audit lookup syntax");
         assertTrue(nativeLookup.getContext().getNodes().stream()
-                        .anyMatch(node -> node.getNode().getName().equals("eventType")),
-                "native event lookup was routed to the direct filter argument");
+                        .anyMatch(node -> node.getNode().getName().equals("BREAK_BLOCK")),
+                "native event lookup was routed to the native literal branch");
 
         var nativeInteractionLookup = dispatcher.parse("itemgraph lookup INTERACT_BLOCK", source);
         assertParsedCompletely(nativeInteractionLookup, "native block-interaction lookup syntax");
         assertTrue(nativeInteractionLookup.getContext().getNodes().stream()
-                        .anyMatch(node -> node.getNode().getName().equals("eventType")),
-                "native block-interaction lookup was routed to the direct filter argument");
+                        .anyMatch(node -> node.getNode().getName().equals("INTERACT_BLOCK")),
+                "native block-interaction lookup was routed to the native literal branch");
 
         var nativeEntityInteractionLookup = dispatcher.parse("itemgraph lookup INTERACT_ENTITY", source);
         assertParsedCompletely(nativeEntityInteractionLookup, "native entity-interaction lookup syntax");
         assertTrue(nativeEntityInteractionLookup.getContext().getNodes().stream()
-                        .anyMatch(node -> node.getNode().getName().equals("eventType")),
-                "native entity-interaction lookup was routed to the direct filter argument");
+                        .anyMatch(node -> node.getNode().getName().equals("INTERACT_ENTITY")),
+                "native entity-interaction lookup was routed to the native literal branch");
 
         var nativeAllLookup = dispatcher.parse("itemgraph lookup all", source);
         assertParsedCompletely(nativeAllLookup, "native all-events lookup syntax");
         assertTrue(nativeAllLookup.getContext().getNodes().stream()
-                        .anyMatch(node -> node.getNode().getName().equals("eventType")),
-                "native all-events lookup was routed to the direct filter argument");
+                        .anyMatch(node -> node.getNode().getName().equals("all")),
+                "native all-events lookup was routed to the native literal branch");
     }
 
     @Test
