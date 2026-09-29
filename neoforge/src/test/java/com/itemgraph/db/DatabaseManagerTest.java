@@ -28,6 +28,15 @@ class DatabaseManagerTest {
         assertFalse(rendered.contains("super-secret"));
     }
 
+    @Test
+    void loopbackHostDetectionOnlyTreatsLocalLiteralsAsLoopback() {
+        assertTrue(DatabaseManager.isLoopbackHost("localhost"));
+        assertTrue(DatabaseManager.isLoopbackHost("127.0.0.1"));
+        assertTrue(DatabaseManager.isLoopbackHost("[::1]"));
+        assertFalse(DatabaseManager.isLoopbackHost("db.example"));
+        assertFalse(DatabaseManager.isLoopbackHost("0.0.0.0"));
+    }
+
     @AfterEach
     void tearDown() {
         DatabaseManager.getInstance().close();

@@ -43,7 +43,11 @@ Application connections do not enable RSA public-key retrieval. MySQL deployment
 using `caching_sha2_password` must configure `database_ssl_mode=verify-full` (or
 `verify-ca` with an explicitly trusted CA) or use a server authentication method
 that does not require key retrieval. `trust` encrypts the connection but does not
-verify the server identity.
+verify the server identity. The default `disable` mode is plaintext and is intended
+only for local loopback development; ItemGraph logs a warning when a non-loopback
+host uses it. Configure `verify-full` for production, or `verify-ca` when the
+deployment has an explicitly trusted CA and hostname verification is handled
+separately.
 The CI-only MySQL fixture explicitly enables `allowPublicKeyRetrieval` with dummy
 credentials to exercise the disposable service.
 

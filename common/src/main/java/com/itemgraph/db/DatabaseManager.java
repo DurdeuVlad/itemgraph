@@ -66,6 +66,13 @@ public class DatabaseManager {
                     stmt.execute("PRAGMA busy_timeout = " + requestedSettings.connectionTimeoutMs() + ";");
                 }
             } else {
+                if ("disable".equals(requestedSettings.sslMode())
+                        && !isLoopbackHost(requestedSettings.host())) {
+                    LOGGER.warn("ItemGraph network database host '{}' is configured with "
+                            + "database_ssl_mode=disable; database traffic is plaintext. "
+                            + "Use database_ssl_mode=verify-full (or verify-ca with a trusted CA) "
+                            + "for non-loopback deployments.", requestedSettings.host());
+                }
                 Class.forName("org.mariadb.jdbc.Driver");
                 String url = "jdbc:mariadb://" + requestedSettings.host() + ":"
                         + requestedSettings.port() + "/" + requestedSettings.database()
@@ -210,6 +217,17 @@ public class DatabaseManager {
         Connection connection = DriverManager.getConnection(url, properties);
         connection.setReadOnly(readOnly);
         return connection;
+    }
+
+    static boolean isLoopbackHost(String host) {
+        if (host == null) {
+            return false;
+        }
+        String normalized = host.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.equals("localhost")
+                || normalized.equals("127.0.0.1")
+                || normalized.equals("::1")
+                || normalized.equals("[::1]");
     }
 
     public synchronized Path getDatabasePath() {
