@@ -206,7 +206,8 @@ public final class GriefLoggerHistoricalImporter {
         List<String> primaryValues = new ArrayList<>();
         for (int i = 0; i < columns.size(); i++) {
             Column column = columns.get(i);
-            Object value = rows.getObject(i + 1);
+            int resultIndex = hasRowid ? i + 2 : i + 1;
+            Object value = rows.getObject(resultIndex);
             values.put(column.name(), value);
             if (column.primaryKey()) {
                 primaryValues.add(value == null ? "null" : canonicalScalar(value));

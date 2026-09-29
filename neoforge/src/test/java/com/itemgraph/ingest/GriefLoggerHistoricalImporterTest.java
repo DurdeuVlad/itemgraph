@@ -51,6 +51,16 @@ class GriefLoggerHistoricalImporterTest {
             assertTrue(rs.next());
             assertEquals(28, rs.getInt(1));
         }
+        try (PreparedStatement stmt = database.getConnection().prepareStatement(
+                "SELECT action_id, payload_json, source_key FROM ig_grieflogger_rows "
+                        + "WHERE table_name = 'items' AND source_key = 'pk:1'")) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(0, rs.getInt("action_id"));
+                assertTrue(rs.getString("payload_json").contains("\"action\":0"));
+                assertEquals("pk:1", rs.getString("source_key"));
+            }
+        }
 
         GriefLoggerHistoricalImporter.ImportReport second = importer.importAll();
         assertEquals("COMPLETE", second.status());
