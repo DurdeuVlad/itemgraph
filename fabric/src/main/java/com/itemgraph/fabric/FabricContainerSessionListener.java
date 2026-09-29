@@ -16,6 +16,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.PlayerEnderChestContainer;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
 import java.util.HashMap;
@@ -111,7 +112,7 @@ public final class FabricContainerSessionListener {
     }
 
     private static List<ContainerKey> aliases(String levelId, BlockPos clicked, BlockPos canonical,
-                                              ServerLevel level) {
+                                              Level level) {
         return BlockInspectionTargets.resolveBlockPositions(level, clicked).stream()
                 .filter(pos -> !pos.equals(canonical))
                 .map(pos -> key(levelId, pos))
