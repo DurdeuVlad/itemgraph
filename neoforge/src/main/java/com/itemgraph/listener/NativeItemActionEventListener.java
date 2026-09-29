@@ -12,9 +12,7 @@ import net.minecraft.world.entity.projectile.ThrowableItemProjectile;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.UseAnim;
-import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 
@@ -54,25 +52,6 @@ public final class NativeItemActionEventListener {
         }
     }
 
-    @SubscribeEvent(priority = EventPriority.LOWEST)
-    public void onProjectileSpawned(EntityJoinLevelEvent event) {
-        if (event.isCanceled() || event.loadedFromDisk() || event.getLevel().isClientSide()
-                || !(event.getEntity() instanceof Projectile projectile)
-                || !(projectile.getOwner() instanceof ServerPlayer player)) {
-            return;
-        }
-        ItemStack stack = projectile instanceof AbstractArrow arrow
-                ? arrow.getPickupItemStackOrigin()
-                : projectile instanceof ItemSupplier supplier ? supplier.getItem() : ItemStack.EMPTY;
-        if (stack == null || stack.isEmpty()) {
-            return;
-        }
-        // GriefLogger's compatible quantity row is created at the
-        // shootFromRotation attempt boundary. The accepted spawn is retained as
-        // separate raw evidence and must not create a second quantity row.
-        submitProjectileSpawnAccepted(player, stack, projectile);
-    }
-
     /** Records the same attempt boundary as GriefLogger's ProjectileMixin. */
     public static void onProjectileShootAttempt(Projectile projectile, Entity source) {
         if (!(source instanceof ServerPlayer player) || projectile == null
@@ -109,6 +88,22 @@ public final class NativeItemActionEventListener {
                 level, null, null, null, "UNKNOWN", canonical, amount, null));
     }
 
+    /** Records accepted evidence after ServerLevel.addFreshEntity returns true. */
+    public static void onProjectileAdded(Entity entity, boolean added) {
+        if (!added || !(entity instanceof Projectile projectile)
+                || projectile.level().isClientSide()
+                || !(projectile.getOwner() instanceof ServerPlayer player)) {
+            return;
+        }
+        ItemStack stack = projectile instanceof AbstractArrow arrow
+                ? arrow.getPickupItemStackOrigin()
+                : projectile instanceof ItemSupplier supplier ? supplier.getItem() : ItemStack.EMPTY;
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+        submitProjectileSpawnAccepted(player, stack, projectile);
+    }
+
     private static void submitProjectileSpawnAccepted(ServerPlayer player, ItemStack stack,
                                                        Projectile projectile) {
         String level = player.level().dimension().location().toString();
@@ -140,7 +135,8 @@ public final class NativeItemActionEventListener {
                 playerUuid, playerName, levelName,
                 playerX, playerY, playerZ, levelName,
                 null, null, null, "UNKNOWN",
-                item.itemId(), rawData, item, amount, null, null);
+                item.itemId(), rawData, item, amount, null, null,
+                InternalObservationService.sourceEventIdForUuid(eventId));
         if (service.submit(observation)) {
             // Keep the legacy native-audit lookup path readable while the
             // quantity observation remains the single unified source.
@@ -170,7 +166,7 @@ public final class NativeItemActionEventListener {
                         System.currentTimeMillis(), "PROJECTILE_SPAWN_ACCEPTED", playerUuid, playerName,
                         levelName, projectileX, projectileY, projectileZ, item.itemId(),
                         "action=" + actionType + " projectile=" + projectileId + " event_id=" + eventId
-                                + " outcome=accepted evidence=spawned_by_player quantity=" + amount,
+                                + " outcome=accepted evidence=spawned_by_player",
                         rawData));
     }
 }

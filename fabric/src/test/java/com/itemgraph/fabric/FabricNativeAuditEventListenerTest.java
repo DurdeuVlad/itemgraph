@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -211,6 +212,7 @@ class FabricNativeAuditEventListenerTest {
         assertEquals("minecraft:arrow", captured.getValue().item().itemId());
         assertEquals(3, captured.getValue().amount());
         assertEquals("UNKNOWN", captured.getValue().targetType());
+        assertNotNull(captured.getValue().sourceEventId());
         org.junit.jupiter.api.Assertions.assertNull(captured.getValue().targetX());
         assertEquals("player-uuid", captured.getValue().playerUuid());
         org.junit.jupiter.api.Assertions.assertTrue(

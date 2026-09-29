@@ -4,7 +4,8 @@
   "package": "com.itemgraph.neoforge.mixin",
   "compatibilityLevel": "JAVA_21",
   "server": [
-    "ProjectileMixin"
+    "ProjectileMixin",
+    "ServerLevelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

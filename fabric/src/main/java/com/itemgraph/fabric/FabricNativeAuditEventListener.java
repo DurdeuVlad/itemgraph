@@ -324,7 +324,8 @@ public final class FabricNativeAuditEventListener {
                 System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
                 playerX, playerY, playerZ, levelName,
                 null, null, null, "UNKNOWN", item.itemId(), rawData,
-                item, amount, null, null);
+                item, amount, null, null,
+                InternalObservationService.sourceEventIdForUuid(eventId));
         if (service.submit(observation)) {
             // Keep the legacy native-audit lookup path readable while the
             // quantity observation remains the single unified source.
@@ -354,7 +355,7 @@ public final class FabricNativeAuditEventListener {
                         System.currentTimeMillis(), "PROJECTILE_SPAWN_ACCEPTED", playerUuid, playerName,
                         levelName, projectileX, projectileY, projectileZ, item.itemId(),
                         "action=" + actionType + " projectile=" + projectileId + " event_id=" + eventId
-                                + " outcome=accepted evidence=spawned_by_player quantity=" + amount,
+                                + " outcome=accepted evidence=spawned_by_player",
                         rawData));
     }
 

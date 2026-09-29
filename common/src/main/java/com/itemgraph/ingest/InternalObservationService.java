@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.UUID;
 
 /**
  * Asynchronous, bounded worker for recording internal/supplemental observations (Phase 8/9/10).
@@ -53,7 +54,8 @@ public class InternalObservationService {
             CanonicalItem item,
             int amount,
             String itemEntityUuid,
-            Long timestampEndMs
+            Long timestampEndMs,
+            Long sourceEventId
     ) {
         public InternalObservation(
                 long timestampMs, String actionType, String playerUuid, String playerName,
@@ -62,7 +64,7 @@ public class InternalObservationService {
                 String targetType, String itemId, byte[] rawData, int amount, String itemEntityUuid
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
-                 targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, null, amount, itemEntityUuid, null);
+                 targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, null, amount, itemEntityUuid, null, null);
         }
 
         public InternalObservation(
@@ -72,7 +74,7 @@ public class InternalObservationService {
                 String targetType, String itemId, byte[] rawData, CanonicalItem item, int amount, String itemEntityUuid
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
-                    targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, item, amount, itemEntityUuid, null);
+                    targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, item, amount, itemEntityUuid, null, null);
         }
 
         public InternalObservation(
@@ -83,7 +85,7 @@ public class InternalObservationService {
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
                  targetLevelName, targetX, targetY, targetZ, targetType,
-                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, null);
+                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, null, null);
         }
 
         public InternalObservation(
@@ -94,8 +96,42 @@ public class InternalObservationService {
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
                  targetLevelName, targetX, targetY, targetZ, targetType,
-                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, timestampEndMs);
+                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, timestampEndMs, null);
         }
+
+        public InternalObservation(
+                long timestampMs, String actionType, String playerUuid, String playerName,
+                String levelName, double x, double y, double z,
+                String targetLevelName, Double targetX, Double targetY, Double targetZ,
+                String targetType, String itemId, byte[] rawData, CanonicalItem item, int amount,
+                String itemEntityUuid, Long timestampEndMs
+        ) {
+            this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
+                    targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData,
+                    item, amount, itemEntityUuid, timestampEndMs, null);
+        }
+
+    }
+
+    /**
+     * Maps a UUID event identity to the INTEGER source_event_id column used by
+     * both SQLite and MySQL/MariaDB. The full UUID remains in raw_data; this
+     * stable 64-bit projection makes queued retries idempotent through the
+     * existing (source_type, source_event_id) unique index.
+     */
+    public static long sourceEventIdForUuid(String eventId) {
+        UUID uuid = UUID.fromString(eventId);
+        long value = uuid.getMostSignificantBits() ^ Long.rotateLeft(uuid.getLeastSignificantBits(), 29);
+        value ^= value >>> 33;
+        value *= 0xff51afd7ed558ccdL;
+        value ^= value >>> 33;
+        value *= 0xc4ceb9fe1a85ec53L;
+        value ^= value >>> 33;
+        if (value == Long.MIN_VALUE) {
+            return Long.MAX_VALUE;
+        }
+        value = Math.abs(value);
+        return value == 0 ? 1 : value;
     }
 
     public record InternalTransformation(
@@ -569,12 +605,14 @@ public class InternalObservationService {
         try {
             conn.setAutoCommit(false);
 
-            // INSERT OR IGNORE: the V11 partial unique index protects internal event submissions.
+            // INSERT OR IGNORE: source_event_id deduplicates durable producer
+            // identities; the V11 partial unique index protects legacy rows
+            // that intentionally have no source event identity.
             String insertSql = """
                 INSERT OR IGNORE INTO ig_observations (
                     source_type, source_event_id, timestamp_ms, node_id, target_node_id,
                     fingerprint_id, action_type, amount, raw_data, correlation_status, item_entity_uuid, timestamp_end_ms
-                ) VALUES ('ITEMGRAPH_INTERNAL', NULL, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+                ) VALUES ('ITEMGRAPH_INTERNAL', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
             """;
 
             try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
@@ -680,30 +718,35 @@ public class InternalObservationService {
                         }
                     }
 
-                    pstmt.setLong(1, obs.timestampMs());
-                    pstmt.setLong(2, originNodeId);
-                    if (targetNodeId != null) {
-                        pstmt.setLong(3, targetNodeId);
+                    if (obs.sourceEventId() != null) {
+                        pstmt.setLong(1, obs.sourceEventId());
                     } else {
-                        pstmt.setNull(3, Types.INTEGER);
+                        pstmt.setNull(1, Types.BIGINT);
                     }
-                    pstmt.setLong(4, fingerprintId);
-                    pstmt.setString(5, obs.actionType());
-                    pstmt.setInt(6, obs.amount());
-                    if (obs.rawData() != null) {
-                        pstmt.setBytes(7, obs.rawData());
+                    pstmt.setLong(2, obs.timestampMs());
+                    pstmt.setLong(3, originNodeId);
+                    if (targetNodeId != null) {
+                        pstmt.setLong(4, targetNodeId);
                     } else {
-                        pstmt.setNull(7, Types.BLOB);
+                        pstmt.setNull(4, Types.INTEGER);
+                    }
+                    pstmt.setLong(5, fingerprintId);
+                    pstmt.setString(6, obs.actionType());
+                    pstmt.setInt(7, obs.amount());
+                    if (obs.rawData() != null) {
+                        pstmt.setBytes(8, obs.rawData());
+                    } else {
+                        pstmt.setNull(8, Types.BLOB);
                     }
                     if (obs.itemEntityUuid() != null) {
-                        pstmt.setString(8, obs.itemEntityUuid());
+                        pstmt.setString(9, obs.itemEntityUuid());
                     } else {
-                        pstmt.setNull(8, Types.VARCHAR);
+                        pstmt.setNull(9, Types.VARCHAR);
                     }
                     if (obs.timestampEndMs() != null) {
-                        pstmt.setLong(9, obs.timestampEndMs());
+                        pstmt.setLong(10, obs.timestampEndMs());
                     } else {
-                        pstmt.setNull(9, Types.BIGINT);
+                        pstmt.setNull(10, Types.BIGINT);
                     }
                     pstmt.addBatch();
                 }

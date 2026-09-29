@@ -531,4 +531,31 @@ class InternalObservationServiceTest {
         assertEquals("PLAYER", nodeTypeOf(row.nodeId()));
         assertEquals("GROUND", nodeTypeOf(row.targetNodeId()));
     }
+
+    @Test
+    void durableSourceEventIdDeduplicatesProjectileRetry() throws Exception {
+        initializeTopologyDatabase();
+        long sourceEventId = InternalObservationService.sourceEventIdForUuid(
+                "123e4567-e89b-12d3-a456-426614174000");
+        byte[] raw = "{\"capture\":\"projectile_shoot_attempt\",\"event_id\":\"123e4567-e89b-12d3-a456-426614174000\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        InternalObservation observation = new InternalObservation(
+                1234L, "THROW_ITEM", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 5, 64, 5,
+                "minecraft:overworld", null, null, null,
+                "UNKNOWN", DIAMOND.itemId(), raw, DIAMOND, 1, null, null, sourceEventId);
+
+        persist(observation);
+        persist(observation);
+
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT source_event_id, COUNT(*) FROM ig_observations GROUP BY source_event_id")) {
+            try (ResultSet result = statement.executeQuery()) {
+                assertTrue(result.next());
+                assertEquals(sourceEventId, result.getLong(1));
+                assertEquals(1, result.getInt(2));
+                assertFalse(result.next());
+            }
+        }
+    }
 }

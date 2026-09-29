@@ -236,7 +236,8 @@ tasks.register('verifyGriefLoggerCompatibleJar') {
             if (!entryNames.contains('com/itemgraph/query/TraceQueryService.class')
                     || !entryNames.contains('com/itemgraph/core/port/RuntimeInformationPort.class')
                     || !entryNames.contains('itemgraph-neoforge.mixins.json')
-                    || !entryNames.contains('com/itemgraph/neoforge/mixin/ProjectileMixin.class')) {
+                    || !entryNames.contains('com/itemgraph/neoforge/mixin/ProjectileMixin.class')
+                    || !entryNames.contains('com/itemgraph/neoforge/mixin/ServerLevelMixin.class')) {
                 throw new GradleException("${artifact.name} is missing shared runtime or core classes")
             }
 
@@ -272,7 +273,8 @@ tasks.register('verifyGriefLoggerCompatibleJar') {
             }
 
             if (!standardEntryNames.contains('itemgraph-neoforge.mixins.json')
-                    || !standardEntryNames.contains('com/itemgraph/neoforge/mixin/ProjectileMixin.class')) {
+                    || !standardEntryNames.contains('com/itemgraph/neoforge/mixin/ProjectileMixin.class')
+                    || !standardEntryNames.contains('com/itemgraph/neoforge/mixin/ServerLevelMixin.class')) {
                 throw new GradleException("${standardArtifact.name} must package the NeoForge projectile mixin")
             }
         } finally {
