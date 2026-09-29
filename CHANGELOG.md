@@ -8,6 +8,13 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Changed
 
+- **Loader runtime hardening:** Fabric pickup capture no longer exposes a
+  non-private mixin helper or nested record that Mixin remaps as a Minecraft
+  inner class. Native lookup event types now use vanilla literal command nodes,
+  preserving direct GriefLogger filter syntax while allowing NeoForge and Fabric
+  operators to receive the command tree without a disconnect. Connected-player
+  staging replays verified one durable throw and shoot row plus one accepted
+  spawn audit row for each loader; no release artifact or version bump was made.
 - **One storage contract for SQLite and MySQL/MariaDB:** ItemGraph now exposes
   validated backend settings on NeoForge and Fabric, runs the shared migrations
   and JDBC queries through one dialect layer, preserves SQLite partial-dedup

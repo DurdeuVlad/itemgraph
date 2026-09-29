@@ -189,8 +189,19 @@ checksummed historical database when an operator explicitly configures it.
   run. The dedicated server loaded `itemgraph-neoforge.mixins.json`, initialized
   Mixin 0.8.7, reached `Done`, applied schema migration v16, and reported
   GriefLogger disabled without a mod-loading or mixin error. This proves the
-  NeoForge runtime can load the mixin configuration; a connected player replay
-  is still required for end-to-end projectile action evidence.
+  NeoForge runtime can load the mixin configuration.
+- **2026-09-30, connected-player projectile parity:** GriefLogger-absent
+  Mineflayer replays ran against Fabric on `127.0.0.1:27993` and NeoForge on
+  `127.0.0.1:27994`, each with a fresh world and ItemGraph schema v16. Each
+  replay performed one snowball throw and one bow shot. Read-only SQLite checks
+  found one `THROW_ITEM` and one `SHOOT_ITEM` row in `ig_observations`, each with
+  a non-null `source_event_id`, and exactly one matching
+  `PROJECTILE_SPAWN_ACCEPTED` audit row per projectile in `ig_audit_events`.
+  Duplicate `(source_type, source_event_id)` queries returned zero rows for both
+  tables. The operator connected successfully after the command tree was changed
+  to vanilla literal event-type nodes; the previous unserializable custom
+  argument no longer disconnects clients. Compatibility artifacts remain gated
+  by the unresolved action and operations mappings listed in the registry.
 - **2026-09-29, Fabric native-only smoke:** the dedicated loopback staging server
   started with no GriefLogger JAR, applied the ItemGraph schema 13 migrations,
   loaded the Fabric mixins, and reached `Done` on port 27992. The ingestion worker

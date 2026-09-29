@@ -619,6 +619,10 @@ retention procedure; no production change is authorized by this test.
 The 2026-09-30 NeoForge staging startup additionally ran `:neoforge:runServer`
 with the shared `common` and `core` source sets attached to the ModDev run. It
 loaded the NeoForge mixin configuration, applied migration v16, reached `Done`,
-and shut down without a mod-loading or mixin error. This is loader startup
-evidence only; it does not replace a connected-player projectile replay.
+and shut down without a mod-loading or mixin error. A connected-player replay
+then performed one snowball throw and one bow shot. Read-only SQLite inspection
+found one durable `THROW_ITEM` and one `SHOOT_ITEM` observation, one accepted
+spawn audit row for each, non-null source event IDs on all four rows, and zero
+duplicate source-event groups. Fabric passed the identical replay and query on
+port 27993; NeoForge used port 27994. These replays are staging evidence only.
 
