@@ -152,6 +152,7 @@ public record AuditLookupFilters(
                 case "craft", "craft_item" -> "CRAFT";
                 case "smelt" -> "SMELT";
                 case "anvil_rename", "anvil" -> "ANVIL_RENAME";
+                case "anvil_repair", "anvil_rename_repair" -> "ANVIL_REPAIR";
                 case "break_item", "item_break" -> "BREAK_ITEM";
                 case "consume_item", "consume" -> "CONSUME_ITEM";
                 case "hopper_insert" -> "HOPPER_INSERT";

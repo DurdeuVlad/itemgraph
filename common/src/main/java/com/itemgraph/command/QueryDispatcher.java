@@ -22,6 +22,9 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -74,9 +77,11 @@ public final class QueryDispatcher {
     private static final Logger LOGGER = LoggerFactory.getLogger(QueryDispatcher.class);
 
     private static final int MAX_QUEUED_QUERIES = 64;
+    private static final long PLAYER_QUERY_TIMEOUT_MS = 5_000L;
 
     /** Created on first use and reused; the single worker accepts a bounded queue. */
     private static volatile ExecutorService executor;
+    private static volatile ScheduledExecutorService timeoutExecutor;
 
     private QueryDispatcher() {}
 
@@ -174,11 +179,16 @@ public final class QueryDispatcher {
         } catch (RejectedExecutionException e) {
             return rejectQueue(source);
         }
+        ScheduledFuture<?> playerTimeout = source.getEntity() instanceof ServerPlayer
+                ? schedulePlayerTimeout(cancellation) : null;
 
         if (server != null && Thread.currentThread() == serverThread && source.getEntity() == null) {
             source.sendSuccess(() -> Component.literal(
                     "[ItemGraph] Query accepted; completed results will be written to the server log."), false);
-            future.whenComplete((output, throwable) -> deliver(source, server, serverThread, label, output, throwable));
+            future.whenComplete((output, throwable) -> {
+                cancelTimeout(playerTimeout);
+                deliver(source, server, serverThread, label, output, throwable);
+            });
             return 1;
         }
 
@@ -215,7 +225,10 @@ public final class QueryDispatcher {
             }
         }
 
-        future.whenComplete((output, throwable) -> deliver(source, server, serverThread, label, output, throwable));
+        future.whenComplete((output, throwable) -> {
+            cancelTimeout(playerTimeout);
+            deliver(source, server, serverThread, label, output, throwable);
+        });
 
         return 1;
     }
@@ -449,12 +462,46 @@ public final class QueryDispatcher {
         }
     }
 
+    private static ScheduledFuture<?> schedulePlayerTimeout(QueryCancellation cancellation) {
+        return queryTimeoutExecutor().schedule(cancellation::cancel,
+                PLAYER_QUERY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private static void cancelTimeout(ScheduledFuture<?> timeout) {
+        if (timeout != null) {
+            timeout.cancel(false);
+        }
+    }
+
+    private static ScheduledExecutorService queryTimeoutExecutor() {
+        ScheduledExecutorService current = timeoutExecutor;
+        if (current != null) {
+            return current;
+        }
+        synchronized (QueryDispatcher.class) {
+            if (timeoutExecutor == null) {
+                timeoutExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "ItemGraph-Query-Timeout");
+                    t.setDaemon(true);
+                    return t;
+                });
+            }
+            return timeoutExecutor;
+        }
+    }
+
     /** Stops the query executor. Called from {@code ServerStoppingEvent}. */
     public static void shutdown() {
         ExecutorService current;
+        ScheduledExecutorService timers;
         synchronized (QueryDispatcher.class) {
             current = executor;
             executor = null;
+            timers = timeoutExecutor;
+            timeoutExecutor = null;
+        }
+        if (timers != null) {
+            timers.shutdownNow();
         }
         if (current == null) {
             return;

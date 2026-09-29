@@ -371,6 +371,8 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   the bounded query worker, preserving source and prefixed evidence IDs. The query
   is bounded to 20 rows, uses a 1..1024 cube around the issuing player, and rejects
   include/exclude conflicts before SQL dispatch.
+- Player lookup queries are cancelled after five seconds through the SQLite progress
+  handler, preserving the bounded worker queue under selective or poorly indexed scans.
 - Canceled chat, command, death, and block events are excluded; command and block
   callbacks are labeled attempts where the loader hook is pre-action, and canceled
   actions remain distinct from completed evidence.

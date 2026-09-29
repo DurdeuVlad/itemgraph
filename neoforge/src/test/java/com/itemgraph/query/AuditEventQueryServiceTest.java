@@ -246,6 +246,8 @@ class AuditEventQueryServiceTest {
                 "action.pickup_item radius.5", 1_000L).eventTypes());
         assertEquals(List.of("CRAFT"), AuditLookupFilters.parse(
                 "action.craft_item radius.5", 1_000L).eventTypes());
+        assertEquals(List.of("ANVIL_REPAIR"), AuditLookupFilters.parse(
+                "action.anvil_repair radius.5", 1_000L).eventTypes());
         AuditLookupFilters dotted = AuditLookupFilters.parse(
                 "include.modid:item.variant radius.5", 1_000L);
         assertEquals(List.of("modid:item.variant"), dotted.includeSubjects());

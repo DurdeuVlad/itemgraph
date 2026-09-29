@@ -26,7 +26,7 @@ public final class UnifiedEvidenceQueryService {
             "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_ATTEMPT",
             "COMMAND_EXECUTED", "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK_ATTEMPT",
             "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "ADD_ITEM", "REMOVE_ITEM",
-            "DROP_ITEM", "PICKUP_ITEM", "CRAFT", "SMELT", "ANVIL_RENAME", "BREAK_ITEM",
+            "DROP_ITEM", "PICKUP_ITEM", "CRAFT", "SMELT", "ANVIL_RENAME", "ANVIL_REPAIR", "BREAK_ITEM",
             "CONSUME_ITEM", "HOPPER_INSERT", "HOPPER_EXTRACT", "DEATH_DROP",
             "ADD_ITEM_ENDER", "REMOVE_ITEM_ENDER");
 
@@ -73,7 +73,7 @@ public final class UnifiedEvidenceQueryService {
                 """);
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, "UPPER(event_type)", filters.eventTypes(), false);
-        appendUserFilter(sql, args, "player_name", "player_uuid", filters.playerNames());
+        appendUserFilter(sql, args, List.of("player_name"), List.of("player_uuid"), filters.playerNames());
         appendWindow(sql, args, filters.window(), "timestamp_ms");
         appendLocation(sql, args, "level_id", "x", "y", "z", levelId, centerX, centerY, centerZ,
                 filters.radiusBlocks());
@@ -113,8 +113,12 @@ public final class UnifiedEvidenceQueryService {
                        COALESCE(origin.x, dest.x) AS x,
                        COALESCE(origin.y, dest.y) AS y,
                        COALESCE(origin.z, dest.z) AS z,
-                       COALESCE(origin.custom_label, dest.custom_label) AS player_name,
-                       COALESCE(origin.owner_uuid, dest.owner_uuid) AS player_uuid,
+                       CASE WHEN origin.node_type = 'PLAYER' THEN origin.custom_label
+                            WHEN dest.node_type = 'PLAYER' THEN dest.custom_label
+                            ELSE COALESCE(origin.custom_label, dest.custom_label) END AS player_name,
+                       CASE WHEN origin.node_type = 'PLAYER' THEN origin.owner_uuid
+                            WHEN dest.node_type = 'PLAYER' THEN dest.owner_uuid
+                            ELSE COALESCE(origin.owner_uuid, dest.owner_uuid) END AS player_uuid,
                        f.item_id, origin.custom_label AS origin_label,
                        dest.custom_label AS dest_label
                 FROM ig_observations o
@@ -125,8 +129,9 @@ public final class UnifiedEvidenceQueryService {
                 """);
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, OBSERVATION_ACTION, filters.eventTypes(), true);
-        appendUserFilter(sql, args, "COALESCE(origin.custom_label, dest.custom_label)",
-                "COALESCE(origin.owner_uuid, dest.owner_uuid)", filters.playerNames());
+        appendUserFilter(sql, args,
+                List.of("origin.custom_label", "dest.custom_label"),
+                List.of("origin.owner_uuid", "dest.owner_uuid"), filters.playerNames());
         appendWindow(sql, args, filters.window(), "o.timestamp_ms");
         appendLocation(sql, args, "COALESCE(origin.level_id, dest.level_id)",
                 "COALESCE(origin.x, dest.x)", "COALESCE(origin.y, dest.y)",
@@ -179,7 +184,7 @@ public final class UnifiedEvidenceQueryService {
                 """);
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, TRANSFORMATION_ACTION, filters.eventTypes(), true);
-        appendUserFilter(sql, args, "p.custom_label", "p.owner_uuid", filters.playerNames());
+        appendUserFilter(sql, args, List.of("p.custom_label"), List.of("p.owner_uuid"), filters.playerNames());
         appendWindow(sql, args, filters.window(), "t.timestamp_ms");
         appendLocation(sql, args, "p.level_id", "p.x", "p.y", "p.z", levelId,
                 centerX, centerY, centerZ, filters.radiusBlocks());
@@ -234,18 +239,29 @@ public final class UnifiedEvidenceQueryService {
         sql.append(")");
     }
 
-    private static void appendUserFilter(StringBuilder sql, List<Object> args, String nameExpression,
-                                         String uuidExpression, List<String> users) {
+    private static void appendUserFilter(StringBuilder sql, List<Object> args,
+                                         List<String> nameExpressions,
+                                         List<String> uuidExpressions, List<String> users) {
         if (users.isEmpty()) {
             return;
         }
-        sql.append(" AND (LOWER(").append(nameExpression).append(") IN (");
-        appendPlaceholders(sql, users.size());
-        sql.append(") OR LOWER(").append(uuidExpression).append(") IN (");
-        appendPlaceholders(sql, users.size());
-        sql.append("))");
-        users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
-        users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
+        if (nameExpressions.size() != uuidExpressions.size()) {
+            throw new IllegalArgumentException("user name and UUID expressions must be paired");
+        }
+        sql.append(" AND (");
+        for (int i = 0; i < nameExpressions.size(); i++) {
+            if (i > 0) {
+                sql.append(" OR ");
+            }
+            sql.append("(LOWER(").append(nameExpressions.get(i)).append(") IN (");
+            appendPlaceholders(sql, users.size());
+            sql.append(") OR LOWER(").append(uuidExpressions.get(i)).append(") IN (");
+            appendPlaceholders(sql, users.size());
+            sql.append("))");
+            users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
+            users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
+        }
+        sql.append(")");
     }
 
     private static void appendWindow(StringBuilder sql, List<Object> args, QueryWindow window,

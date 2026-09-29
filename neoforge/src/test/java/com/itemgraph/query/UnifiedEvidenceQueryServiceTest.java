@@ -41,7 +41,7 @@ class UnifiedEvidenceQueryServiceTest {
         audit("BREAK_BLOCK", 1_000L, "minecraft:stone");
         observation("ITEMGRAPH_INTERNAL", 2_000L, "DROP_ITEM", stoneFingerprint, 3);
         transformation("CRAFT", 3_000L);
-        observation("GRIEFLOGGER", 4_000L, "PICKUP_ITEM", stoneFingerprint, 3);
+        observationFromGround("GRIEFLOGGER", 4_000L, "PICKUP_ITEM", stoneFingerprint, 3);
 
         AuditLookupFilters filters = AuditLookupFilters.parse(
                 "action.break_block,drop_item,craft,pickup_item radius.100", 10_000L);
@@ -55,6 +55,7 @@ class UnifiedEvidenceQueryServiceTest {
                 rows.stream().map(UnifiedEvidenceDetail::actionType).toList());
         assertEquals("observation#2", rows.get(0).evidenceId());
         assertEquals("OBSERVED", rows.get(0).evidenceClass());
+        assertEquals("Alex", rows.get(0).playerName());
     }
 
     @Test
@@ -80,7 +81,7 @@ class UnifiedEvidenceQueryServiceTest {
 
     @Test
     void excludeSubjectRemovesMatchingItemsAndPreservesImportedSource() throws Exception {
-        observation("GRIEFLOGGER", 2_000L, "PICKUP_ITEM", stoneFingerprint, 3);
+        observationFromGround("GRIEFLOGGER", 2_000L, "PICKUP_ITEM", stoneFingerprint, 3);
         observation("ITEMGRAPH_INTERNAL", 1_000L, "DROP_ITEM", resultFingerprint, 1);
 
         AuditLookupFilters filters = AuditLookupFilters.parse(
@@ -91,6 +92,42 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals(1, rows.size());
         assertEquals("OBSERVATION", rows.get(0).source());
         assertEquals("minecraft:stone_bricks", rows.get(0).subjectId());
+    }
+
+    @Test
+    void exclusionKeepsRowsWithUnknownSubjects() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement(
+                "INSERT INTO ig_audit_events (event_type, timestamp_ms, level_id, x, y, z) "
+                        + "VALUES ('CHAT_MESSAGE', 1, 'minecraft:overworld', 10, 64, 10)")) {
+            statement.executeUpdate();
+        }
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observations
+                    (source_type, source_event_id, timestamp_ms, node_id, target_node_id,
+                     fingerprint_id, action_type, amount)
+                VALUES ('ITEMGRAPH_INTERNAL', 77, 2, ?, ?, 9999, 'DROP_ITEM', 1)
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.setLong(2, groundNode);
+            statement.executeUpdate();
+        }
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations
+                    (transformation_type, player_node_id, source_fingerprint_id,
+                     result_fingerprint_id, quantity, timestamp_ms)
+                VALUES ('ANVIL_REPAIR', ?, 9998, 9997, 1, 3)
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.executeUpdate();
+        }
+
+        AuditLookupFilters filters = AuditLookupFilters.parse(
+                "action.all exclude.stone radius.100", 10_000L);
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(
+                conn, filters, "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(3, rows.size());
+        assertTrue(rows.stream().allMatch(row -> row.evidenceClass().equals("OBSERVED")));
     }
 
     private long node(String type, double x, double y, double z, String label, String owner) throws Exception {
@@ -142,6 +179,16 @@ class UnifiedEvidenceQueryServiceTest {
 
     private void observation(String source, long timestamp, String action, long fingerprint, int amount)
             throws Exception {
+        insertObservation(source, timestamp, action, fingerprint, amount, playerNode, groundNode);
+    }
+
+    private void observationFromGround(String source, long timestamp, String action, long fingerprint, int amount)
+            throws Exception {
+        insertObservation(source, timestamp, action, fingerprint, amount, groundNode, playerNode);
+    }
+
+    private void insertObservation(String source, long timestamp, String action, long fingerprint, int amount,
+                                   long origin, long destination) throws Exception {
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_observations
                     (source_type, source_event_id, timestamp_ms, node_id, target_node_id,
@@ -151,8 +198,8 @@ class UnifiedEvidenceQueryServiceTest {
             statement.setString(1, source);
             statement.setLong(2, timestamp);
             statement.setLong(3, timestamp);
-            statement.setLong(4, playerNode);
-            statement.setLong(5, groundNode);
+            statement.setLong(4, origin);
+            statement.setLong(5, destination);
             statement.setLong(6, fingerprint);
             statement.setString(7, action);
             statement.setInt(8, amount);
