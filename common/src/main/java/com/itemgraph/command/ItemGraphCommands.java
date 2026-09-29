@@ -39,6 +39,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.ResourceLocationArgument;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -86,6 +87,7 @@ public final class ItemGraphCommands {
             Double centerY,
             Double centerZ,
             Double radius,
+            List<AuditEventQueryService.ExactPosition> exactPositions,
             AuditLookupFilters filters,
             String filterDescription,
             long createdAtMs) {
@@ -612,14 +614,16 @@ public final class ItemGraphCommands {
      * near lookups continue to use the documented minimum radius of one block.
      */
     public static int openBlockInspection(CommandSourceStack source, String dimension, int x, int y, int z) {
-        if (!(source.getEntity() instanceof ServerPlayer) || !source.hasPermission(2)) {
+        if (!(source.getEntity() instanceof ServerPlayer player) || !source.hasPermission(2)) {
             source.sendFailure(Component.literal(
                     "[ItemGraph] Block inspection requires a permission-level-2 player."));
             return 0;
         }
+        List<AuditEventQueryService.ExactPosition> positions = BlockInspectionTargets.resolve(
+                player.level(), new BlockPos(x, y, z));
         AuditPageSession session = new AuditPageSession(
                 UUID.randomUUID(), "all", null, QueryWindow.unbounded(), QueryLimits.DEFAULT_LIMIT,
-                dimension, (double) x, (double) y, (double) z, 0.0, null,
+                dimension, (double) x, (double) y, (double) z, 0.0, positions, null,
                 "inspect block=" + dimension + " [" + x + "," + y + "," + z + "]",
                 System.currentTimeMillis());
         rememberPageSession(source, session);
@@ -650,7 +654,7 @@ public final class ItemGraphCommands {
                 + " center=" + centerX + "," + centerY + "," + centerZ;
         AuditPageSession session = new AuditPageSession(
                 UUID.randomUUID(), null, null, filters.window(), GRIEFLOGGER_DEFAULT_LIMIT, levelId,
-                centerX, centerY, centerZ, filters.radiusBlocks(), filters,
+                centerX, centerY, centerZ, filters.radiusBlocks(), null, filters,
                 filterDescription, System.currentTimeMillis());
         rememberPageSession(source, session);
         return dispatchAuditPage(source, "lookup filtered audit", session, 1, true);
@@ -682,6 +686,7 @@ public final class ItemGraphCommands {
         AuditPageSession session = new AuditPageSession(
                 UUID.randomUUID(), eventType, null, window, clampedLimit, null,
                 null, null, null, null, null,
+                null,
                 "type=" + eventType + " window=" + window.describe(),
                 System.currentTimeMillis());
         rememberPageSession(ctx.getSource(), session);
@@ -738,9 +743,13 @@ public final class ItemGraphCommands {
                 lines = QueryFormatter.formatUnifiedEvidence(evidence, filter);
                 returnedRows = evidence.size();
             } else {
-                List<AuditEventDetail> events = AUDIT_EVENT_QUERIES.find(conn, session.eventType(), session.playerName(),
-                        session.window(), session.levelId(), session.centerX(), session.centerY(),
-                        session.centerZ(), session.radius(), clampedLimit, offset);
+                List<AuditEventDetail> events = session.exactPositions() != null
+                        && !session.exactPositions().isEmpty()
+                        ? AUDIT_EVENT_QUERIES.findExact(conn, session.eventType(), session.playerName(),
+                                session.window(), session.levelId(), session.exactPositions(), clampedLimit, offset)
+                        : AUDIT_EVENT_QUERIES.find(conn, session.eventType(), session.playerName(),
+                                session.window(), session.levelId(), session.centerX(), session.centerY(),
+                                session.centerZ(), session.radius(), clampedLimit, offset);
                 lines = QueryFormatter.formatAuditEvents(events, filter);
                 returnedRows = events.size();
             }
@@ -865,7 +874,7 @@ public final class ItemGraphCommands {
                 + " window=" + window.describe();
         AuditPageSession session = new AuditPageSession(UUID.randomUUID(), eventType, playerName, window,
                 QueryLimits.clampLimit(limit), levelId, centerX, centerY, centerZ, radius,
-                null, filter, System.currentTimeMillis());
+                null, null, filter, System.currentTimeMillis());
         rememberPageSession(ctx.getSource(), session);
         return dispatchAuditPage(ctx.getSource(), "lookup audit", session, 1,
                 ctx.getSource().getEntity() instanceof ServerPlayer);
