@@ -106,7 +106,32 @@ EXPECTED_SOURCE_FILES = tuple(sorted(SOURCE_BASE_URL + path for path in EXPECTED
 # CHAT and COMMAND are published feature rows in the source database but are
 # not members of the three audited source action enums.
 EXPECTED_SOURCE_CAPABILITIES = set(EXPECTED_SOURCE_ACTIONS) | {"CHAT", "COMMAND"}
-REQUIRED_MILESTONE_ISSUES = {24, 26, 27, 28, 29, 30, 31, 43}
+# The action rows are a compatibility contract, not merely a vocabulary list.
+# Keep the expected mapping here so a registry edit cannot silently change the
+# evidence or quantity semantics while retaining the same action names.
+EXPECTED_ACTION_CONTRACT: dict[str, tuple[str, str, str, str]] = {
+    "ADD_ITEM": ("ADD_ITEM", "compatible", "observed", "signed_delta"),
+    "REMOVE_ITEM": ("REMOVE_ITEM", "compatible", "observed", "signed_delta"),
+    "DROP_ITEM": ("DROP_ITEM", "compatible", "observed", "signed_delta"),
+    "PICKUP_ITEM": ("PICKUP_ITEM", "compatible", "observed", "signed_delta"),
+    "CRAFT_ITEM": ("CRAFT", "extended", "observed", "transformation"),
+    "CONSUME_ITEM": ("CONSUME_ITEM", "compatible", "observed", "signed_delta"),
+    "BREAK_ITEM": ("BREAK_ITEM", "compatible", "observed", "signed_delta"),
+    "THROW_ITEM": ("THROW_ITEM", "unresolved", "observed", "non_quantity_projectile_evidence"),
+    "SHOOT_ITEM": ("SHOOT_ITEM", "unresolved", "observed", "non_quantity_projectile_evidence"),
+    "PLACE_BLOCK": ("PLACE_BLOCK", "compatible", "observed", "none"),
+    "BREAK_BLOCK": ("BREAK_BLOCK", "compatible", "observed", "none"),
+    "INTERACT_BLOCK": ("INTERACT_BLOCK_ATTEMPT", "unresolved", "observed", "none"),
+    "KILL_ENTITY": ("KILL_ENTITY", "compatible", "observed", "none"),
+    "INTERACT_ENTITY": ("INTERACT_ENTITY", "unresolved", "observed", "none"),
+    "JOIN": ("PLAYER_JOIN", "compatible", "observed", "none"),
+    "QUIT": ("PLAYER_QUIT", "compatible", "observed", "none"),
+    "CHAT": ("CHAT_MESSAGE", "compatible", "observed", "none"),
+    "COMMAND": ("COMMAND_ATTEMPT", "compatible", "observed", "none"),
+    "ADD_ITEM_ENDER": ("ADD_ITEM_ENDER", "unresolved", "observed", "signed_delta"),
+    "REMOVE_ITEM_ENDER": ("REMOVE_ITEM_ENDER", "unresolved", "observed", "signed_delta"),
+}
+REQUIRED_MILESTONE_ISSUES = {24, 25, 26, 27, 28, 29, 30, 31, 43}
 M8_MILESTONE_TITLE = "M8: Drop-in GriefLogger parity"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -196,9 +221,34 @@ def validate_registry(registry: dict[str, Any]) -> None:
     )
     allowed_statuses = set(registry.get("statuses", []))
     require(allowed_statuses == {"compatible", "extended", "unsupported", "unresolved"}, "registry status vocabulary changed")
+    allowed_evidence_classes = set(registry.get("evidence_classes", []))
+    require(
+        allowed_evidence_classes == {"observed", "inferred", "ambiguous", "unresolved"},
+        "registry evidence_class vocabulary changed",
+    )
     for index, row in enumerate(actions):
         require(isinstance(row, dict), f"actions[{index}] must be an object")
+        itemgraph = row.get("itemgraph")
+        evidence_class = row.get("evidence_class")
+        quantity = row.get("quantity")
+        loaders = row.get("loaders")
+        require(isinstance(itemgraph, str) and itemgraph, f"actions[{index}] itemgraph must be a non-empty string")
         require(row.get("status") in allowed_statuses, f"actions[{index}] has an unknown status")
+        require(evidence_class in allowed_evidence_classes, f"actions[{index}] has an unknown evidence_class")
+        require(isinstance(quantity, str) and quantity, f"actions[{index}] quantity must be a non-empty string")
+        require(loaders == ["fabric", "neoforge"], f"actions[{index}] loaders must be exactly ['fabric', 'neoforge']")
+        source_action = row.get("grieflogger")
+        if source_action in EXPECTED_ACTION_CONTRACT:
+            expected_itemgraph, expected_status, expected_evidence, expected_quantity = EXPECTED_ACTION_CONTRACT[source_action]
+            require(
+                (itemgraph, row["status"], evidence_class, quantity)
+                == (expected_itemgraph, expected_status, expected_evidence, expected_quantity),
+                f"actions[{index}] contract for {source_action} changed",
+            )
+            if expected_status == "unresolved":
+                require(row.get("owner_issue") == 27, f"actions[{index}] unresolved {source_action} must remain owned by issue #27")
+            else:
+                require("owner_issue" not in row, f"actions[{index}] compatible/extended {source_action} must not claim an unresolved owner issue")
         if row.get("status") == "unresolved":
             require(isinstance(row.get("owner_issue"), int), f"actions[{index}] unresolved row needs owner_issue")
 
@@ -234,6 +284,9 @@ def validate_documents(registry: dict[str, Any]) -> None:
         for row in section:
             if isinstance(row, dict) and isinstance(row.get("owner_issue"), int):
                 owner_issues.add(row["owner_issue"])
+    filters = registry.get("filters", {})
+    if isinstance(filters, dict) and isinstance(filters.get("owner_issue"), int):
+        owner_issues.add(filters["owner_issue"])
     owner_issues.add(baseline["owner_issue"])
     for issue in sorted(owner_issues):
         require(f"#{issue}" in parity, f"parity document does not reference owner issue #{issue}")
