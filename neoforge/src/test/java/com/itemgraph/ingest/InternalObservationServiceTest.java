@@ -152,6 +152,7 @@ class InternalObservationServiceTest {
                 10, 64, -20, "minecraft:arrow", "outcome=accepted", new byte[]{2}, sourceEventId);
 
         persistAudit(first, second);
+        persistAudit(first, second);
 
         try (PreparedStatement statement = conn.prepareStatement(
                 "SELECT source_event_id, raw_data FROM ig_audit_events ORDER BY id")) {
@@ -628,6 +629,7 @@ class InternalObservationServiceTest {
                 "minecraft:overworld", null, null, null,
                 "UNKNOWN", DIAMOND.itemId(), new byte[]{2}, DIAMOND, 1, null, null, sourceEventId);
 
+        persist(first, second);
         persist(first, second);
 
         try (PreparedStatement statement = conn.prepareStatement(
