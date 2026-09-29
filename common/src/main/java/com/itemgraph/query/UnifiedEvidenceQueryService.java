@@ -284,9 +284,14 @@ public final class UnifiedEvidenceQueryService {
         if (subjects.isEmpty()) {
             return;
         }
-        sql.append(" AND ").append(exclude ? "LOWER(" + expression + ") NOT IN (" : "LOWER(" + expression + ") IN (");
+        if (exclude) {
+            sql.append(" AND (").append(expression).append(" IS NULL OR LOWER(")
+                    .append(expression).append(") NOT IN (");
+        } else {
+            sql.append(" AND LOWER(").append(expression).append(") IN (");
+        }
         appendPlaceholders(sql, subjects.size());
-        sql.append(")");
+        sql.append(exclude ? "))" : ")");
         subjects.forEach(subject -> args.add(subject.toLowerCase(Locale.ROOT)));
     }
 
@@ -296,12 +301,14 @@ public final class UnifiedEvidenceQueryService {
             return;
         }
         sql.append(" AND (");
-        sql.append(exclude ? "LOWER(source_fp.item_id) NOT IN (" : "LOWER(source_fp.item_id) IN (");
+        sql.append(exclude ? "(source_fp.item_id IS NULL OR LOWER(source_fp.item_id) NOT IN ("
+                : "LOWER(source_fp.item_id) IN (");
         appendPlaceholders(sql, subjects.size());
-        sql.append(exclude ? ") AND " : ") OR ");
-        sql.append(exclude ? "LOWER(result_fp.item_id) NOT IN (" : "LOWER(result_fp.item_id) IN (");
+        sql.append(exclude ? ")) AND " : ") OR ");
+        sql.append(exclude ? "(result_fp.item_id IS NULL OR LOWER(result_fp.item_id) NOT IN ("
+                : "LOWER(result_fp.item_id) IN (");
         appendPlaceholders(sql, subjects.size());
-        sql.append(")");
+        sql.append(exclude ? "))" : ")");
         subjects.forEach(subject -> args.add(subject.toLowerCase(Locale.ROOT)));
         subjects.forEach(subject -> args.add(subject.toLowerCase(Locale.ROOT)));
         sql.append(")");
