@@ -43,7 +43,6 @@
     {"grieflogger": "COMMAND", "itemgraph": "COMMAND_ATTEMPT", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "SMELT", "itemgraph": "SMELT", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "ItemGraph preserves transformation lineage and source/result fingerprints."},
     {"grieflogger": "ANVIL_RENAME", "itemgraph": "ANVIL_RENAME", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "ItemGraph preserves transformation lineage and source/result fingerprints."},
-    {"grieflogger": null, "itemgraph": "CRAFT_TRANSFORMATION_LINEAGE", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental lineage detail beyond the GriefLogger action row."},
     {"grieflogger": null, "itemgraph": "HOPPER_INSERT", "status": "extended", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental automation evidence with unknown endpoints; GriefLogger does not publish an equivalent hopper action."},
     {"grieflogger": null, "itemgraph": "HOPPER_EXTRACT", "status": "extended", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental automation evidence with unknown endpoints; GriefLogger does not publish an equivalent hopper action."}
   ],
@@ -96,6 +95,9 @@
     {"grieflogger": "container_history", "itemgraph": "container_history", "status": "compatible", "owner_issue": 26},
     {"grieflogger": "double_chest_history", "itemgraph": "double_chest_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
     {"grieflogger": "door_history", "itemgraph": "door_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26}
+  ],
+  "extensions": [
+    {"itemgraph": "transformation_lineage", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental source/result fingerprints and lineage metadata for CRAFT, SMELT, and ANVIL_RENAME."}
   ],
   "storage": {
     "native": ["sqlite"],
