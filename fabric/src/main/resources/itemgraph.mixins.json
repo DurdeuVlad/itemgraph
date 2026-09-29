@@ -1,0 +1,20 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.itemgraph.fabric.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "server": [
+    "CommandsMixin",
+    "ServerLevelMixin",
+    "BlockItemMixin",
+    "ServerPlayerMixin",
+    "ItemEntityMixin",
+    "LivingEntityMixin",
+    "ItemStackMixin",
+    "HopperBlockEntityMixin",
+    "ResultSlotMixin",
+    "FurnaceResultSlotMixin",
+    "AnvilMenuMixin",
+    "ItemCombinerMenuAccessor"
+  ]
+}

@@ -139,18 +139,23 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 
 ## M8: Drop-in GriefLogger parity
 
-- Status: planned; GitHub milestone https://github.com/DurdeuVlad/itemgraph/milestone/4.
+- Status: in progress; GitHub milestone
+  https://github.com/DurdeuVlad/itemgraph/milestone/4.
 - Outcome: ItemGraph keeps `/ig` and `/itemgraph` while matching GriefLogger behavior
   for commands, filters, inspector, events, read-only history import, storage, and
-  operations. `/gl` and `/grieflogger` are not aliases.
+  operations. `/gl` and `/grieflogger` are not aliases. ItemGraph owns the native audit
+  evidence needed to retire GriefLogger as a runtime dependency.
+- Delivered: V13 native audit ledger and bounded `/ig lookup` for NeoForge, shared
+  Fabric capture for its supported audit events, asynchronous persistence, action/player/
+  time/radius lookup, item-flow and transformation capture, read-only container
+  inspection, and a per-player interactive lookup page session. Item-flow evidence stays
+  in `ig_observations`; block, session, chat, command, and entity events use
+  `ig_audit_events`.
+- Remaining: complete the registry entries tracked by issues #25–#31, including the
+  unified lookup surface, all inspector targets, exact projectile/interaction semantics,
+  read-only historical import, MySQL/MariaDB, operations controls, and differential
+  staging proof. The runtime matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact
+  current boundary.
 - Proof: the compatibility registry, cross-loader tests, backend tests, and native-only
   staging replay tracked by issues #23–#31.
-
-## M9: ItemGraph audit++ performance and extra events
-
-- Status: planned; GitHub milestone https://github.com/DurdeuVlad/itemgraph/milestone/5.
-- Outcome: measured performance controls, extra administrative/world/entity events,
-  modded inventory adapters, cross-loader APIs, and tamper-evident exports.
-- Proof: reproducible CI benchmarks, conservation reports, adapter fixtures, and export
-  verification tracked by issues #32–#37.
 

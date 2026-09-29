@@ -4,6 +4,7 @@ import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.ingest.InternalObservationService.InternalObservation;
+import com.itemgraph.ingest.InternalObservationService.InternalAuditEvent;
 import com.itemgraph.ingest.InternalObservationService.InternalTransformation;
 import com.itemgraph.listener.ContainerCapabilityWrapper;
 import com.itemgraph.listener.ContainerInteractionTracker;
@@ -83,6 +84,65 @@ class InternalObservationServiceTest {
         Method m = InternalObservationService.class.getDeclaredMethod("persistBatch", List.class);
         m.setAccessible(true);
         m.invoke(service, List.of(obs));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void persistAudit(InternalAuditEvent... events) throws Exception {
+        Method m = InternalObservationService.class.getDeclaredMethod("persistAuditEvents", List.class);
+        m.setAccessible(true);
+        m.invoke(service, List.of(events));
+    }
+
+    @Test
+    void nativeAuditEventsPersistOutsideItemObservationLedger() throws Exception {
+        initializeTopologyDatabase();
+        persistAudit(new InternalAuditEvent(
+                1234L, "BREAK_BLOCK", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:stone", null, null));
+
+        try (PreparedStatement audit = conn.prepareStatement(
+                "SELECT event_type, player_name, subject_id FROM ig_audit_events");
+             ResultSet rs = audit.executeQuery()) {
+            assertTrue(rs.next());
+            assertEquals("BREAK_BLOCK", rs.getString(1));
+            assertEquals("Alex", rs.getString(2));
+            assertEquals("minecraft:stone", rs.getString(3));
+            assertFalse(rs.next());
+        }
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_observations")) {
+            assertTrue(rs.next());
+            assertEquals(0, rs.getInt(1), "non-quantity audit events must not become item transfers");
+        }
+    }
+
+    @Test
+    void uninitializedDatabaseDoesNotClaimAuditEventsWerePersisted() {
+        DatabaseManager.getInstance().close();
+        assertTrue(service.submitAuditEvent(new InternalAuditEvent(
+                1234L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, null, "hello", null)));
+
+        service.stop();
+
+        assertEquals(0, service.getTotalAuditEvents());
+        assertEquals(0, service.getTotalPersisted());
+        assertEquals(1, service.getTotalDropped(), "shutdown loss is counted instead of reported as persisted");
+        assertEquals(0, service.getQueueSize());
+    }
+
+    @Test
+    void nativeAuditRawBytesAreDefensivelyCopied() {
+        byte[] raw = {1, 2};
+        InternalAuditEvent event = new InternalAuditEvent(
+                1234L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, null, "hello", raw);
+
+        raw[0] = 9;
+        byte[] returned = event.rawData();
+        returned[1] = 8;
+
+        assertArrayEquals(new byte[]{1, 2}, event.rawData());
     }
 
     private String nodeTypeOf(long nodeId) throws Exception {

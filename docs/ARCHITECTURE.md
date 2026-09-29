@@ -21,7 +21,21 @@ neoforge adapter┘
 
 `RuntimeInformationPort` is declared in `core` and is implemented by both loader composition roots. `ItemGraphCommands` and API validation use this port for the mod version and installed-mod lookup instead of calling either loader's discovery API. Both adapters initialize the shared runtime with platform-owned config paths, server registry access, and server lifecycle callbacks.
 
-The adapter difference is deliberate: NeoForge has ItemGraph's native supplemental event listeners for containers, item entities, armor stands, and transformations. Fabric currently relies on GriefLogger's supported event database or preview API submissions for evidence collection; the Fabric build does not claim NeoForge-only supplemental event coverage. Install GriefLogger and select the matching Fabric compatibility jar for the supported Fabric evidence path.
+The adapters expose different event APIs but both now have native audit capture. NeoForge
+adds native container, item-entity, armor-stand, transformation, and item-action listeners;
+Fabric adds its supported session, chat, block, death, command-dispatch, fresh-projectile,
+completed-consumption, durability-break, transformation-result, and container-inspection callbacks.
+NeoForge command callbacks and the Fabric `CommandsMixin` are stored as
+`COMMAND_ATTEMPT` because both hooks run before command execution. This matches
+GriefLogger's documented command-attempt behavior and avoids inventing a success result.
+NeoForge-only inventory hooks remain an explicit platform coverage boundary in
+`docs/GRIEFLOGGER_PARITY.md`; Fabric `BlockItemMixin` captures completed BlockItem
+placements, `LivingEntityMixin` captures completed eat/drink uses, `ItemStackMixin` captures
+durability breaks at the shrink boundary, and Fabric projectile callbacks are non-quantity
+spawn evidence. Fabric result-slot mixins capture crafting, smelting, and anvil transformations
+into the shared ledger. Both loaders
+share the read-only `FlowBrowserService` for coordinate inspection; GriefLogger ingestion
+remains optional and read-only on both loaders.
 
 The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the jars that require GriefLogger `1.2.10-1.21.1`.
 
@@ -54,6 +68,20 @@ Candidate node classes:
 
 A node is not necessarily permanent. Some are long-lived, such as a chest at fixed coordinates. Others are ephemeral, such as a ground item entity.
 
+### Native audit events
+
+`ig_observations` is reserved for item quantity-flow evidence. Native block,
+session, chat, command, entity, and projectile-use audit records are stored in the separate
+`ig_audit_events` ledger so they cannot be mistaken for item transfers. The
+ledger uses the same bounded asynchronous persistence service and read-only query
+dispatcher as item evidence. NeoForge consume and durability-break events remain
+quantity-flow observations because they carry an observed item identity and amount.
+NeoForge and Fabric projectile spawn callbacks record only the spawned projectile type,
+source item ID, and location as audit evidence: they do not assert that one item left an
+inventory or that the projectile reached the ground. This preserves quantity
+conservation for Infinity bows, multishot, and throwable items without a matching
+inventory delta.
+
 ### Observations
 
 An observation is a direct fact from a trusted source.
@@ -80,7 +108,10 @@ target_node_id = DESTINATION  (where the item went TO)
 
 This is ItemGraph's modeling decision, not something GriefLogger states. GriefLogger's `items` table is player-centric — every row records an action a player performed, naming only the player. Recording that literally (origin = player, destination = unset, for every action) loses direction entirely: a drop and the pickup that recovers the same stack would share no node, leaving correlation nothing to join on.
 
-The implemented node types are `PLAYER`, `CONTAINER`, `GROUND`, `ARMOR_STAND`, and `UNKNOWN` (`com.itemgraph.graph.NodeType`), resolved to stable identities by `com.itemgraph.graph.NodeManager`:
+The implemented node types are `PLAYER`, `CONTAINER`, `GROUND`, `ARMOR_STAND`, and `UNKNOWN` (`com.itemgraph.graph.NodeType`), resolved to stable identities by `com.itemgraph.graph.NodeManager`.
+The endpoint table below applies to quantity rows imported from GriefLogger's
+`items` and `containers` tables. Native projectile spawn callbacks are stored in
+`ig_audit_events` and make no origin, destination, or quantity claim:
 
 | Source | Action | Origin | Destination |
 | --- | --- | --- | --- |
@@ -157,7 +188,8 @@ Only the fourth link genuinely needs inference, and only because `GROUND` is an 
 
 ### Matching rules
 
-For a `DROP_ITEM` / `THROW_ITEM` / `SHOOT_ITEM` observation, a candidate `PICKUP_ITEM` must:
+For an imported GriefLogger `DROP_ITEM` / `THROW_ITEM` / `SHOOT_ITEM` observation,
+a candidate `PICKUP_ITEM` must:
 
 - originate at the **same `GROUND` node** (same dimension + block),
 - carry the **same `fingerprint_id`** (exact canonical metadata equality),
@@ -483,6 +515,15 @@ serialize transactions on the shared ItemGraph JDBC connection.
   pending entry so full pickups are never double-counted; entries on removed
   entities are dropped without emitting (merge/despawn indistinguishable from
   absorb) and all entries expire after 1s under a 512-entry bound.
+- Fabric normal player drops and pickups use server-only hooks in
+  `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin`. A returned
+  drop entity is recorded only when `ServerLevel.addFreshEntity` returns true,
+  with its returned stack count and UUID. Pickup records the exact before/after
+  stack-count delta, including partial absorption, and maps the ground endpoint
+  through the same `GROUND` persistence branch. Drops observed while
+  `ServerPlayer.isDeadOrDying()` are labeled `DEATH_DROP`; custom death-event
+  additions and automated non-player item movement remain unimplemented until a
+  loader-native hook can prove their source and destination.
 
 ### Automated container transfers (Issue 4)
 - `ContainerCapabilityRegistrar` registers `ContainerCapabilityWrapper` providers
@@ -535,6 +576,12 @@ serialize transactions on the shared ItemGraph JDBC connection.
   an accepted query cancels the click with `InteractionResult.SUCCESS`, which prevents both
   the normal container GUI and held-item use path from running. A rejected query preserves
   the ordinary container interaction instead of leaving the player with neither screen.
+- Fabric's `FabricNativeAuditEventListener` applies the same decision through
+  `UseBlockCallback`: it checks the server-side `Container`, calls the shared
+  `FlowBrowserService.openContainer`, and returns `SUCCESS` only after the query is accepted.
+  The Fabric disconnect callback clears that player's inspection state; server stop clears
+  any remaining state. This follows Fabric's documented callback contract: listeners run
+  until one returns a non-`PASS` `InteractionResult` ([Fabric 1.21.1 event guide](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md)).
 - Because the click is cancelled before `ContainerSessionListener` records it, inspection
   is not container-transfer evidence. The opened `FlowBrowserMenu` contains only a
   `SimpleContainer`, so its Open/Close lifecycle cannot create a block-entity-backed watch.
@@ -545,6 +592,10 @@ serialize transactions on the shared ItemGraph JDBC connection.
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
 - `/ig trace container <x> <y> <z>`: reconstructs item ingress and egress for a container at coordinates.
 - `/ig trace item <query>`: resolves string queries by numeric ID, item registry ID, or custom name.
+- `/ig lookup filters <filter1> ... <filter5>`: applies GriefLogger's `name.value`
+  action, user, include, exclude, time, and required radius filters to native
+  audit rows. The radius is a bounded cube around the issuing player and runs
+  asynchronously on the read-only query worker.
 
 ## Transformation Lineage (Phase 9)
 

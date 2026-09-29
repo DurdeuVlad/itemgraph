@@ -320,6 +320,98 @@ API promise.
 
 ## Git strategy
 
+## Phase 11 — Native GriefLogger replacement parity
+
+The native replacement is staged by evidence category. `ig_observations` remains
+the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
+
+### Delivered in the current slice
+
+- V13 creates the ItemGraph-owned `ig_audit_events` table and indexes.
+- NeoForge captures player join/quit, chat, and command attempts; Fabric captures
+  the same command-dispatch attempt through a narrowly scoped `CommandsMixin`.
+  NeoForge also captures block place,
+  block break, block interaction, and player-kill events asynchronously.
+- NeoForge captures consume and durability break into the existing quantity-flow
+  ledger, and projectile spawn usage as non-quantity audit evidence; Fabric captures
+  join/quit, chat, block break/interaction, player-kill events through Fabric API callbacks,
+  fresh player-owned projectile spawns through `ServerLevelMixin`, and completed
+  `BlockItem.place` actions through `BlockItemMixin`. Fabric also captures normal
+  player drops and full or partial pickups through server-only `ServerPlayer.drop`
+  and `ItemEntity.playerTouch` return hooks; the returned entity UUID and stack
+  count delta are retained as the quantity evidence.
+- Fabric captures completed eat/drink consumption through `LivingEntityMixin` at
+  `completeUsingItem`'s return boundary. It preserves the original stack in a
+  bounded nested capture, matches the HEAD and RETURN callbacks by a stable
+  caller class/method marker plus stack depth, and discards stale or ambiguous
+  markers instead of pairing the wrong invocation. `ItemStackMixin` captures
+  durability breaks at the `hurtAndBreak` shrink boundary, before the broken
+  stack is removed.
+- Fabric captures custom item entities accepted during `ServerPlayer.die` in a
+  bounded death window and deduplicates them against the normal
+  `ServerPlayer.drop` path, preserving the returned entity UUID and stack count.
+- Fabric result-slot mixins capture crafting, furnace-family smelting, and anvil
+  rename/repair results into `ig_item_transformations` with canonical source and
+  result fingerprints.
+- Fabric `HopperBlockEntityMixin` captures successful vanilla hopper transfers as
+  endpoint-unknown `HOPPER_INSERT`/`HOPPER_EXTRACT` net deltas, preserving quantity
+  without attributing automation to a player.
+- Both loaders expose the same read-only container inspector: NeoForge uses its
+  high-priority `InspectionListener`, while Fabric uses `UseBlockCallback` and the
+  shared `FlowBrowserService`. A click is consumed only after the asynchronous query
+  is accepted, and inspection state is cleared on disconnect and server stop.
+- `/ig lookup <eventType> [limit] [sinceMinutes]` and
+  `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
+  bounded native audit evidence; `/ig lookup near` adds exact dimension and
+  bounded radius filters.
+- `/ig lookup filters <filter1> ... <filter5>` implements the published
+  GriefLogger `name.value` vocabulary for action, user, include, exclude, time,
+  and required radius filters. The query is bounded to 20 rows, runs off-thread,
+  uses a 1..1024 cube around the issuing player, and rejects include/exclude
+  conflicts before SQL dispatch.
+- Canceled chat, command, death, and block events are excluded; command and block
+  callbacks are labeled attempts where the loader hook is pre-action, and canceled
+  actions remain distinct from completed evidence.
+
+The Fabric mixins are deliberate: Fabric API's server message callbacks cover only
+command-generated broadcasts, not general command execution. The mixin records the
+Minecraft `Commands.performCommand` entry boundary and never labels a command as
+successful. It is isolated to the Fabric adapter and covered by a recorder regression
+test; replacing it with a broader mixin would increase the false-success surface.
+The placement mixin follows the same boundary rule: it records only a successful
+`BlockItem.place` return and the newly occupied cells in its bounded 5x5x5
+before/after snapshot. Fabric's
+official [1.21.1 event documentation](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md)
+says areas without API hooks should use a mixin;
+there is no completed block-placement callback in the interaction events.
+GriefLogger's [command documentation](https://daqem.com/projects/grieflogger/wiki/player-actions/chat-commands)
+states that every command attempt is recorded regardless of permission or command
+success, so the pre-execution semantics are the parity target. The pre-execution
+semantics are also documented by NeoForge's
+[`CommandEvent`](https://raw.githubusercontent.com/neoforged/NeoForge/1.21.1/src/main/java/net/neoforged/neoforge/event/CommandEvent.java),
+and the Fabric API limitation is documented by Fabric's
+[`ServerMessageEvents`](https://raw.githubusercontent.com/FabricMC/fabric-api/0.116.12+1.21.1/fabric-message-api-v1/src/main/java/net/fabricmc/fabric/api/message/v1/ServerMessageEvents.java),
+whose server command event covers broadcast messages rather than general command
+execution. Fabric's drop and pickup hooks use the same narrow boundary rule:
+`ServerPlayer.drop` is paired with the `ServerLevel.addFreshEntity` boolean
+result before a ground entity is recorded, while the `ItemEntity.playerTouch`
+before/after count delta proves how many items were actually absorbed. Drops
+observed while `ServerPlayer.isDeadOrDying()` are labeled `DEATH_DROP`; custom
+item entities accepted during `ServerPlayer.die` are captured in a bounded death
+window and deduplicated against the normal drop hook. Vanilla Fabric hopper
+transfers now emit endpoint-unknown net deltas through `HopperBlockEntityMixin`.
+GriefLogger has no hopper or mechanical-automation event, so modded automation
+adapters are supplemental work outside the replacement-parity gate.
+
+### Remaining parity slices
+
+- A documented native-only migration/retention plan remains the operator
+  cutover gate. The GriefLogger-absent Fabric replay now verifies the native
+  audit, item-action, container, hopper, transformation, lookup, and inspector
+  paths listed in `docs/GRIEFLOGGER_PARITY.md`. Modded automation adapters are
+  optional supplemental work because GriefLogger has no equivalent event
+  coverage.
+
 Prefer small commits such as:
 
 ```text
@@ -371,7 +463,7 @@ MVP is complete when:
 
 Use a pure Java core containing domain records, deterministic correlation/query logic, application use cases, and ports. The core must not import `net.minecraft.*`, `net.neoforged.*`, `net.fabricmc.*`, Brigadier, or loader lifecycle classes. Persistence and platform integrations implement ports outside the core. Gradle must build independent Fabric and NeoForge mod jars from their own entry points and metadata; neither jar may contain the other loader's metadata or classes.
 
-The Fabric and NeoForge adapters provide server lifecycle, command registration, item/component canonicalization, event capture, server path/config access, and Minecraft-specific API conversions. Shared JDBC persistence, GriefLogger read-only ingestion, graph reconstruction, and query use cases stay in loader-neutral shared code where their dependencies allow it. Fabric reads GriefLogger's database or accepts preview API observations, but does not yet provide the supplemental native event listeners present in NeoForge. Both loaders have a GriefLogger 1.2.10-1.21.1-compatible artifact.
+The Fabric and NeoForge adapters provide server lifecycle, command registration, item/component canonicalization, event capture, server path/config access, and Minecraft-specific API conversions. Shared JDBC persistence, GriefLogger read-only ingestion, graph reconstruction, and query use cases stay in loader-neutral shared code where their dependencies allow it. Fabric and NeoForge both provide native audit callbacks; loader-specific gaps are tracked in `docs/GRIEFLOGGER_PARITY.md`. Both loaders have a GriefLogger 1.2.10-1.21.1-compatible artifact.
 
 Reference pattern: the maintained multi-loader Minecraft template uses a loader-free `common` module plus separate `fabric` and `neoforge` projects; Fabric Loom documents that multi-project mods list all participating source sets in `loom.mods`. ItemGraph's hexagonal boundary is stricter than the template's common source set: only adapter projects may bind to loader APIs, and the core is plain Java. Source references: [Player005 multi-loader template for 1.21.1](https://github.com/Player005/multiloader-mod-template/tree/1.21.1) and [Fabric Loom classpath groups](https://docs.fabricmc.net/develop/loom/classpath-groups).
 

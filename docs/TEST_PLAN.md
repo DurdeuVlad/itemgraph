@@ -559,3 +559,25 @@ database were not copied or accessed. This startup smoke establishes that the mo
 resolution crash is gone. The isolated folder had no GriefLogger database schema,
 so this run does not verify event ingestion against the source clone's existing DB.
 
+## Native GriefLogger parity slice (source verification)
+
+The current source-level verification runs without producing a release artifact:
+
+- `./gradlew.bat :neoforge:test --tests com.itemgraph.ingest.InternalObservationServiceTest --tests com.itemgraph.listener.NativeAuditEventListenerTest --tests com.itemgraph.listener.NativeItemActionEventListenerTest --tests com.itemgraph.query.AuditEventQueryServiceTest --rerun-tasks --no-daemon`
+- `./gradlew.bat :neoforge:test --tests com.itemgraph.command.ItemGraphCommandsHelpTest --tests com.itemgraph.query.AuditEventQueryServiceTest --rerun-tasks --no-daemon`
+- `./gradlew.bat :fabric:compileJava --no-daemon`
+
+These checks cover V13 audit persistence, cancellation filtering, shutdown-loss
+accounting, defensive raw-data copying, opaque-detail formatting, location/radius
+filters, stable page offsets, native item-action wiring, and the Fabric callback
+adapter. The 2026-09-29 GriefLogger-absent Fabric replay in the isolated
+`C:\Users\User\itemgraph-staging-replay` checkout exercised join/quit, chat,
+commands, block actions, entity kills, containers, consume, durability break,
+throw, shoot, projectile, and hopper events through the real server. After clean
+shutdown, the isolated SQLite database contained rows for every exercised event,
+and the bot received results from both generic and filtered `/ig lookup` commands.
+The same staging checkout persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows,
+and `/ig inspect on` opened a read-only `minecraft:generic_9x6` flow browser for
+the populated chest. The remaining cutover work is the documented migration and
+retention procedure; no production change is authorized by this test.
+

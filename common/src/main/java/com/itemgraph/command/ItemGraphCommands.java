@@ -11,6 +11,9 @@ import com.itemgraph.ingest.SourceCheckpoint;
 import com.itemgraph.listener.ContainerInteractionTracker;
 import com.itemgraph.query.EventQueryService;
 import com.itemgraph.query.ExplainQueryService;
+import com.itemgraph.query.AuditEventQueryService;
+import com.itemgraph.query.AuditEventDetail;
+import com.itemgraph.query.AuditLookupFilters;
 import com.itemgraph.query.FingerprintRef;
 import com.itemgraph.query.NodeRef;
 import com.itemgraph.query.QueryFormatter;
@@ -23,11 +26,13 @@ import com.itemgraph.core.port.RuntimeInformationPort;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.mojang.brigadier.tree.LiteralCommandNode;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -39,7 +44,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The /itemgraph (alias /ig) command tree.
@@ -50,13 +58,33 @@ import java.util.concurrent.CompletableFuture;
 public final class ItemGraphCommands {
 
     private static final EventQueryService EVENT_QUERIES = new EventQueryService();
+    private static final AuditEventQueryService AUDIT_EVENT_QUERIES = new AuditEventQueryService();
     private static final ExplainQueryService EXPLAIN_QUERIES = new ExplainQueryService();
     private static final TraceQueryService TRACE_QUERIES = new TraceQueryService();
     private static final AuditService AUDIT_SERVICE = new AuditService();
+    private static final int MAX_PAGE_SESSIONS_PER_PLAYER = 8;
+    private static final Map<UUID, Map<UUID, AuditPageSession>> AUDIT_PAGE_SESSIONS = new ConcurrentHashMap<>();
+    private static final long PAGE_SESSION_TTL_MS = 30L * 60L * 1_000L;
     private static volatile RuntimeInformationPort runtimeInformation = new RuntimeInformationPort() {
         @Override public String modVersion() { return "unknown"; }
         @Override public boolean isModLoaded(String modId) { return false; }
     };
+
+    private record AuditPageSession(
+            UUID sessionId,
+            String eventType,
+            String playerName,
+            QueryWindow window,
+            int limit,
+            String levelId,
+            Double centerX,
+            Double centerY,
+            Double centerZ,
+            Double radius,
+            AuditLookupFilters filters,
+            String filterDescription,
+            long createdAtMs) {
+    }
 
     private ItemGraphCommands() {}
 
@@ -76,6 +104,8 @@ public final class ItemGraphCommands {
                                         .executes(ItemGraphCommands::helpTopic)))
                         .then(Commands.literal("status").executes(ItemGraphCommands::status))
                         .then(Commands.literal("audit").executes(ItemGraphCommands::audit))
+                        .then(buildStandalonePageCommand())
+                        .then(buildLookupCommand())
                         .then(Commands.literal("ingest")
                                 .then(Commands.literal("now").executes(ItemGraphCommands::ingestNow)))
 
@@ -173,6 +203,123 @@ public final class ItemGraphCommands {
                 .redirect(root));
     }
 
+    private static LiteralArgumentBuilder<CommandSourceStack> buildLookupCommand() {
+        LiteralArgumentBuilder<CommandSourceStack> lookup = Commands.literal("lookup");
+
+        var type = Commands.argument("eventType", StringArgumentType.word())
+                .suggests(ItemGraphCommands::suggestAuditEventTypes)
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"), null,
+                        QueryLimits.DEFAULT_LIMIT, null));
+        var typeLimit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"), null,
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        typeLimit.then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"), null,
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes"))));
+        type.then(typeLimit);
+        lookup.then(type);
+
+        var playerType = Commands.argument("eventType", StringArgumentType.word())
+                .suggests(ItemGraphCommands::suggestAuditEventTypes)
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        StringArgumentType.getString(ctx, "playerName"),
+                        QueryLimits.DEFAULT_LIMIT, null));
+        var playerLimit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        StringArgumentType.getString(ctx, "playerName"),
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        playerLimit.then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAudit(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        StringArgumentType.getString(ctx, "playerName"),
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes"))));
+        playerType.then(playerLimit);
+
+        lookup.then(Commands.literal("player")
+                .then(Commands.argument("playerName", StringArgumentType.string())
+                        .then(playerType)));
+
+        lookup.then(buildNearLookupCommand());
+        lookup.then(buildPagedLookupCommand());
+        lookup.then(Commands.literal("filters")
+                .then(Commands.argument("filters", StringArgumentType.greedyString())
+                        .executes(ctx -> lookupAuditFilters(ctx,
+                                StringArgumentType.getString(ctx, "filters")))));
+        return lookup;
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> buildStandalonePageCommand() {
+        return Commands.literal("page")
+                .then(Commands.argument("page", IntegerArgumentType.integer(1))
+                        .executes(ctx -> lookupAuditSessionPage(ctx,
+                                IntegerArgumentType.getInteger(ctx, "page"), null))
+                        .then(Commands.argument("session", StringArgumentType.word())
+                                .executes(ctx -> lookupAuditSessionPage(ctx,
+                                        IntegerArgumentType.getInteger(ctx, "page"),
+                                        StringArgumentType.getString(ctx, "session")))));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> buildPagedLookupCommand() {
+        var since = Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAuditPage(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "page"),
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes")));
+        var limit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAuditPage(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "page"),
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        limit.then(since);
+        var eventType = Commands.argument("eventType", StringArgumentType.word())
+                .suggests(ItemGraphCommands::suggestAuditEventTypes)
+                .executes(ctx -> lookupAuditPage(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "page"),
+                        QueryLimits.DEFAULT_LIMIT, null));
+        eventType.then(limit);
+        var page = Commands.argument("page", IntegerArgumentType.integer(1));
+        page.then(eventType);
+        return Commands.literal("page").then(page);
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> buildNearLookupCommand() {
+        var since = Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAuditNear(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes")));
+        var limit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAuditNear(ctx,
+                        StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        limit.then(since);
+        var eventType = Commands.argument("eventType", StringArgumentType.word())
+                .suggests(ItemGraphCommands::suggestAuditEventTypes)
+                .executes(ctx -> lookupAuditNear(ctx,
+                        StringArgumentType.getString(ctx, "eventType"), QueryLimits.DEFAULT_LIMIT, null));
+        eventType.then(limit);
+        var radius = Commands.argument("radius", DoubleArgumentType.doubleArg(0.1));
+        radius.then(eventType);
+        var z = Commands.argument("z", DoubleArgumentType.doubleArg());
+        z.then(radius);
+        var y = Commands.argument("y", DoubleArgumentType.doubleArg());
+        y.then(z);
+        var x = Commands.argument("x", DoubleArgumentType.doubleArg());
+        x.then(y);
+        var dimension = Commands.argument("dimension", StringArgumentType.word());
+        dimension.then(x);
+        return Commands.literal("near").then(dimension);
+    }
+
     private static int help(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
         CommandHelp.overviewLines().forEach(line ->
@@ -212,6 +359,11 @@ public final class ItemGraphCommands {
             CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
         return SharedSuggestionProvider.suggestResource(
                 ctx.getSource().levels().stream().map(ResourceKey::location), builder);
+    }
+
+    private static CompletableFuture<Suggestions> suggestAuditEventTypes(
+            CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggest(AuditEventQueryService.EVENT_TYPES, builder);
     }
 
     /** /ig event <observationId> - one raw observation, labelled OBSERVED. */
@@ -382,11 +534,249 @@ public final class ItemGraphCommands {
         });
     }
 
+    /** /ig lookup <eventType> [limit] [sinceMinutes] and /ig lookup player ... */
+    private static int lookupAudit(CommandContext<CommandSourceStack> ctx, String eventType,
+                                   String playerName, int limit, Long sinceMinutes) {
+        return lookupAudit(ctx, eventType, playerName, limit, sinceMinutes,
+                null, null, null, null, null);
+    }
+
+    private static int lookupAuditNear(CommandContext<CommandSourceStack> ctx, String eventType,
+                                       int limit, Long sinceMinutes) {
+        return lookupAudit(ctx, eventType, null, limit, sinceMinutes,
+                StringArgumentType.getString(ctx, "dimension"),
+                DoubleArgumentType.getDouble(ctx, "x"),
+                DoubleArgumentType.getDouble(ctx, "y"),
+                DoubleArgumentType.getDouble(ctx, "z"),
+                DoubleArgumentType.getDouble(ctx, "radius"));
+    }
+
+    /** Executes the GriefLogger-compatible name.value filter form around the issuing player. */
+    private static int lookupAuditFilters(CommandContext<CommandSourceStack> ctx, String expression) {
+        CommandSourceStack source = ctx.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] Filtered lookup requires a permission-level-2 player so radius can use the current position."));
+            return 0;
+        }
+        AuditLookupFilters filters;
+        try {
+            filters = AuditLookupFilters.parse(expression, System.currentTimeMillis());
+        } catch (IllegalArgumentException e) {
+            source.sendFailure(Component.literal("[ItemGraph] Invalid lookup filter: " + e.getMessage()));
+            return 0;
+        }
+        String levelId = player.level().dimension().location().toString();
+        double centerX = player.getX();
+        double centerY = player.getY();
+        double centerZ = player.getZ();
+        String filterDescription = filters.describe()
+                + " dimension=" + levelId
+                + " center=" + centerX + "," + centerY + "," + centerZ;
+        AuditPageSession session = new AuditPageSession(
+                UUID.randomUUID(), null, null, filters.window(), QueryLimits.DEFAULT_LIMIT, levelId,
+                centerX, centerY, centerZ, filters.radiusBlocks(), filters,
+                filterDescription, System.currentTimeMillis());
+        rememberPageSession(source, session);
+        return dispatchAuditPage(source, "lookup filtered audit", session, 1, true);
+    }
+
+    private static int lookupAuditPage(CommandContext<CommandSourceStack> ctx, String eventType,
+                                       int page, int limit, Long sinceMinutes) {
+        int clampedLimit = QueryLimits.clampLimit(limit);
+        QueryWindow window = sinceMinutes == null
+                ? QueryWindow.unbounded()
+                : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
+        AuditPageSession session = new AuditPageSession(
+                UUID.randomUUID(), eventType, null, window, clampedLimit, null,
+                null, null, null, null, null,
+                "type=" + eventType + " window=" + window.describe(),
+                System.currentTimeMillis());
+        rememberPageSession(ctx.getSource(), session);
+        return dispatchAuditPage(ctx.getSource(), "lookup audit", session, page,
+                ctx.getSource().getEntity() instanceof ServerPlayer);
+    }
+
+    private static int lookupAuditSessionPage(CommandContext<CommandSourceStack> ctx, int page,
+                                              String sessionToken) {
+        CommandSourceStack source = ctx.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer)) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] /ig page requires a player with an active lookup session."));
+            return 0;
+        }
+        AuditPageSession session;
+        if (sessionToken == null) {
+            session = activePageSession(source);
+        } else {
+            UUID sessionId;
+            try {
+                sessionId = UUID.fromString(sessionToken);
+            } catch (IllegalArgumentException e) {
+                source.sendFailure(Component.literal("[ItemGraph] Invalid lookup page session."));
+                return 0;
+            }
+            session = pageSession(source, sessionId);
+        }
+        if (session == null) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] No active lookup page session. Run /ig lookup first."));
+            return 0;
+        }
+        return dispatchAuditPage(source, "lookup page", session, page, true);
+    }
+
+    private static int dispatchAuditPage(CommandSourceStack source, String label,
+                                         AuditPageSession session, int page,
+                                         boolean standaloneCommand) {
+        int clampedLimit = QueryLimits.clampLimit(session.limit());
+        int requestedPage = Math.max(1, page);
+        int offset = QueryLimits.clampPageOffset(requestedPage, clampedLimit);
+        int effectivePage = offset / clampedLimit + 1;
+        String filter = session.filterDescription() + " page=" + effectivePage
+                + " limit=" + clampedLimit
+                + (effectivePage == requestedPage ? "" : " requestedPage=" + requestedPage + " offset=" + offset);
+        return QueryDispatcher.dispatch(source, label, conn -> {
+            List<AuditEventDetail> events;
+            if (session.filters() != null) {
+                events = AUDIT_EVENT_QUERIES.findFiltered(conn, session.filters(), session.levelId(),
+                        session.centerX(), session.centerY(), session.centerZ(), clampedLimit, offset);
+            } else {
+                events = AUDIT_EVENT_QUERIES.find(conn, session.eventType(), session.playerName(),
+                        session.window(), session.levelId(), session.centerX(), session.centerY(),
+                        session.centerZ(), session.radius(), clampedLimit, offset);
+            }
+            List<QueryDispatcher.QueryAction> actions = new java.util.ArrayList<>();
+            if (standaloneCommand && effectivePage > 1) {
+                actions.add(new QueryDispatcher.QueryAction("Previous",
+                        standalonePageCommand(effectivePage - 1, session.sessionId())));
+            }
+            if (standaloneCommand && shouldOfferNextAuditPage(effectivePage, clampedLimit, offset, events.size())) {
+                actions.add(new QueryDispatcher.QueryAction("Next",
+                        standalonePageCommand(effectivePage + 1, session.sessionId())));
+            }
+            return QueryDispatcher.QueryOutput.found(
+                    QueryFormatter.formatAuditEvents(events, filter), actions);
+        });
+    }
+
+    private static void rememberPageSession(CommandSourceStack source, AuditPageSession session) {
+        if (source.getEntity() instanceof ServerPlayer player) {
+            UUID playerId = player.getUUID();
+            if (playerId != null) {
+                Map<UUID, AuditPageSession> sessions = AUDIT_PAGE_SESSIONS.computeIfAbsent(
+                        playerId, ignored -> new ConcurrentHashMap<>());
+                sessions.put(session.sessionId(), session);
+                while (sessions.size() > MAX_PAGE_SESSIONS_PER_PLAYER) {
+                    UUID oldestId = sessions.values().stream()
+                            .min(java.util.Comparator.comparingLong(AuditPageSession::createdAtMs))
+                            .map(AuditPageSession::sessionId)
+                            .orElse(null);
+                    if (oldestId == null) {
+                        break;
+                    }
+                    sessions.remove(oldestId);
+                }
+            }
+        }
+    }
+
+    private static AuditPageSession activePageSession(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            return null;
+        }
+        UUID playerId = player.getUUID();
+        if (playerId == null) {
+            return null;
+        }
+        Map<UUID, AuditPageSession> sessions = AUDIT_PAGE_SESSIONS.get(playerId);
+        if (sessions == null || sessions.isEmpty()) {
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        sessions.values().removeIf(session -> now - session.createdAtMs() > PAGE_SESSION_TTL_MS);
+        AuditPageSession active = sessions.values().stream()
+                .max(java.util.Comparator.comparingLong(AuditPageSession::createdAtMs))
+                .orElse(null);
+        if (sessions.isEmpty()) {
+            AUDIT_PAGE_SESSIONS.remove(playerId, sessions);
+        }
+        return active;
+    }
+
+    private static AuditPageSession pageSession(CommandSourceStack source, UUID sessionId) {
+        if (!(source.getEntity() instanceof ServerPlayer player) || sessionId == null) {
+            return null;
+        }
+        UUID playerId = player.getUUID();
+        if (playerId == null) {
+            return null;
+        }
+        Map<UUID, AuditPageSession> sessions = AUDIT_PAGE_SESSIONS.get(playerId);
+        if (sessions == null) {
+            return null;
+        }
+        AuditPageSession session = sessions.get(sessionId);
+        if (session == null) {
+            return null;
+        }
+        if (System.currentTimeMillis() - session.createdAtMs() > PAGE_SESSION_TTL_MS) {
+            sessions.remove(sessionId, session);
+            return null;
+        }
+        return session;
+    }
+
+    /** Clears a player's paging state when the server lifecycle removes them. */
+    public static void clearPageSession(UUID playerId) {
+        if (playerId != null) {
+            AUDIT_PAGE_SESSIONS.remove(playerId);
+        }
+    }
+
+    /** Clears all paging state before the owning server/database shuts down. */
+    public static void clearPageSessions() {
+        AUDIT_PAGE_SESSIONS.clear();
+    }
+
+    private static String standalonePageCommand(int page, UUID sessionId) {
+        return "/ig page " + Math.max(1, page) + " " + sessionId;
+    }
+
+    static boolean shouldOfferNextAuditPage(int effectivePage, int clampedLimit,
+                                             int offset, int returnedRows) {
+        if (returnedRows != clampedLimit) {
+            return false;
+        }
+        int nextOffset = QueryLimits.clampPageOffset(effectivePage + 1, clampedLimit);
+        return nextOffset > offset;
+    }
+
+    private static int lookupAudit(CommandContext<CommandSourceStack> ctx, String eventType,
+                                   String playerName, int limit, Long sinceMinutes,
+                                   String levelId, Double centerX, Double centerY, Double centerZ,
+                                   Double radius) {
+        QueryWindow window = sinceMinutes == null
+                ? QueryWindow.unbounded()
+                : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
+        String filter = "type=" + eventType
+                + (playerName == null ? "" : " player=" + playerName)
+                + (levelId == null ? "" : " dimension=" + levelId)
+                + (radius == null ? "" : " center=" + centerX + "," + centerY + "," + centerZ + " radius=" + radius)
+                + " window=" + window.describe();
+        AuditPageSession session = new AuditPageSession(UUID.randomUUID(), eventType, playerName, window,
+                QueryLimits.clampLimit(limit), levelId, centerX, centerY, centerZ, radius,
+                null, filter, System.currentTimeMillis());
+        rememberPageSession(ctx.getSource(), session);
+        return dispatchAuditPage(ctx.getSource(), "lookup audit", session, 1,
+                ctx.getSource().getEntity() instanceof ServerPlayer);
+    }
+
     private static int status(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
         String modVersion = runtimeInformation.modVersion();
         boolean griefLoggerLoaded = runtimeInformation.isModLoaded("grieflogger");
-        boolean glDbAvailable = IngestionService.getInstance().getAdapter().isDatabaseAvailable();
+        boolean glDbAvailable = IngestionService.getInstance().getAdapter().isSupportedSchemaAvailable();
         String glStatus = !griefLoggerLoaded ? "DISABLED (not installed)"
                 : glDbAvailable ? "ENABLED (database reachable)"
                 : "DISABLED (mod present but database not found)";
@@ -420,6 +810,11 @@ public final class ItemGraphCommands {
                 rs.next();
                 totalObservations = rs.getLong(1);
             }
+            long totalAuditEvents;
+            try (var stmt = conn.createStatement(); var rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_audit_events")) {
+                rs.next();
+                totalAuditEvents = rs.getLong(1);
+            }
             long activeEdges = 0;
             long supersededEdges = 0;
             try (var stmt = conn.createStatement();
@@ -445,6 +840,7 @@ public final class ItemGraphCommands {
                             + " deferred, " + lastCorrelation.durationMs() + "ms)"),
                     "[ItemGraph] ingestion: running=" + ingestion.isRunning()
                             + " totalObservations=" + totalObservations
+                            + " nativeAuditEvents=" + totalAuditEvents
                             + " checkpoints=" + checkpoints
                             + " lastCycle=" + (lastResult == null ? "never run yet"
                             : (lastResult.success() ? "OK" : "ERROR (" + lastResult.errorMessage() + ")")
@@ -456,7 +852,8 @@ public final class ItemGraphCommands {
                             + " persisted=" + internalObs.getTotalPersisted()
                             + " dropped=" + internalObs.getTotalDropped()
                             + " capabilityQueueRejections=" + capabilityQueueRejections
-                            + " transformations=" + internalObs.getTotalTransformations(),
+                            + " transformations=" + internalObs.getTotalTransformations()
+                            + " auditEvents=" + internalObs.getTotalAuditEvents(),
                     "[ItemGraph] entity tracking: active=" + entityTracker.getActiveEntityCount()
                             + " drops=" + entityTracker.getDropCount()
                             + " pickups=" + entityTracker.getPickupCount()

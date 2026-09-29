@@ -241,15 +241,15 @@ public class IngestionService {
             return lastResult;
         }
 
-        if (!adapter.isDatabaseAvailable()) {
+        if (!adapter.isSupportedSchemaAvailable()) {
             if (!glUnavailableLoggedOnce) {
-                LOGGER.info("GriefLogger database not found at {} — ingestion skipped. " +
+                LOGGER.info("GriefLogger database or supported schema not available at {} — ingestion skipped. " +
                         "ItemGraph will rely on its own NeoForge event listeners for coverage.",
                         adapter.getDatabasePath());
                 glUnavailableLoggedOnce = true;
             }
             lastResult = new IngestionResult(false, 0, 0, 0,
-                    "GriefLogger database not found or not readable at " + adapter.getDatabasePath());
+                    "GriefLogger database not found or supported schema missing at " + adapter.getDatabasePath());
             return lastResult;
         }
         // GL DB is available (again) — reset so re-disappearance is also logged

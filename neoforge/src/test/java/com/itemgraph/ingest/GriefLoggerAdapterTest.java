@@ -161,4 +161,17 @@ class GriefLoggerAdapterTest {
         assertFalse(adapter.isDatabaseAvailable());
         assertThrows(SQLException.class, adapter::openReadOnlyConnection);
     }
+
+    @Test
+    void unsupportedSqliteFileIsNotTreatedAsARecorderDatabase() throws Exception {
+        Path unrelated = tempDir.resolve("unrelated.db");
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + unrelated.toAbsolutePath());
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)");
+        }
+
+        GriefLoggerAdapter adapter = new GriefLoggerAdapter(unrelated);
+        assertTrue(adapter.isDatabaseAvailable());
+        assertFalse(adapter.isSupportedSchemaAvailable());
+    }
 }

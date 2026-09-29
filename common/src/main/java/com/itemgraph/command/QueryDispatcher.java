@@ -3,7 +3,10 @@ package com.itemgraph.command;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.query.QueryFormatter;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -106,15 +109,33 @@ public final class QueryDispatcher {
      * @param found true if the thing asked about exists; false renders as a command
      *              failure, because "no observation #42" is a negative answer, not output
      * @param lines the text to send, already formatted by {@link QueryFormatter}
+     * @param actions bounded player-scoped chat controls sent after the text
      */
-    public record QueryOutput(boolean found, List<String> lines) {
+    public record QueryAction(String label, String command) {
+        public QueryAction {
+            if (label == null || label.isBlank() || command == null || command.isBlank()) {
+                throw new IllegalArgumentException("query action label and command are required");
+            }
+        }
+    }
+
+    public record QueryOutput(boolean found, List<String> lines, List<QueryAction> actions) {
+
+        public QueryOutput(boolean found, List<String> lines) {
+            this(found, lines, List.of());
+        }
 
         public QueryOutput {
             lines = List.copyOf(lines);
+            actions = List.copyOf(actions);
         }
 
         public static QueryOutput found(List<String> lines) {
             return new QueryOutput(true, lines);
+        }
+
+        public static QueryOutput found(List<String> lines, List<QueryAction> actions) {
+            return new QueryOutput(true, lines, actions);
         }
 
         /** A well-formed negative result: the id was valid, nothing matched it. */
@@ -168,6 +189,7 @@ public final class QueryDispatcher {
                 QueryOutput output = future.get(5, TimeUnit.SECONDS);
                 if (output.found()) {
                     output.lines().forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
+                    sendActions(source, output.actions());
                 } else {
                     output.lines().forEach(line -> source.sendFailure(Component.literal(line)));
                 }
@@ -368,7 +390,27 @@ public final class QueryDispatcher {
             // The graph is sensitive (see docs/SECURITY_AND_PERMISSIONS.md) and an item
             // trace names coordinates and players.
             output.lines().forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
+            sendActions(source, output.actions());
         });
+    }
+
+    /** Sends bounded interactive controls after the textual query output. */
+    static void sendActions(CommandSourceStack source, List<QueryAction> actions) {
+        if (actions.isEmpty()) {
+            return;
+        }
+        MutableComponent controls = Component.literal("[ItemGraph] ");
+        for (int i = 0; i < actions.size(); i++) {
+            QueryAction action = actions.get(i);
+            if (i > 0) {
+                controls.append(" ");
+            }
+            controls.append(Component.literal("[" + action.label() + "]").withStyle(style ->
+                    style.withColor(ChatFormatting.AQUA)
+                            .withUnderlined(true)
+                            .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, action.command()))));
+        }
+        source.sendSuccess(() -> controls, false);
     }
 
     /**

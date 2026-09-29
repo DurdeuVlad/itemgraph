@@ -46,6 +46,7 @@ public final class ItemGraphFabric implements ModInitializer {
                 ItemGraphCommands.register(dispatcher));
         ServerLifecycleEvents.SERVER_STARTING.register(this::onServerStarting);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
+        FabricNativeAuditEventListener.register();
         LOGGER.info("ItemGraph Fabric adapter initialized for Minecraft 1.21.1");
     }
 
@@ -65,7 +66,9 @@ public final class ItemGraphFabric implements ModInitializer {
     }
 
     private void onServerStopping(MinecraftServer server) {
+        ItemGraphCommands.clearPageSessions();
         ItemGraphApiLifecycle.stop(server);
+        FabricContainerSessionListener.flushAll();
         com.itemgraph.command.InspectionService.getInstance().clear();
         InternalObservationService.getInstance().stop();
         IngestionService.getInstance().stop();

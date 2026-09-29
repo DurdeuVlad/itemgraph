@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -271,6 +272,30 @@ class ContainerInteractionTrackerTest {
         assertEquals("ADD_ITEM", obs.actionType());
         assertEquals(3, obs.amount());
         assertEquals(1, tracker.sessionCount(), "one player can hold exactly one session");
+    }
+
+    @Test
+    void closeAllSessionsContinuesAfterOneSnapshotFails() {
+        AtomicBoolean firstSnapshot = new AtomicBoolean(true);
+        tracker.openSession(STEVE, "Steve", KEY, () -> {
+            if (firstSnapshot.getAndSet(false)) {
+                return totals(DIAMOND, 5);
+            }
+            throw new IllegalStateException("container disappeared");
+        }, List.of());
+        AtomicReference<InventoryTotals> live = new AtomicReference<>(totals(IRON, 2));
+        tracker.openSession(ALEX, "Alex", KEY_B, live::get, List.of());
+        live.set(totals(IRON, 6));
+
+        tracker.closeAllSessions();
+
+        InternalObservationService.InternalObservation obs = pendingObservations().poll();
+        assertNotNull(obs, "a healthy session must still flush after another snapshot fails");
+        assertEquals(ALEX.toString(), obs.playerUuid());
+        assertEquals("ADD_ITEM", obs.actionType());
+        assertEquals(4, obs.amount());
+        assertEquals(0, tracker.sessionCount());
+        assertEquals(0, tracker.watchCount());
     }
 
     @Test

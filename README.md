@@ -4,9 +4,9 @@
 
 ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **Fabric and NeoForge 1.21.1**.
 
-Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time. It does **not** assign a permanent UUID to every item. Instead, it combines raw evidence from existing logging systems such as GriefLogger with carefully selected supplemental event hooks, then builds an explainable temporal item-flow graph.
+Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time, while retaining a native audit ledger for non-item events. It does **not** assign a permanent UUID to every item. Instead, it combines raw evidence from native server hooks and optional existing logging systems such as GriefLogger, then builds an explainable temporal item-flow graph.
 
-**GriefLogger is optional.** The NeoForge build records supported native events and can also read GriefLogger's SQLite database strictly read-only. The Fabric build shares the graph, API, database, query, and GriefLogger ingestion code; its out-of-the-box event evidence source is GriefLogger or observations submitted through the preview API.
+**GriefLogger is optional.** The NeoForge and Fabric builds record native item-flow and supported audit events and can also read GriefLogger's SQLite database strictly read-only. Native parity coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
 
 Each loader has a standard build and a GriefLogger-compatible build. For GriefLogger
 `1.2.10-1.21.1`, install the artifact ending in

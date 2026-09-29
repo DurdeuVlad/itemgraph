@@ -40,6 +40,13 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
+    void cappedAuditPageDoesNotOfferARepeatingNextControl() {
+        assertTrue(ItemGraphCommands.shouldOfferNextAuditPage(1, 30, 0, 30));
+        assertFalse(ItemGraphCommands.shouldOfferNextAuditPage(334, 30, 9_990, 30));
+        assertFalse(ItemGraphCommands.shouldOfferNextAuditPage(334, 30, 9_990, 29));
+    }
+
+    @Test
     void bareFullRootAndAliasShowOverview() throws Exception {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();
@@ -53,6 +60,7 @@ class ItemGraphCommandsHelpTest {
         successes.clear();
         assertEquals(1, dispatcher.execute("ig", source));
         assertTrue(successes.stream().anyMatch(line -> line.contains("/ig inspect [on|off|status]")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("/ig page <page>")));
     }
 
     @Test
@@ -60,14 +68,14 @@ class ItemGraphCommandsHelpTest {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandNode<CommandSourceStack> root = dispatcher.getRoot().getChild("itemgraph");
         assertNotNull(root);
-        assertEquals(Set.of("help", "status", "audit", "ingest", "event", "explain", "trace", "gui", "inspect"),
+        assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect"),
                 root.getChildren().stream().map(CommandNode::getName).collect(Collectors.toSet()));
         assertEquals(Set.of("now"), childNames(root, "ingest"));
         assertEquals(Set.of("item", "player", "container"), childNames(root, "trace"));
         assertEquals(Set.of("item", "player", "container"), childNames(root, "gui"));
         assertEquals(Set.of("on", "off", "status"), childNames(root, "inspect"));
 
-        for (String topLevel : Set.of("help", "status", "audit", "ingest", "event", "explain", "trace", "gui", "inspect")) {
+        for (String topLevel : Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect")) {
             assertNotNull(CommandHelp.topicLines(topLevel), "missing help topic for /ig " + topLevel);
         }
         for (String path : List.of("ingest now", "trace item", "trace player", "trace container",
@@ -83,6 +91,9 @@ class ItemGraphCommandsHelpTest {
             assertTrue(inspectHelp.contains("/ig inspect " + child),
                     "inspect help does not document /ig inspect " + child);
         }
+        String pageHelp = String.join("\n", CommandHelp.topicLines("page"));
+        assertTrue(pageHelp.contains("Syntax: /ig page <page>"));
+        assertTrue(pageHelp.contains("per-player"));
     }
 
     @Test
@@ -159,11 +170,35 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
+    void standalonePageRequiresAnActivePlayerSession() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+
+        assertEquals(0, dispatcher.execute("itemgraph page 2", source));
+        verify(source).sendFailure(failure.capture());
+        assertTrue(failure.getValue().getString().contains("No active lookup page session"));
+    }
+
+    @Test
+    void standalonePageAcceptsAQuerySessionToken() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+
+        assertEquals(0, dispatcher.execute(
+                "itemgraph page 2 00000000-0000-0000-0000-000000000001", source));
+        verify(source).sendFailure(failure.capture());
+        assertTrue(failure.getValue().getString().contains("No active lookup page session"));
+    }
+
+    @Test
     void suggestionsCoverLiteralsPlayersItemsTopicsAndDimensions() {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();
 
-        assertSuggestions(dispatcher, source, "itemgraph ", "help", "status", "trace", "gui", "inspect");
+        assertSuggestions(dispatcher, source, "itemgraph ", "help", "status", "audit", "lookup", "page", "trace", "gui", "inspect");
+        assertSuggestions(dispatcher, source, "itemgraph lookup ", "all", "BREAK_BLOCK", "CHAT_MESSAGE");
         assertSuggestions(dispatcher, source, "itemgraph help ", "trace item", "gui container", "inspect");
         assertSuggestions(dispatcher, source, "itemgraph inspect ", "on", "off", "status");
         assertSuggestions(dispatcher, source, "itemgraph trace player ", "Alex", "Steve");

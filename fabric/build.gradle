@@ -15,6 +15,13 @@ dependencies {
     include 'org.xerial:sqlite-jdbc:3.46.1.0'
     implementation project(':core')
     implementation project(':common').sourceSets.main.output
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testImplementation 'org.mockito:mockito-core:5.12.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.12.0'
+    testImplementation files(sourceSets.main.compileClasspath)
+    testRuntimeOnly files(sourceSets.main.runtimeClasspath)
 }
 
 loom {
@@ -68,6 +75,10 @@ tasks.named('remapJar') {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}
+
 tasks.register('verifyFabricJar') {
     group = 'verification'
     description = 'Checks loader metadata and packaged shared classes in the Fabric release jar.'
@@ -92,8 +103,22 @@ tasks.register('verifyFabricJar') {
                 def names = java.util.Collections.list(archive.entries()).collect { it.name }
                 def nestedSqlite = names.any { it.startsWith('META-INF/jars/sqlite-jdbc-') }
                 if (!names.contains('fabric.mod.json')
+                        || !names.contains('itemgraph.mixins.json')
                         || names.contains('META-INF/neoforge.mods.toml')
                         || !names.contains('com/itemgraph/fabric/ItemGraphFabric.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/CommandsMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/ServerLevelMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/BlockItemMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/ServerPlayerMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/ItemEntityMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/LivingEntityMixin.class')
+                        || !names.contains('com/itemgraph/fabric/capture/LivingEntityUseCapture.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/ItemStackMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/HopperBlockEntityMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/ResultSlotMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/FurnaceResultSlotMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/AnvilMenuMixin.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/ItemCombinerMenuAccessor.class')
                         || !names.contains('com/itemgraph/query/TraceQueryService.class')
                         || (nestedSqlite == check.compatible)) {
                     throw new GradleException("${artifact.name} is missing Fabric/shared classes, contains NeoForge metadata, or has incorrect SQLite bundling")

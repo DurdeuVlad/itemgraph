@@ -13,6 +13,8 @@ final class CommandHelp {
 
     static final List<String> TOPIC_NAMES = List.of(
             "help", "status", "audit", "ingest", "ingest now", "event", "explain",
+            "lookup", "lookup player", "lookup filters",
+            "page",
             "trace", "trace item", "trace player", "trace container",
             "gui", "gui item", "gui player", "gui container", "inspect");
 
@@ -26,6 +28,12 @@ final class CommandHelp {
                 "[ItemGraph] /ig help [topic] — show all commands or one topic.",
                 "[ItemGraph] /ig status — show mod, GriefLogger, database, ingestion, and inference state.",
                 "[ItemGraph] /ig audit — verify ItemGraph database invariants asynchronously.",
+                "[ItemGraph] /ig page <page> — continue the issuing player's active lookup session.",
+                "[ItemGraph] /ig lookup <eventType> [limit] [sinceMinutes] — query native audit events.",
+                "[ItemGraph] /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes] — bound results to a location.",
+                "[ItemGraph] /ig lookup page <page> <eventType> [limit] [sinceMinutes] — continue a bounded audit result page.",
+                "[ItemGraph] /ig lookup player <playerName> <eventType> [limit] [sinceMinutes] — filter native audit events by player.",
+                "[ItemGraph] /ig lookup filters <filter1> [filter2] ... — GriefLogger-compatible action/user/include/exclude/time/radius lookup (maximum five; radius required).",
                 "[ItemGraph] /ig ingest now — queue one complete ingest and correlate cycle.",
                 "[ItemGraph] /ig event <observationId> — show one raw observed evidence row.",
                 "[ItemGraph] /ig explain <edgeId> — show one inferred edge, confidence, and cited evidence.",
@@ -75,6 +83,30 @@ final class CommandHelp {
                 "[ItemGraph] Syntax: /ig audit",
                 "[ItemGraph] Runs a read-only invariant audit off the server thread: conservation, positivity, relational integrity, and allocation state.",
                 "[ItemGraph] Example: /ig audit"));
+        topics.put("page", List.of(
+                "[ItemGraph] Syntax: /ig page <page>",
+                "[ItemGraph] Continues the issuing player's last lookup with the same filters and bounded page size.",
+                "[ItemGraph] Page state is per-player, expires after 30 minutes, and is read-only; generated buttons carry a session token so older results stay bound to their query.",
+                "[ItemGraph] Example: /ig page 2"));
+        List<String> lookup = List.of(
+                "[ItemGraph] Syntax: /ig lookup <eventType> [limit] [sinceMinutes]",
+                "[ItemGraph] eventType: all, PLAYER_JOIN, PLAYER_QUIT, CHAT_MESSAGE, COMMAND_ATTEMPT, COMMAND_EXECUTED, PLACE_BLOCK, BREAK_BLOCK, INTERACT_BLOCK, INTERACT_BLOCK_ATTEMPT, KILL_ENTITY, THROW_ITEM, or SHOOT_ITEM.",
+                "[ItemGraph] Results are native OBSERVED evidence from ig_audit_events; limit defaults to 20 and is capped at 100.",
+                "[ItemGraph] /ig lookup near clamps radius to 1..1024 blocks and requires an exact dimension id.",
+                "[ItemGraph] Pages are 1-based; offsets are capped at 10,000 rows.",
+                "[ItemGraph] Example: /ig lookup BREAK_BLOCK 50 120");
+        topics.put("lookup", lookup);
+        topics.put("lookup player", List.of(
+                "[ItemGraph] Syntax: /ig lookup player <playerName> <eventType> [limit] [sinceMinutes]",
+                "[ItemGraph] playerName is an exact stored player name; eventType uses the same values as /ig lookup.",
+                "[ItemGraph] Example: /ig lookup player Alex COMMAND_ATTEMPT 50 1440"));
+        topics.put("lookup filters", List.of(
+                "[ItemGraph] Syntax: /ig lookup filters <filter1> [filter2] [filter3] [filter4] [filter5]",
+                "[ItemGraph] Filters use name.value: action, user, include, exclude, time (m/h/d/y), and radius.",
+                "[ItemGraph] action values are native audit actions (join, quit, chat, command_attempt, place_block, break_block, interact_block, kill_entity, throw_item, shoot_item); quantity-flow drop/pickup actions remain under /ig trace.",
+                "[ItemGraph] radius is required, uses the issuing player's current dimension and position, and searches a cube clamped to 1..1024 blocks.",
+                "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and native audit results are bounded to 20 rows.",
+                "[ItemGraph] Example: /ig lookup filters action.break_block include.diamond_ore time.1h radius.50"));
         List<String> ingest = List.of(
                 "[ItemGraph] Syntax: /ig ingest now",
                 "[ItemGraph] Queues one complete ingest-and-correlate cycle on the bounded background worker.",

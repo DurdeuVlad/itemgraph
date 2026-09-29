@@ -32,7 +32,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-final class FlowBrowserService {
+/** Shared read-only flow-browser entry points used by both loader adapters. */
+public final class FlowBrowserService {
 
     private static final int PAGE_SIZE = QueryLimits.MAX_GUI_PAGE_SIZE;
     private static final int PREVIOUS_SLOT = 45;
@@ -116,7 +117,13 @@ final class FlowBrowserService {
         return open(source, new Target(TargetKind.PLAYER, playerName, null, 0, 0, 0, null), sinceMinutes);
     }
 
-    static int openContainer(CommandSourceStack source, String dimension, int x, int y, int z, Long sinceMinutes) {
+    /**
+     * Starts the asynchronous read-only flow browser for a container position.
+     * The method is public so loader-specific interaction listeners can share
+     * the same permission checks and query dispatch path.
+     */
+    public static int openContainer(CommandSourceStack source, String dimension, int x, int y, int z,
+                                    Long sinceMinutes) {
         return open(source, new Target(TargetKind.CONTAINER, null, dimension, x, y, z, null), sinceMinutes);
     }
 

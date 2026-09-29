@@ -55,15 +55,64 @@ import java.util.Optional;
  * 6. lore: ordered list of strings joined by "|" from DataComponents.LORE.
  *
  * Items with null, empty, or unpatched DataComponentPatch produce "id=<registry_id>",
- * ensuring standard vanilla items share identical canonical fingerprints.
+ * ensuring standard vanilla items share identical canonical fingerprints. A raw patch
+ * that cannot be decoded is represented by "id=<registry_id>;opaque_data_sha256=<hash>"
+ * so the source evidence remains distinct and explicitly unresolved.
  */
 public class ItemCanonicalizer {
     private static final Logger LOGGER = LoggerFactory.getLogger(ItemCanonicalizer.class);
+    /**
+     * A bad historical blob can be referenced by many GriefLogger rows. Keep a
+     * bounded registry-aware negative cache so a known failure is not decoded and
+     * diagnosed once per row while its entry remains resident. Identity keys matter
+     * here: component IDs are only meaningful in the exact RegistryAccess that
+     * produced the bytes.
+     */
+    private static final int MAX_OPAQUE_DECODE_CACHE_ENTRIES = 4096;
+    private static final int OPAQUE_DECODE_LOCK_STRIPES = 64;
+    private static final LinkedHashMap<OpaqueDecodeKey, Boolean> OPAQUE_DECODE_FAILURES =
+            new LinkedHashMap<>(128, 0.75f, true);
+    private static final Object[] OPAQUE_DECODE_LOCKS = createDecodeLocks();
     private static volatile RegistryAccess activeRegistryAccess;
+
+    private static Object[] createDecodeLocks() {
+        Object[] locks = new Object[OPAQUE_DECODE_LOCK_STRIPES];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new Object();
+        }
+        return locks;
+    }
+
+    private static final class OpaqueDecodeKey {
+        private final RegistryAccess registryAccess;
+        private final String rawDataHash;
+
+        private OpaqueDecodeKey(RegistryAccess registryAccess, String rawDataHash) {
+            this.registryAccess = registryAccess;
+            this.rawDataHash = rawDataHash;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof OpaqueDecodeKey that)) {
+                return false;
+            }
+            return registryAccess == that.registryAccess && rawDataHash.equals(that.rawDataHash);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * System.identityHashCode(registryAccess) + rawDataHash.hashCode();
+        }
+    }
 
     /** Supplies the server's registry view from a loader adapter without binding this class to that loader. */
     public static void setRegistryAccess(RegistryAccess registryAccess) {
         activeRegistryAccess = registryAccess;
+        clearOpaqueDecodeFailureCache();
     }
 
     public static CanonicalItem canonicalize(String rawItemId, byte[] rawData) {
@@ -74,6 +123,7 @@ public class ItemCanonicalizer {
         String itemId = resolveRegistryId(rawItemId);
 
         DataComponentPatch patch = DataComponentPatch.EMPTY;
+        String opaqueDataHash = null;
         if (rawData != null && rawData.length > 0) {
             RegistryAccess regAccess = registryAccess;
             if (regAccess == null) {
@@ -87,17 +137,85 @@ public class ItemCanonicalizer {
                 }
             }
 
-            try {
-                RegistryFriendlyByteBuf buf = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(rawData), regAccess);
-                patch = DataComponentPatch.STREAM_CODEC.decode(buf);
-            } catch (Exception e) {
-                LOGGER.warn("Failed to decode DataComponentPatch for item '{}' ({} bytes): {}",
-                        itemId, rawData.length, e.getMessage());
-                patch = DataComponentPatch.EMPTY;
+            String rawDataHash = sha256Hex(rawData);
+            OpaqueDecodeKey decodeKey = new OpaqueDecodeKey(regAccess, rawDataHash);
+            if (hasOpaqueDecodeFailure(decodeKey)) {
+                return extractAndBuild(itemId, patch, null, rawDataHash);
+            }
+
+            synchronized (decodeLock(decodeKey)) {
+                // A second worker can arrive while the first worker is decoding.
+                // Recheck after acquiring the stripe so failed payloads are truly
+                // single-flight rather than merely single-log.
+                if (hasOpaqueDecodeFailure(decodeKey)) {
+                    return extractAndBuild(itemId, patch, null, rawDataHash);
+                }
+                RegistryFriendlyByteBuf buf = null;
+                try {
+                    buf = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(rawData), regAccess);
+                    patch = DataComponentPatch.STREAM_CODEC.decode(buf);
+                    if (buf.isReadable()) {
+                        throw new IllegalArgumentException("DataComponentPatch has " + buf.readableBytes()
+                                + " trailing bytes");
+                    }
+                } catch (Exception e) {
+                    opaqueDataHash = rawDataHash;
+                    if (rememberOpaqueDecodeFailure(decodeKey)) {
+                        LOGGER.debug("Could not decode GriefLogger DataComponentPatch for item '{}' ({} bytes); "
+                                        + "raw data SHA-256={} and component metadata remain unresolved",
+                                itemId, rawData.length, opaqueDataHash, e);
+                    }
+                    patch = DataComponentPatch.EMPTY;
+                } finally {
+                    if (buf != null) {
+                        buf.release();
+                    }
+                }
             }
         }
 
-        return extractAndBuild(itemId, patch);
+        return extractAndBuild(itemId, patch, null, opaqueDataHash);
+    }
+
+    private static Object decodeLock(OpaqueDecodeKey key) {
+        return OPAQUE_DECODE_LOCKS[Math.floorMod(key.hashCode(), OPAQUE_DECODE_LOCK_STRIPES)];
+    }
+
+    private static boolean hasOpaqueDecodeFailure(OpaqueDecodeKey key) {
+        synchronized (OPAQUE_DECODE_FAILURES) {
+            return OPAQUE_DECODE_FAILURES.get(key) != null;
+        }
+    }
+
+    /**
+     * Records a failed hash and returns true only for the first failure in the
+     * current registry context. The caller uses that result to keep diagnostics
+     * useful without allowing repeated source rows to flood the log.
+     */
+    private static boolean rememberOpaqueDecodeFailure(OpaqueDecodeKey key) {
+        synchronized (OPAQUE_DECODE_FAILURES) {
+            if (OPAQUE_DECODE_FAILURES.containsKey(key)) {
+                OPAQUE_DECODE_FAILURES.get(key); // refresh LRU order
+                return false;
+            }
+            if (OPAQUE_DECODE_FAILURES.size() >= MAX_OPAQUE_DECODE_CACHE_ENTRIES) {
+                OPAQUE_DECODE_FAILURES.remove(OPAQUE_DECODE_FAILURES.keySet().iterator().next());
+            }
+            OPAQUE_DECODE_FAILURES.put(key, Boolean.TRUE);
+            return true;
+        }
+    }
+
+    static void clearOpaqueDecodeFailureCache() {
+        synchronized (OPAQUE_DECODE_FAILURES) {
+            OPAQUE_DECODE_FAILURES.clear();
+        }
+    }
+
+    static int opaqueDecodeFailureCacheSize() {
+        synchronized (OPAQUE_DECODE_FAILURES) {
+            return OPAQUE_DECODE_FAILURES.size();
+        }
     }
 
     /**
@@ -132,11 +250,16 @@ public class ItemCanonicalizer {
     }
 
     private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch) {
-        return extractAndBuild(itemId, patch, null);
+        return extractAndBuild(itemId, patch, null, null);
     }
 
     private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch,
                                                  Map<String, String> components) {
+        return extractAndBuild(itemId, patch, components, null);
+    }
+
+    private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch,
+                                                 Map<String, String> components, String opaqueDataHash) {
         String customName = null;
         List<String> sortedEnchantments = new ArrayList<>();
         Integer damage = null;
@@ -264,6 +387,9 @@ public class ItemCanonicalizer {
         if (!loreLines.isEmpty()) {
             canon.append(";lore=").append(String.join("|", loreLines));
         }
+        if (opaqueDataHash != null) {
+            canon.append(";opaque_data_sha256=").append(opaqueDataHash);
+        }
 
         String fingerprintHash = sha256Hex(canon.toString());
 
@@ -283,6 +409,9 @@ public class ItemCanonicalizer {
         }
         if (!loreLines.isEmpty()) {
             summaryParts.add("lore=[" + String.join(", ", loreLines) + "]");
+        }
+        if (opaqueDataHash != null) {
+            summaryParts.add("component_decode=UNRESOLVED;raw_data_sha256=" + opaqueDataHash);
         }
         String componentSummary = summaryParts.isEmpty() ? null : String.join("; ", summaryParts);
 
@@ -337,9 +466,13 @@ public class ItemCanonicalizer {
     }
 
     public static String sha256Hex(String input) {
+        return sha256Hex(input.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String sha256Hex(byte[] input) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(input);
             StringBuilder hexString = new StringBuilder();
             for (byte b : hash) {
                 String hex = Integer.toHexString(0xff & b);

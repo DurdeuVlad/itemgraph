@@ -47,6 +47,8 @@ public class ItemGraph {
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ItemEntityEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ArmorStandEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.TransformationEventListener());
+        NeoForge.EVENT_BUS.register(new com.itemgraph.listener.NativeAuditEventListener());
+        NeoForge.EVENT_BUS.register(new com.itemgraph.listener.NativeItemActionEventListener());
 
         // Container capability wrapper: intercepts IItemHandler insertItem/extractItem on all
         // vanilla container block entities for automated transfer observation.
@@ -82,7 +84,9 @@ public class ItemGraph {
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
+        ItemGraphCommands.clearPageSessions();
         com.itemgraph.api.ItemGraphApiLifecycle.stop(event.getServer());
+        com.itemgraph.listener.ContainerInteractionTracker.getInstance().closeAllSessions();
         com.itemgraph.command.InspectionService.getInstance().clear();
         com.itemgraph.ingest.InternalObservationService.getInstance().stop();
         com.itemgraph.ingest.IngestionService.getInstance().stop();
