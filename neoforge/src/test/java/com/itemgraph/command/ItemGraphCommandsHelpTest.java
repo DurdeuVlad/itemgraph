@@ -290,6 +290,10 @@ class ItemGraphCommandsHelpTest {
                                 chestPartner.getX(), chestPartner.getY(), chestPartner.getZ())),
                 BlockInspectionTargets.resolve(level, chest));
 
+        when(level.getBlockState(chestPartner)).thenReturn(leftChest);
+        assertEquals(1, BlockInspectionTargets.resolve(level, chest).size(),
+                "two same-side chest states must not be treated as one logical chest");
+
         BlockPos door = new BlockPos(20, 64, 20);
         var lowerDoor = Blocks.OAK_DOOR.defaultBlockState().setValue(DoorBlock.HALF, DoubleBlockHalf.LOWER);
         BlockPos upperDoor = door.above();

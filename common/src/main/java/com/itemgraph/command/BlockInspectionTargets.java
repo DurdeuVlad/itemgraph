@@ -32,6 +32,9 @@ public final class BlockInspectionTargets {
         positions.add(position(clicked));
 
         BlockState state = level.getBlockState(clicked);
+        if (state == null) {
+            return List.copyOf(positions);
+        }
         BlockPos partner = null;
         if (state.getBlock() instanceof ChestBlock
                 && state.getValue(ChestBlock.TYPE) != ChestType.SINGLE) {
@@ -49,11 +52,14 @@ public final class BlockInspectionTargets {
 
     private static boolean isMatchingPartner(Level level, BlockState state, BlockPos partner) {
         BlockState partnerState = level.getBlockState(partner);
-        if (partnerState.getBlock() != state.getBlock()) {
+        if (partnerState == null || partnerState.getBlock() != state.getBlock()) {
             return false;
         }
         if (state.getBlock() instanceof ChestBlock) {
-            return partnerState.getValue(ChestBlock.TYPE) != ChestType.SINGLE;
+            ChestType clickedType = state.getValue(ChestBlock.TYPE);
+            ChestType partnerType = partnerState.getValue(ChestBlock.TYPE);
+            return clickedType != ChestType.SINGLE && partnerType != ChestType.SINGLE
+                    && clickedType != partnerType;
         }
         if (state.getBlock() instanceof DoorBlock) {
             return partnerState.getValue(DoorBlock.HALF) != state.getValue(DoorBlock.HALF);
