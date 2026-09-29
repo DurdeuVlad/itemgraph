@@ -342,9 +342,11 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   count delta are retained as the quantity evidence.
 - Fabric captures completed eat/drink consumption through `LivingEntityMixin` at
   `completeUsingItem`'s return boundary. It preserves the original stack in a
-  bounded nested capture and records only a consumed result. `ItemStackMixin`
-  captures durability breaks at the `hurtAndBreak` shrink boundary, before the
-  broken stack is removed.
+  bounded nested capture, matches the HEAD and RETURN callbacks by a stable
+  caller class/method marker plus stack depth, and discards stale or ambiguous
+  markers instead of pairing the wrong invocation. `ItemStackMixin` captures
+  durability breaks at the `hurtAndBreak` shrink boundary, before the broken
+  stack is removed.
 - Fabric captures custom item entities accepted during `ServerPlayer.die` in a
   bounded death window and deduplicates them against the normal
   `ServerPlayer.drop` path, preserving the returned entity UUID and stack count.

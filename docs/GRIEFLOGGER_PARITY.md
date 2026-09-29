@@ -75,8 +75,10 @@ record those transfers.
   `BREAK_ITEM`, `HOPPER_INSERT`, and `HOPPER_EXTRACT` observation rows. The
   replay also returned rows through both generic and filtered lookup commands.
   A first replay exposed a Fabric `NoSuchMethodError` when consuming an item;
-  moving the bounded capture records outside the mixin package and preserving
-  the latest capture on a transformed call path removed the crash. The final
+  moving the bounded capture records outside the mixin package removed the
+  invalid transformed constructor. The capture now matches HEAD and RETURN by
+  a stable caller class/method marker and stack depth; stale or ambiguous
+  markers are discarded rather than paired with another invocation. The final
   replay produced no kick or server exception.
 - **2026-09-29, Fabric item-flow implementation:** normal player drops and
   pickups now use server-only `ServerPlayer.drop` and `ItemEntity.playerTouch`
