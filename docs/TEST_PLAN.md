@@ -582,7 +582,7 @@ on port 3307 with the following environment variables:
 
 ```text
 ITEMGRAPH_TEST_MARIADB_URL=jdbc:mariadb://127.0.0.1:3306/itemgraph
-ITEMGRAPH_TEST_MYSQL_URL=jdbc:mariadb://127.0.0.1:3307/itemgraph
+ITEMGRAPH_TEST_MYSQL_URL=jdbc:mariadb://127.0.0.1:3307/itemgraph?allowPublicKeyRetrieval=true
 ```
 
 The test verifies clean schema setup, a second idempotent migration pass,
