@@ -12,6 +12,12 @@ class ItemGraphConfigTest {
     @Test
     void testDefaultValues() {
         assertEquals("itemgraph/itemgraph.db", ItemGraphConfig.DATABASE_PATH.getDefault());
+        assertEquals("sqlite", ItemGraphConfig.DATABASE_BACKEND.getDefault());
+        assertEquals(3306, ItemGraphConfig.DATABASE_PORT.getDefault());
+        assertEquals("itemgraph", ItemGraphConfig.DATABASE_NAME.getDefault());
+        assertEquals("itemgraph", ItemGraphConfig.DATABASE_USERNAME.getDefault());
+        assertEquals(5_000, ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS.getDefault());
+        assertEquals("disable", ItemGraphConfig.DATABASE_SSL_MODE.getDefault());
         assertEquals("database.db", ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getDefault());
         assertEquals(Boolean.FALSE, ItemGraphConfig.DEBUG_LOGGING.getDefault());
         assertEquals(300, ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getDefault());
@@ -21,6 +27,8 @@ class ItemGraphConfigTest {
     @Test
     void testConfigPaths() {
         assertEquals(List.of("general", "database_path"), ItemGraphConfig.DATABASE_PATH.getPath());
+        assertEquals(List.of("general", "database_backend"), ItemGraphConfig.DATABASE_BACKEND.getPath());
+        assertEquals(List.of("general", "database_connection_timeout_ms"), ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS.getPath());
         assertEquals(List.of("general", "grieflogger_database_path"), ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getPath());
         assertEquals(List.of("general", "debug_logging"), ItemGraphConfig.DEBUG_LOGGING.getPath());
         assertEquals(List.of("correlation", "ground_bridge_max_seconds"), ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getPath());

@@ -18,6 +18,36 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root-password
+          MARIADB_DATABASE: itemgraph
+          MARIADB_USER: itemgraph
+          MARIADB_PASSWORD: itemgraph
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root-password
+          MYSQL_DATABASE: itemgraph
+          MYSQL_USER: itemgraph
+          MYSQL_PASSWORD: itemgraph
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,6 +86,13 @@ jobs:
         run: python3 tools/validate_grieflogger_release_fixture.py
 
       - name: Test and build all loader artifacts
+        env:
+          ITEMGRAPH_TEST_MARIADB_URL: jdbc:mariadb://127.0.0.1:3306/itemgraph
+          ITEMGRAPH_TEST_MARIADB_USER: itemgraph
+          ITEMGRAPH_TEST_MARIADB_PASSWORD: itemgraph
+          ITEMGRAPH_TEST_MYSQL_URL: jdbc:mariadb://127.0.0.1:3307/itemgraph?allowPublicKeyRetrieval=true
+          ITEMGRAPH_TEST_MYSQL_USER: itemgraph
+          ITEMGRAPH_TEST_MYSQL_PASSWORD: itemgraph
         run: ./gradlew clean build
 
       - name: Upload all server artifacts

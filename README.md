@@ -10,7 +10,8 @@ Its purpose is to reconstruct plausible item-type and stack-quantity movement ac
 
 Each loader has a standard build and a GriefLogger-compatible build. For GriefLogger
 `1.2.10-1.21.1`, install the artifact ending in
-`-<loader>-grieflogger-compatible.jar`; it omits ItemGraph's SQLite dependency and
+`-<loader>-grieflogger-compatible.jar`; it omits only ItemGraph's SQLite dependency,
+keeps the MariaDB Connector/J driver for ItemGraph-owned MySQL/MariaDB storage, and
 requires that exact GriefLogger release. Use the standard loader jar when GriefLogger
 is absent. The four release files are:
 
@@ -29,7 +30,16 @@ the retained source database copy.
 
 On Fabric, configure `grieflogger_database_path` in `config/itemgraph.properties`
 to point at GriefLogger's database file. The database remains read-only from
-ItemGraph.
+ItemGraph. ItemGraph-owned storage defaults to SQLite; set `database_backend=mysql_mariadb`
+plus `database_host`, `database_port`, `database_name`, `database_username`,
+`database_password`, `database_ssl_mode`, and `database_connection_timeout_ms` to
+use the shared MySQL/MariaDB storage contract. Set `database_ssl_mode=verify-full`
+or `verify-ca` for MySQL `caching_sha2_password`; `disable` is intended for a
+server authentication method that does not require RSA key retrieval and keeps
+database traffic plaintext. Use `verify-full` for production, or `verify-ca` with
+an explicitly trusted CA; ItemGraph warns when `disable` is used with a
+non-loopback host. NeoForge exposes the same keys under `general` in its server
+TOML.
 
 > Evidence first. Inference second. Confidence explicit. Every conclusion traceable.
 

@@ -1,5 +1,6 @@
 package com.itemgraph.db.migration;
 
+import com.itemgraph.db.DatabaseDialect;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -45,6 +46,11 @@ public class V7__QuantityFlowLedger implements SchemaMigration {
 
     @Override
     public void apply(Connection conn) throws SQLException {
+        apply(conn, DatabaseDialect.fromConnection(conn));
+    }
+
+    @Override
+    public void apply(Connection conn, DatabaseDialect dialect) throws SQLException {
         try (Statement stmt = conn.createStatement()) {
             // 1. Quantity allocation ledger
             stmt.execute("""
@@ -61,7 +67,9 @@ public class V7__QuantityFlowLedger implements SchemaMigration {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_alloc_edge ON ig_edge_allocations(edge_id);");
 
             // 2. Explicit lifecycle status on observations
-            stmt.execute("ALTER TABLE ig_observations ADD COLUMN correlation_status TEXT NOT NULL DEFAULT 'PENDING';");
+            if (!MigrationSchema.hasColumn(conn, "ig_observations", "correlation_status")) {
+                stmt.execute("ALTER TABLE ig_observations ADD COLUMN correlation_status TEXT NOT NULL DEFAULT 'PENDING';");
+            }
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_obs_corr_status_time ON ig_observations(correlation_status, timestamp_ms);");
 
             // 3. Backfill existing Phase 5/6 edges into ig_edge_allocations
@@ -84,27 +92,58 @@ public class V7__QuantityFlowLedger implements SchemaMigration {
             """);
 
             // 4. Backfill correlation_status for existing observations
-            stmt.execute("""
-                UPDATE ig_observations
-                SET correlation_status = 'FULLY_ALLOCATED'
-                WHERE id IN (
-                    SELECT o.id FROM ig_observations o
-                    JOIN (SELECT observation_id, SUM(amount) AS total FROM ig_edge_allocations GROUP BY observation_id) a
-                      ON a.observation_id = o.id
-                    WHERE a.total >= o.amount
-                );
-            """);
+            if (dialect == DatabaseDialect.MYSQL_MARIADB) {
+                // MySQL rejects an UPDATE whose IN subquery reads the same target
+                // table. The extra derived-table layer forces materialization while
+                // preserving SQLite's row-selection semantics.
+                stmt.execute("""
+                    UPDATE ig_observations
+                    SET correlation_status = 'FULLY_ALLOCATED'
+                    WHERE id IN (
+                        SELECT id FROM (
+                            SELECT o.id FROM ig_observations o
+                            JOIN (SELECT observation_id, SUM(amount) AS total FROM ig_edge_allocations GROUP BY observation_id) a
+                              ON a.observation_id = o.id
+                            WHERE a.total >= o.amount
+                        ) candidates
+                    );
+                """);
 
-            stmt.execute("""
-                UPDATE ig_observations
-                SET correlation_status = 'PARTIALLY_ALLOCATED'
-                WHERE id IN (
-                    SELECT o.id FROM ig_observations o
-                    JOIN (SELECT observation_id, SUM(amount) AS total FROM ig_edge_allocations GROUP BY observation_id) a
-                      ON a.observation_id = o.id
-                    WHERE a.total < o.amount AND a.total > 0
-                );
-            """);
+                stmt.execute("""
+                    UPDATE ig_observations
+                    SET correlation_status = 'PARTIALLY_ALLOCATED'
+                    WHERE id IN (
+                        SELECT id FROM (
+                            SELECT o.id FROM ig_observations o
+                            JOIN (SELECT observation_id, SUM(amount) AS total FROM ig_edge_allocations GROUP BY observation_id) a
+                              ON a.observation_id = o.id
+                            WHERE a.total < o.amount AND a.total > 0
+                        ) candidates
+                    );
+                """);
+            } else {
+                stmt.execute("""
+                    UPDATE ig_observations
+                    SET correlation_status = 'FULLY_ALLOCATED'
+                    WHERE id IN (
+                        SELECT o.id FROM ig_observations o
+                        JOIN (SELECT observation_id, SUM(amount) AS total FROM ig_edge_allocations GROUP BY observation_id) a
+                          ON a.observation_id = o.id
+                        WHERE a.total >= o.amount
+                    );
+                """);
+
+                stmt.execute("""
+                    UPDATE ig_observations
+                    SET correlation_status = 'PARTIALLY_ALLOCATED'
+                    WHERE id IN (
+                        SELECT o.id FROM ig_observations o
+                        JOIN (SELECT observation_id, SUM(amount) AS total FROM ig_edge_allocations GROUP BY observation_id) a
+                          ON a.observation_id = o.id
+                        WHERE a.total < o.amount AND a.total > 0
+                    );
+                """);
+            }
 
             stmt.execute("""
                 UPDATE ig_observations

@@ -28,7 +28,9 @@ public class V8__HighValueIntegrations implements SchemaMigration {
     public void apply(Connection conn) throws SQLException {
         try (Statement stmt = conn.createStatement()) {
             // 1. Add item_entity_uuid to ig_observations
-            stmt.execute("ALTER TABLE ig_observations ADD COLUMN item_entity_uuid TEXT DEFAULT NULL;");
+            if (!MigrationSchema.hasColumn(conn, "ig_observations", "item_entity_uuid")) {
+                stmt.execute("ALTER TABLE ig_observations ADD COLUMN item_entity_uuid TEXT DEFAULT NULL;");
+            }
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_obs_entity_uuid ON ig_observations(item_entity_uuid);");
 
             // 2. Transformations table (Phase 9)

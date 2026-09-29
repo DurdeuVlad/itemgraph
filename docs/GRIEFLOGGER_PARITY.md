@@ -25,7 +25,7 @@ canonical action names, accepted GriefLogger spellings, compatibility status,
 evidence and quantity semantics, loader/storage support, lookup filters,
 permission and paging controls, inspector behavior, configuration controls, and
 the GitHub issue responsible for incomplete mappings.
-The current registry compatibility version is `m8.2.1`.
+The current registry compatibility version is `m8.3.0`.
 
 The registry version changes when a mapping, status, evidence or quantity
 meaning, loader, or backend contract changes. Documentation-only clarifications
@@ -129,7 +129,7 @@ claiming that the two are identical.
 | Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `BlockInspectionTargets`, `FlowBrowserService`, `TraceQueryService`, and native audit query path | `ig_audit_events`, `ig_observations` | `/ig inspect`, `/ig page`, `/ig trace container` | Block inspection now resolves a valid double chest or door into both physical positions and queries them in one globally ordered page on both loaders. New double-chest sessions use one deterministic container anchor with the partner as an alias; reopening a former partner position after a topology split retires the stale alias before creating a new watch, while overlapping watches close against their recorded keys and share capability credits. Historical container-flow node merging and interaction supersession remain part of [#26](https://github.com/DurdeuVlad/itemgraph/issues/26). |
 | Paginated generic audit results | `AuditEventQueryService` offset paging | `ig_audit_events` | `/ig lookup page <page> ...` | Bounded 1-based page offsets and server-generated Previous/Next chat controls implemented |
 | Historical GriefLogger schema | `GriefLoggerHistoricalImporter`, `GriefLoggerHistoricalProjection`, and `GriefLoggerAdapter` | `ig_grieflogger_import_runs`, `ig_grieflogger_import_checkpoints`, `ig_grieflogger_rows`, `ig_grieflogger_lookup` | `/ig ingest history` and `/ig lookup provenance` | The supported core schema is validated before import; all 11 pinned source tables are retained as provenance rows with source/schema fingerprints, resumable per-table checkpoints, primary-key/hash/ordinal keys, retained source rowids, binary payload preservation, unresolved reasons, independent writer batches, and durable failed-run counts. Event tables are normalized into bounded unified lookup rows with historical username resolution. Reference and identity rows remain raw, exact source-hash/table/key provenance results and never become quantity evidence. |
-| MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite | — | Deliberate scope boundary |
+| MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite or MySQL/MariaDB | Same migration/query contract; CI runs disposable MariaDB 10.11 and MySQL 8.0 services | Implemented in the shared JDBC dialect layer; issue #29 remains open until hosted CI proves clean setup, upgrade, restart, and read-only paths |
 
 ## Data boundary
 

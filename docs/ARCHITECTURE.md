@@ -15,9 +15,9 @@ neoforge adapter┘
 ```
 
 - `core/` contains Java-only domain records (`CanonicalItem`, `CorrelationResult`, and `NodeType`) and loader-neutral ports. It must not import Minecraft, Brigadier, Fabric, NeoForge, SQLite, or JDBC packages. `verifyCoreArchitecture` enforces that source boundary.
-- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. SQLite persistence and GriefLogger's read-only adapter are shared runtime components here.
-- `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite as a nested Fabric jar; its compatible jar replaces the metadata to require GriefLogger and strips the nested SQLite jar.
-- `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite; its compatible jar requires GriefLogger and omits the Jar-in-Jar SQLite module.
+- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence, migrations, and GriefLogger's read-only adapter are shared runtime components here.
+- `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite and MariaDB Connector/J as nested Fabric jars; its compatible jar replaces the metadata, requires GriefLogger, and strips only the nested SQLite jar.
+- `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite and MariaDB Connector/J; its compatible jar requires GriefLogger, keeps MariaDB Connector/J, and omits the Jar-in-Jar SQLite module.
 
 `RuntimeInformationPort` is declared in `core` and is implemented by both loader composition roots. `ItemGraphCommands` and API validation use this port for the mod version and installed-mod lookup instead of calling either loader's discovery API. Both adapters initialize the shared runtime with platform-owned config paths, server registry access, and server lifecycle callbacks.
 
@@ -683,9 +683,11 @@ ItemGraph owns:
 - schema migrations
 - operational metrics
 
-**SQLite driver provisioning**: `sqlite-jdbc` is bundled in the ItemGraph jar via
-`jarJar` (version range `[3.40.0.0,4.0.0.0)`, prefer `3.46.1.0`), so production boots
-standalone and JarJar negotiation deduplicates with GriefLogger's embedded copy. Dev
+**JDBC driver provisioning**: `sqlite-jdbc` is bundled in the ItemGraph jar via
+`jarJar` (version range `[3.40.0.0,4.0.0.0)`, prefer `3.46.1.0`) and MariaDB
+Connector/J `3.5.7` is bundled for both MySQL and MariaDB network storage. Production
+boots standalone and the dedicated GriefLogger-compatible artifact removes only the
+SQLite copy so GriefLogger remains the sole provider of `org.sqlite.*`. Dev
 runs launch the mod from `build/classes`, so the project's jarJar contents never
 materialize — `build.gradle` adds the driver to `additionalRuntimeClasspath` only when
 no jar in `run/mods` embeds `sqlite-jdbc` (adding it unconditionally alongside such a
@@ -701,7 +703,10 @@ A relational database is appropriate for the MVP because the workload includes:
 - joins by player/container
 - durable append-oriented storage
 
-SQLite is a reasonable MVP option if staging measurements show acceptable write and query performance. The architecture should not make SQLite impossible to replace.
+SQLite remains the default for a simple local deployment. MySQL/MariaDB is the
+network option for larger installations; the dialect layer preserves the same
+constraints, ordering, migrations, and read-only query separation instead of
+duplicating repository implementations.
 
 Suggested logical tables:
 

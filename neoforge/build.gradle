@@ -52,6 +52,10 @@ dependencies {
 
 tasks.named('test', Test) {
     useJUnitPlatform()
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
 }
 
 tasks.named('jar', Jar) {
@@ -102,6 +106,15 @@ dependencies {
             require '[3.40.0.0,4.0.0.0)'
         }
     }
+
+    jarJar(implementation("org.mariadb.jdbc:mariadb-java-client:${rootProject.mariadb_connector_version}")) {
+        version {
+            prefer rootProject.mariadb_connector_version
+            require '[3.5.0,4.0.0)'
+        }
+    }
+
+    testImplementation "org.mariadb.jdbc:mariadb-java-client:${rootProject.mariadb_connector_version}"
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -157,10 +170,38 @@ tasks.register('processGriefLoggerCompatibleResources', ProcessResources) {
     }
 }
 
+tasks.register('processGriefLoggerCompatibleJarJar') {
+    group = 'build'
+    description = 'Copies only the MariaDB JDBC Jar-in-Jar dependency into the GriefLogger-compatible artifact.'
+    dependsOn tasks.named('jarJar')
+    outputs.dir(layout.buildDirectory.dir('generated/grieflogger-compatible-jarjar'))
+    doLast {
+        def source = layout.buildDirectory.dir('generated/jarJar/META-INF/jarjar').get().asFile
+        def output = layout.buildDirectory.dir('generated/grieflogger-compatible-jarjar/META-INF/jarjar').get().asFile
+        output.mkdirs()
+        def maria = source.listFiles()?.find { it.name.startsWith('mariadb-java-client-') && it.name.endsWith('.jar') }
+        if (maria == null) {
+            throw new GradleException('jarJar did not produce the MariaDB JDBC driver')
+        }
+        copy {
+            from maria
+            into output
+        }
+        def metadata = [jars: [[
+                identifier: [group: 'org.mariadb.jdbc', artifact: 'mariadb-java-client'],
+                version: [range: '[3.5.0,4.0.0)', artifactVersion: rootProject.mariadb_connector_version],
+                path: "META-INF/jarjar/${maria.name}",
+                isObfuscated: false
+        ]]]
+        def metadataFile = layout.buildDirectory.file('generated/grieflogger-compatible-jarjar/META-INF/jarjar/metadata.json').get().asFile
+        metadataFile.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(metadata)) + '\n', 'UTF-8')
+    }
+}
+
 tasks.register('griefloggerCompatibleJar', Jar) {
     group = 'build'
-    description = 'Builds an ItemGraph jar that requires GriefLogger 1.2.10-1.21.1 and uses its SQLite driver.'
-    dependsOn tasks.named('classes'), tasks.named('processGriefLoggerCompatibleResources')
+    description = 'Builds an ItemGraph jar that requires GriefLogger 1.2.10-1.21.1 for SQLite and bundles MariaDB Connector/J.'
+    dependsOn tasks.named('classes'), tasks.named('processGriefLoggerCompatibleResources'), tasks.named('processGriefLoggerCompatibleJarJar')
     archiveClassifier = 'neoforge-grieflogger-compatible'
     destinationDirectory = rootProject.layout.buildDirectory.dir('libs')
 
@@ -170,6 +211,7 @@ tasks.register('griefloggerCompatibleJar', Jar) {
     from project(':common').sourceSets.main.output
     from project(':core').sourceSets.main.output
     from(tasks.named('processGriefLoggerCompatibleResources'))
+    from(tasks.named('processGriefLoggerCompatibleJarJar'))
 }
 
 tasks.register('verifyGriefLoggerCompatibleJar') {
@@ -184,8 +226,12 @@ tasks.register('verifyGriefLoggerCompatibleJar') {
         def standardArchive = new java.util.zip.ZipFile(standardArtifact)
         try {
             def entryNames = java.util.Collections.list(archive.entries()).collect { it.name }
-            if (entryNames.any { it.startsWith('org/sqlite/') || it.contains('sqlite-jdbc-') || it == 'META-INF/jarjar/metadata.json' }) {
+            if (entryNames.any { it.startsWith('org/sqlite/') || it.contains('sqlite-jdbc-') }) {
                 throw new GradleException("${artifact.name} unexpectedly contains a bundled SQLite driver")
+            }
+            if (!entryNames.any { it.contains('mariadb-java-client-') }
+                    || !entryNames.contains('META-INF/jarjar/metadata.json')) {
+                throw new GradleException("${artifact.name} must contain the MariaDB JDBC driver and Jar-in-Jar metadata")
             }
             if (!entryNames.contains('com/itemgraph/query/TraceQueryService.class')
                     || !entryNames.contains('com/itemgraph/core/port/RuntimeInformationPort.class')) {

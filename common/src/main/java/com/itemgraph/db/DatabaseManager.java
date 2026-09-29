@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.util.Properties;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -18,6 +19,8 @@ public class DatabaseManager {
 
     private Connection connection;
     private Path databasePath;
+    private DatabaseSettings settings;
+    private DatabaseDialect dialect = DatabaseDialect.SQLITE;
     private int currentSchemaVersion = 0;
     private String lastError = null;
     private boolean initialized = false;
@@ -29,38 +32,72 @@ public class DatabaseManager {
     }
 
     public synchronized void initialize() {
-        initialize(resolvePath("itemgraph/itemgraph.db"));
+        initialize(DatabaseSettings.sqlite(resolvePath("itemgraph/itemgraph.db")));
     }
 
     public synchronized void initialize(Path path) {
-        this.databasePath = path;
+        initialize(DatabaseSettings.sqlite(path));
+    }
+
+    /** Initializes ItemGraph-owned storage using the selected backend. */
+    public synchronized void initialize(DatabaseSettings requestedSettings) {
+        if (requestedSettings == null) {
+            throw new IllegalArgumentException("database settings must not be null");
+        }
+        close();
+        this.settings = requestedSettings;
+        this.dialect = DatabaseDialect.fromSettings(requestedSettings);
+        this.databasePath = requestedSettings.sqlitePath();
         this.lastError = null;
         try {
-            if (path.getParent() != null) {
-                Files.createDirectories(path.getParent());
+            Connection raw;
+            if (requestedSettings.backend() == DatabaseSettings.Backend.SQLITE) {
+                Path path = requestedSettings.sqlitePath();
+                if (path.getParent() != null) {
+                    Files.createDirectories(path.getParent());
+                }
+                Class.forName("org.sqlite.JDBC");
+                String url = "jdbc:sqlite:" + path.toAbsolutePath();
+                LOGGER.info("Connecting to ItemGraph SQLite database at {}", path.toAbsolutePath());
+                raw = DriverManager.getConnection(url);
+                try (Statement stmt = raw.createStatement()) {
+                    stmt.execute("PRAGMA foreign_keys = ON;");
+                    stmt.execute("PRAGMA journal_mode = WAL;");
+                    stmt.execute("PRAGMA busy_timeout = " + requestedSettings.connectionTimeoutMs() + ";");
+                }
+            } else {
+                if ("disable".equals(requestedSettings.sslMode())
+                        && !isLoopbackHost(requestedSettings.host())) {
+                    LOGGER.warn("ItemGraph network database host '{}' is configured with "
+                            + "database_ssl_mode=disable; database traffic is plaintext. "
+                            + "Use database_ssl_mode=verify-full (or verify-ca with a trusted CA) "
+                            + "for non-loopback deployments.", requestedSettings.host());
+                }
+                Class.forName("org.mariadb.jdbc.Driver");
+                String url = "jdbc:mariadb://" + requestedSettings.host() + ":"
+                        + requestedSettings.port() + "/" + requestedSettings.database()
+                        + "?connectTimeout=" + requestedSettings.connectionTimeoutMs()
+                        + "&socketTimeout=" + requestedSettings.connectionTimeoutMs()
+                        + "&sslMode=" + requestedSettings.sslMode();
+                Properties properties = new Properties();
+                properties.setProperty("user", requestedSettings.username());
+                properties.setProperty("password", requestedSettings.password());
+                LOGGER.info("Connecting to ItemGraph {} database at {}:{}/{}",
+                        requestedSettings.backend(), requestedSettings.host(),
+                        requestedSettings.port(), requestedSettings.database());
+                raw = DriverManager.getConnection(url, properties);
+                raw.setReadOnly(false);
             }
-
-            Class.forName("org.sqlite.JDBC");
-
-            String url = "jdbc:sqlite:" + path.toAbsolutePath();
-            LOGGER.info("Connecting to ItemGraph database at {}", url);
-            this.connection = DriverManager.getConnection(url);
-
-            try (Statement stmt = this.connection.createStatement()) {
-                stmt.execute("PRAGMA foreign_keys = ON;");
-                stmt.execute("PRAGMA journal_mode = WAL;");
-                stmt.execute("PRAGMA busy_timeout = 5000;");
-            }
-
-            this.currentSchemaVersion = MigrationRunner.runMigrations(this.connection);
+            this.connection = DialectConnection.wrap(raw, this.dialect);
+            this.currentSchemaVersion = MigrationRunner.runMigrations(this.connection, this.dialect);
             this.initialized = true;
             LOGGER.info("ItemGraph database initialized successfully (schema version: {}).", this.currentSchemaVersion);
         } catch (ClassNotFoundException e) {
-            this.lastError = "SQLite JDBC driver not found: " + e.getMessage();
-            LOGGER.error("Failed to load SQLite JDBC driver", e);
+            this.lastError = "JDBC driver not found for backend " + requestedSettings.backend();
+            LOGGER.error("Failed to load JDBC driver for ItemGraph backend {}", requestedSettings.backend(), e);
         } catch (SQLException | IOException e) {
             this.lastError = "Database initialization error: " + e.getMessage();
-            LOGGER.error("Failed to initialize ItemGraph database at {}", path, e);
+            LOGGER.error("Failed to initialize ItemGraph {} database", requestedSettings.backend(), e);
         }
     }
 
@@ -86,8 +123,8 @@ public class DatabaseManager {
 
     public synchronized Connection getConnection() throws SQLException {
         if (connection == null || connection.isClosed()) {
-            if (databasePath != null) {
-                initialize(databasePath);
+            if (settings != null) {
+                initialize(settings);
             } else {
                 initialize();
             }
@@ -96,8 +133,8 @@ public class DatabaseManager {
     }
 
     /**
-     * Opens a short-lived, read-only connection to the same database file, for queries
-     * that run off the server thread.
+     * Opens a short-lived, read-only connection to the configured ItemGraph backend,
+     * for queries that run off the server thread.
      *
      * <h2>Why not just reuse {@link #getConnection()}</h2>
      *
@@ -108,40 +145,27 @@ public class DatabaseManager {
      * read rows that are about to be rolled back. For a forensic tool that is not a
      * performance detail: an admin could be shown an observation that never existed.
      *
-     * <p>The database runs in WAL mode (set in {@link #initialize(Path)}), so an
-     * independent reader sees a consistent committed snapshot and never blocks the
-     * writer — which is exactly the property a command-triggered historical query needs.
+     * <p>SQLite runs in WAL mode and network backends use independent sessions, so an
+     * independent reader sees committed data without borrowing the ingestion handle.
      *
-     * <p>{@code PRAGMA query_only = ON} is set so the read-only intent is enforced by
-     * SQLite rather than only asserted in javadoc. Callers must close the returned
-     * connection; it is theirs, not the shared one.
+     * <p>{@code PRAGMA query_only = ON} enforces the read-only intent for SQLite;
+     * MySQL/MariaDB receives JDBC read-only mode on the independent session. Callers
+     * must close the returned connection; it is theirs, not the shared one.
      *
      * @throws SQLException if the database has not been initialized yet, or the
      *                      connection could not be opened
      */
     public Connection openReadOnlyConnection() throws SQLException {
-        Path path;
+        DatabaseSettings current;
         synchronized (this) {
-            if (!initialized || databasePath == null) {
+            if (!initialized || settings == null) {
                 throw new SQLException("ItemGraph database is not initialized"
                         + (lastError != null ? " (" + lastError + ")" : ""));
             }
-            path = databasePath;
+            current = settings;
         }
-
-        Connection readConn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
-        try (Statement stmt = readConn.createStatement()) {
-            stmt.execute("PRAGMA busy_timeout = 5000;");
-            stmt.execute("PRAGMA query_only = ON;");
-        } catch (SQLException e) {
-            try {
-                readConn.close();
-            } catch (SQLException ignored) {
-                // The open failure is the interesting one.
-            }
-            throw e;
-        }
-        return readConn;
+        Connection readConn = openIndependentConnection(current, true);
+        return DialectConnection.wrap(readConn, DatabaseDialect.fromSettings(current));
     }
 
     /**
@@ -157,32 +181,65 @@ public class DatabaseManager {
      * <p>The caller owns the returned connection and must close it.</p>
      */
     public Connection openWriteConnection() throws SQLException {
-        Path path;
+        DatabaseSettings current;
         synchronized (this) {
-            if (!initialized || databasePath == null) {
+            if (!initialized || settings == null) {
                 throw new SQLException("ItemGraph database is not initialized"
                         + (lastError != null ? " (" + lastError + ")" : ""));
             }
-            path = databasePath;
+            current = settings;
         }
+        Connection writeConn = openIndependentConnection(current, false);
+        return DialectConnection.wrap(writeConn, DatabaseDialect.fromSettings(current));
+    }
 
-        Connection writeConn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
-        try (Statement stmt = writeConn.createStatement()) {
-            stmt.execute("PRAGMA foreign_keys = ON;");
-            stmt.execute("PRAGMA busy_timeout = 5000;");
-        } catch (SQLException e) {
-            try {
-                writeConn.close();
-            } catch (SQLException ignored) {
-                // The open failure is the interesting one.
+    private static Connection openIndependentConnection(DatabaseSettings current, boolean readOnly)
+            throws SQLException {
+        if (current.backend() == DatabaseSettings.Backend.SQLITE) {
+            Connection connection = DriverManager.getConnection("jdbc:sqlite:" + current.sqlitePath().toAbsolutePath());
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("PRAGMA busy_timeout = " + current.connectionTimeoutMs() + ";");
+                if (readOnly) {
+                    stmt.execute("PRAGMA query_only = ON;");
+                } else {
+                    stmt.execute("PRAGMA foreign_keys = ON;");
+                }
             }
-            throw e;
+            return connection;
         }
-        return writeConn;
+        String url = "jdbc:mariadb://" + current.host() + ":" + current.port() + "/" + current.database()
+                + "?connectTimeout=" + current.connectionTimeoutMs()
+                + "&socketTimeout=" + current.connectionTimeoutMs()
+                + "&sslMode=" + current.sslMode();
+        Properties properties = new Properties();
+        properties.setProperty("user", current.username());
+        properties.setProperty("password", current.password());
+        Connection connection = DriverManager.getConnection(url, properties);
+        connection.setReadOnly(readOnly);
+        return connection;
+    }
+
+    static boolean isLoopbackHost(String host) {
+        if (host == null) {
+            return false;
+        }
+        String normalized = host.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.equals("localhost")
+                || normalized.equals("127.0.0.1")
+                || normalized.equals("::1")
+                || normalized.equals("[::1]");
     }
 
     public synchronized Path getDatabasePath() {
         return databasePath;
+    }
+
+    public synchronized DatabaseSettings getSettings() {
+        return settings;
+    }
+
+    public synchronized DatabaseDialect getDialect() {
+        return dialect;
     }
 
     public synchronized int getCurrentSchemaVersion() {

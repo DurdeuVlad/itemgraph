@@ -13,6 +13,8 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.fabric_api_version}"
     implementation 'org.xerial:sqlite-jdbc:3.46.1.0'
     include 'org.xerial:sqlite-jdbc:3.46.1.0'
+    implementation "org.mariadb.jdbc:mariadb-java-client:${rootProject.mariadb_connector_version}"
+    include "org.mariadb.jdbc:mariadb-java-client:${rootProject.mariadb_connector_version}"
     implementation project(':core')
     implementation project(':common').sourceSets.main.output
 
@@ -102,6 +104,7 @@ tasks.register('verifyFabricJar') {
             try {
                 def names = java.util.Collections.list(archive.entries()).collect { it.name }
                 def nestedSqlite = names.any { it.startsWith('META-INF/jars/sqlite-jdbc-') }
+                def nestedMariaDb = names.any { it.startsWith('META-INF/jars/mariadb-java-client-') }
                 if (!names.contains('fabric.mod.json')
                         || !names.contains('itemgraph.mixins.json')
                         || names.contains('META-INF/neoforge.mods.toml')
@@ -120,8 +123,9 @@ tasks.register('verifyFabricJar') {
                         || !names.contains('com/itemgraph/fabric/mixin/AnvilMenuMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/ItemCombinerMenuAccessor.class')
                         || !names.contains('com/itemgraph/query/TraceQueryService.class')
-                        || (nestedSqlite == check.compatible)) {
-                    throw new GradleException("${artifact.name} is missing Fabric/shared classes, contains NeoForge metadata, or has incorrect SQLite bundling")
+                        || (nestedSqlite == check.compatible)
+                        || (!nestedMariaDb)) {
+                    throw new GradleException("${artifact.name} is missing Fabric/shared classes or has incorrect JDBC driver bundling")
                 }
                 def metadata = new groovy.json.JsonSlurper().parse(archive.getInputStream(archive.getEntry('fabric.mod.json')))
                 if (metadata.id != rootProject.mod_id
@@ -133,7 +137,8 @@ tasks.register('verifyFabricJar') {
                 }
                 if (check.compatible) {
                     if (metadata.depends.grieflogger != rootProject.grieflogger_version
-                            || metadata.jars != null) {
+                            || metadata.jars == null
+                            || metadata.jars.any { it.file?.toString()?.contains('sqlite-jdbc-') }) {
                         throw new GradleException("${artifact.name} must require the tested GriefLogger version and omit nested SQLite metadata")
                     }
                 } else if (metadata.depends.grieflogger != null) {
@@ -148,15 +153,31 @@ tasks.register('verifyFabricJar') {
 }
 
 tasks.register('processFabricGriefLoggerCompatibleResources') {
-    dependsOn tasks.named('processResources')
+    dependsOn tasks.named('remapJar')
     inputs.property('griefloggerVersion', rootProject.grieflogger_version)
     outputs.file(layout.buildDirectory.file('generated/grieflogger-compatible-resources/fabric.mod.json'))
     doLast {
-        def source = layout.buildDirectory.file('resources/main/fabric.mod.json').get().asFile
+        def sourceJar = tasks.named('remapJar').get().archiveFile.get().asFile
+        def source = new java.util.zip.ZipFile(sourceJar).withCloseable { zip ->
+            def entry = zip.getEntry('fabric.mod.json')
+            if (entry == null) {
+                throw new GradleException("${sourceJar.name} is missing fabric.mod.json")
+            }
+            def text = zip.getInputStream(entry).getText('UTF-8')
+            def file = layout.buildDirectory.file('generated/grieflogger-compatible-resources/remapped-fabric.mod.json').get().asFile
+            file.parentFile.mkdirs()
+            file.setText(text, 'UTF-8')
+            file
+        }
         def output = layout.buildDirectory.file('generated/grieflogger-compatible-resources/fabric.mod.json').get().asFile
         def metadata = new groovy.json.JsonSlurper().parse(source)
         metadata.depends.grieflogger = rootProject.grieflogger_version
-        metadata.remove('jars')
+        if (metadata.jars != null) {
+            metadata.jars = metadata.jars.findAll { !(it.file?.toString()?.contains('sqlite-jdbc-')) }
+            if (metadata.jars.isEmpty()) {
+                metadata.remove('jars')
+            }
+        }
         output.parentFile.mkdirs()
         output.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(metadata)) + '\n', 'UTF-8')
     }
@@ -164,12 +185,12 @@ tasks.register('processFabricGriefLoggerCompatibleResources') {
 
 tasks.register('fabricGriefLoggerCompatibleJar', Jar) {
     group = 'build'
-    description = 'Builds Fabric metadata requiring GriefLogger 1.2.10-1.21.1 and excludes the SQLite nested jar.'
+    description = 'Builds Fabric metadata requiring GriefLogger 1.2.10-1.21.1 and excludes only the SQLite nested jar.'
     dependsOn tasks.named('remapJar'), tasks.named('processFabricGriefLoggerCompatibleResources')
     archiveClassifier = 'fabric-grieflogger-compatible'
     destinationDirectory = rootProject.layout.buildDirectory.dir('libs')
     from({ zipTree(tasks.named('remapJar').get().archiveFile.get().asFile) }) {
-        exclude 'fabric.mod.json', 'META-INF/jars/**'
+        exclude 'fabric.mod.json', 'META-INF/jars/sqlite-jdbc-*.jar'
     }
     from layout.buildDirectory.dir('generated/grieflogger-compatible-resources')
 }

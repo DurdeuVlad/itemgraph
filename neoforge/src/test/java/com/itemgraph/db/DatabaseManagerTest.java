@@ -17,6 +17,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DatabaseManagerTest {
 
+    @Test
+    void databaseSettingsToStringRedactsPassword() {
+        DatabaseSettings settings = DatabaseSettings.mysqlMariaDb(
+                "db.example", 3306, "itemgraph", "itemgraph", "super-secret", 5_000, true);
+
+        String rendered = settings.toString();
+
+        assertTrue(rendered.contains("password=<redacted>"));
+        assertFalse(rendered.contains("super-secret"));
+    }
+
+    @Test
+    void loopbackHostDetectionOnlyTreatsLocalLiteralsAsLoopback() {
+        assertTrue(DatabaseManager.isLoopbackHost("localhost"));
+        assertTrue(DatabaseManager.isLoopbackHost("127.0.0.1"));
+        assertTrue(DatabaseManager.isLoopbackHost("[::1]"));
+        assertFalse(DatabaseManager.isLoopbackHost("db.example"));
+        assertFalse(DatabaseManager.isLoopbackHost("0.0.0.0"));
+    }
+
     @AfterEach
     void tearDown() {
         DatabaseManager.getInstance().close();
