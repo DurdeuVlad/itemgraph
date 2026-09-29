@@ -73,6 +73,7 @@ public final class ItemGraphCommands {
             String eventType,
             String playerName,
             QueryWindow window,
+            Long sinceMinutes,
             int limit,
             String levelId,
             Double centerX,
@@ -568,7 +569,7 @@ public final class ItemGraphCommands {
                 + " dimension=" + levelId
                 + " center=" + centerX + "," + centerY + "," + centerZ;
         AuditPageSession session = new AuditPageSession(
-                null, null, filters.window(), QueryLimits.DEFAULT_LIMIT, levelId,
+                null, null, filters.window(), null, QueryLimits.DEFAULT_LIMIT, levelId,
                 centerX, centerY, centerZ, filters.radiusBlocks(), filters,
                 filterDescription, System.currentTimeMillis());
         rememberPageSession(source, session);
@@ -582,7 +583,7 @@ public final class ItemGraphCommands {
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
         AuditPageSession session = new AuditPageSession(
-                eventType, null, window, clampedLimit, null,
+                eventType, null, window, sinceMinutes, clampedLimit, null,
                 null, null, null, null, null,
                 "type=" + eventType + " window=" + window.describe(),
                 System.currentTimeMillis());
@@ -631,13 +632,13 @@ public final class ItemGraphCommands {
                 actions.add(new QueryDispatcher.QueryAction("Previous", standaloneCommand
                         ? standalonePageCommand(effectivePage - 1)
                         : auditPageCommand(effectivePage - 1, session.eventType(), clampedLimit,
-                        session.window())));
+                        session.sinceMinutes())));
             }
             if (shouldOfferNextAuditPage(effectivePage, clampedLimit, offset, events.size())) {
                 actions.add(new QueryDispatcher.QueryAction("Next", standaloneCommand
                         ? standalonePageCommand(effectivePage + 1)
                         : auditPageCommand(effectivePage + 1, session.eventType(), clampedLimit,
-                        session.window())));
+                        session.sinceMinutes())));
             }
             return QueryDispatcher.QueryOutput.found(
                     QueryFormatter.formatAuditEvents(events, filter), actions);
@@ -684,10 +685,9 @@ public final class ItemGraphCommands {
         AUDIT_PAGE_SESSIONS.clear();
     }
 
-    private static String auditPageCommand(int page, String eventType, int limit, QueryWindow window) {
+    private static String auditPageCommand(int page, String eventType, int limit, Long sinceMinutes) {
         return "/ig lookup page " + Math.max(1, page) + " " + eventType + " " + limit
-                + (window == null || window.sinceMs() == null ? "" : " " +
-                Math.max(1L, (System.currentTimeMillis() - window.sinceMs()) / 60_000L));
+                + (sinceMinutes == null ? "" : " " + Math.max(1L, sinceMinutes));
     }
 
     private static String standalonePageCommand(int page) {
@@ -715,7 +715,7 @@ public final class ItemGraphCommands {
                 + (levelId == null ? "" : " dimension=" + levelId)
                 + (radius == null ? "" : " center=" + centerX + "," + centerY + "," + centerZ + " radius=" + radius)
                 + " window=" + window.describe();
-        AuditPageSession session = new AuditPageSession(eventType, playerName, window,
+        AuditPageSession session = new AuditPageSession(eventType, playerName, window, null,
                 QueryLimits.clampLimit(limit), levelId, centerX, centerY, centerZ, radius,
                 null, filter, System.currentTimeMillis());
         rememberPageSession(ctx.getSource(), session);
