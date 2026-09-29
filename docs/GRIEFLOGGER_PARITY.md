@@ -50,6 +50,8 @@ The contract uses GriefLogger's published documentation:
 
 The source audit is pinned to GriefLogger ref `26.2`, commit
 `d315098b3f37317a5cddfbd75086f4f912f16a83` ([source tree](https://github.com/DAQEM/GriefLogger/tree/26.2)), retrieved 2026-09-29.
+The complete feature inventory and the 26.2-dev versus ItemGraph 1.21.1 compatibility
+boundary are recorded in [the source audit](GRIEFLOGGER_SOURCE_AUDIT.md).
 The source defines 18 actions across block, session, and item enums and creates
 11 tables: `items`, `containers`, `blocks`, `sessions`, `chats`, `commands`,
 `users`, `usernames`, `levels`, `materials`, and `entities`. The profile and
