@@ -1,7 +1,7 @@
 # ItemGraph Milestones
 
 Document status: active
-Last reviewed: 2026-09-25
+Last reviewed: 2026-09-29
 Owner: Vlad Durdeu
 
 Milestones describe outcomes and proof, not a list of implementation chores.
@@ -137,21 +137,47 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Risk: external source identity, inventory identity, backpressure, and sensitive query
   results require explicit contracts and consumer-side permission checks.
 
-## M8: Native GriefLogger replacement parity
+## M8: Drop-in GriefLogger parity
 
-- Status: in progress; V13 native audit ledger and bounded `/ig lookup` are implemented
-  for NeoForge and the shared Fabric adapter now captures its supported audit events.
-- Outcome: ItemGraph owns the server audit evidence needed to retire GriefLogger as a
-  runtime dependency. Item-flow evidence stays in `ig_observations`; block, session,
-  chat, command, and entity events use `ig_audit_events`.
-- Delivered: NeoForge capture for join/quit, chat, commands, block place/break/interact,
-  player-killed entities, consume, durability break, and bow shoot; Fabric capture for
-  join/quit, chat, block break/interact, and player-killed entities; asynchronous
-  persistence; action/player/time lookup; tests proving the ledger is separate from item
-  transfers.
-- Remaining: Fabric projectile hooks, Fabric command execution and completed
-  block-placement hooks, interactive chat pagination controls, and
-  staging verification with the GriefLogger JAR absent.
-- Acceptance evidence: `docs/GRIEFLOGGER_PARITY.md`, V13 migration tests, native audit
-  persistence/query tests, and a dedicated staging event matrix.
+- Status: planned; GitHub milestone [#4](https://github.com/DurdeuVlad/itemgraph/milestone/4).
+- Outcome: ItemGraph keeps its own `/ig` and `/itemgraph` names while matching
+  GriefLogger semantics for commands, filters, inspector behavior, native events,
+  read-only historical import, SQLite plus MySQL/MariaDB storage, and operations.
+  This is a behavioral replacement; `/gl` and `/grieflogger` aliases are not part
+  of the contract.
+- Current evidence: V13 native audit capture and bounded `/ig lookup` are implemented
+  for the covered NeoForge and Fabric events; the 2026-09-29 Fabric replay verified
+  native-only startup and representative audit/item rows. This is not yet 100% parity.
+- Explicit gaps tracked by issues [#23](https://github.com/DurdeuVlad/itemgraph/issues/23)
+  through [#31](https://github.com/DurdeuVlad/itemgraph/issues/31): command/filter and
+  inspector semantics, a complete canonical action registry, item-flow and transformation
+  lookup, all native event coverage, read-only import of every documented GriefLogger
+  table, MySQL/MariaDB storage, configuration/retention controls, and differential
+  cutover proof.
+- Dependencies: NeoForge/Fabric 1.21.1 APIs, Java 21, GriefLogger source-schema fixtures,
+  and disposable SQLite/MySQL/MariaDB CI services.
+- Acceptance evidence: the parity matrix in `docs/GRIEFLOGGER_PARITY.md`, cross-loader
+  command/event fixtures, source-database hash reports, backend query parity, and the
+  native-only staging replay defined by issue #31.
+- Risk: unsupported inventory types, undocumented GriefLogger schema variants, and
+  differences between attempted and completed actions can leave evidence unresolved.
+
+## M9: ItemGraph audit++ performance and extra events
+
+- Status: planned; GitHub milestone [#5](https://github.com/DurdeuVlad/itemgraph/milestone/5).
+- Outcome: extend the compatible replacement with measured throughput/backpressure,
+  creative and administrative causes, modded inventory and automation adapters, world
+  and entity causes, cross-loader integration contracts, and tamper-evident incident
+  exports.
+- Scope boundary: all work is staging/CI first; no production changes, GriefLogger writes,
+  hidden-inventory disclosure, or unbounded scans.
+- Issues: [#32](https://github.com/DurdeuVlad/itemgraph/issues/32) performance budgets,
+  [#33](https://github.com/DurdeuVlad/itemgraph/issues/33) creative/admin mutations,
+  [#34](https://github.com/DurdeuVlad/itemgraph/issues/34) modded inventory and automation,
+  [#35](https://github.com/DurdeuVlad/itemgraph/issues/35) world/entity causes,
+  [#36](https://github.com/DurdeuVlad/itemgraph/issues/36) cross-loader API fixtures, and
+  [#37](https://github.com/DurdeuVlad/itemgraph/issues/37) tamper-evident exports.
+- Dependencies: M8 action/storage contracts and measured staging budgets.
+- Acceptance evidence: reproducible CI benchmarks, conservation reports, adapter fixtures,
+  API compatibility tests, and export verification against altered copies.
 
