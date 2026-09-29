@@ -215,6 +215,7 @@ record those transfers.
   canceled event opens an asynchronous, permission-level-2 audit page constrained
   to the exact dimension and block coordinates, so adjacent blocks cannot leak into
   the result. Canceled inspection clicks are excluded from native audit capture;
+  rejected block-history queries also keep the gameplay action canceled, and
   repeated left-click hold/abort packets are ignored. Double-chest and door
   logical-target aggregation remains open in [issue #26](https://github.com/DurdeuVlad/itemgraph/issues/26).
 - **2026-09-29, Fabric container sessions:** server menu initialization and close

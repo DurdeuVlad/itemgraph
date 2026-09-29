@@ -143,8 +143,10 @@ public final class FabricNativeAuditEventListener {
                 InspectionService.getInstance().clear(serverPlayer.getUUID());
                 return InteractionResult.PASS;
             }
-            int accepted = openBlockHistory(serverPlayer, serverLevel, pos);
-            return accepted == 0 ? InteractionResult.PASS : InteractionResult.SUCCESS;
+            // Inspection mode owns the attack even when the read-only query is
+            // rejected, so a failed lookup cannot break the block.
+            openBlockHistory(serverPlayer, serverLevel, pos);
+            return InteractionResult.SUCCESS;
         });
         UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
@@ -202,8 +204,13 @@ public final class FabricNativeAuditEventListener {
             return null;
         }
         if (!(level.getBlockEntity(pos) instanceof Container)) {
-            return blockHistoryOpener == null || blockHistoryOpener.open(player, level, pos) == 0
-                    ? null : InteractionResult.SUCCESS;
+            if (blockHistoryOpener != null) {
+                // The inspection click is canceled even when the query is rejected;
+                // otherwise it would fall through to held-item use or block action.
+                blockHistoryOpener.open(player, level, pos);
+                return InteractionResult.SUCCESS;
+            }
+            return null;
         }
         return browserOpener.open(player, level, pos) == 0 ? null : InteractionResult.SUCCESS;
     }

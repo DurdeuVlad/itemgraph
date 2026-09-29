@@ -73,7 +73,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void inactiveAndUnsupportedClicksPreserveVanillaBehavior() {
+    void inactiveClicksPreserveVanillaBehaviorButRejectedBlockInspectionIsSafe() {
         UUID playerUuid = UUID.randomUUID();
         ServerPlayer player = permittedPlayer(playerUuid);
         AtomicInteger opens = new AtomicInteger();
@@ -97,7 +97,8 @@ class InspectionListenerTest {
         PlayerInteractEvent.RightClickBlock unsupported = rightClick(player, CONTAINER_POS);
 
         listener.onRightClickBlock(unsupported);
-        assertFalse(unsupported.isCanceled());
+        assertTrue(unsupported.isCanceled());
+        assertEquals(InteractionResult.SUCCESS, unsupported.getCancellationResult());
         assertEquals(0, opens.get());
     }
 
@@ -168,6 +169,24 @@ class InspectionListenerTest {
     }
 
     @Test
+    void rejectedNonContainerRightClickStillCancelsGameplay() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockEntity(CONTAINER_POS)).thenReturn(mock(BlockEntity.class));
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> 0,
+                (openingPlayer, openingLevel, clickedPos) -> 0).onRightClickBlock(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(InteractionResult.SUCCESS, event.getCancellationResult());
+    }
+
+    @Test
     void activeLeftClickOpensExactBlockHistoryAndCancelsBreaking() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
@@ -190,6 +209,22 @@ class InspectionListenerTest {
 
         assertTrue(event.isCanceled());
         assertEquals(1, opens.get());
+    }
+
+    @Test
+    void rejectedLeftClickStillCancelsBreaking() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.LeftClickBlock event = leftClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> 0,
+                (openingPlayer, openingLevel, clickedPos) -> 0).onLeftClickBlock(event);
+
+        assertTrue(event.isCanceled());
     }
 
     @Test

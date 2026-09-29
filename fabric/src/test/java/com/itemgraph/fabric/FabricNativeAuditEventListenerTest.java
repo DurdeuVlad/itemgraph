@@ -119,6 +119,23 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
+    void rejectedNonContainerFabricInspectionStillConsumesClick() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = org.mockito.Mockito.mock(ServerLevel.class);
+        when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(mock(BlockEntity.class));
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
+                inspections,
+                (openingPlayer, openingLevel, clickedPos) -> 0,
+                (openingPlayer, openingLevel, clickedPos) -> 0,
+                player, level, BlockPos.ZERO);
+
+        assertEquals(InteractionResult.SUCCESS, result);
+    }
+
+    @Test
     void FabricInspectionPermissionLossDisablesMode() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);

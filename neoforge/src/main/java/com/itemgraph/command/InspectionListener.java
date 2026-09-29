@@ -62,11 +62,16 @@ public class InspectionListener {
             inspections.clear(player.getUUID());
             return;
         }
-        int accepted = level.getBlockEntity(event.getPos()) instanceof Container
-                ? browserOpener.open(player, level, event.getPos())
-                : blockHistoryOpener.open(player, level, event.getPos());
-        if (accepted == 0) {
-            return;
+        if (level.getBlockEntity(event.getPos()) instanceof Container) {
+            int accepted = browserOpener.open(player, level, event.getPos());
+            if (accepted == 0) {
+                return;
+            }
+        } else {
+            // A block inspection click must never fall through to block/item use when
+            // the read-only query cannot be queued. The opener reports the failure;
+            // cancellation preserves the inspection-mode safety boundary.
+            blockHistoryOpener.open(player, level, event.getPos());
         }
         event.setCancellationResult(InteractionResult.SUCCESS);
         event.setCanceled(true);
@@ -89,10 +94,9 @@ public class InspectionListener {
             return;
         }
 
-        int accepted = blockHistoryOpener.open(player, level, event.getPos());
-        if (accepted == 0) {
-            return;
-        }
+        // See the right-click block path: inspection mode owns the click even when
+        // the asynchronous query was rejected, so a failed lookup cannot break a block.
+        blockHistoryOpener.open(player, level, event.getPos());
         event.setCanceled(true);
     }
 
