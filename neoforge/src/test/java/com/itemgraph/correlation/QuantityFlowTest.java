@@ -1,6 +1,7 @@
 package com.itemgraph.correlation;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.db.migration.MigrationRunner;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -638,7 +639,7 @@ class QuantityFlowTest {
         dbManager = DatabaseManager.getInstance();
         dbManager.initialize(dbPath);
         assertTrue(dbManager.isInitialized());
-        assertEquals(15, dbManager.getCurrentSchemaVersion());
+        assertEquals(MigrationRunner.LATEST_VERSION, dbManager.getCurrentSchemaVersion());
         conn = dbManager.getConnection();
         CorrelationEngine eng2 = new CorrelationEngine(dbManager, WINDOW_SECONDS);
 

@@ -62,6 +62,7 @@ The project follows a simple pre-1.0 development changelog model.
 - **GriefLogger component decode handling**: undecodable historical `DataComponentPatch` rows no longer emit a per-row WARN or repeat the same codec failure for every duplicate row while its entry remains in the bounded cache. ItemGraph keeps the raw BLOB, records an opaque SHA-256 fingerprint so distinct payloads do not collapse into one item-ID fingerprint, and emits one DEBUG diagnostic per payload and registry context. Replacing the server registry context clears the cache and permits a retry.
 - **Unsupported GriefLogger database guard:** a readable SQLite file is now checked for the complete supported `items`, `containers`, `users`, `levels`, and `materials` schema before ingestion. Unrelated or empty SQLite files are skipped with one informational message instead of repeated missing-table warnings.
 - **Projectile action parity:** both loaders now record `THROW_ITEM` and `SHOOT_ITEM` at the same `Projectile.shootFromRotation` HEAD attempt boundary used by GriefLogger, while accepted player-owned spawns are retained as `PROJECTILE_SPAWN_ACCEPTED` evidence without duplicating quantity flow. Compatibility artifacts remain gated by the other unresolved action families.
+- **Lookup case compatibility:** native `/ig lookup` event literals preserve GriefLogger's case-insensitive `all` form, including the legacy uppercase `ALL` spelling on root, player, paged, and near queries.
 
 ## [0.3.2] — 2026-09-28
 

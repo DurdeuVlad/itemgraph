@@ -267,6 +267,12 @@ class ItemGraphCommandsHelpTest {
         assertTrue(nativeAllLookup.getContext().getNodes().stream()
                         .anyMatch(node -> node.getNode().getName().equals("all")),
                 "native all-events lookup was routed to the native literal branch");
+
+        var nativeUppercaseAllLookup = dispatcher.parse("itemgraph lookup ALL", source);
+        assertParsedCompletely(nativeUppercaseAllLookup, "uppercase native all-events lookup syntax");
+        assertTrue(nativeUppercaseAllLookup.getContext().getNodes().stream()
+                        .anyMatch(node -> node.getNode().getName().equals("ALL")),
+                "uppercase native all-events lookup was routed to the native literal branch");
     }
 
     @Test
@@ -278,11 +284,20 @@ class ItemGraphCommandsHelpTest {
                 "itemgraph lookup player Alex BREAK_BLOCK 5 60", source),
                 "player audit lookup syntax");
         assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup player Alex ALL 5 60", source),
+                "uppercase player all-events lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
                 "itemgraph lookup page 2 break_block 5 60", source),
                 "lowercase paged audit lookup syntax");
         assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup page 2 ALL 5 60", source),
+                "uppercase paged all-events lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
                 "itemgraph lookup near minecraft:overworld 0 64 0 10 SHOOT_ITEM 5 60", source),
                 "near audit lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup near minecraft:overworld 0 64 0 10 ALL 5 60", source),
+                "uppercase near all-events lookup syntax");
     }
 
     @Test

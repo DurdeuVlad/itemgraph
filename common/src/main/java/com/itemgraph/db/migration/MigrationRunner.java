@@ -15,6 +15,9 @@ import java.util.List;
 public class MigrationRunner {
     private static final Logger LOGGER = LoggerFactory.getLogger(MigrationRunner.class);
 
+    /** Latest schema version applied by this source tree. */
+    public static final int LATEST_VERSION = 16;
+
     private static final List<SchemaMigration> MIGRATIONS = List.of(
             new V1__InitialSchema(),
             new V2__DeduplicationConstraint(),

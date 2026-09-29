@@ -224,6 +224,9 @@ public final class ItemGraphCommands {
             if (!eventType.equals(eventType.toLowerCase(java.util.Locale.ROOT))) {
                 lookup.then(buildAuditLookupType(eventType.toLowerCase(java.util.Locale.ROOT), eventType));
             }
+            if (!eventType.equals(eventType.toUpperCase(java.util.Locale.ROOT))) {
+                lookup.then(buildAuditLookupType(eventType.toUpperCase(java.util.Locale.ROOT), null));
+            }
         }
 
         var playerName = Commands.argument("playerName", StringArgumentType.string());
@@ -231,6 +234,9 @@ public final class ItemGraphCommands {
             playerName.then(buildAuditLookupType(eventType, "playerName"));
             if (!eventType.equals(eventType.toLowerCase(java.util.Locale.ROOT))) {
                 playerName.then(buildAuditLookupType(eventType.toLowerCase(java.util.Locale.ROOT), "playerName"));
+            }
+            if (!eventType.equals(eventType.toUpperCase(java.util.Locale.ROOT))) {
+                playerName.then(buildAuditLookupType(eventType.toUpperCase(java.util.Locale.ROOT), "playerName"));
             }
         }
         lookup.then(Commands.literal("player").then(playerName));
@@ -299,6 +305,9 @@ public final class ItemGraphCommands {
             if (!eventType.equals(eventType.toLowerCase(java.util.Locale.ROOT))) {
                 page.then(buildPagedAuditType(eventType.toLowerCase(java.util.Locale.ROOT)));
             }
+            if (!eventType.equals(eventType.toUpperCase(java.util.Locale.ROOT))) {
+                page.then(buildPagedAuditType(eventType.toUpperCase(java.util.Locale.ROOT)));
+            }
         }
         return Commands.literal("page").then(page);
     }
@@ -330,6 +339,9 @@ public final class ItemGraphCommands {
             radius.then(buildNearAuditType(eventType));
             if (!eventType.equals(eventType.toLowerCase(java.util.Locale.ROOT))) {
                 radius.then(buildNearAuditType(eventType.toLowerCase(java.util.Locale.ROOT)));
+            }
+            if (!eventType.equals(eventType.toUpperCase(java.util.Locale.ROOT))) {
+                radius.then(buildNearAuditType(eventType.toUpperCase(java.util.Locale.ROOT)));
             }
         }
         var z = Commands.argument("z", DoubleArgumentType.doubleArg());
