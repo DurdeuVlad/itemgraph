@@ -564,8 +564,10 @@ serialize transactions on the shared ItemGraph JDBC connection.
 - Ender Chest menus use `EnderChestInteractionTracker` on both loaders. The tracker
   diffs the player-owned `PlayerEnderChestContainer` at open/close boundaries and
   emits signed `ADD_ITEM_ENDER`/`REMOVE_ITEM_ENDER` observations. The endpoint has
-  no world coordinates; the interaction position remains context only, while the
-  durable external key is the player's UUID.
+  no world coordinates; the observation keeps the player's last finite server
+  position as context and stores SQL `NULL` when no position is known, while the
+  durable external key is the player's UUID. Menu-switch and shutdown fallbacks
+  never substitute world origin coordinates.
 - Container resolution scans `menu.slots` for a `BlockEntity`-backed `Container`;
   double chests (`CompoundContainer`) recover the clicked position from
   `RightClickBlock` in the same tick and alias the partner half. Menus without a
