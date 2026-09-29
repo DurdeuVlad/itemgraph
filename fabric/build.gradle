@@ -112,6 +112,7 @@ tasks.register('verifyFabricJar') {
                         || !names.contains('com/itemgraph/fabric/mixin/ServerPlayerMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/ItemEntityMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/LivingEntityMixin.class')
+                        || !names.contains('com/itemgraph/fabric/capture/LivingEntityUseCapture.class')
                         || !names.contains('com/itemgraph/fabric/mixin/ItemStackMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/HopperBlockEntityMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/ResultSlotMixin.class')

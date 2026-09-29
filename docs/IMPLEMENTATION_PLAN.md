@@ -403,10 +403,12 @@ adapters are supplemental work outside the replacement-parity gate.
 
 ### Remaining parity slices
 
-- Real-server row verification with GriefLogger absent plus a documented
-  migration/retention plan remain the replacement-parity gate. Modded
-  automation adapters are optional supplemental work because GriefLogger has
-  no equivalent event coverage.
+- Fabric transformation and inspector row/UI replay, plus a documented
+  migration/retention plan, remain before the full replacement-parity gate is
+  closed. The GriefLogger-absent Fabric replay now verifies the native audit,
+  item-action, container, and hopper rows listed in `docs/GRIEFLOGGER_PARITY.md`.
+  Modded automation adapters are optional supplemental work because GriefLogger
+  has no equivalent event coverage.
 
 Prefer small commits such as:
 
