@@ -59,7 +59,8 @@ public final class BlockInspectionTargets {
             ChestType clickedType = state.getValue(ChestBlock.TYPE);
             ChestType partnerType = partnerState.getValue(ChestBlock.TYPE);
             return clickedType != ChestType.SINGLE && partnerType != ChestType.SINGLE
-                    && clickedType != partnerType;
+                    && clickedType != partnerType
+                    && state.getValue(ChestBlock.FACING) == partnerState.getValue(ChestBlock.FACING);
         }
         if (state.getBlock() instanceof DoorBlock) {
             return partnerState.getValue(DoorBlock.HALF) != state.getValue(DoorBlock.HALF);

@@ -290,6 +290,10 @@ class ItemGraphCommandsHelpTest {
                                 chestPartner.getX(), chestPartner.getY(), chestPartner.getZ())),
                 BlockInspectionTargets.resolve(level, chest));
 
+        when(level.getBlockState(chestPartner)).thenReturn(rightChest.setValue(ChestBlock.FACING, Direction.EAST));
+        assertEquals(1, BlockInspectionTargets.resolve(level, chest).size(),
+                "double chest halves with different facings must not be merged");
+
         when(level.getBlockState(chestPartner)).thenReturn(leftChest);
         assertEquals(1, BlockInspectionTargets.resolve(level, chest).size(),
                 "two same-side chest states must not be treated as one logical chest");
