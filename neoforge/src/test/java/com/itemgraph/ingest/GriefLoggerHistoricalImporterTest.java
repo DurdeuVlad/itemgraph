@@ -174,8 +174,17 @@ class GriefLoggerHistoricalImporterTest {
         Class.forName("org.sqlite.JDBC");
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath())) {
             for (String table : GriefLoggerHistoricalImporter.SOURCE_TABLES) {
+                String definition = switch (table) {
+                    case "items", "containers" ->
+                            "id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, "
+                                    + "x INTEGER, y INTEGER, z INTEGER, type INTEGER, data BLOB, amount INTEGER, "
+                                    + "action INTEGER, payload BLOB, label TEXT";
+                    case "users" -> "id INTEGER PRIMARY KEY, name TEXT, uuid TEXT, action INTEGER, payload BLOB, label TEXT";
+                    case "levels", "materials" -> "id INTEGER PRIMARY KEY, name TEXT, action INTEGER, payload BLOB, label TEXT";
+                    default -> "id INTEGER PRIMARY KEY, action INTEGER, payload BLOB, label TEXT";
+                };
                 try (Statement stmt = conn.createStatement()) {
-                    stmt.execute("CREATE TABLE \"" + table + "\" (id INTEGER PRIMARY KEY, action INTEGER, payload BLOB, label TEXT)");
+                    stmt.execute("CREATE TABLE \"" + table + "\" (" + definition + ")");
                 }
             }
             try (PreparedStatement stmt = conn.prepareStatement("INSERT INTO items (id, action, payload, label) VALUES (?, ?, ?, ?)")) {
