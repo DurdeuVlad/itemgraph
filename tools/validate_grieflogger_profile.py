@@ -226,14 +226,14 @@ def validate_registry(registry: dict[str, Any]) -> None:
         source_action_counts == Counter(EXPECTED_SOURCE_ACTIONS),
         "registry does not enumerate every audited source action exactly once",
     )
-    extension_itemgraphs = {
+    extension_action_counts = Counter(
         row.get("itemgraph")
         for row in actions
         if isinstance(row, dict) and row.get("grieflogger") is None
-    }
+    )
     require(
-        extension_itemgraphs == set(EXPECTED_EXTENSION_ACTION_CONTRACT),
-        "registry ItemGraph-only action set is incomplete or has an extra value",
+        extension_action_counts == Counter(EXPECTED_EXTENSION_ACTION_CONTRACT.keys()),
+        "registry ItemGraph-only actions are incomplete, duplicated, or have an extra value",
     )
     allowed_statuses = set(registry.get("statuses", []))
     require(allowed_statuses == {"compatible", "extended", "unsupported", "unresolved"}, "registry status vocabulary changed")
