@@ -12,7 +12,7 @@ final class CommandHelp {
     private static final String PERMISSION_LINE = "[ItemGraph] Permission: level 2.";
 
     static final List<String> TOPIC_NAMES = List.of(
-            "help", "status", "audit", "ingest", "ingest now", "event", "explain",
+            "help", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain",
             "lookup", "lookup player", "lookup filters",
             "page",
             "trace", "trace item", "trace player", "trace container",
@@ -35,6 +35,7 @@ final class CommandHelp {
                 "[ItemGraph] /ig lookup player <playerName> <eventType> [limit] [sinceMinutes] — filter native audit events by player.",
                 "[ItemGraph] /ig lookup filters <filter1> [filter2] ... — GriefLogger-compatible action/user/include/exclude/time/radius lookup (maximum five; radius required).",
                 "[ItemGraph] /ig ingest now — queue one complete ingest and correlate cycle.",
+                "[ItemGraph] /ig ingest history — queue a bounded, read-only import of all present GriefLogger history tables.",
                 "[ItemGraph] /ig event <observationId> — show one raw observed evidence row.",
                 "[ItemGraph] /ig explain <edgeId> — show one inferred edge, confidence, and cited evidence.",
                 "[ItemGraph] /ig trace item <query> [limit] [sinceMinutes]",
@@ -113,6 +114,11 @@ final class CommandHelp {
                 "[ItemGraph] Example: /ig ingest now");
         topics.put("ingest", ingest);
         topics.put("ingest now", ingest);
+        topics.put("ingest history", List.of(
+                "[ItemGraph] Syntax: /ig ingest history",
+                "[ItemGraph] Queues the eleven-table GriefLogger historical importer on the bounded background worker.",
+                "[ItemGraph] The source database is opened read-only; ItemGraph stores source/schema fingerprints, checkpoints, opaque bytes, and unresolved reasons.",
+                "[ItemGraph] Example: /ig ingest history"));
         topics.put("event", List.of(
                 "[ItemGraph] Syntax: /ig event <observationId>",
                 "[ItemGraph] observationId: positive long. Shows one raw OBSERVED row with source, endpoints, item, amount, timing, and correlation metadata.",

@@ -42,8 +42,10 @@ public class IngestionService {
     private ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean manualIngestionQueued = new AtomicBoolean(false);
+    private final AtomicBoolean historicalImportQueued = new AtomicBoolean(false);
 
     private volatile IngestionResult lastResult = null;
+    private volatile GriefLoggerHistoricalImporter.ImportReport lastHistoricalImport = null;
     private volatile long lastRunTimestamp = 0;
 
     /**
@@ -125,6 +127,7 @@ public class IngestionService {
         });
 
         manualIngestionQueued.set(false);
+        historicalImportQueued.set(false);
         running.set(true);
         // Schedule every 60 seconds, with an initial delay of 5 seconds
         executor.scheduleWithFixedDelay(this::runIngestionSafely, 5, 60, TimeUnit.SECONDS);
@@ -151,6 +154,8 @@ public class IngestionService {
             executor = null;
             LOGGER.info("ItemGraph ingestion service stopped.");
         }
+        manualIngestionQueued.set(false);
+        historicalImportQueued.set(false);
         nodeManager.clearCaches();
     }
 
@@ -220,6 +225,39 @@ public class IngestionService {
             manualIngestionQueued.set(false);
             return false;
         }
+    }
+
+    /** Queues one complete read-only import of the eleven GriefLogger source tables. */
+    public boolean requestHistoricalImportAsync() {
+        ScheduledExecutorService current = executor;
+        if (!running.get() || current == null || !historicalImportQueued.compareAndSet(false, true)) {
+            return false;
+        }
+        try {
+            current.execute(() -> {
+                try {
+                    lastHistoricalImport = runHistoricalImport();
+                } catch (Throwable t) {
+                    LOGGER.error("Historical GriefLogger import failed", t);
+                } finally {
+                    historicalImportQueued.set(false);
+                }
+            });
+            return true;
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            historicalImportQueued.set(false);
+            return false;
+        }
+    }
+
+    public GriefLoggerHistoricalImporter.ImportReport getLastHistoricalImport() {
+        return lastHistoricalImport;
+    }
+
+    /** Runs the historical import on the caller's worker thread; never call from a tick handler. */
+    public synchronized GriefLoggerHistoricalImporter.ImportReport runHistoricalImport()
+            throws java.io.IOException, SQLException {
+        return new GriefLoggerHistoricalImporter(adapter, dbManager).importAll();
     }
 
     public CorrelationEngine getCorrelationEngine() {

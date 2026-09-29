@@ -174,4 +174,19 @@ class GriefLoggerAdapterTest {
         assertTrue(adapter.isDatabaseAvailable());
         assertFalse(adapter.isSupportedSchemaAvailable());
     }
+
+    @Test
+    void coreTableNamesWithWrongColumnsAreNotTreatedAsARecorderDatabase() throws Exception {
+        Path wrongSchema = tempDir.resolve("wrong-schema.db");
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + wrongSchema.toAbsolutePath());
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE items (id INTEGER PRIMARY KEY)");
+            stmt.execute("CREATE TABLE containers (id INTEGER PRIMARY KEY)");
+            stmt.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)");
+            stmt.execute("CREATE TABLE levels (id INTEGER PRIMARY KEY)");
+            stmt.execute("CREATE TABLE materials (id INTEGER PRIMARY KEY)");
+        }
+
+        assertFalse(new GriefLoggerAdapter(wrongSchema).isSupportedSchemaAvailable());
+    }
 }

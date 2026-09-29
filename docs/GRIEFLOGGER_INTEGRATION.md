@@ -124,16 +124,36 @@ last_seen_timestamp = ...
 
 ## Incremental ingestion
 
-Avoid full rescans.
+The historical importer is an explicit operator-triggered pass; it does not run
+on every 60-second item/container ingestion tick. `GriefLoggerHistoricalImporter`
+reads all eleven pinned 26.2 tables through the read-only adapter and writes only
+ItemGraph-owned `ig_grieflogger_*` tables.
 
 Preferred behavior:
 
-1. Read events after the last durable checkpoint.
-2. Normalize them into ItemGraph observations.
-3. Commit ItemGraph observations.
-4. Advance the checkpoint only after successful persistence.
+1. Compute the source file SHA-256 and deterministic schema fingerprint.
+2. Read each present table in bounded batches, using a primary-key source key or
+   deterministic payload-hash/ordinal identity; SQLite `rowid` is retained as
+   provenance when available but is not treated as a durable identity.
+3. Preserve every row as canonical JSON plus original binary fields and explicit
+   unresolved reasons for opaque payloads or unknown action IDs.
+4. Validate the supported GriefLogger core schema before creating an import run;
+   an unrelated readable SQLite file is rejected instead of being reported as a
+   complete import with eleven missing tables.
+5. Use an independent ItemGraph writer connection, commit bounded row batches and
+   table boundaries, and advance checkpoints only after successful persistence so
+   live observation queues are not blocked by the historical scan.
+6. Re-running the same source is idempotent through the source-hash/table/key
+   primary key; a failed source snapshot can resume without writing the source.
 
-This should be idempotent.
+If a later table fails after earlier batches were committed, the run is marked
+`FAILED` with the durable table and row counts plus the failed table's committed
+partial report. The status record therefore cannot claim zero imported rows while
+the provenance ledger already contains committed data.
+
+The import report records missing tables, source/schema fingerprints, row counts,
+opaque counts, checkpoint keys, and completion status in
+`ig_grieflogger_import_runs` and `ig_grieflogger_import_checkpoints`.
 
 ## Source identity
 

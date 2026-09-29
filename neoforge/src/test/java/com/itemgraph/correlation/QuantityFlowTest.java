@@ -638,7 +638,7 @@ class QuantityFlowTest {
         dbManager = DatabaseManager.getInstance();
         dbManager.initialize(dbPath);
         assertTrue(dbManager.isInitialized());
-        assertEquals(13, dbManager.getCurrentSchemaVersion());
+        assertEquals(14, dbManager.getCurrentSchemaVersion());
         conn = dbManager.getConnection();
         CorrelationEngine eng2 = new CorrelationEngine(dbManager, WINDOW_SECONDS);
 

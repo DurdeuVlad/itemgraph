@@ -27,7 +27,8 @@ public class MigrationRunner {
             new V10__InternalDedupEntityUuid(),
             new V11__ObservationSourceGroupsAndIntervals(),
             new V12__PreviewApiSourcesAndExternalNodes(),
-            new V13__AuditEvents()
+            new V13__AuditEvents(),
+            new V14__GriefLoggerHistoricalImport()
     );
 
     public static int runMigrations(Connection conn) throws SQLException {

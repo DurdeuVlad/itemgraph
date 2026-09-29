@@ -15,6 +15,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -22,6 +23,12 @@ import java.util.Set;
 public class GriefLoggerAdapter {
     private static final Logger LOGGER = LoggerFactory.getLogger(GriefLoggerAdapter.class);
     private static final Set<String> ALLOWED_TABLES = Set.of("items", "containers");
+    private static final java.util.Map<String, Set<String>> REQUIRED_CORE_COLUMNS = java.util.Map.of(
+            "items", Set.of("time", "user", "level", "x", "y", "z", "type", "data", "amount", "action"),
+            "containers", Set.of("time", "user", "level", "x", "y", "z", "type", "data", "amount", "action"),
+            "users", Set.of("id", "name", "uuid"),
+            "levels", Set.of("id", "name"),
+            "materials", Set.of("id", "name"));
 
     private final Path databasePath;
 
@@ -54,25 +61,37 @@ public class GriefLoggerAdapter {
         if (!isDatabaseAvailable()) {
             return false;
         }
-        try (Connection conn = openReadOnlyConnection();
-             PreparedStatement stmt = conn.prepareStatement(
-                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?, ?)")) {
-            stmt.setString(1, "items");
-            stmt.setString(2, "containers");
-            stmt.setString(3, "users");
-            stmt.setString(4, "levels");
-            stmt.setString(5, "materials");
-            java.util.Set<String> tables = new java.util.HashSet<>();
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    tables.add(rs.getString(1));
+        try (Connection conn = openReadOnlyConnection()) {
+            for (var required : REQUIRED_CORE_COLUMNS.entrySet()) {
+                Set<String> columns = new HashSet<>();
+                try (PreparedStatement stmt = conn.prepareStatement(
+                        "PRAGMA table_info(" + quoteIdentifier(required.getKey()) + ")");
+                     ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        columns.add(rs.getString("name").toLowerCase(java.util.Locale.ROOT));
+                    }
+                }
+                if (!columns.containsAll(required.getValue())) {
+                    LOGGER.debug("GriefLogger schema check rejected {}: missing columns {}",
+                            required.getKey(), difference(required.getValue(), columns));
+                    return false;
                 }
             }
-            return tables.size() == 5;
+            return true;
         } catch (SQLException e) {
             LOGGER.debug("GriefLogger schema check failed for {}: {}", databasePath, e.getMessage());
             return false;
         }
+    }
+
+    private static Set<String> difference(Set<String> required, Set<String> actual) {
+        Set<String> missing = new HashSet<>(required);
+        missing.removeAll(actual);
+        return missing;
+    }
+
+    private static String quoteIdentifier(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
 
     /**
