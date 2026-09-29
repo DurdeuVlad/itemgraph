@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   build-and-test:
@@ -42,6 +43,12 @@ jobs:
           VERSION="$(awk -F= '$1 == "mod_version" {print $2; exit}' gradle.properties | tr -d '\r')"
           test -n "${VERSION}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate GriefLogger compatibility profile
+        env:
+          GRIEFLOGGER_PROFILE_CHECK_REMOTE: '1'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 tools/validate_grieflogger_profile.py
 
       - name: Test and build all loader artifacts
         run: ./gradlew clean build

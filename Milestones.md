@@ -154,7 +154,7 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Delivered through issue #25: the unified filtered lookup now merges native audit,
   item-flow, transformation, and imported `GRIEFLOGGER` evidence with bounded paging,
   source IDs, and canonical action filters. Remaining: freeze the source/profile authority
-  in #43, then complete #24, #26–#31 for all inspector targets, all 18 pinned actions,
+  in #43, then complete #24, #26, #27, #28, #29, #30, and #31 for all inspector targets, all 18 pinned actions,
   read-only import of all 11 GriefLogger tables, MySQL/MariaDB, operations controls, and
   differential staging proof. The runtime matrix in `docs/GRIEFLOGGER_PARITY.md` records
   the exact current boundary.
