@@ -155,13 +155,14 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   item-flow, transformation, and already-normalized `GRIEFLOGGER` observations with
   bounded paging, source IDs, and canonical action filters. The generic eleven-table
   historical ledger remains the immutable source of truth and its normalized event
-  projection is delivered by #28. Remaining: freeze the source/profile authority
-  in #43, then complete #24, #26, #27, #28, #29, #30, and #31 for all inspector targets, all 18 pinned actions,
-  normalized lookup projection for six event tables (with exact provenance access for five reference/identity tables), MySQL/MariaDB, operations controls, and
-  differential staging proof. The runtime matrix in `docs/GRIEFLOGGER_PARITY.md` records
-  the exact current boundary.
+  projection is delivered by #28. The pinned 26.2 source/profile authority is recorded
+  in #43. Remaining: complete #24, #26, #27, #29, #30, #31, and #54 for all inspector
+  targets, all 18 pinned actions, the exact supported 1.21.1 release fixture,
+  MySQL/MariaDB, operations controls, and differential staging proof. The runtime
+  matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact current boundary.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
-  fixtures, and native-only staging replay tracked by issues #24–#31 and #43.
+  fixtures, exact-release fixture, and native-only staging replay tracked by issues
+  #24–#31, #43, and #54.
 
 ## M9: ItemGraph audit++ performance and extra events
 
@@ -174,7 +175,8 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Scope boundary: staging and CI proof only. Every extension preserves evidence classes,
   quantity conservation, privacy, bounded queues, and asynchronous database work.
 - Dependencies: M8 compatibility profile and native proof precede the M9 extensions;
-  #32–#37, #44, and #45 own the implementation slices.
+  #32–#37, #44, #45, and #55–#58 own the implementation slices. Issue #35 is the
+  event-taxonomy tracker for #55, #56, and #57.
 - Acceptance evidence: reproducible benchmark output, cross-loader fixtures, malformed and
   opaque evidence cases, export verification, and read-only auditor review.
 
