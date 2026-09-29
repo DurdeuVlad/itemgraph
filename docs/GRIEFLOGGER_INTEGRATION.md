@@ -137,10 +137,19 @@ Preferred behavior:
    provenance when available but is not treated as a durable identity.
 3. Preserve every row as canonical JSON plus original binary fields and explicit
    unresolved reasons for opaque payloads or unknown action IDs.
-4. Commit ItemGraph-owned rows and advance the per-table checkpoint only after
-   successful persistence.
-5. Re-running the same source is idempotent through the source-hash/table/key
+4. Validate the supported GriefLogger core schema before creating an import run;
+   an unrelated readable SQLite file is rejected instead of being reported as a
+   complete import with eleven missing tables.
+5. Use an independent ItemGraph writer connection, commit bounded row batches and
+   table boundaries, and advance checkpoints only after successful persistence so
+   live observation queues are not blocked by the historical scan.
+6. Re-running the same source is idempotent through the source-hash/table/key
    primary key; a failed source snapshot can resume without writing the source.
+
+If a later table fails after earlier batches were committed, the run is marked
+`FAILED` with the durable table and row counts plus the failed table's committed
+partial report. The status record therefore cannot claim zero imported rows while
+the provenance ledger already contains committed data.
 
 The import report records missing tables, source/schema fingerprints, row counts,
 opaque counts, checkpoint keys, and completion status in

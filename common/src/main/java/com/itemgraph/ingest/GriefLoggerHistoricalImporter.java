@@ -71,134 +71,184 @@ public final class GriefLoggerHistoricalImporter {
         if (!source.isDatabaseAvailable()) {
             throw new IOException("GriefLogger database is not readable: " + source.getDatabasePath());
         }
+        if (!source.isSupportedSchemaAvailable()) {
+            throw new IOException("GriefLogger database does not contain the supported core schema: "
+                    + source.getDatabasePath());
+        }
         if (!target.isInitialized()) {
             throw new SQLException("ItemGraph database is not initialized");
         }
 
         String sourceHash = sha256(source.getDatabasePath());
         long startedAt = System.currentTimeMillis();
-        try (Connection sourceConn = source.openReadOnlyConnection()) {
+        try (Connection sourceConn = source.openReadOnlyConnection();
+             Connection targetConn = target.openWriteConnection()) {
             Map<String, List<Column>> schema = discoverSchema(sourceConn);
             String schemaFingerprint = schemaFingerprint(schema);
-            Connection targetConn = target.getConnection();
-            // InternalObservationService serializes live writes on this same connection.
-            // Hold the connection monitor for the complete import transaction so a live
-            // observation cannot enter the transaction and be committed or rolled back
-            // together with historical rows.
-            synchronized (targetConn) {
-                boolean originalAutoCommit = targetConn.getAutoCommit();
-                long runId = insertRun(targetConn, source.getDatabasePath().toString(), sourceHash,
-                        schemaFingerprint, startedAt);
-                List<TableReport> reports = new ArrayList<>();
-                long imported = 0;
-                long opaque = 0;
-                try {
-                    targetConn.setAutoCommit(false);
-                    for (String table : SOURCE_TABLES) {
-                        List<Column> columns = schema.get(table);
-                        TableReport report;
-                        if (columns == null) {
-                            report = new TableReport(table, false, 0, 0, 0,
-                                    "MISSING", "table is absent from source schema");
-                        } else {
-                            report = importTable(sourceConn, targetConn, sourceHash,
-                                    schemaFingerprint, table, columns);
-                        }
-                        reports.add(report);
-                        imported += report.rowsImported();
-                        opaque += report.rowsOpaque();
+            boolean originalAutoCommit = targetConn.getAutoCommit();
+            long runId = insertRun(targetConn, source.getDatabasePath().toString(), sourceHash,
+                    schemaFingerprint, startedAt);
+            List<TableReport> reports = new ArrayList<>();
+            long imported = 0;
+            long opaque = 0;
+            try {
+                targetConn.setAutoCommit(false);
+                for (String table : SOURCE_TABLES) {
+                    List<Column> columns = schema.get(table);
+                    TableReport report;
+                    if (columns == null) {
+                        report = new TableReport(table, false, 0, 0, 0,
+                                "MISSING", "table is absent from source schema");
+                    } else {
+                        report = importTable(sourceConn, targetConn, sourceHash,
+                                schemaFingerprint, table, columns);
                     }
+                    // A table boundary is a durable checkpoint. This prevents a later
+                    // table failure from contradicting counts already persisted.
                     targetConn.commit();
-                    updateRun(targetConn, runId, "COMPLETE", reports.size(), imported, opaque,
-                            reportJson(reports));
-                    targetConn.commit();
-                    return new ImportReport(source.getDatabasePath().toString(), sourceHash,
-                            schemaFingerprint, runId, reports, imported, opaque, "COMPLETE");
-                } catch (SQLException | RuntimeException e) {
-                    targetConn.rollback();
-                    updateRun(targetConn, runId, "FAILED", 0, 0, 0,
-                            "{\"error\":\"" + escapeJson(e.toString()) + "\"}");
-                    targetConn.commit();
-                    throw e;
-                } finally {
-                    targetConn.setAutoCommit(originalAutoCommit);
+                    reports.add(report);
+                    imported += report.rowsImported();
+                    opaque += report.rowsOpaque();
                 }
+                updateRun(targetConn, runId, "COMPLETE", reports.size(), imported, opaque,
+                        reportJson(reports));
+                targetConn.commit();
+                return new ImportReport(source.getDatabasePath().toString(), sourceHash,
+                        schemaFingerprint, runId, reports, imported, opaque, "COMPLETE");
+            } catch (SQLException | RuntimeException e) {
+                if (e instanceof TableImportFailure tableFailure) {
+                    TableReport partial = tableFailure.report();
+                    reports.add(partial);
+                    imported += partial.rowsImported();
+                    opaque += partial.rowsOpaque();
+                }
+                try {
+                    targetConn.rollback();
+                } catch (SQLException rollbackFailure) {
+                    e.addSuppressed(rollbackFailure);
+                }
+                try {
+                    updateRun(targetConn, runId, "FAILED", reports.size(), imported, opaque,
+                            reportJson(reports, e));
+                    targetConn.commit();
+                } catch (SQLException statusFailure) {
+                    e.addSuppressed(statusFailure);
+                }
+                throw e;
+            } finally {
+                targetConn.setAutoCommit(originalAutoCommit);
             }
+        }
+    }
+
+    private static final class TableImportFailure extends SQLException {
+        private final TableReport report;
+
+        private TableImportFailure(TableReport report, Throwable cause) {
+            super("Historical import failed for table " + report.tableName(), cause);
+            this.report = report;
+        }
+
+        private TableReport report() {
+            return report;
         }
     }
 
     private TableReport importTable(Connection sourceConn, Connection targetConn,
                                     String sourceHash, String schemaFingerprint,
                                     String table, List<Column> columns) throws SQLException {
-        String checkpoint = readCheckpoint(targetConn, sourceHash, table);
-        boolean checkpointFound = checkpoint == null;
+        String checkpoint = null;
+        boolean checkpointFound = false;
         long seen = 0;
         long imported = 0;
         long opaque = 0;
+        long committedSeen = 0;
+        long committedImported = 0;
+        long committedOpaque = 0;
         long ordinal = 0;
         boolean rowidQuery = true;
-        String select = "SELECT rowid AS __itemgraph_rowid__, * FROM " + quote(table) + " ORDER BY rowid ASC";
-        try (PreparedStatement stmt = sourceConn.prepareStatement(select)) {
-            try (ResultSet rows = stmt.executeQuery()) {
-                while (rows.next()) {
-                    ordinal++;
-                    RowData row = rowData(rows, columns, ordinal, true);
-                    if (!checkpointFound) {
-                        if (row.sourceKey().equals(checkpoint)) {
-                            checkpointFound = true;
+        try {
+            checkpoint = readCheckpoint(targetConn, sourceHash, table);
+            checkpointFound = checkpoint == null;
+            try {
+                String select = "SELECT rowid AS __itemgraph_rowid__, * FROM " + quote(table) + " ORDER BY rowid ASC";
+                try (PreparedStatement stmt = sourceConn.prepareStatement(select)) {
+                    try (ResultSet rows = stmt.executeQuery()) {
+                        while (rows.next()) {
+                            ordinal++;
+                            RowData row = rowData(rows, columns, ordinal, true);
+                            if (!checkpointFound) {
+                                if (row.sourceKey().equals(checkpoint)) {
+                                    checkpointFound = true;
+                                }
+                                continue;
+                            }
+                            seen++;
+                            boolean inserted = insertRow(targetConn, sourceHash, schemaFingerprint, table, row);
+                            if (inserted) {
+                                imported++;
+                            }
+                            if (row.unresolvedReason() != null) {
+                                opaque++;
+                            }
+                            writeCheckpoint(targetConn, sourceHash, table, row.sourceKey(),
+                                    seen, imported, opaque);
+                            if ((seen % BATCH_SIZE) == 0) {
+                                targetConn.commit();
+                                committedSeen = seen;
+                                committedImported = imported;
+                                committedOpaque = opaque;
+                            }
                         }
-                        continue;
-                    }
-                    seen++;
-                    boolean inserted = insertRow(targetConn, sourceHash, schemaFingerprint, table, row);
-                    if (inserted) {
-                        imported++;
-                    }
-                    if (row.unresolvedReason() != null) {
-                        opaque++;
-                    }
-                    writeCheckpoint(targetConn, sourceHash, table, row.sourceKey(),
-                            seen, imported, opaque);
-                    if ((seen % BATCH_SIZE) == 0) {
-                        targetConn.commit();
                     }
                 }
-            }
         } catch (SQLException rowidFailure) {
             String message = rowidFailure.getMessage() == null ? "" : rowidFailure.getMessage().toLowerCase();
-            if (!message.contains("no such column") && !message.contains("without rowid")) {
-                throw rowidFailure;
-            }
-            rowidQuery = false;
-            // WITHOUT ROWID tables are uncommon in GriefLogger, but schema-variant
-            // fixtures must remain importable with an ordinal/hash source key.
-            String fallback = "SELECT * FROM " + quote(table);
-            try (PreparedStatement stmt = sourceConn.prepareStatement(fallback);
-                 ResultSet rows = stmt.executeQuery()) {
-                while (rows.next()) {
-                    ordinal++;
-                    RowData row = rowData(rows, columns, ordinal, false);
-                    if (!checkpointFound) {
-                        if (row.sourceKey().equals(checkpoint)) {
-                            checkpointFound = true;
+            if (message.contains("no such column") || message.contains("without rowid")) {
+                rowidQuery = false;
+                // WITHOUT ROWID tables are uncommon in GriefLogger, but schema-variant
+                // fixtures must remain importable with an ordinal/hash source key.
+                String fallback = "SELECT * FROM " + quote(table);
+                try (PreparedStatement stmt = sourceConn.prepareStatement(fallback);
+                     ResultSet rows = stmt.executeQuery()) {
+                    while (rows.next()) {
+                        ordinal++;
+                        RowData row = rowData(rows, columns, ordinal, false);
+                        if (!checkpointFound) {
+                            if (row.sourceKey().equals(checkpoint)) {
+                                checkpointFound = true;
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                    seen++;
-                    boolean inserted = insertRow(targetConn, sourceHash, schemaFingerprint, table, row);
-                    if (inserted) {
-                        imported++;
-                    }
-                    if (row.unresolvedReason() != null) {
-                        opaque++;
-                    }
-                    writeCheckpoint(targetConn, sourceHash, table, row.sourceKey(),
-                            seen, imported, opaque);
-                    if ((seen % BATCH_SIZE) == 0) {
-                        targetConn.commit();
+                        seen++;
+                        boolean inserted = insertRow(targetConn, sourceHash, schemaFingerprint, table, row);
+                        if (inserted) {
+                            imported++;
+                        }
+                        if (row.unresolvedReason() != null) {
+                            opaque++;
+                        }
+                        writeCheckpoint(targetConn, sourceHash, table, row.sourceKey(),
+                                seen, imported, opaque);
+                        if ((seen % BATCH_SIZE) == 0) {
+                            targetConn.commit();
+                            committedSeen = seen;
+                            committedImported = imported;
+                            committedOpaque = opaque;
+                        }
                     }
                 }
+            } else {
+                throw rowidFailure;
             }
+        }
+        } catch (SQLException | RuntimeException failure) {
+            String detail = rowidQuery
+                    ? "source-rowid retained; hash/ordinal checkpoint; failed after committed rows"
+                    : "ordinal/hash checkpoint; source has no rowid; failed after committed rows";
+            TableReport partial = new TableReport(table, true, committedSeen, committedImported,
+                    committedOpaque, "FAILED", detail);
+            throw new TableImportFailure(partial, failure);
         }
         String detail = rowidQuery ? "source-rowid retained; hash/ordinal checkpoint" : "ordinal/hash checkpoint; source has no rowid";
         return new TableReport(table, true, seen, imported, opaque, "COMPLETE", detail);
@@ -376,6 +426,10 @@ public final class GriefLoggerHistoricalImporter {
     }
 
     private static String reportJson(List<TableReport> reports) {
+        return reportJson(reports, null);
+    }
+
+    private static String reportJson(List<TableReport> reports, Throwable failure) {
         StringBuilder json = new StringBuilder("{");
         for (int i = 0; i < reports.size(); i++) {
             if (i > 0) json.append(',');
@@ -385,7 +439,12 @@ public final class GriefLoggerHistoricalImporter {
                     .append(",\"rowsSeen\":").append(report.rowsSeen())
                     .append(",\"rowsImported\":").append(report.rowsImported())
                     .append(",\"rowsOpaque\":").append(report.rowsOpaque())
-                    .append(",\"status\":\"").append(escapeJson(report.status())).append("\"}");
+                    .append(",\"status\":\"").append(escapeJson(report.status())).append("\"")
+                    .append(",\"detail\":\"").append(escapeJson(report.detail())).append("\"}");
+        }
+        if (failure != null) {
+            if (!reports.isEmpty()) json.append(',');
+            json.append("\"error\":\"").append(escapeJson(failure.toString())).append("\"");
         }
         return json.append('}').toString();
     }

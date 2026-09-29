@@ -144,6 +144,43 @@ public class DatabaseManager {
         return readConn;
     }
 
+    /**
+     * Opens an independent writer connection to the initialized ItemGraph database.
+     *
+     * <p>The normal {@link #getConnection()} handle is shared by live observation
+     * persistence and is deliberately serialized by {@code InternalObservationService}.
+     * Long-running maintenance jobs must use this handle instead so they can commit
+     * bounded batches without holding the live writer's monitor or delaying evidence
+     * queue draining. SQLite WAL mode permits the two writers to make progress; the
+     * busy timeout provides bounded lock contention handling.</p>
+     *
+     * <p>The caller owns the returned connection and must close it.</p>
+     */
+    public Connection openWriteConnection() throws SQLException {
+        Path path;
+        synchronized (this) {
+            if (!initialized || databasePath == null) {
+                throw new SQLException("ItemGraph database is not initialized"
+                        + (lastError != null ? " (" + lastError + ")" : ""));
+            }
+            path = databasePath;
+        }
+
+        Connection writeConn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
+        try (Statement stmt = writeConn.createStatement()) {
+            stmt.execute("PRAGMA foreign_keys = ON;");
+            stmt.execute("PRAGMA busy_timeout = 5000;");
+        } catch (SQLException e) {
+            try {
+                writeConn.close();
+            } catch (SQLException ignored) {
+                // The open failure is the interesting one.
+            }
+            throw e;
+        }
+        return writeConn;
+    }
+
     public synchronized Path getDatabasePath() {
         return databasePath;
     }

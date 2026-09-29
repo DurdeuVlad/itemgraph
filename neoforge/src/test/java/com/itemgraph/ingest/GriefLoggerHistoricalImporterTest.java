@@ -5,16 +5,24 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GriefLoggerHistoricalImporterTest {
@@ -68,7 +76,101 @@ class GriefLoggerHistoricalImporterTest {
         assertArrayEquals(before, Files.readAllBytes(sourcePath));
     }
 
+    @Test
+    void rejectsReadableDatabaseWithoutSupportedCoreSchema() throws Exception {
+        Path sourcePath = tempDir.resolve("unrelated.db");
+        Class.forName("org.sqlite.JDBC");
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + sourcePath.toAbsolutePath());
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)");
+        }
+        database.initialize(tempDir.resolve("itemgraph.db"));
+
+        IOException failure = assertThrows(IOException.class,
+                () -> new GriefLoggerHistoricalImporter(new GriefLoggerAdapter(sourcePath), database).importAll());
+        assertTrue(failure.getMessage().contains("supported core schema"));
+    }
+
+    @Test
+    void importUsesIndependentWriterConnectionInsteadOfLiveWriterMonitor() throws Exception {
+        Path sourcePath = tempDir.resolve("grieflogger-concurrent.db");
+        createFixture(sourcePath);
+        database.initialize(tempDir.resolve("itemgraph-concurrent.db"));
+        GriefLoggerHistoricalImporter importer = new GriefLoggerHistoricalImporter(
+                new GriefLoggerAdapter(sourcePath), database);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Connection liveWriter = database.getConnection();
+            synchronized (liveWriter) {
+                var future = executor.submit(importer::importAll);
+                GriefLoggerHistoricalImporter.ImportReport report = future.get(10, TimeUnit.SECONDS);
+                assertEquals("COMPLETE", report.status());
+            }
+        } finally {
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void failedRunPreservesRowsCommittedBeforeLaterTableFailure() throws Exception {
+        Path sourcePath = tempDir.resolve("grieflogger-failure.db");
+        createFixture(sourcePath, 501);
+        database.initialize(tempDir.resolve("itemgraph-failure.db"));
+
+        GriefLoggerAdapter failingSource = new GriefLoggerAdapter(sourcePath) {
+            @Override
+            public boolean isSupportedSchemaAvailable() {
+                return true;
+            }
+
+            @Override
+            public Connection openReadOnlyConnection() throws SQLException {
+                Connection delegate = super.openReadOnlyConnection();
+                return (Connection) Proxy.newProxyInstance(
+                        Connection.class.getClassLoader(),
+                        new Class<?>[]{Connection.class},
+                        (proxy, method, args) -> {
+                            if ("prepareStatement".equals(method.getName())
+                                    && args != null && args.length > 0
+                                    && args[0] instanceof String sql
+                                    && sql.contains("FROM \"containers\"")) {
+                                throw new SQLException("synthetic containers failure");
+                            }
+                            try {
+                                return method.invoke(delegate, args);
+                            } catch (InvocationTargetException invocationFailure) {
+                                throw invocationFailure.getCause();
+                            }
+                        });
+            }
+        };
+
+        SQLException failure = assertThrows(SQLException.class,
+                () -> new GriefLoggerHistoricalImporter(failingSource, database).importAll());
+        assertTrue(failure.getMessage().contains("Historical import failed for table containers"));
+
+        try (PreparedStatement stmt = database.getConnection().prepareStatement(
+                "SELECT status, table_count, rows_imported, rows_opaque FROM ig_grieflogger_import_runs ORDER BY id DESC LIMIT 1");
+             ResultSet rs = stmt.executeQuery()) {
+            assertTrue(rs.next());
+            assertEquals("FAILED", rs.getString("status"));
+            assertEquals(2, rs.getInt("table_count"));
+            assertEquals(501, rs.getInt("rows_imported"));
+            assertEquals(501, rs.getInt("rows_opaque"));
+        }
+        try (Statement stmt = database.getConnection().createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_grieflogger_rows")) {
+            assertTrue(rs.next());
+            assertEquals(501, rs.getInt(1));
+        }
+    }
+
     private static void createFixture(Path path) throws Exception {
+        createFixture(path, 18);
+    }
+
+    private static void createFixture(Path path, int itemCount) throws Exception {
         Class.forName("org.sqlite.JDBC");
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath())) {
             for (String table : GriefLoggerHistoricalImporter.SOURCE_TABLES) {
@@ -77,8 +179,9 @@ class GriefLoggerHistoricalImporterTest {
                 }
             }
             try (PreparedStatement stmt = conn.prepareStatement("INSERT INTO items (id, action, payload, label) VALUES (?, ?, ?, ?)")) {
-                for (int action = 0; action <= 17; action++) {
-                    stmt.setInt(1, action + 1);
+                for (int item = 0; item < itemCount; item++) {
+                    int action = item % 18;
+                    stmt.setInt(1, item + 1);
                     stmt.setInt(2, action);
                     stmt.setBytes(3, new byte[]{(byte) action, 0x01, (byte) 0xff});
                     stmt.setString(4, "action-" + action);
