@@ -18,8 +18,6 @@ final class DialectSql {
             "(?is)^\\s*PRAGMA\\s+table_info\\s*\\(\\s*[`\\\"']?([A-Za-z0-9_]+)[`\\\"']?\\s*\\)\\s*;?\\s*$");
     private static final Pattern DROP_INDEX = Pattern.compile(
             "(?is)^\\s*DROP\\s+INDEX\\s+IF\\s+EXISTS\\s+([A-Za-z0-9_]+)\\s*;?\\s*$");
-    private static final Pattern ADD_COLUMN = Pattern.compile(
-            "(?is)(ALTER\\s+TABLE\\s+[A-Za-z0-9_]+\\s+ADD\\s+COLUMN\\s+)(?!IF\\s+NOT\\s+EXISTS)");
 
     private DialectSql() {
     }
@@ -49,15 +47,17 @@ final class DialectSql {
         translated = translated.replaceAll("(?i)\\bINTEGER\\s+PRIMARY\\s+KEY\\s+AUTOINCREMENT\\b",
                 "BIGINT PRIMARY KEY AUTO_INCREMENT");
         translated = translated.replaceAll("(?i)\\bAUTOINCREMENT\\b", "AUTO_INCREMENT");
+        // SQLite INTEGER is a signed 64-bit value. Use BIGINT for IDs, epoch
+        // milliseconds, rowids, and quantities so strict MySQL mode cannot
+        // overflow during migration recording or evidence ingestion.
+        translated = translated.replaceAll("(?i)\\bINTEGER\\b", "BIGINT");
         translated = translated.replaceAll("(?i)\\bREAL\\b", "DOUBLE");
         translated = translated.replaceAll("(?i)\\bBLOB\\b", "LONGBLOB");
         translated = translated.replaceAll("(?i)\\bCAST\\(([^()]*)\\s+AS\\s+TEXT\\)", "CAST($1 AS CHAR)");
-        translated = ADD_COLUMN.matcher(translated).replaceAll("$1IF NOT EXISTS ");
-
         // MySQL/MariaDB require VARCHAR-like key columns; SQLite permits TEXT
         // keys.  Keep large forensic fields as LONGTEXT after the key rewrite.
         translated = translated.replaceAll("(?i)\\bTEXT\\b", "VARCHAR(191)");
-        translated = translated.replaceAll("(?i)\\b(detail|details|explanation|component_summary|payload_json|unresolved_reason|message|report_json)\\s+VARCHAR\\(191\\)",
+        translated = translated.replaceAll("(?i)\\b(source_path|detail|details|explanation|component_summary|payload_json|unresolved_reason|message|report_json)\\s+VARCHAR\\(191\\)",
                 "$1 LONGTEXT");
         translated = translated.replaceAll("(?i)\\b(BLOB)\\b", "LONGBLOB");
 

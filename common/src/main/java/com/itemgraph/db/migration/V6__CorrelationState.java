@@ -50,7 +50,9 @@ public class V6__CorrelationState implements SchemaMigration {
     @Override
     public void apply(Connection conn) throws SQLException {
         try (Statement stmt = conn.createStatement()) {
-            stmt.execute("ALTER TABLE ig_observations ADD COLUMN correlated_at INTEGER;");
+            if (!MigrationSchema.hasColumn(conn, "ig_observations", "correlated_at")) {
+                stmt.execute("ALTER TABLE ig_observations ADD COLUMN correlated_at INTEGER;");
+            }
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_obs_correlation_pending ON ig_observations(correlated_at, timestamp_ms);");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_obs_bridge_lookup ON ig_observations(node_id, fingerprint_id, timestamp_ms);");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_obs_bridge_target_lookup ON ig_observations(target_node_id, fingerprint_id, timestamp_ms);");

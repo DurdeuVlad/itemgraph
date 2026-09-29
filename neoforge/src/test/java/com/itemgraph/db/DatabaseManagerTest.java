@@ -17,6 +17,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DatabaseManagerTest {
 
+    @Test
+    void databaseSettingsToStringRedactsPassword() {
+        DatabaseSettings settings = DatabaseSettings.mysqlMariaDb(
+                "db.example", 3306, "itemgraph", "itemgraph", "super-secret", 5_000, true);
+
+        String rendered = settings.toString();
+
+        assertTrue(rendered.contains("password=<redacted>"));
+        assertFalse(rendered.contains("super-secret"));
+    }
+
     @AfterEach
     void tearDown() {
         DatabaseManager.getInstance().close();

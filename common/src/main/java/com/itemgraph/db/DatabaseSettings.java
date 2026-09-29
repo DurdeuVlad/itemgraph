@@ -61,4 +61,21 @@ public record DatabaseSettings(
     public boolean isNetworkBackend() {
         return backend == Backend.MYSQL_MARIADB;
     }
+
+    /**
+     * Keeps credentials out of incidental log messages and exception context.
+     * The password accessor remains available to the JDBC connection factory.
+     */
+    @Override
+    public String toString() {
+        return "DatabaseSettings[backend=" + backend
+                + ", sqlitePath=" + sqlitePath
+                + ", host=" + host
+                + ", port=" + port
+                + ", database=" + database
+                + ", username=" + username
+                + ", password=<redacted>"
+                + ", connectionTimeoutMs=" + connectionTimeoutMs
+                + ", useIndexes=" + useIndexes + ']';
+    }
 }

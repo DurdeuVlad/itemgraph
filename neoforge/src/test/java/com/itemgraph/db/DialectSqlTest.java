@@ -10,12 +10,14 @@ class DialectSqlTest {
     @Test
     void preservesTableIdempotencyAndRewritesSQLiteTypes() {
         String sql = "CREATE TABLE IF NOT EXISTS sample (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + "name TEXT NOT NULL, payload BLOB, ratio REAL, detail TEXT)";
+                + "applied_at INTEGER NOT NULL, source_path TEXT NOT NULL, name TEXT NOT NULL, payload BLOB, ratio REAL, detail TEXT)";
 
         String translated = DialectSql.translate(sql, DatabaseDialect.MYSQL_MARIADB);
 
         assertTrue(translated.contains("CREATE TABLE IF NOT EXISTS"));
         assertTrue(translated.contains("BIGINT PRIMARY KEY AUTO_INCREMENT"));
+        assertTrue(translated.contains("applied_at BIGINT"));
+        assertTrue(translated.contains("source_path LONGTEXT"));
         assertTrue(translated.contains("name VARCHAR(191)"));
         assertTrue(translated.contains("payload LONGBLOB"));
         assertTrue(translated.contains("ratio DOUBLE"));

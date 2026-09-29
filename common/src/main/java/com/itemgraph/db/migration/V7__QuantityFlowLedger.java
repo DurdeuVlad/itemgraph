@@ -61,7 +61,9 @@ public class V7__QuantityFlowLedger implements SchemaMigration {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_alloc_edge ON ig_edge_allocations(edge_id);");
 
             // 2. Explicit lifecycle status on observations
-            stmt.execute("ALTER TABLE ig_observations ADD COLUMN correlation_status TEXT NOT NULL DEFAULT 'PENDING';");
+            if (!MigrationSchema.hasColumn(conn, "ig_observations", "correlation_status")) {
+                stmt.execute("ALTER TABLE ig_observations ADD COLUMN correlation_status TEXT NOT NULL DEFAULT 'PENDING';");
+            }
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_obs_corr_status_time ON ig_observations(correlation_status, timestamp_ms);");
 
             // 3. Backfill existing Phase 5/6 edges into ig_edge_allocations

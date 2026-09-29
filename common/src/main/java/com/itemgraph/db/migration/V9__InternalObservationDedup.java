@@ -44,8 +44,10 @@ public class V9__InternalObservationDedup implements SchemaMigration {
                 // MySQL/MariaDB do not have SQLite's partial-index predicate.  A
                 // generated sentinel keeps NULL internal events in one unique scope,
                 // while non-NULL source events remain distinct by their source id.
-                stmt.execute("ALTER TABLE ig_observations ADD COLUMN IF NOT EXISTS "
-                        + "ig_internal_dedup_source BIGINT AS (COALESCE(source_event_id, -1)) STORED;");
+                if (!MigrationSchema.hasColumn(conn, "ig_observations", "ig_internal_dedup_source")) {
+                    stmt.execute("ALTER TABLE ig_observations ADD COLUMN "
+                            + "ig_internal_dedup_source BIGINT AS (COALESCE(source_event_id, -1)) STORED;");
+                }
                 stmt.execute("""
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_internal_dedup
                     ON ig_observations(source_type, timestamp_ms, node_id, fingerprint_id, amount, action_type, ig_internal_dedup_source);

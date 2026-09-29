@@ -35,7 +35,7 @@ public class V12__PreviewApiSourcesAndExternalNodes implements SchemaMigration {
                     """);
         }
 
-        if (!hasColumn(conn, "ig_nodes", "external_key")) {
+        if (!MigrationSchema.hasColumn(conn, "ig_nodes", "external_key")) {
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute("ALTER TABLE ig_nodes ADD COLUMN external_key TEXT");
             }
@@ -50,15 +50,4 @@ public class V12__PreviewApiSourcesAndExternalNodes implements SchemaMigration {
         }
     }
 
-    private static boolean hasColumn(Connection conn, String table, String column) throws SQLException {
-        try (Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("PRAGMA table_info(" + table + ")")) {
-            while (rs.next()) {
-                if (column.equals(rs.getString("name"))) {
-                    return true;
-                }
-            }
-            return false;
-        }
-    }
 }
