@@ -80,6 +80,10 @@ public abstract class ItemEntityMixin {
             }
         }
         if (match == null) {
+            // A callback without a matching HEAD means the thread-local state
+            // no longer describes the invocation stack; discard it rather than
+            // allowing a later entity to inherit a stale quantity snapshot.
+            pending.clear();
             return null;
         }
         // If an inner invocation unwound without its RETURN callback, discard
