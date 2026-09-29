@@ -150,6 +150,8 @@ public class InternalObservationService {
     private final java.util.concurrent.atomic.AtomicLong totalAuditEvents = new java.util.concurrent.atomic.AtomicLong(0);
     private volatile long auditRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
     private volatile long lastAuditRetryLogMs;
+    private volatile long observationRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
+    private volatile long lastObservationRetryLogMs;
     private Thread workerThread;
 
     private InternalObservationService() {}
@@ -253,6 +255,7 @@ public class InternalObservationService {
         totalTransformations.set(0);
         totalAuditEvents.set(0);
         resetAuditRetryState();
+        resetObservationRetryState();
     }
 
     private void drainQueueSafely() {
@@ -265,8 +268,13 @@ public class InternalObservationService {
                 if (firstObs != null) {
                     obsBatch.add(firstObs);
                     queue.drainTo(obsBatch, 99);
-                    persistBatch(obsBatch);
-                    totalPersisted.addAndGet(obsBatch.size());
+                    try {
+                        persistBatch(obsBatch);
+                        resetObservationRetryState();
+                        totalPersisted.addAndGet(obsBatch.size());
+                    } catch (Exception failure) {
+                        requeueObservationBatch(obsBatch, failure);
+                    }
                     obsBatch.clear();
                 }
 
@@ -310,7 +318,9 @@ public class InternalObservationService {
                 persistBatch(remainingObs);
                 totalPersisted.addAndGet(remainingObs.size());
             } catch (Exception e) {
-                LOGGER.error("Error flushing internal observations on shutdown", e);
+                long dropped = totalDropped.addAndGet(remainingObs.size());
+                LOGGER.error("Could not persist {} internal observations during shutdown; {} events were dropped",
+                        remainingObs.size(), dropped, e);
             }
         }
 
@@ -384,6 +394,46 @@ public class InternalObservationService {
         long dropped = totalDropped.addAndGet(batch.size());
         LOGGER.error("Could not persist {} native audit events during shutdown; {} events were dropped",
                 batch.size(), dropped, failure);
+    }
+
+    /**
+     * Retains an observation batch after a transactional write failure so a
+     * paired legacy audit projection cannot outlive the quantity evidence.
+     */
+    private void requeueObservationBatch(List<InternalObservation> batch, Exception failure) {
+        if (batch.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long lastLog = lastObservationRetryLogMs;
+        if (lastLog == 0L || now - lastLog >= AUDIT_RETRY_LOG_INTERVAL_MS) {
+            lastObservationRetryLogMs = now;
+            LOGGER.error("Could not persist {} internal observations; retaining them for retry (backoff={} ms)",
+                    batch.size(), observationRetryBackoffMs, failure);
+        }
+        for (InternalObservation observation : batch) {
+            if (!queue.offer(observation)) {
+                long dropped = totalDropped.incrementAndGet();
+                if (dropped == 1 || dropped % 1000 == 0) {
+                    LOGGER.warn("Internal observation queue remained full while retrying; dropped {} ({} dropped total)",
+                            observation.actionType(), dropped);
+                }
+            }
+        }
+        if (running.get()) {
+            long backoff = observationRetryBackoffMs;
+            observationRetryBackoffMs = Math.min(AUDIT_RETRY_MAX_BACKOFF_MS, backoff * 2L);
+            try {
+                Thread.sleep(backoff);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void resetObservationRetryState() {
+        observationRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
+        lastObservationRetryLogMs = 0L;
     }
 
     private void persistAuditEvents(List<InternalAuditEvent> batch) throws SQLException {
@@ -502,7 +552,9 @@ public class InternalObservationService {
     private void persistBatch(List<InternalObservation> batch) throws SQLException {
         if (batch.isEmpty()) return;
         DatabaseManager db = DatabaseManager.getInstance();
-        if (!db.isInitialized()) return;
+        if (!db.isInitialized()) {
+            throw new SQLException("ItemGraph database is not initialized");
+        }
 
         Connection conn = db.getConnection();
         synchronized (conn) {

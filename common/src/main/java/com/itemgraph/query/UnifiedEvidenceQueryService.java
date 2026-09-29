@@ -179,10 +179,26 @@ public final class UnifiedEvidenceQueryService {
                                                    String levelId, double centerX, double centerY,
                                                    double centerZ, int limit) throws SQLException {
         StringBuilder sql = new StringBuilder("""
-                SELECT id, event_type, timestamp_ms, player_uuid, player_name,
-                       level_id, x, y, z, subject_id, detail, source_type
-                FROM ig_audit_events
+                SELECT a.id, a.event_type, a.timestamp_ms, a.player_uuid, a.player_name,
+                       a.level_id, a.x, a.y, a.z, a.subject_id, a.detail, a.source_type
+                FROM ig_audit_events a
                 WHERE 1 = 1
+                  -- New projectile rows also have a quantity observation. Keep
+                  -- only the new audit compatibility projection out of the
+                  -- unified timeline when the durable observation with the
+                  -- same raw event identity exists. If persistence lost the
+                  -- observation, retain the audit row as the only evidence.
+                  AND NOT (UPPER(a.event_type) IN ('THROW_ITEM', 'SHOOT_ITEM')
+                           AND a.source_type = 'ITEMGRAPH_INTERNAL'
+                           AND COALESCE(a.detail, '') LIKE '%quantity=%'
+                           AND EXISTS (
+                               SELECT 1
+                               FROM ig_observations o
+                               WHERE o.source_type = 'ITEMGRAPH_INTERNAL'
+                                 AND UPPER(o.action_type) = UPPER(a.event_type)
+                                 AND o.raw_data IS NOT NULL
+                                 AND o.raw_data = a.raw_data
+                           ))
                 """);
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, "UPPER(event_type)", filters.eventTypes(), false);

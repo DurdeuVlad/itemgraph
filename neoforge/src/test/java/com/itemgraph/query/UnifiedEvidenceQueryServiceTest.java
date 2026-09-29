@@ -80,6 +80,41 @@ class UnifiedEvidenceQueryServiceTest {
     }
 
     @Test
+    void suppressesNewProjectileAuditProjectionButKeepsOlderAuditOnlyRows() throws Exception {
+        byte[] projectionIdentity = "{\"capture\":\"projectile_spawn\",\"event_id\":\"test-event\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        auditWithDetailAndRaw("SHOOT_ITEM", 3_000L, "minecraft:arrow", "quantity=2", projectionIdentity);
+        observationWithRaw("ITEMGRAPH_INTERNAL", 3_000L, "SHOOT_ITEM", stoneFingerprint, 2, projectionIdentity);
+        auditWithDetail("SHOOT_ITEM", 2_000L, "minecraft:arrow", null);
+
+        AuditLookupFilters filters = AuditLookupFilters.parse(
+                "action.shoot_item radius.100", 10_000L);
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(
+                conn, filters, "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(2, rows.size());
+        assertEquals("observation#1", rows.get(0).evidenceId());
+        assertEquals("audit#2", rows.get(1).evidenceId());
+        assertEquals(2, rows.get(0).quantity());
+    }
+
+    @Test
+    void keepsProjectileAuditProjectionWhenObservationWasNotPersisted() throws Exception {
+        byte[] projectionIdentity = "{\"capture\":\"projectile_spawn\",\"event_id\":\"lost-event\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        auditWithDetailAndRaw("SHOOT_ITEM", 3_000L, "minecraft:arrow", "quantity=2", projectionIdentity);
+
+        AuditLookupFilters filters = AuditLookupFilters.parse(
+                "action.shoot_item radius.100", 10_000L);
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(
+                conn, filters, "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, rows.size());
+        assertEquals("audit#1", rows.get(0).evidenceId());
+        assertEquals("SHOOT_ITEM", rows.get(0).actionType());
+    }
+
+    @Test
     void excludeSubjectRemovesMatchingItemsAndPreservesImportedSource() throws Exception {
         observationFromGround("GRIEFLOGGER", 2_000L, "PICKUP_ITEM", stoneFingerprint, 3);
         observation("ITEMGRAPH_INTERNAL", 1_000L, "DROP_ITEM", resultFingerprint, 1);
@@ -253,35 +288,55 @@ class UnifiedEvidenceQueryServiceTest {
     }
 
     private void audit(String action, long timestamp, String subject) throws Exception {
+        auditWithDetail(action, timestamp, subject, null);
+    }
+
+    private void auditWithDetail(String action, long timestamp, String subject, String detail) throws Exception {
+        auditWithDetailAndRaw(action, timestamp, subject, detail, null);
+    }
+
+    private void auditWithDetailAndRaw(String action, long timestamp, String subject, String detail, byte[] rawData)
+            throws Exception {
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_audit_events
-                    (event_type, timestamp_ms, player_uuid, player_name, level_id, x, y, z, subject_id, source_type)
-                VALUES (?, ?, 'uuid-alex', 'Alex', 'minecraft:overworld', 10, 64, 10, ?, 'ITEMGRAPH_INTERNAL')
+                    (event_type, timestamp_ms, player_uuid, player_name, level_id, x, y, z, subject_id, detail, source_type, raw_data)
+                VALUES (?, ?, 'uuid-alex', 'Alex', 'minecraft:overworld', 10, 64, 10, ?, ?, 'ITEMGRAPH_INTERNAL', ?)
                 """)) {
             statement.setString(1, action);
             statement.setLong(2, timestamp);
             statement.setString(3, subject);
+            statement.setString(4, detail);
+            if (rawData == null) {
+                statement.setNull(5, java.sql.Types.BLOB);
+            } else {
+                statement.setBytes(5, rawData);
+            }
             statement.executeUpdate();
         }
     }
 
     private void observation(String source, long timestamp, String action, long fingerprint, int amount)
             throws Exception {
-        insertObservation(source, timestamp, action, fingerprint, amount, playerNode, groundNode);
+        observationWithRaw(source, timestamp, action, fingerprint, amount, null);
+    }
+
+    private void observationWithRaw(String source, long timestamp, String action, long fingerprint, int amount,
+                                    byte[] rawData) throws Exception {
+        insertObservation(source, timestamp, action, fingerprint, amount, playerNode, groundNode, rawData);
     }
 
     private void observationFromGround(String source, long timestamp, String action, long fingerprint, int amount)
             throws Exception {
-        insertObservation(source, timestamp, action, fingerprint, amount, groundNode, playerNode);
+        insertObservation(source, timestamp, action, fingerprint, amount, groundNode, playerNode, null);
     }
 
     private void insertObservation(String source, long timestamp, String action, long fingerprint, int amount,
-                                   long origin, long destination) throws Exception {
+                                   long origin, long destination, byte[] rawData) throws Exception {
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_observations
                     (source_type, source_event_id, timestamp_ms, node_id, target_node_id,
-                     fingerprint_id, action_type, amount)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     fingerprint_id, action_type, amount, raw_data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)) {
             statement.setString(1, source);
             statement.setLong(2, timestamp);
@@ -291,6 +346,11 @@ class UnifiedEvidenceQueryServiceTest {
             statement.setLong(6, fingerprint);
             statement.setString(7, action);
             statement.setInt(8, amount);
+            if (rawData == null) {
+                statement.setNull(9, java.sql.Types.BLOB);
+            } else {
+                statement.setBytes(9, rawData);
+            }
             statement.executeUpdate();
         }
     }

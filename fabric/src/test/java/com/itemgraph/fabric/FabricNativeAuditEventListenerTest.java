@@ -41,6 +41,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.any;
 
 class FabricNativeAuditEventListenerTest {
     private final InspectionService inspections = InspectionService.getInstance();
@@ -191,22 +192,49 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void projectileRecorderStoresEvidenceWithoutQuantityFlow() {
+    void projectileRecorderPreservesItemQuantityAndUnknownEndpoint() {
         InternalObservationService service = mock(InternalObservationService.class);
+        when(service.submit(any(InternalObservationService.InternalObservation.class))).thenReturn(true);
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
-            FabricNativeAuditEventListener.recordProjectileAudit(
+            FabricNativeAuditEventListener.recordProjectileObservation(
                     "SHOOT_ITEM", "player-uuid", "Alex", "minecraft:overworld",
-                    1.5, 64.0, -2.5, "minecraft:bow", "minecraft:arrow");
+                    10.0, 65.0, -4.0, 11.5, 65.0, -2.5,
+                    new CanonicalItem("minecraft:arrow", "fingerprint", null, null, null), 3,
+                    "minecraft:arrow");
         }
 
-        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalObservation.class);
+        verify(service).submit(captured.capture());
+        assertEquals("SHOOT_ITEM", captured.getValue().actionType());
+        assertEquals("minecraft:arrow", captured.getValue().item().itemId());
+        assertEquals(3, captured.getValue().amount());
+        assertEquals("UNKNOWN", captured.getValue().targetType());
+        org.junit.jupiter.api.Assertions.assertNull(captured.getValue().targetX());
+        assertEquals("player-uuid", captured.getValue().playerUuid());
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> audit =
                 ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
-        verify(service).submitAuditEvent(captured.capture());
-        assertEquals("SHOOT_ITEM", captured.getValue().eventType());
-        assertEquals("minecraft:bow", captured.getValue().subjectId());
-        assertEquals("projectile=minecraft:arrow evidence=spawned_by_player",
-                captured.getValue().detail());
+        verify(service).submitAuditEvent(audit.capture());
+        assertEquals("SHOOT_ITEM", audit.getValue().eventType());
+        assertEquals("minecraft:arrow", audit.getValue().subjectId());
+        org.junit.jupiter.api.Assertions.assertTrue(audit.getValue().detail().contains("quantity=3"));
+    }
+
+    @Test
+    void rejectedProjectileObservationDoesNotQueueLegacyProjection() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        when(service.submit(any(InternalObservationService.InternalObservation.class))).thenReturn(false);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            FabricNativeAuditEventListener.recordProjectileObservation(
+                    "SHOOT_ITEM", "player-uuid", "Alex", "minecraft:overworld",
+                    10.0, 65.0, -4.0, 11.5, 65.0, -2.5,
+                    new CanonicalItem("minecraft:arrow", "fingerprint", null, null, null), 1,
+                    "minecraft:arrow");
+        }
+        org.mockito.Mockito.verify(service, org.mockito.Mockito.never()).submitAuditEvent(any());
     }
 
     @Test
