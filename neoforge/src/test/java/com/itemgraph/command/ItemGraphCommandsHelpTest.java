@@ -204,7 +204,7 @@ class ItemGraphCommandsHelpTest {
         CommandSourceStack source = source();
 
         assertSuggestions(dispatcher, source, "itemgraph ", "help", "status", "audit", "lookup", "page", "trace", "gui", "inspect");
-        assertSuggestions(dispatcher, source, "itemgraph lookup ", "all", "BREAK_BLOCK", "CHAT_MESSAGE");
+        assertSuggestions(dispatcher, source, "itemgraph lookup ", "all", "BREAK_BLOCK", "CHAT_MESSAGE", "INTERACT_ENTITY");
         assertSuggestions(dispatcher, source, "itemgraph lookup action.", "action.break_block", "action.chat_message");
         assertSuggestions(dispatcher, source, "itemgraph lookup action.break_block ", "user.", "include.", "exclude.", "time.", "radius.");
         assertSuggestions(dispatcher, source, "itemgraph help ", "trace item", "gui container", "inspect");
@@ -248,6 +248,12 @@ class ItemGraphCommandsHelpTest {
         assertTrue(nativeInteractionLookup.getContext().getNodes().stream()
                         .anyMatch(node -> node.getNode().getName().equals("eventType")),
                 "native block-interaction lookup was routed to the direct filter argument");
+
+        var nativeEntityInteractionLookup = dispatcher.parse("itemgraph lookup INTERACT_ENTITY", source);
+        assertParsedCompletely(nativeEntityInteractionLookup, "native entity-interaction lookup syntax");
+        assertTrue(nativeEntityInteractionLookup.getContext().getNodes().stream()
+                        .anyMatch(node -> node.getNode().getName().equals("eventType")),
+                "native entity-interaction lookup was routed to the direct filter argument");
 
         var nativeAllLookup = dispatcher.parse("itemgraph lookup all", source);
         assertParsedCompletely(nativeAllLookup, "native all-events lookup syntax");

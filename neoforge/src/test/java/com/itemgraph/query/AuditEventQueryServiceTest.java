@@ -107,6 +107,22 @@ class AuditEventQueryServiceTest {
     }
 
     @Test
+    void nativeEntityInteractionEventsAreSelectableByEventType() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement(
+                "INSERT INTO ig_audit_events (event_type, timestamp_ms, player_name, subject_id, detail) VALUES ('INTERACT_ENTITY', 1, 'Alex', 'minecraft:villager', 'outcome=attempt')")) {
+            insert.executeUpdate();
+        }
+
+        List<AuditEventDetail> interactions = service.find(
+                conn, "interact_entity", "Alex", QueryWindow.unbounded(), 10);
+
+        assertEquals(1, interactions.size());
+        assertEquals("INTERACT_ENTITY", interactions.get(0).eventType());
+        assertEquals("minecraft:villager", interactions.get(0).subjectId());
+        assertEquals("outcome=attempt", interactions.get(0).detail());
+    }
+
+    @Test
     void formatterKeepsMultilineDetailsOnOneConsoleLine() throws Exception {
         try (PreparedStatement insert = conn.prepareStatement(
                 "INSERT INTO ig_audit_events (event_type, timestamp_ms, detail) VALUES ('CHAT_MESSAGE', 1, ?)") ) {
