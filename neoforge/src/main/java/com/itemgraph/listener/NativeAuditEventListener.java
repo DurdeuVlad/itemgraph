@@ -1,6 +1,7 @@
 package com.itemgraph.listener;
 
 import com.itemgraph.ingest.InternalObservationService;
+import com.itemgraph.command.ItemGraphCommands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
@@ -40,6 +41,7 @@ public final class NativeAuditEventListener {
     @SubscribeEvent
     public void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            ItemGraphCommands.clearPageSession(player.getUUID());
             submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
         }
     }

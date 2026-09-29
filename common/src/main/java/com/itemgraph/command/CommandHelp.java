@@ -14,6 +14,7 @@ final class CommandHelp {
     static final List<String> TOPIC_NAMES = List.of(
             "help", "status", "audit", "ingest", "ingest now", "event", "explain",
             "lookup", "lookup player", "lookup filters",
+            "page",
             "trace", "trace item", "trace player", "trace container",
             "gui", "gui item", "gui player", "gui container", "inspect");
 
@@ -27,6 +28,7 @@ final class CommandHelp {
                 "[ItemGraph] /ig help [topic] — show all commands or one topic.",
                 "[ItemGraph] /ig status — show mod, GriefLogger, database, ingestion, and inference state.",
                 "[ItemGraph] /ig audit — verify ItemGraph database invariants asynchronously.",
+                "[ItemGraph] /ig page <page> — continue the issuing player's active lookup session.",
                 "[ItemGraph] /ig lookup <eventType> [limit] [sinceMinutes] — query native audit events.",
                 "[ItemGraph] /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes] — bound results to a location.",
                 "[ItemGraph] /ig lookup page <page> <eventType> [limit] [sinceMinutes] — continue a bounded audit result page.",
@@ -81,6 +83,11 @@ final class CommandHelp {
                 "[ItemGraph] Syntax: /ig audit",
                 "[ItemGraph] Runs a read-only invariant audit off the server thread: conservation, positivity, relational integrity, and allocation state.",
                 "[ItemGraph] Example: /ig audit"));
+        topics.put("page", List.of(
+                "[ItemGraph] Syntax: /ig page <page>",
+                "[ItemGraph] Continues the issuing player's last lookup with the same filters and bounded page size.",
+                "[ItemGraph] Page state is per-player, expires after 30 minutes, and is read-only.",
+                "[ItemGraph] Example: /ig page 2"));
         List<String> lookup = List.of(
                 "[ItemGraph] Syntax: /ig lookup <eventType> [limit] [sinceMinutes]",
                 "[ItemGraph] eventType: all, PLAYER_JOIN, PLAYER_QUIT, CHAT_MESSAGE, COMMAND_ATTEMPT, COMMAND_EXECUTED, PLACE_BLOCK, BREAK_BLOCK, INTERACT_BLOCK, INTERACT_BLOCK_ATTEMPT, KILL_ENTITY, THROW_ITEM, or SHOOT_ITEM.",

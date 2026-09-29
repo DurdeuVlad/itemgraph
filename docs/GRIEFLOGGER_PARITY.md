@@ -1,9 +1,49 @@
 # GriefLogger replacement parity
 
-This matrix is the acceptance boundary for replacing GriefLogger as the native
-server audit source. It is based on GriefLogger's published feature surface:
+This document defines the compatibility contract and acceptance boundary for
+replacing GriefLogger as the native server audit source. Compatibility is
+behavioral and evidence-preserving; ItemGraph keeps its own command names and
+storage. The matrix below is based on GriefLogger's published feature surface:
 block actions, item usage, player sessions, chat, commands, inspector, filtered
 lookup, pagination, and SQLite/MySQL storage.
+
+## Branding contract
+
+- Supported commands are `/ig` and `/itemgraph`.
+- `/gl` and `/grieflogger` are not ItemGraph commands or aliases.
+- A GriefLogger database is a read-only source. ItemGraph never repairs,
+  migrates, writes, deletes, indexes, vacuums, or purges it.
+- ItemGraph labels direct observations, inferred movement, ambiguous candidates,
+  and unresolved events separately. Non-quantity audit evidence is never
+  presented as an item transfer.
+
+## Registry
+
+The normative machine-readable mapping is
+[`GRIEFLOGGER_COMPATIBILITY.json`](GRIEFLOGGER_COMPATIBILITY.json). It records
+canonical action names, accepted GriefLogger spellings, compatibility status,
+evidence and quantity semantics, loader/storage support, lookup filters,
+permission and paging controls, inspector behavior, configuration controls, and
+the GitHub issue responsible for incomplete mappings.
+
+The registry version changes when a mapping, status, evidence or quantity
+meaning, loader, or backend contract changes. Documentation-only clarifications
+are patch changes; additive mappings with existing behavior are minor changes;
+renamed, removed, or incompatible mappings are major changes. The registry,
+this document, and the owning issue change together.
+
+## Published source surface
+
+The contract uses GriefLogger's published documentation:
+
+- https://daqem.com/projects/grieflogger
+- https://daqem.com/projects/grieflogger/wiki/player-actions/item-usage
+- https://daqem.com/projects/grieflogger/wiki/player-actions/block-interactions
+- https://daqem.com/projects/grieflogger/wiki/player-actions/player-sessions
+- https://daqem.com/projects/grieflogger/wiki/player-actions/chat-commands
+- https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/lookup-command
+- https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/inspect-command
+- https://daqem.com/projects/grieflogger/wiki/getting-started/configuration
 
 | GriefLogger capability | ItemGraph native source | Storage | Query/UI status | Evidence status |
 | --- | --- | --- | --- | --- |

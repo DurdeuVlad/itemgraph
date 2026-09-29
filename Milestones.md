@@ -137,21 +137,25 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Risk: external source identity, inventory identity, backpressure, and sensitive query
   results require explicit contracts and consumer-side permission checks.
 
-## M8: Native GriefLogger replacement parity
+## M8: Drop-in GriefLogger parity
 
-- Status: in progress; V13 native audit ledger and bounded `/ig lookup` are implemented
-  for NeoForge and the shared Fabric adapter now captures its supported audit events.
-- Outcome: ItemGraph owns the server audit evidence needed to retire GriefLogger as a
-  runtime dependency. Item-flow evidence stays in `ig_observations`; block, session,
-  chat, command, and entity events use `ig_audit_events`.
-- Delivered: NeoForge capture for join/quit, chat, commands, block place/break/interact,
-  player-killed entities, consume, durability break, and bow shoot; Fabric capture for
-  join/quit, chat, block break/interact, and player-killed entities; asynchronous
-  persistence; action/player/time lookup; tests proving the ledger is separate from item
-  transfers.
-- Remaining: Fabric projectile hooks, Fabric command execution and completed
-  block-placement hooks, interactive chat pagination controls, and
-  staging verification with the GriefLogger JAR absent.
-- Acceptance evidence: `docs/GRIEFLOGGER_PARITY.md`, V13 migration tests, native audit
-  persistence/query tests, and a dedicated staging event matrix.
+- Status: in progress; GitHub milestone
+  https://github.com/DurdeuVlad/itemgraph/milestone/4.
+- Outcome: ItemGraph keeps `/ig` and `/itemgraph` while matching GriefLogger behavior
+  for commands, filters, inspector, events, read-only history import, storage, and
+  operations. `/gl` and `/grieflogger` are not aliases. ItemGraph owns the native audit
+  evidence needed to retire GriefLogger as a runtime dependency.
+- Delivered: V13 native audit ledger and bounded `/ig lookup` for NeoForge, shared
+  Fabric capture for its supported audit events, asynchronous persistence, action/player/
+  time/radius lookup, item-flow and transformation capture, read-only container
+  inspection, and a per-player interactive lookup page session. Item-flow evidence stays
+  in `ig_observations`; block, session, chat, command, and entity events use
+  `ig_audit_events`.
+- Remaining: complete the registry entries tracked by issues #25–#31, including the
+  unified lookup surface, all inspector targets, exact projectile/placement semantics,
+  read-only historical import, MySQL/MariaDB, operations controls, and differential
+  staging proof. The runtime matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact
+  current boundary.
+- Proof: the compatibility registry, cross-loader tests, backend tests, and native-only
+  staging replay tracked by issues #23–#31.
 

@@ -5,6 +5,7 @@ import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.FlowBrowserService;
 import com.itemgraph.command.InspectionService;
+import com.itemgraph.command.ItemGraphCommands;
 import com.mojang.brigadier.ParseResults;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -103,6 +104,7 @@ public final class FabricNativeAuditEventListener {
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayer player = handler.getPlayer();
+            ItemGraphCommands.clearPageSession(player.getUUID());
             submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
             FabricContainerSessionListener.onMenuClosing(player);
             InspectionService.getInstance().clear(player.getUUID());
