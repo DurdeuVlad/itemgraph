@@ -156,13 +156,17 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   bounded paging, source IDs, and canonical action filters. The generic eleven-table
   historical ledger remains the immutable source of truth and its normalized event
   projection is delivered by #28. The pinned 26.2 source/profile authority is recorded
-  in #43. Remaining: complete #24, #26, #27, #29, #30, #31, and #54 for all inspector
-  targets, all 18 pinned actions, the exact supported 1.21.1 release fixture,
-  MySQL/MariaDB, operations controls, and differential staging proof. The runtime
+  in #43. Remaining: complete #24, #26, #27, #29, #30, and #31 for all inspector
+  targets, all 18 pinned actions, MySQL/MariaDB, operations controls,
+  and differential staging proof. The runtime
   matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact current boundary.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
-  #24–#31, #43, and #54.
+  #24–#31, #43, and #54. The current registry is `m8.3.0`; six action mappings
+  remain unresolved. Issue #27 is decomposed into #73 (projectile outcomes),
+  #74 (block interaction outcomes), #75 (entity interaction outcomes), and #76
+  (Ender action writers and deltas). Compatibility artifacts remain supported
+  until the M8 gate and the native-only cutover evidence pass.
 
 ## M9: ItemGraph audit++ performance and extra events
 
@@ -179,4 +183,22 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   event-taxonomy tracker for #55, #56, and #57.
 - Acceptance evidence: reproducible benchmark output, cross-loader fixtures, malformed and
   opaque evidence cases, export verification, and read-only auditor review.
+
+## M10: Native-only cutover and release hardening
+
+- Status: blocked on M8 parity; GitHub milestone
+  https://github.com/DurdeuVlad/itemgraph/milestone/6.
+- Outcome: after M8 parity and the M9 safety/operations evidence required for a
+  safe cutover, ItemGraph becomes the only supported runtime artifact for the
+  exact GriefLogger 1.2.10-1.21.1 replacement target.
+- Scope boundary: staging and release verification only. The read-only
+  GriefLogger importer and immutable source archive remain supported; no
+  production change or source-database mutation is authorized by this milestone.
+- Dependencies: #71 establishes the audited native-only approval gate; #72
+  removes compatible build/publication variants only after #71 closes and an
+  explicit version bump/tag is supplied. Optional M9 feature extensions can
+  continue after cutover in the standard jar.
+- Acceptance evidence: differential report, 24-hour native-only staging soak,
+  artifact/dependency checks, release metadata, source-archive checksum, and
+  rollback rehearsal reviewed by an independent read-only auditor.
 
