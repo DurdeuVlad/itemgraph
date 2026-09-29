@@ -9,6 +9,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.CompoundContainer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.PlayerEnderChestContainer;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -88,12 +89,17 @@ public class ContainerSessionListener {
         }
         ContainerInteractionTracker.getInstance().closeSession(
                 player.getUUID(), player.getX(), player.getY(), player.getZ());
+        EnderChestInteractionTracker.getInstance().closeSession(
+                player.getUUID(), player.getX(), player.getY(), player.getZ());
     }
 
     @SubscribeEvent
     public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         // A disconnecting player may bypass the Close event; never leave a stale watch.
         ContainerInteractionTracker.getInstance().closeSession(
+                event.getEntity().getUUID(),
+                event.getEntity().getX(), event.getEntity().getY(), event.getEntity().getZ());
+        EnderChestInteractionTracker.getInstance().closeSession(
                 event.getEntity().getUUID(),
                 event.getEntity().getX(), event.getEntity().getY(), event.getEntity().getZ());
     }
@@ -107,9 +113,14 @@ public class ContainerSessionListener {
         Container blockContainer = null;
         BlockEntity containerEntity = null;
         CompoundContainer merged = null;
+        PlayerEnderChestContainer enderContainer = null;
 
         for (Slot slot : menu.slots) {
             Container c = slot.container;
+            if (c instanceof PlayerEnderChestContainer ender) {
+                enderContainer = ender;
+                break;
+            }
             if (c instanceof BlockEntity be) {
                 containerEntity = be;
                 blockContainer = c;
@@ -121,6 +132,14 @@ public class ContainerSessionListener {
         }
 
         String levelId = player.level().dimension().location().toString();
+        if (enderContainer != null) {
+            Container observed = enderContainer;
+            EnderChestInteractionTracker.getInstance().openSession(
+                    player.getUUID(), player.getGameProfile().getName(), levelId,
+                    player.getX(), player.getY(), player.getZ(),
+                    () -> snapshotTotals(observed));
+            return;
+        }
         if (containerEntity != null) {
             BlockPos pos = containerEntity.getBlockPos();
             Container observed = blockContainer;

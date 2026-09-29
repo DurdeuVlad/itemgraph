@@ -108,6 +108,14 @@ public class ContainerInteractionTracker {
      */
     public void openSession(UUID playerUuid, String playerName, ContainerKey key,
                             Supplier<InventoryTotals> snapshotSource, List<ContainerKey> aliases) {
+        // A menu switch can skip a loader close callback. Flush a player-owned
+        // Ender Chest session before replacing it with a block-container watch.
+        if (!EnderChestInteractionTracker.getInstance().closeSession(
+                playerUuid, Double.NaN, Double.NaN, Double.NaN)) {
+            // Keep the old Ender session retryable rather than tracking two
+            // containers for one player after a failed final snapshot.
+            return;
+        }
         ContainerKey previous = playerSessions.get(playerUuid);
         if (previous != null) {
             // Defensive: a menu switch without an intervening Close event — flush
@@ -171,17 +179,26 @@ public class ContainerInteractionTracker {
      * {@code ADD_ITEM}/{@code REMOVE_ITEM} net observation per remaining fingerprint.
      * {@code x,y,z} is the closing player's position.
      */
-    public void closeSession(UUID playerUuid, double x, double y, double z) {
-        ContainerKey key = playerSessions.remove(playerUuid);
+    public boolean closeSession(UUID playerUuid, double x, double y, double z) {
+        ContainerKey key = playerSessions.get(playerUuid);
         if (key == null) {
-            return;
+            return true;
         }
         Watch watch = watches.get(resolve(key));
         if (watch == null) {
-            return;
+            playerSessions.remove(playerUuid, key);
+            return true;
         }
 
-        InventoryTotals now = watch.snapshotSource.get();
+        InventoryTotals now;
+        try {
+            now = watch.snapshotSource.get();
+        } catch (RuntimeException e) {
+            LOGGER.warn("ItemGraph: failed to snapshot container session for {} at {}: {}",
+                    playerUuid, key, e.toString());
+            return false;
+        }
+        playerSessions.remove(playerUuid, key);
         long windowEndMs = System.currentTimeMillis();
         Map<String, Long> playerDelta = computePlayerDelta(
                 watch.baseline, now.counts(), watch.capabilityDelta);
@@ -205,6 +222,7 @@ public class ContainerInteractionTracker {
             watches.remove(watch.key);
             aliases.values().removeIf(watch.key::equals);
         }
+        return true;
     }
 
     /**

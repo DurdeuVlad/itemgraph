@@ -483,6 +483,28 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void enderDepositUsesDurablePlayerOwnedExternalInventoryEndpoint() throws Exception {
+        initializeTopologyDatabase();
+        persist(new InternalObservation(
+                System.currentTimeMillis(), "ADD_ITEM_ENDER", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 10, 64, -20,
+                "minecraft:overworld", null, null, null,
+                "ENDER_CHEST", DIAMOND, 3, null));
+
+        ObsRow row = singleObservation();
+        assertEquals("PLAYER", nodeTypeOf(row.nodeId()));
+        assertEquals("EXTERNAL_INVENTORY", nodeTypeOf(row.targetNodeId()));
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT external_key FROM ig_nodes WHERE id = ?")) {
+            statement.setLong(1, row.targetNodeId());
+            try (ResultSet result = statement.executeQuery()) {
+                assertTrue(result.next());
+                assertEquals("minecraft:ender_chest/" + PLAYER_UUID, result.getString(1));
+            }
+        }
+    }
+
+    @Test
     void ambiguousActorResolvesToUnknownNotAPlayerNode() throws Exception {
         initializeTopologyDatabase();
         persist(containerObs("ADD_ITEM", ContainerInteractionTracker.AMBIGUOUS_UUID,

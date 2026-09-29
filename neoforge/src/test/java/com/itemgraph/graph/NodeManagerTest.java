@@ -209,6 +209,26 @@ class NodeManagerTest {
     }
 
     @Test
+    void unknownPlayerPositionIsStoredAsNullInsteadOfWorldOrigin() throws Exception {
+        long id = nodeManager.getOrCreatePlayerNode(conn, "uuid-unknown-position", "Steve",
+                OVERWORLD, Double.NaN, Double.NaN, Double.NaN);
+
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "SELECT x, y, z FROM ig_nodes WHERE id = ?")) {
+            pstmt.setLong(1, id);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                assertTrue(rs.next());
+                rs.getDouble("x");
+                assertTrue(rs.wasNull());
+                rs.getDouble("y");
+                assertTrue(rs.wasNull());
+                rs.getDouble("z");
+                assertTrue(rs.wasNull());
+            }
+        }
+    }
+
+    @Test
     void testBlankLevelFallsBackToOverworld() throws Exception {
         long explicit = nodeManager.getOrCreateGroundNode(conn, OVERWORLD, 5, 64, 5);
 

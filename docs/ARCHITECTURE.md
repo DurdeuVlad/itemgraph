@@ -57,7 +57,7 @@ A node represents a location or inventory capable of containing items.
 Candidate node classes:
 
 - Player inventory
-- Player ender chest
+- Player ender chest (`EXTERNAL_INVENTORY`, durable key `minecraft:ender_chest/<player UUID>`)
 - Block container
 - Entity inventory
 - Armor stand
@@ -561,10 +561,18 @@ serialize transactions on the shared ItemGraph JDBC connection.
 - One open participant → attributed `ADD_ITEM`/`REMOVE_ITEM`. Multiple participants →
   one `[ambiguous]` observation (UNKNOWN actor endpoint, candidates preserved in
   `raw_data`) rather than N rows manufacturing quantity.
+- Ender Chest menus use `EnderChestInteractionTracker` on both loaders. The tracker
+  diffs the player-owned `PlayerEnderChestContainer` at open/close boundaries and
+  emits signed `ADD_ITEM_ENDER`/`REMOVE_ITEM_ENDER` observations. The endpoint has
+  no world coordinates; the observation keeps the player's last finite server
+  position as context and stores SQL `NULL` when no position is known, while the
+  durable external key is the player's UUID. Menu-switch and shutdown fallbacks
+  never substitute world origin coordinates.
 - Container resolution scans `menu.slots` for a `BlockEntity`-backed `Container`;
   double chests (`CompoundContainer`) recover the clicked position from
   `RightClickBlock` in the same tick and alias the partner half. Menus without a
-  block-entity container (crafting grids, anvils, ender chests) are not watched.
+  block-entity container (crafting grids and anvils) are not watched by the block
+  container tracker; Ender Chest menus are handled by the player-owned tracker above.
 
 ### Command-toggled container inspection (Issue 10)
 
