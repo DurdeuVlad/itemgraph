@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Measures one player's Ender Chest menu session without polling the inventory.
@@ -20,12 +22,14 @@ import java.util.function.Supplier;
  */
 public final class EnderChestInteractionTracker {
     private static final EnderChestInteractionTracker INSTANCE = new EnderChestInteractionTracker();
+    private static final Logger LOGGER = LoggerFactory.getLogger(EnderChestInteractionTracker.class);
 
     private record Session(String playerName, String levelName,
                            Supplier<ContainerInteractionTracker.InventoryTotals> snapshotSource,
                            Map<String, Long> baseline,
                            Map<String, CanonicalItem> exemplars,
-                           long windowStartMs) {
+                           long windowStartMs,
+                           double lastX, double lastY, double lastZ) {
     }
 
     private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
@@ -40,13 +44,20 @@ public final class EnderChestInteractionTracker {
     /** Opens or replaces a player-owned Ender Chest session. */
     public void openSession(UUID playerUuid, String playerName, String levelName,
                             Supplier<ContainerInteractionTracker.InventoryTotals> snapshotSource) {
+        openSession(playerUuid, playerName, levelName, Double.NaN, Double.NaN, Double.NaN, snapshotSource);
+    }
+
+    /** Opens a session while retaining the player's last known server position. */
+    public void openSession(UUID playerUuid, String playerName, String levelName,
+                            double x, double y, double z,
+                            Supplier<ContainerInteractionTracker.InventoryTotals> snapshotSource) {
         if (playerUuid == null || snapshotSource == null) {
             return;
         }
         // A menu switch can skip a loader close callback. Flush a block-container
         // watch before replacing it with this player-owned inventory session.
-        ContainerInteractionTracker.getInstance().closeSession(playerUuid, 0.0, 0.0, 0.0);
-        closeSession(playerUuid, 0.0, 0.0, 0.0);
+        ContainerInteractionTracker.getInstance().closeSession(playerUuid, Double.NaN, Double.NaN, Double.NaN);
+        closeSession(playerUuid, Double.NaN, Double.NaN, Double.NaN);
         ContainerInteractionTracker.InventoryTotals totals = snapshotSource.get();
         sessions.put(playerUuid, new Session(
                 playerName == null ? "" : playerName,
@@ -54,16 +65,31 @@ public final class EnderChestInteractionTracker {
                 snapshotSource,
                 new HashMap<>(totals.counts()),
                 new HashMap<>(totals.exemplars()),
-                System.currentTimeMillis()));
+                System.currentTimeMillis(), x, y, z));
     }
 
     /** Closes a session and emits signed Ender Chest quantity deltas. */
     public void closeSession(UUID playerUuid, double x, double y, double z) {
-        Session session = sessions.remove(playerUuid);
+        Session session = sessions.get(playerUuid);
         if (session == null) {
             return;
         }
-        ContainerInteractionTracker.InventoryTotals current = session.snapshotSource().get();
+        double resolvedX = Double.isFinite(x) ? x : session.lastX();
+        double resolvedY = Double.isFinite(y) ? y : session.lastY();
+        double resolvedZ = Double.isFinite(z) ? z : session.lastZ();
+        Session positioned = new Session(session.playerName(), session.levelName(), session.snapshotSource(),
+                session.baseline(), session.exemplars(), session.windowStartMs(),
+                resolvedX, resolvedY, resolvedZ);
+        sessions.replace(playerUuid, session, positioned);
+        session = positioned;
+        ContainerInteractionTracker.InventoryTotals current;
+        try {
+            current = session.snapshotSource().get();
+        } catch (RuntimeException e) {
+            LOGGER.warn("ItemGraph: failed to snapshot Ender Chest session for {}: {}",
+                    playerUuid, e.toString());
+            return;
+        }
         long endMs = System.currentTimeMillis();
         Map<String, Long> delta = computeDelta(session.baseline(), current.counts());
         Map<String, CanonicalItem> exemplars = new HashMap<>(session.exemplars());
@@ -85,12 +111,13 @@ public final class EnderChestInteractionTracker {
                 InternalObservationService.getInstance().submit(
                         new InternalObservationService.InternalObservation(
                                 session.windowStartMs(), action, playerUuid.toString(), session.playerName(),
-                                session.levelName(), x, y, z,
+                                session.levelName(), session.lastX(), session.lastY(), session.lastZ(),
                                 session.levelName(), null, null, null, "ENDER_CHEST",
                                 item.itemId(), rawData, item, amount, null, endMs));
                 remaining -= amount;
             }
         }
+        sessions.remove(playerUuid, session);
     }
 
     static Map<String, Long> computeDelta(Map<String, Long> baseline, Map<String, Long> current) {
@@ -113,9 +140,13 @@ public final class EnderChestInteractionTracker {
     /** Flushes active sessions during an orderly server stop. */
     public void closeAllSessions() {
         for (UUID playerUuid : new HashSet<>(sessions.keySet())) {
-            closeSession(playerUuid, 0.0, 0.0, 0.0);
+            try {
+                closeSession(playerUuid, Double.NaN, Double.NaN, Double.NaN);
+            } catch (RuntimeException e) {
+                LOGGER.warn("ItemGraph: failed to flush Ender Chest session for {}: {}",
+                        playerUuid, e.toString());
+            }
         }
-        sessions.clear();
     }
 
     int sessionCount() {

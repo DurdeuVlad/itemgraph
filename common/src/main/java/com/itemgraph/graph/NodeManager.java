@@ -66,6 +66,14 @@ public class NodeManager {
         return levelId + ":" + x + ":" + y + ":" + z;
     }
 
+    private static void setCoordinateOrNull(PreparedStatement pstmt, int index, double value) throws SQLException {
+        if (Double.isFinite(value)) {
+            pstmt.setDouble(index, value);
+        } else {
+            pstmt.setNull(index, java.sql.Types.REAL);
+        }
+    }
+
     public long getOrCreatePlayerNode(Connection conn, String uuid, String name, String level, double x, double y, double z) throws SQLException {
         String levelId = normalizeLevel(level);
         String customLabel = (name != null && !name.isBlank()) ? name : "unknown";
@@ -93,9 +101,9 @@ public class NodeManager {
             try (PreparedStatement pstmt = conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
                 pstmt.setString(1, uuid);
                 pstmt.setString(2, levelId);
-                pstmt.setDouble(3, x);
-                pstmt.setDouble(4, y);
-                pstmt.setDouble(5, z);
+                setCoordinateOrNull(pstmt, 3, x);
+                setCoordinateOrNull(pstmt, 4, y);
+                setCoordinateOrNull(pstmt, 5, z);
                 pstmt.setString(6, customLabel);
                 pstmt.executeUpdate();
                 try (ResultSet keys = pstmt.getGeneratedKeys()) {
@@ -122,9 +130,9 @@ public class NodeManager {
             String insertSql = "INSERT INTO ig_nodes (node_type, owner_uuid, level_id, x, y, z, custom_label) VALUES ('" + NodeType.PLAYER.name() + "', NULL, ?, ?, ?, ?, ?)";
             try (PreparedStatement pstmt = conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
                 pstmt.setString(1, levelId);
-                pstmt.setDouble(2, x);
-                pstmt.setDouble(3, y);
-                pstmt.setDouble(4, z);
+                setCoordinateOrNull(pstmt, 2, x);
+                setCoordinateOrNull(pstmt, 3, y);
+                setCoordinateOrNull(pstmt, 4, z);
                 pstmt.setString(5, customLabel);
                 pstmt.executeUpdate();
                 try (ResultSet keys = pstmt.getGeneratedKeys()) {

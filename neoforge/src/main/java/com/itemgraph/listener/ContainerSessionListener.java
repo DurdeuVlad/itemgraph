@@ -136,6 +136,7 @@ public class ContainerSessionListener {
             Container observed = enderContainer;
             EnderChestInteractionTracker.getInstance().openSession(
                     player.getUUID(), player.getGameProfile().getName(), levelId,
+                    player.getX(), player.getY(), player.getZ(),
                     () -> snapshotTotals(observed));
             return;
         }
