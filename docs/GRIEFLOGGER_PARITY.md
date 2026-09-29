@@ -221,7 +221,8 @@ record those transfers.
    applies exact dimension and a radius clamped to 1..1024 blocks. Interactive chat
    `/ig lookup page` controls continue pages with a 10,000-row offset ceiling and
    rerun the same bounded filters as the original query. `/ig lookup filters` accepts
-   the five-filter GriefLogger syntax and uses a required cube radius around the player.
+   the five-filter GriefLogger syntax and uses a required cube radius around the player;
+   the delivered lookup/filter contract is tracked in [#25](https://github.com/DurdeuVlad/itemgraph/issues/25).
 4. The existing item-flow tests remain green and the GriefLogger database is not
    opened by the native-only path.
 5. M8 is not complete while [#43](https://github.com/DurdeuVlad/itemgraph/issues/43),
