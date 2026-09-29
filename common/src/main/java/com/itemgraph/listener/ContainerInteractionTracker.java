@@ -110,7 +110,12 @@ public class ContainerInteractionTracker {
                             Supplier<InventoryTotals> snapshotSource, List<ContainerKey> aliases) {
         // A menu switch can skip a loader close callback. Flush a player-owned
         // Ender Chest session before replacing it with a block-container watch.
-        EnderChestInteractionTracker.getInstance().closeSession(playerUuid, Double.NaN, Double.NaN, Double.NaN);
+        if (!EnderChestInteractionTracker.getInstance().closeSession(
+                playerUuid, Double.NaN, Double.NaN, Double.NaN)) {
+            // Keep the old Ender session retryable rather than tracking two
+            // containers for one player after a failed final snapshot.
+            return;
+        }
         ContainerKey previous = playerSessions.get(playerUuid);
         if (previous != null) {
             // Defensive: a menu switch without an intervening Close event — flush
