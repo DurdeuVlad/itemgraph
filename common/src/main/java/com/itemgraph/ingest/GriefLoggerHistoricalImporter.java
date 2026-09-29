@@ -159,6 +159,10 @@ public final class GriefLoggerHistoricalImporter {
                 }
             }
         } catch (SQLException rowidFailure) {
+            String message = rowidFailure.getMessage() == null ? "" : rowidFailure.getMessage().toLowerCase();
+            if (!message.contains("no such column") && !message.contains("without rowid")) {
+                throw rowidFailure;
+            }
             rowidQuery = false;
             // WITHOUT ROWID tables are uncommon in GriefLogger, but schema-variant
             // fixtures must remain importable with an ordinal/hash source key.
@@ -190,7 +194,7 @@ public final class GriefLoggerHistoricalImporter {
                 }
             }
         }
-        String detail = rowidQuery ? "rowid checkpoint" : "ordinal/hash checkpoint; source has no rowid";
+        String detail = rowidQuery ? "source-rowid retained; hash/ordinal checkpoint" : "ordinal/hash checkpoint; source has no rowid";
         return new TableReport(table, true, seen, imported, opaque, "COMPLETE", detail);
     }
 
@@ -227,7 +231,7 @@ public final class GriefLoggerHistoricalImporter {
             sourceKey = "pk:" + String.join("|", primaryValues);
         } else if (hasRowid) {
             sourceRowid = rows.getLong("__itemgraph_rowid__");
-            sourceKey = "rowid:" + sourceRowid;
+            sourceKey = "hash:" + sha256(payloadJson.getBytes(StandardCharsets.UTF_8)) + ":" + ordinal;
         } else {
             sourceKey = "hash:" + sha256(payloadJson.getBytes(StandardCharsets.UTF_8)) + ":" + ordinal;
         }

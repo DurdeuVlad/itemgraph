@@ -132,8 +132,9 @@ ItemGraph-owned `ig_grieflogger_*` tables.
 Preferred behavior:
 
 1. Compute the source file SHA-256 and deterministic schema fingerprint.
-2. Read each present table in bounded batches, using a primary-key source key,
-   SQLite `rowid`, or a deterministic payload-hash/ordinal fallback.
+2. Read each present table in bounded batches, using a primary-key source key or
+   deterministic payload-hash/ordinal identity; SQLite `rowid` is retained as
+   provenance when available but is not treated as a durable identity.
 3. Preserve every row as canonical JSON plus original binary fields and explicit
    unresolved reasons for opaque payloads or unknown action IDs.
 4. Commit ItemGraph-owned rows and advance the per-table checkpoint only after
