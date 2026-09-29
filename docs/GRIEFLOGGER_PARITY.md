@@ -36,6 +36,25 @@ and tamper-evident exports. Research informing the design includes
 [Ledger's server-side event scope](https://modrinth.com/mod/ledger), and
 [Fabric's event guidance](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md).
 
+### M8 staging gates
+
+The native-only cutover proof in issue [#31](https://github.com/DurdeuVlad/itemgraph/issues/31)
+uses the current documented hard bounds as its minimum objective gates. The staging
+run must satisfy all of these conditions:
+
+- zero uncaught server exceptions, kicks, or process crashes;
+- every accepted fixture event is persisted, or its loss is counted as an explicit
+  queue rejection/persistence failure; no silent loss;
+- ingestion, transformation, and audit queues never exceed their existing 10,000-entry
+  capacity, and the query worker never has more than 64 waiting requests;
+- each bounded lookup returns at most the existing 100-row limit, and every entity-less
+  synchronous query either completes within the documented five-second buffer timeout
+  or returns an explicit timeout/error;
+- quantity conservation and temporal ordering checks report zero invariant violations.
+
+M9 issue [#32](https://github.com/DurdeuVlad/itemgraph/issues/32) adds measured throughput,
+latency, CPU, memory, and overload budgets; it does not replace these M8 safety gates.
+
 | GriefLogger capability | ItemGraph native source | Storage | Query/UI status | Evidence status |
 | --- | --- | --- | --- | --- |
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested; compatibility lookup inclusion is tracked by [#25](https://github.com/DurdeuVlad/itemgraph/issues/25) |

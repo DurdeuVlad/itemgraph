@@ -158,7 +158,10 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   and disposable SQLite/MySQL/MariaDB CI services.
 - Acceptance evidence: the parity matrix in `docs/GRIEFLOGGER_PARITY.md`, cross-loader
   command/event fixtures, source-database hash reports, backend query parity, and the
-  native-only staging replay defined by issue #31.
+  native-only staging replay defined by issue #31. Its minimum gates are zero crashes or
+  kicks, no silent event loss, existing 10,000-entry ingestion queues and 64-request
+  query bound respected, the existing 100-row lookup limit, five-second entity-less
+  query timeout, and zero quantity/temporal invariant violations.
 - Risk: unsupported inventory types, undocumented GriefLogger schema variants, and
   differences between attempted and completed actions can leave evidence unresolved.
 
