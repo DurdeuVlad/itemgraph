@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "compatibility_version": "m8",
+  "compatibility_version": "m8.0.0",
   "mod_id": "itemgraph",
   "supported_commands": ["/ig", "/itemgraph"],
   "unsupported_aliases": ["/gl", "/grieflogger"],
@@ -28,7 +28,7 @@
     {"grieflogger": "REMOVE_ITEM", "itemgraph": "REMOVE_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "DROP_ITEM", "itemgraph": "DROP_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "PICKUP_ITEM", "itemgraph": "PICKUP_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
-    {"grieflogger": "CRAFT_ITEM", "itemgraph": "CRAFT", "status": "compatible", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "CRAFT_ITEM", "itemgraph": "CRAFT", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "ItemGraph preserves transformation lineage and source/result fingerprints."},
     {"grieflogger": "CONSUME_ITEM", "itemgraph": "CONSUME_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "BREAK_ITEM", "itemgraph": "BREAK_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "THROW_ITEM", "itemgraph": "THROW_ITEM", "status": "unresolved", "evidence_class": "observed", "quantity": "non_quantity_projectile_evidence", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "ItemGraph currently records projectile spawn evidence without claiming a quantity transfer; GriefLogger's item-usage row includes item/count semantics."},
@@ -41,9 +41,9 @@
     {"grieflogger": "QUIT", "itemgraph": "PLAYER_QUIT", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "CHAT", "itemgraph": "CHAT_MESSAGE", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "COMMAND", "itemgraph": "COMMAND_ATTEMPT", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
-    {"grieflogger": "CRAFT_ITEM", "itemgraph": "CRAFT", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "ItemGraph preserves transformation lineage and source/result fingerprints."},
     {"grieflogger": "SMELT", "itemgraph": "SMELT", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "ItemGraph preserves transformation lineage and source/result fingerprints."},
     {"grieflogger": "ANVIL_RENAME", "itemgraph": "ANVIL_RENAME", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "ItemGraph preserves transformation lineage and source/result fingerprints."},
+    {"grieflogger": null, "itemgraph": "CRAFT_TRANSFORMATION_LINEAGE", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental lineage detail beyond the GriefLogger action row."},
     {"grieflogger": null, "itemgraph": "HOPPER_INSERT", "status": "extended", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental automation evidence with unknown endpoints; GriefLogger does not publish an equivalent hopper action."},
     {"grieflogger": null, "itemgraph": "HOPPER_EXTRACT", "status": "extended", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental automation evidence with unknown endpoints; GriefLogger does not publish an equivalent hopper action."}
   ],
@@ -77,25 +77,25 @@
     }
   },
   "configuration_controls": [
-    {"grieflogger": "useMysql", "itemgraph": "storage.backend", "status": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlHost", "itemgraph": "storage.mysql.host", "status": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlPort", "itemgraph": "storage.mysql.port", "status": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlDatabase", "itemgraph": "storage.mysql.database", "status": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlUsername", "itemgraph": "storage.mysql.username", "status": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlPassword", "itemgraph": "storage.mysql.password", "status": "planned", "owner_issue": 29, "redacted": true},
-    {"grieflogger": "mysqlTimeout", "itemgraph": "storage.connection_timeout", "status": "planned", "owner_issue": 29},
-    {"grieflogger": "useIndexes", "itemgraph": "storage.index_policy", "status": "planned", "owner_issue": 29},
-    {"grieflogger": "maxPageSize", "itemgraph": "query.max_page_size", "status": "planned", "owner_issue": 30},
-    {"grieflogger": "serverSideOnlyMode", "itemgraph": "server_side_only", "status": "planned", "owner_issue": 30},
-    {"grieflogger": "queueFrequency", "itemgraph": "ingestion.queue_frequency", "status": "planned", "owner_issue": 30},
-    {"grieflogger": "helloFrequency", "itemgraph": "operations.hello_frequency", "status": "planned", "owner_issue": 30}
+    {"grieflogger": "useMysql", "itemgraph": "storage.backend", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
+    {"grieflogger": "mysqlHost", "itemgraph": "storage.mysql.host", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
+    {"grieflogger": "mysqlPort", "itemgraph": "storage.mysql.port", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
+    {"grieflogger": "mysqlDatabase", "itemgraph": "storage.mysql.database", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
+    {"grieflogger": "mysqlUsername", "itemgraph": "storage.mysql.username", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
+    {"grieflogger": "mysqlPassword", "itemgraph": "storage.mysql.password", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29, "redacted": true},
+    {"grieflogger": "mysqlTimeout", "itemgraph": "storage.connection_timeout", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
+    {"grieflogger": "useIndexes", "itemgraph": "storage.index_policy", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
+    {"grieflogger": "maxPageSize", "itemgraph": "query.max_page_size", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30},
+    {"grieflogger": "serverSideOnlyMode", "itemgraph": "server_side_only", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30},
+    {"grieflogger": "queueFrequency", "itemgraph": "ingestion.queue_frequency", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30},
+    {"grieflogger": "helloFrequency", "itemgraph": "operations.hello_frequency", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30}
   ],
   "inspector_behavior": [
-    {"grieflogger": "left_click_block_history", "itemgraph": "block_left_click_history", "status": "planned", "owner_issue": 26},
-    {"grieflogger": "right_click_functional_block_history", "itemgraph": "functional_block_right_click_history", "status": "planned", "owner_issue": 26},
+    {"grieflogger": "left_click_block_history", "itemgraph": "block_left_click_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
+    {"grieflogger": "right_click_functional_block_history", "itemgraph": "functional_block_right_click_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
     {"grieflogger": "container_history", "itemgraph": "container_history", "status": "compatible", "owner_issue": 26},
-    {"grieflogger": "double_chest_history", "itemgraph": "double_chest_history", "status": "planned", "owner_issue": 26},
-    {"grieflogger": "door_history", "itemgraph": "door_history", "status": "planned", "owner_issue": 26}
+    {"grieflogger": "double_chest_history", "itemgraph": "double_chest_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
+    {"grieflogger": "door_history", "itemgraph": "door_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26}
   ],
   "storage": {
     "native": ["sqlite"],
