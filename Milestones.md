@@ -154,10 +154,10 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Delivered through issue #25: the unified filtered lookup now merges native audit,
   item-flow, transformation, and already-normalized `GRIEFLOGGER` observations with
   bounded paging, source IDs, and canonical action filters. The generic eleven-table
-  historical ledger is currently provenance-only; its normalized event projection is
-  owned by #28. Remaining: freeze the source/profile authority
+  historical ledger remains the immutable source of truth and its normalized event
+  projection is delivered by #28. Remaining: freeze the source/profile authority
   in #43, then complete #24, #26, #27, #28, #29, #30, and #31 for all inspector targets, all 18 pinned actions,
-  normalized lookup projection for the eleven imported tables, MySQL/MariaDB, operations controls, and
+  normalized lookup projection for six event tables (with exact provenance access for five reference/identity tables), MySQL/MariaDB, operations controls, and
   differential staging proof. The runtime matrix in `docs/GRIEFLOGGER_PARITY.md` records
   the exact current boundary.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema

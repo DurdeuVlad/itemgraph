@@ -130,6 +130,57 @@ class UnifiedEvidenceQueryServiceTest {
         assertTrue(rows.stream().allMatch(row -> row.evidenceClass().equals("OBSERVED")));
     }
 
+    @Test
+    void mergesNormalizedHistoricalGriefLoggerRowsWithProvenance() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_grieflogger_lookup
+                    (source_sha256, table_name, source_key, timestamp_ms, level_name,
+                     x, y, z, player_name, player_uuid, action_type, quantity,
+                     subject_id, detail, evidence_class, unresolved_reason)
+                VALUES ('source-hash', 'items', 'pk:42', 5_000, 'minecraft:overworld',
+                        10, 64, 10, 'Alex', 'uuid-alex', 'DROP_ITEM', 2,
+                        'minecraft:stone', 'source=GRIEFLOGGER table=items key=pk:42',
+                        'UNRESOLVED', 'opaque_binary_field')
+                """)) {
+            statement.executeUpdate();
+        }
+
+        AuditLookupFilters filters = AuditLookupFilters.parse(
+                "action.drop_item include.stone user.uuid-alex radius.5", 10_000L);
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(
+                conn, filters, "minecraft:overworld", 10, 64, 10, 10, 0);
+
+        assertEquals(1, rows.size());
+        assertEquals("GRIEFLOGGER", rows.get(0).source());
+        assertEquals("historical#items#pk:42", rows.get(0).evidenceId());
+        assertEquals("DROP_ITEM", rows.get(0).actionType());
+        assertEquals("minecraft:stone", rows.get(0).subjectId());
+        assertEquals("UNRESOLVED", rows.get(0).evidenceClass());
+        assertTrue(rows.get(0).detail().contains("table=items"));
+    }
+
+    @Test
+    void exactHistoricalProvenanceLookupReturnsReferenceRows() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_grieflogger_rows
+                    (source_sha256, schema_fingerprint, table_name, source_key,
+                     row_ordinal, payload_json, action_id, imported_at, unresolved_reason)
+                VALUES ('source-hash', 'schema-hash', 'usernames', 'pk:7',
+                        1, '{"time":42,"name":"OldAlex"}', NULL, 5_000, NULL)
+                """)) {
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findHistoricalProvenance(
+                conn, "source-hash", "usernames", "pk:7", 10, 0);
+
+        assertEquals(1, rows.size());
+        assertEquals("provenance#usernames#pk:7", rows.get(0).evidenceId());
+        assertEquals("HISTORICAL_PROVENANCE", rows.get(0).actionType());
+        assertEquals("PROVENANCE_ONLY", rows.get(0).evidenceClass());
+        assertTrue(rows.get(0).detail().contains("OldAlex"));
+    }
+
     private long node(String type, double x, double y, double z, String label, String owner) throws Exception {
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_nodes (node_type, owner_uuid, level_id, x, y, z, custom_label)

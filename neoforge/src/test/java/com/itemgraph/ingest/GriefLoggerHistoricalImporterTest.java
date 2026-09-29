@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -74,6 +75,70 @@ class GriefLoggerHistoricalImporterTest {
         assertEquals("COMPLETE", second.status());
         assertEquals(0, second.rowsImported());
         assertArrayEquals(before, Files.readAllBytes(sourcePath));
+    }
+
+    @Test
+    void projectsEventTablesWithHistoricalReferencesAndProvenance() throws Exception {
+        Path sourcePath = tempDir.resolve("grieflogger-lookup.db");
+        createLookupFixture(sourcePath);
+        byte[] before = Files.readAllBytes(sourcePath);
+        database.initialize(tempDir.resolve("itemgraph-lookup.db"));
+
+        GriefLoggerHistoricalImporter.ImportReport report = new GriefLoggerHistoricalImporter(
+                new GriefLoggerAdapter(sourcePath), database).importAll();
+
+        assertEquals("COMPLETE", report.status());
+        assertEquals(12, report.rowsImported());
+        assertEquals(0, report.rowsOpaque());
+        assertArrayEquals(before, Files.readAllBytes(sourcePath));
+
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT table_name, action_type, timestamp_ms, level_name, player_name,
+                       player_uuid, quantity, subject_id, evidence_class, detail
+                FROM ig_grieflogger_lookup ORDER BY table_name
+                """); ResultSet rows = statement.executeQuery()) {
+            assertTrue(rows.next());
+            assertEquals("blocks", rows.getString("table_name"));
+            assertEquals("BREAK_BLOCK", rows.getString("action_type"));
+            assertEquals("minecraft:overworld", rows.getString("level_name"));
+            assertEquals("Alice (old)", rows.getString("player_name"));
+            assertEquals("minecraft:diamond_sword", rows.getString("subject_id"));
+            assertEquals("OBSERVED", rows.getString("evidence_class"));
+            assertTrue(rows.getString("detail").contains("table=blocks"));
+
+            assertTrue(rows.next());
+            assertEquals("chats", rows.getString("table_name"));
+            assertEquals("CHAT_MESSAGE", rows.getString("action_type"));
+            assertTrue(rows.getString("detail").contains("text=hello"));
+
+            assertTrue(rows.next());
+            assertEquals("commands", rows.getString("table_name"));
+            assertEquals("COMMAND_ATTEMPT", rows.getString("action_type"));
+
+            assertTrue(rows.next());
+            assertEquals("containers", rows.getString("table_name"));
+            assertEquals("ADD_ITEM", rows.getString("action_type"));
+            assertEquals(3, rows.getInt("quantity"));
+
+            assertTrue(rows.next());
+            assertEquals("items", rows.getString("table_name"));
+            assertEquals("REMOVE_ITEM", rows.getString("action_type"));
+            assertEquals("Alice (old)", rows.getString("player_name"));
+
+            assertTrue(rows.next());
+            assertEquals("sessions", rows.getString("table_name"));
+            assertEquals("PLAYER_JOIN", rows.getString("action_type"));
+            assertFalse(rows.next());
+        }
+
+        GriefLoggerHistoricalImporter.ImportReport second = new GriefLoggerHistoricalImporter(
+                new GriefLoggerAdapter(sourcePath), database).importAll();
+        assertEquals(0, second.rowsImported());
+        try (Statement statement = database.getConnection().createStatement();
+             ResultSet rows = statement.executeQuery("SELECT COUNT(*) FROM ig_grieflogger_lookup")) {
+            assertTrue(rows.next());
+            assertEquals(6, rows.getInt(1));
+        }
     }
 
     @Test
@@ -210,6 +275,36 @@ class GriefLoggerHistoricalImporterTest {
                     stmt.executeUpdate();
                 }
             }
+        }
+    }
+
+    private static void createLookupFixture(Path path) throws Exception {
+        Class.forName("org.sqlite.JDBC");
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, data BLOB, amount INTEGER, action INTEGER)");
+            stmt.execute("CREATE TABLE containers (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, data BLOB, amount INTEGER, action INTEGER)");
+            stmt.execute("CREATE TABLE blocks (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, action INTEGER)");
+            stmt.execute("CREATE TABLE sessions (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, action INTEGER)");
+            stmt.execute("CREATE TABLE chats (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, message TEXT)");
+            stmt.execute("CREATE TABLE commands (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, command TEXT)");
+            stmt.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, uuid TEXT)");
+            stmt.execute("CREATE TABLE usernames (id INTEGER PRIMARY KEY, time INTEGER, uuid TEXT, name TEXT)");
+            stmt.execute("CREATE TABLE levels (id INTEGER PRIMARY KEY, name TEXT)");
+            stmt.execute("CREATE TABLE materials (id INTEGER PRIMARY KEY, name TEXT)");
+            stmt.execute("CREATE TABLE entities (id INTEGER PRIMARY KEY, name TEXT)");
+            stmt.execute("INSERT INTO users VALUES (1, 'Alice', 'uuid-a')");
+            stmt.execute("INSERT INTO usernames VALUES (1, 50, 'uuid-a', 'Alice (old)')");
+            stmt.execute("INSERT INTO usernames VALUES (2, 150, 'uuid-a', 'Alice (new)')");
+            stmt.execute("INSERT INTO levels VALUES (1, 'minecraft:overworld')");
+            stmt.execute("INSERT INTO materials VALUES (1, 'minecraft:diamond_sword')");
+            stmt.execute("INSERT INTO entities VALUES (1, 'minecraft:zombie')");
+            stmt.execute("INSERT INTO items VALUES (1, 100, 1, 1, 10, 64, 10, 1, NULL, 2, 0)");
+            stmt.execute("INSERT INTO containers VALUES (1, 110, 1, 1, 11, 64, 10, 1, NULL, 3, 1)");
+            stmt.execute("INSERT INTO blocks VALUES (1, 120, 1, 1, 12, 64, 10, 1, 0)");
+            stmt.execute("INSERT INTO sessions VALUES (1, 130, 1, 1, 12, 64, 10, 0)");
+            stmt.execute("INSERT INTO chats VALUES (1, 140, 1, 1, 12, 64, 10, 'hello')");
+            stmt.execute("INSERT INTO commands VALUES (1, 150, 1, 1, 12, 64, 10, '/itemgraph lookup')");
         }
     }
 }

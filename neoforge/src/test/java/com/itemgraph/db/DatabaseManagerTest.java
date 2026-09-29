@@ -32,7 +32,7 @@ class DatabaseManagerTest {
 
         assertTrue(dbManager.isInitialized());
         assertTrue(dbManager.isConnected());
-        assertEquals(14, dbManager.getCurrentSchemaVersion());
+        assertEquals(15, dbManager.getCurrentSchemaVersion());
         assertTrue(Files.exists(dbPath));
 
         Connection conn = dbManager.getConnection();
@@ -121,7 +121,7 @@ class DatabaseManagerTest {
         // Verify re-initializing does not fail and migrations are idempotent
         dbManager.close();
         dbManager.initialize(dbPath);
-        assertEquals(14, dbManager.getCurrentSchemaVersion());
+        assertEquals(15, dbManager.getCurrentSchemaVersion());
     }
 
     /**
