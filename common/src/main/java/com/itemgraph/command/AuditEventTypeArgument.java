@@ -37,7 +37,8 @@ final class AuditEventTypeArgument implements ArgumentType<String> {
         int cursor = reader.getCursor();
         String value = reader.readUnquotedString();
         String normalized = value.toUpperCase(Locale.ROOT);
-        if (!AuditEventQueryService.EVENT_TYPES.contains(normalized)) {
+        if (AuditEventQueryService.EVENT_TYPES.stream()
+                .noneMatch(candidate -> candidate.equalsIgnoreCase(normalized))) {
             reader.setCursor(cursor);
             throw INVALID.createWithContext(reader);
         }

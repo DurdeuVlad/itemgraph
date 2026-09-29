@@ -245,6 +245,9 @@ class ItemGraphCommandsHelpTest {
 
         var nativeInteractionLookup = dispatcher.parse("itemgraph lookup INTERACT_BLOCK", source);
         assertParsedCompletely(nativeInteractionLookup, "native block-interaction lookup syntax");
+
+        var nativeAllLookup = dispatcher.parse("itemgraph lookup all", source);
+        assertParsedCompletely(nativeAllLookup, "native all-events lookup syntax");
     }
 
     private void assertParsedCompletely(com.mojang.brigadier.ParseResults<CommandSourceStack> parsed,
