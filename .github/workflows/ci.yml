@@ -50,6 +50,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 tools/validate_grieflogger_profile.py
 
+      - name: Validate exact GriefLogger 1.21.1 release fixture
+        env:
+          GRIEFLOGGER_RELEASE_FIXTURE_CHECK_REMOTE: '1'
+        run: python3 tools/validate_grieflogger_release_fixture.py
+
       - name: Test and build all loader artifacts
         run: ./gradlew clean build
 

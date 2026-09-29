@@ -138,7 +138,7 @@ EXPECTED_EXTENSION_ACTION_CONTRACT: dict[str, tuple[str, str, str]] = {
     "HOPPER_INSERT": ("extended", "observed", "signed_delta"),
     "HOPPER_EXTRACT": ("extended", "observed", "signed_delta"),
 }
-REQUIRED_MILESTONE_ISSUES = {24, 25, 26, 27, 28, 29, 30, 31, 43}
+REQUIRED_MILESTONE_ISSUES = {24, 25, 26, 27, 28, 29, 30, 31, 43, 54}
 M8_MILESTONE_TITLE = "M8: Drop-in GriefLogger parity"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -181,6 +181,17 @@ def canonical_source_profile(registry: dict[str, Any]) -> bytes:
 def validate_registry(registry: dict[str, Any]) -> None:
     require(registry.get("schema_version") == 1, "registry schema_version must be 1")
     require(registry.get("mod_id") == "itemgraph", "registry mod_id must be itemgraph")
+
+    release_fixture = registry.get("release_fixture")
+    require(isinstance(release_fixture, dict), "registry release_fixture must be an object")
+    require(
+        release_fixture.get("path") == "docs/grieflogger-fixtures/1.2.10-1.21.1.json"
+        and release_fixture.get("version") == "1.2.10-1.21.1"
+        and release_fixture.get("minecraft") == "1.21.1"
+        and release_fixture.get("loaders") == ["fabric", "neoforge"]
+        and release_fixture.get("owner_issue") == 54,
+        "registry release fixture pointer changed",
+    )
 
     baseline = registry.get("audit_baseline")
     require(isinstance(baseline, dict), "registry audit_baseline must be an object")
@@ -303,6 +314,9 @@ def validate_documents(registry: dict[str, Any]) -> None:
         "source-profile hash",
         "11 tables",
         "18 actions",
+        "1.2.10-1.21.1",
+        "160f77435c9527304adba691388295ead00af40db482338fcbf87951d929e648",
+        "issue #54",
     ]
     for fragment in required_parity_fragments:
         require(fragment in parity, f"parity document is missing required fragment: {fragment}")

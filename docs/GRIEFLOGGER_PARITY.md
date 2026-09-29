@@ -57,6 +57,35 @@ The source defines 18 actions across block, session, and item enums and creates
 `users`, `usernames`, `levels`, `materials`, and `entities`. The profile and
 contradiction matrix are tracked in [issue #43](https://github.com/DurdeuVlad/itemgraph/issues/43).
 
+### Exact 1.21.1 release fixture
+
+The release target for drop-in compatibility is GriefLogger `1.2.10-1.21.1`,
+for both Fabric and NeoForge. The checked-in
+[`1.2.10-1.21.1 release fixture`](grieflogger-fixtures/1.2.10-1.21.1.json)
+records the official Modrinth file IDs, URLs, byte sizes, SHA-1/SHA-256/SHA-512
+digests, loader metadata, Java 21 mixin contracts, embedded SQLite 3.47.2.0
+and MySQL Connector/J 8.4.0 versions, action IDs, all 11 table column layouts,
+commands, configuration defaults, and inspector behavior. Its canonical
+fixture digest is
+`160f77435c9527304adba691388295ead00af40db482338fcbf87951d929e648`.
+
+The exact published artifacts are the authority for the 1.21.1 target. The
+Git tag named `1.2.10-1.21.1` points at source metadata from the later 26.2
+development line, so that source tree is retained as behavior research and is
+not treated as binary compatibility evidence. CI runs
+`tools/validate_grieflogger_release_fixture.py` against the pinned metadata and
+can download and hash both official artifacts when the release-fixture check
+is enabled. The owning issue is issue #54
+([exact-release fixture](https://github.com/DurdeuVlad/itemgraph/issues/54)); it
+owns this fixture and any future release refresh.
+
+The fixture records two explicit unresolved differences: the target runtime
+metadata is Minecraft 1.21.1/Java 21 while the pinned source metadata is
+Minecraft 26.2/Java 25 (owned by #54), and observable native-only behavior still
+requires differential replay against that source profile (owned by
+[#31](https://github.com/DurdeuVlad/itemgraph/issues/31)). Neither difference
+is hidden behind a generic “compatible” label.
+
 The source-profile hash is computed with SHA-256. Its canonical input is the
 compact, sorted-key JSON object containing the pinned `ref`, `commit`, sorted
 source-file URLs, sorted source action enum names, and sorted source table

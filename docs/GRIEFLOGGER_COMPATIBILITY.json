@@ -9,6 +9,13 @@
     "documentation": "https://daqem.com/projects/grieflogger",
     "database_policy": "read_only"
   },
+  "release_fixture": {
+    "path": "docs/grieflogger-fixtures/1.2.10-1.21.1.json",
+    "version": "1.2.10-1.21.1",
+    "minecraft": "1.21.1",
+    "loaders": ["fabric", "neoforge"],
+    "owner_issue": 54
+  },
   "audit_baseline": {
     "ref": "26.2",
     "commit": "d315098b3f37317a5cddfbd75086f4f912f16a83",
