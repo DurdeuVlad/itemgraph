@@ -8,9 +8,6 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.List;
-
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,32 +19,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class MariaDbDialectIntegrationTest {
     @Test
-    void migrationAndBasicEvidenceContractRunsOnConfiguredServers() throws Exception {
-        List<Endpoint> endpoints = new ArrayList<>();
-        addEndpoint(endpoints, "ITEMGRAPH_TEST_MARIADB_URL", "ITEMGRAPH_TEST_MARIADB_USER", "ITEMGRAPH_TEST_MARIADB_PASSWORD");
-        addEndpoint(endpoints, "ITEMGRAPH_TEST_MYSQL_URL", "ITEMGRAPH_TEST_MYSQL_USER", "ITEMGRAPH_TEST_MYSQL_PASSWORD");
-        assumeTrue(!endpoints.isEmpty(), "No disposable MySQL/MariaDB endpoint configured");
-
-        for (Endpoint endpoint : endpoints) {
-            runContract(endpoint);
-        }
+    void mariaDbMigrationAndEvidenceContract() throws Exception {
+        runConfigured("ITEMGRAPH_TEST_MARIADB_URL", "ITEMGRAPH_TEST_MARIADB_USER", "ITEMGRAPH_TEST_MARIADB_PASSWORD");
     }
 
-    private static void addEndpoint(List<Endpoint> endpoints, String urlKey, String userKey, String passwordKey) {
+    @Test
+    void mysqlMigrationAndEvidenceContract() throws Exception {
+        runConfigured("ITEMGRAPH_TEST_MYSQL_URL", "ITEMGRAPH_TEST_MYSQL_USER", "ITEMGRAPH_TEST_MYSQL_PASSWORD");
+    }
+
+    private static void runConfigured(String urlKey, String userKey, String passwordKey) throws Exception {
         String url = System.getenv(urlKey);
-        if (url != null && !url.isBlank()) {
-            endpoints.add(new Endpoint(url, System.getenv().getOrDefault(userKey, "itemgraph"),
-                    System.getenv().getOrDefault(passwordKey, "itemgraph")));
-        }
+        assumeTrue(url != null && !url.isBlank(), "No endpoint configured for " + urlKey);
+        runContract(new Endpoint(url, System.getenv().getOrDefault(userKey, "itemgraph"),
+                System.getenv().getOrDefault(passwordKey, "itemgraph")));
     }
 
     private static void runContract(Endpoint endpoint) throws Exception {
-        System.out.println("[ItemGraph dialect test] connecting to " + endpoint.url());
         try (Connection raw = DriverManager.getConnection(endpoint.url(), endpoint.user(), endpoint.password());
              Connection conn = DialectConnection.wrap(raw, DatabaseDialect.MYSQL_MARIADB)) {
-            System.out.println("[ItemGraph dialect test] connected to " + endpoint.url());
             assertEquals(DatabaseDialect.MYSQL_MARIADB, DatabaseDialect.fromConnection(conn));
-            System.out.println("[ItemGraph dialect test] applying migrations to " + endpoint.url());
             assertEquals(15, MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
             assertEquals(15, MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
 
@@ -77,7 +68,6 @@ class MariaDbDialectIntegrationTest {
                 stmt.setLong(4, 4);
                 stmt.executeUpdate();
             }
-            System.out.println("[ItemGraph dialect test] contract passed for " + endpoint.url());
         }
     }
 
