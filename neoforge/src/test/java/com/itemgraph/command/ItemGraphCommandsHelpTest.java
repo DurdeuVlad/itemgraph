@@ -231,8 +231,17 @@ class ItemGraphCommandsHelpTest {
                 "itemgraph lookup filters action.break_block radius.20", source);
         assertParsedCompletely(explicit, "explicit ItemGraph filter syntax");
 
+        var radiusOnly = dispatcher.parse("itemgraph lookup radius.10", source);
+        assertParsedCompletely(radiusOnly, "one-token GriefLogger filter syntax");
+        assertTrue(radiusOnly.getContext().getNodes().stream()
+                        .anyMatch(node -> node.getNode().getName().equals("lookupFilters")),
+                "radius-only filter was routed to the native event-type argument");
+
         var nativeLookup = dispatcher.parse("itemgraph lookup BREAK_BLOCK 50 60", source);
         assertParsedCompletely(nativeLookup, "native audit lookup syntax");
+        assertTrue(nativeLookup.getContext().getNodes().stream()
+                        .anyMatch(node -> node.getNode().getName().equals("eventType")),
+                "native event lookup was routed to the direct filter argument");
     }
 
     private void assertParsedCompletely(com.mojang.brigadier.ParseResults<CommandSourceStack> parsed,

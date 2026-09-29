@@ -212,7 +212,7 @@ public final class ItemGraphCommands {
     private static LiteralArgumentBuilder<CommandSourceStack> buildLookupCommand() {
         LiteralArgumentBuilder<CommandSourceStack> lookup = Commands.literal("lookup");
 
-        var type = Commands.argument("eventType", StringArgumentType.word())
+        var type = Commands.argument("eventType", AuditEventTypeArgument.type())
                 .suggests(ItemGraphCommands::suggestAuditEventTypes)
                 .executes(ctx -> lookupAudit(ctx,
                         StringArgumentType.getString(ctx, "eventType"), null,
@@ -229,7 +229,7 @@ public final class ItemGraphCommands {
         type.then(typeLimit);
         lookup.then(type);
 
-        var playerType = Commands.argument("eventType", StringArgumentType.word())
+        var playerType = Commands.argument("eventType", AuditEventTypeArgument.type())
                 .suggests(ItemGraphCommands::suggestAuditEventTypes)
                 .executes(ctx -> lookupAudit(ctx,
                         StringArgumentType.getString(ctx, "eventType"),
@@ -302,7 +302,7 @@ public final class ItemGraphCommands {
                         IntegerArgumentType.getInteger(ctx, "page"),
                         IntegerArgumentType.getInteger(ctx, "limit"), null));
         limit.then(since);
-        var eventType = Commands.argument("eventType", StringArgumentType.word())
+        var eventType = Commands.argument("eventType", AuditEventTypeArgument.type())
                 .suggests(ItemGraphCommands::suggestAuditEventTypes)
                 .executes(ctx -> lookupAuditPage(ctx,
                         StringArgumentType.getString(ctx, "eventType"),
@@ -325,7 +325,7 @@ public final class ItemGraphCommands {
                         StringArgumentType.getString(ctx, "eventType"),
                         IntegerArgumentType.getInteger(ctx, "limit"), null));
         limit.then(since);
-        var eventType = Commands.argument("eventType", StringArgumentType.word())
+        var eventType = Commands.argument("eventType", AuditEventTypeArgument.type())
                 .suggests(ItemGraphCommands::suggestAuditEventTypes)
                 .executes(ctx -> lookupAuditNear(ctx,
                         StringArgumentType.getString(ctx, "eventType"), QueryLimits.DEFAULT_LIMIT, null));
