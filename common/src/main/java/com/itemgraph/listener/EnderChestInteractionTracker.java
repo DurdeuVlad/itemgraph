@@ -56,7 +56,12 @@ public final class EnderChestInteractionTracker {
         }
         // A menu switch can skip a loader close callback. Flush a block-container
         // watch before replacing it with this player-owned inventory session.
-        ContainerInteractionTracker.getInstance().closeSession(playerUuid, Double.NaN, Double.NaN, Double.NaN);
+        if (!ContainerInteractionTracker.getInstance().closeSession(
+                playerUuid, Double.NaN, Double.NaN, Double.NaN)) {
+            // Keep the block session retryable rather than opening a second
+            // player-owned session after a failed final snapshot.
+            return;
+        }
         if (!closeSession(playerUuid, Double.NaN, Double.NaN, Double.NaN)) {
             // Preserve the old session when its final snapshot failed. Replacing
             // it would discard the only retryable evidence window.

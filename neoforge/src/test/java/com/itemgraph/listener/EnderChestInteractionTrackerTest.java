@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EnderChestInteractionTrackerTest {
     @Test
@@ -74,6 +75,36 @@ class EnderChestInteractionTrackerTest {
 
         assertEquals(1, ender.sessionCount());
         assertFalse(blocks.isWatched(key));
+        ender.clearAll();
+        blocks.clearAll();
+    }
+
+    @Test
+    void enderMenuDoesNotOpenWhenBlockFlushFails() {
+        EnderChestInteractionTracker ender = EnderChestInteractionTracker.getInstance();
+        ContainerInteractionTracker blocks = ContainerInteractionTracker.getInstance();
+        ender.clearAll();
+        blocks.clearAll();
+        UUID player = UUID.randomUUID();
+        AtomicBoolean fail = new AtomicBoolean(false);
+        ContainerInteractionTracker.InventoryTotals empty =
+                new ContainerInteractionTracker.InventoryTotals(Map.of(), Map.of());
+        ContainerInteractionTracker.ContainerKey key =
+                new ContainerInteractionTracker.ContainerKey("minecraft:overworld", 10, 64, 10);
+        blocks.openSession(player, "Steve", key, () -> {
+            if (fail.get()) {
+                throw new IllegalStateException("synthetic snapshot failure");
+            }
+            return empty;
+        }, List.of());
+        fail.set(true);
+
+        ender.openSession(player, "Steve", "minecraft:overworld", 1, 64, 1, () -> empty);
+
+        assertEquals(0, ender.sessionCount());
+        assertTrue(blocks.isWatched(key));
+        fail.set(false);
+        assertTrue(blocks.closeSession(player, Double.NaN, Double.NaN, Double.NaN));
         ender.clearAll();
         blocks.clearAll();
     }
