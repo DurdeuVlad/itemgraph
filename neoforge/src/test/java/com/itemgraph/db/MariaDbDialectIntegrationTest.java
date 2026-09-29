@@ -42,9 +42,12 @@ class MariaDbDialectIntegrationTest {
     }
 
     private static void runContract(Endpoint endpoint) throws Exception {
+        System.out.println("[ItemGraph dialect test] connecting to " + endpoint.url());
         try (Connection raw = DriverManager.getConnection(endpoint.url(), endpoint.user(), endpoint.password());
              Connection conn = DialectConnection.wrap(raw, DatabaseDialect.MYSQL_MARIADB)) {
+            System.out.println("[ItemGraph dialect test] connected to " + endpoint.url());
             assertEquals(DatabaseDialect.MYSQL_MARIADB, DatabaseDialect.fromConnection(conn));
+            System.out.println("[ItemGraph dialect test] applying migrations to " + endpoint.url());
             assertEquals(15, MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
             assertEquals(15, MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
 
@@ -74,6 +77,7 @@ class MariaDbDialectIntegrationTest {
                 stmt.setLong(4, 4);
                 stmt.executeUpdate();
             }
+            System.out.println("[ItemGraph dialect test] contract passed for " + endpoint.url());
         }
     }
 
