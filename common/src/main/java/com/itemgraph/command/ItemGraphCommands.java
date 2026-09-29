@@ -21,6 +21,8 @@ import com.itemgraph.query.QueryLimits;
 import com.itemgraph.query.QueryWindow;
 import com.itemgraph.query.TraceQueryService;
 import com.itemgraph.query.TraceResult;
+import com.itemgraph.query.UnifiedEvidenceDetail;
+import com.itemgraph.query.UnifiedEvidenceQueryService;
 import com.itemgraph.tracker.ItemEntityTracker;
 import com.itemgraph.core.port.RuntimeInformationPort;
 import com.mojang.brigadier.CommandDispatcher;
@@ -59,6 +61,7 @@ public final class ItemGraphCommands {
 
     private static final EventQueryService EVENT_QUERIES = new EventQueryService();
     private static final AuditEventQueryService AUDIT_EVENT_QUERIES = new AuditEventQueryService();
+    private static final UnifiedEvidenceQueryService UNIFIED_EVIDENCE_QUERIES = new UnifiedEvidenceQueryService();
     private static final ExplainQueryService EXPLAIN_QUERIES = new ExplainQueryService();
     private static final TraceQueryService TRACE_QUERIES = new TraceQueryService();
     private static final AuditService AUDIT_SERVICE = new AuditService();
@@ -363,7 +366,7 @@ public final class ItemGraphCommands {
 
     private static CompletableFuture<Suggestions> suggestAuditEventTypes(
             CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
-        return SharedSuggestionProvider.suggest(AuditEventQueryService.EVENT_TYPES, builder);
+        return SharedSuggestionProvider.suggest(UnifiedEvidenceQueryService.ACTION_TYPES, builder);
     }
 
     /** /ig event <observationId> - one raw observation, labelled OBSERVED. */
@@ -637,26 +640,33 @@ public final class ItemGraphCommands {
                 + " limit=" + clampedLimit
                 + (effectivePage == requestedPage ? "" : " requestedPage=" + requestedPage + " offset=" + offset);
         return QueryDispatcher.dispatch(source, label, conn -> {
-            List<AuditEventDetail> events;
+            List<String> lines;
+            int returnedRows;
             if (session.filters() != null) {
-                events = AUDIT_EVENT_QUERIES.findFiltered(conn, session.filters(), session.levelId(),
+                List<UnifiedEvidenceDetail> evidence = UNIFIED_EVIDENCE_QUERIES.findFiltered(
+                        conn, session.filters(), session.levelId(),
                         session.centerX(), session.centerY(), session.centerZ(), clampedLimit, offset);
+                lines = QueryFormatter.formatUnifiedEvidence(evidence, filter);
+                returnedRows = evidence.size();
             } else {
-                events = AUDIT_EVENT_QUERIES.find(conn, session.eventType(), session.playerName(),
+                List<AuditEventDetail> events = AUDIT_EVENT_QUERIES.find(conn, session.eventType(), session.playerName(),
                         session.window(), session.levelId(), session.centerX(), session.centerY(),
                         session.centerZ(), session.radius(), clampedLimit, offset);
+                lines = QueryFormatter.formatAuditEvents(events, filter);
+                returnedRows = events.size();
             }
             List<QueryDispatcher.QueryAction> actions = new java.util.ArrayList<>();
             if (standaloneCommand && effectivePage > 1) {
                 actions.add(new QueryDispatcher.QueryAction("Previous",
                         standalonePageCommand(effectivePage - 1, session.sessionId())));
             }
-            if (standaloneCommand && shouldOfferNextAuditPage(effectivePage, clampedLimit, offset, events.size())) {
+            if (standaloneCommand && shouldOfferNextAuditPage(effectivePage, clampedLimit, offset,
+                    returnedRows)) {
                 actions.add(new QueryDispatcher.QueryAction("Next",
                         standalonePageCommand(effectivePage + 1, session.sessionId())));
             }
             return QueryDispatcher.QueryOutput.found(
-                    QueryFormatter.formatAuditEvents(events, filter), actions);
+                    lines, actions);
         });
     }
 

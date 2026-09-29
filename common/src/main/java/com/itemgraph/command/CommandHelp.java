@@ -103,9 +103,9 @@ final class CommandHelp {
         topics.put("lookup filters", List.of(
                 "[ItemGraph] Syntax: /ig lookup filters <filter1> [filter2] [filter3] [filter4] [filter5]",
                 "[ItemGraph] Filters use name.value: action, user, include, exclude, time (m/h/d/y), and radius.",
-                "[ItemGraph] action values are native audit actions (join, quit, chat, command_attempt, place_block, break_block, interact_block, kill_entity, throw_item, shoot_item); quantity-flow drop/pickup actions remain under /ig trace.",
+                "[ItemGraph] action values cover native audit, item-flow, and transformation evidence (join, quit, chat, command_attempt, place_block, break_block, drop_item, pickup_item, craft, smelt, anvil_rename, anvil_repair, and more).",
                 "[ItemGraph] radius is required, uses the issuing player's current dimension and position, and searches a cube clamped to 1..1024 blocks.",
-                "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and native audit results are bounded to 20 rows.",
+                "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and unified evidence results are bounded to 20 rows with source and evidence IDs.",
                 "[ItemGraph] Example: /ig lookup filters action.break_block include.diamond_ore time.1h radius.50"));
         List<String> ingest = List.of(
                 "[ItemGraph] Syntax: /ig ingest now",

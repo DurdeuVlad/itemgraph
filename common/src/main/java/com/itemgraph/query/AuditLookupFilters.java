@@ -129,8 +129,10 @@ public record AuditLookupFilters(
         List<String> result = new ArrayList<>(actions.size());
         for (String action : actions) {
             String normalized = action.toLowerCase(Locale.ROOT).replace('-', '_');
+            if ("all".equals(normalized)) {
+                return List.of();
+            }
             String eventType = switch (normalized) {
-                case "all" -> null;
                 case "join", "player_join" -> "PLAYER_JOIN";
                 case "quit", "player_quit" -> "PLAYER_QUIT";
                 case "chat", "chat_message" -> "CHAT_MESSAGE";
@@ -143,7 +145,22 @@ public record AuditLookupFilters(
                 case "kill_entity" -> "KILL_ENTITY";
                 case "throw_item" -> "THROW_ITEM";
                 case "shoot_item" -> "SHOOT_ITEM";
-                default -> throw new IllegalArgumentException("unsupported native audit action '" + action + "'");
+                case "add_item", "add" -> "ADD_ITEM";
+                case "remove_item", "remove" -> "REMOVE_ITEM";
+                case "drop_item", "drop" -> "DROP_ITEM";
+                case "pickup_item", "pickup" -> "PICKUP_ITEM";
+                case "craft", "craft_item" -> "CRAFT";
+                case "smelt" -> "SMELT";
+                case "anvil_rename", "anvil" -> "ANVIL_RENAME";
+                case "anvil_repair", "anvil_rename_repair" -> "ANVIL_REPAIR";
+                case "break_item", "item_break" -> "BREAK_ITEM";
+                case "consume_item", "consume" -> "CONSUME_ITEM";
+                case "hopper_insert" -> "HOPPER_INSERT";
+                case "hopper_extract" -> "HOPPER_EXTRACT";
+                case "death_drop" -> "DEATH_DROP";
+                case "add_item_ender" -> "ADD_ITEM_ENDER";
+                case "remove_item_ender" -> "REMOVE_ITEM_ENDER";
+                default -> throw new IllegalArgumentException("unsupported audit or item-flow action '" + action + "'");
             };
             if (eventType != null && !result.contains(eventType)) {
                 result.add(eventType);

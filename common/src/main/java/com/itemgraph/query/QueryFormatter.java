@@ -100,6 +100,33 @@ public final class QueryFormatter {
         return lines;
     }
 
+    /** Formats the cross-table GriefLogger-compatible lookup timeline. */
+    public static List<String> formatUnifiedEvidence(List<UnifiedEvidenceDetail> evidence,
+                                                      String filterDescription) {
+        List<String> lines = new ArrayList<>();
+        lines.add(PREFIX + "=== UNIFIED EVIDENCE (" + filterDescription + ") ===");
+        if (evidence.isEmpty()) {
+            lines.add(PREFIX + "No audit, item-flow, transformation, or imported evidence matched the requested filters.");
+            return lines;
+        }
+        for (UnifiedEvidenceDetail row : evidence) {
+            String actor = row.playerName() == null ? "(unknown player)" : row.playerName();
+            String location = row.levelName() == null ? "(unknown dimension)" : row.levelName();
+            if (row.x() != null && row.y() != null && row.z() != null) {
+                location += " [" + formatCoordinate(row.x()) + ", "
+                        + formatCoordinate(row.y()) + ", " + formatCoordinate(row.z()) + "]";
+            }
+            String quantity = row.quantity() == 0 ? "" : " quantity=" + row.quantity();
+            String subject = row.subjectId() == null ? "" : " subject=" + row.subjectId();
+            String detail = row.detail() == null ? "" : " detail=" + escapeDetail(row.detail());
+            lines.add(PREFIX + "[" + row.evidenceClass() + "] " + row.source() + " "
+                    + row.evidenceId() + " " + row.actionType()
+                    + " actor=" + actor + " at " + location
+                    + " time=" + formatTime(row.timestampMs()) + quantity + subject + detail);
+        }
+        return lines;
+    }
+
     private static String formatCoordinate(double coordinate) {
         if (coordinate == Math.rint(coordinate)) {
             return Long.toString((long) coordinate);

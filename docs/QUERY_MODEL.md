@@ -42,6 +42,11 @@ Everything below this heading and above "Not yet implemented" is live.
 /ig gui player <playerName> [sinceMinutes]
 /ig gui container <dimension> <x> <y> <z> [sinceMinutes]
 /ig inspect [on|off|status]
+/ig lookup <eventType> [limit] [sinceMinutes]
+/ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]
+/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]
+/ig lookup filters <filter1> [filter2] [filter3] [filter4] [filter5]
+/ig page <page> [session]
 ```
 
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
@@ -65,6 +70,7 @@ names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
 | `sinceMinutes` | long ≥ 1 | unbounded | window is `[now - sinceMinutes, now]`, inclusive; GUI keeps the resolved window constant across pages |
 | `dimension` | resource location | — | required for `/ig gui container`; matches `ig_nodes.level_id` exactly; suggests loaded levels |
 | `x`, `y`, `z` | int | — | block coordinates for `/ig trace container` and `/ig gui container` |
+| `filter` | `name.value` token | — | `/ig lookup filters` accepts action, user, include, exclude, time (`m`, `h`, `d`, `y`), and required radius; at most five tokens |
 
 `limit` has no upper bound in the command grammar on purpose. An over-large request is
 **capped, not rejected**: an admin chasing an incident gets the first page of real output
@@ -94,7 +100,7 @@ command without help fails `ItemGraphCommandsHelpTest`.
 
 ### Execution model
 
-`/ig event`, `/ig explain`, `/ig trace`, `/ig audit`, and the database-backed portion of
+`/ig event`, `/ig explain`, `/ig trace`, `/ig audit`, `/ig lookup`, and the database-backed portion of
 `/ig status` run SQL and formatting off the server thread on a dedicated `ItemGraph-Query-Worker`, then marshal the finished lines back onto the server thread with
 `source.getServer().execute(Runnable)` before calling `sendSuccess`/`sendFailure`. Each
 query reads through its own short-lived read-only connection rather than the ingestion
@@ -106,10 +112,27 @@ A player command returns success as soon as the query is *accepted*; the answer 
 tick or two later. Entity-less commands dispatched on the server thread, including vanilla
 RCON, receive an acceptance message and write completed results to the server log because the
 RCON response buffer is returned with the command. Entity-less off-thread callers can receive
-results synchronously within the five-second buffer timeout.
+results synchronously within the five-second buffer timeout. Player queries have a five-second
+SQLite cancellation deadline as well: the progress handler interrupts a selective scan so
+the single query worker cannot be monopolized by one lookup.
 
 `/ig inspect` changes only per-player volatile state and returns immediately. The subsequent
 container click opens the same asynchronous read-only browser described below.
+
+### Unified filtered lookup
+
+`/ig lookup filters` resolves the required radius around the issuing player's current
+dimension and position, then dispatches one read-only query on the bounded query worker.
+`UnifiedEvidenceQueryService` reads `ig_audit_events`, `ig_observations`, and
+`ig_item_transformations` with parameterized predicates, fetching at most
+`offset + limit` rows from each source. It merges rows by timestamp descending with a
+stable source/evidence-id tie-breaker before applying the global page offset. The action
+filter is OR within its comma-separated values; action, user, include/exclude, time, and
+radius filters are ANDed. A user value matches either stored name or UUID. Imported rows
+retain `source_type=GRIEFLOGGER`, and output keeps the original action and prefixed
+`audit#`, `observation#`, or `transformation#` evidence reference. Radius checks require
+non-null coordinates and use the documented cubic bounds. No GriefLogger database is
+opened or modified by this path.
 
 ### Vanilla flow browser
 

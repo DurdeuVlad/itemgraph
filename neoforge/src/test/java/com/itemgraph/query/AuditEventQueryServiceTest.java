@@ -240,10 +240,14 @@ class AuditEventQueryServiceTest {
                 () -> AuditLookupFilters.parse("action.break_block user.Alex include.stone time.1h radius.5 extra.x", 1_000L));
         assertThrows(IllegalArgumentException.class,
                 () -> AuditLookupFilters.parse("action.break_block", 1_000L));
-        assertThrows(IllegalArgumentException.class,
-                () -> AuditLookupFilters.parse("action.drop_item radius.5", 1_000L));
-        assertThrows(IllegalArgumentException.class,
-                () -> AuditLookupFilters.parse("action.pickup_item radius.5", 1_000L));
+        assertEquals(List.of("DROP_ITEM"), AuditLookupFilters.parse(
+                "action.drop_item radius.5", 1_000L).eventTypes());
+        assertEquals(List.of("PICKUP_ITEM"), AuditLookupFilters.parse(
+                "action.pickup_item radius.5", 1_000L).eventTypes());
+        assertEquals(List.of("CRAFT"), AuditLookupFilters.parse(
+                "action.craft_item radius.5", 1_000L).eventTypes());
+        assertEquals(List.of("ANVIL_REPAIR"), AuditLookupFilters.parse(
+                "action.anvil_repair radius.5", 1_000L).eventTypes());
         AuditLookupFilters dotted = AuditLookupFilters.parse(
                 "include.modid:item.variant radius.5", 1_000L);
         assertEquals(List.of("modid:item.variant"), dotted.includeSubjects());

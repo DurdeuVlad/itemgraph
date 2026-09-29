@@ -366,9 +366,13 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   bounded radius filters.
 - `/ig lookup filters <filter1> ... <filter5>` implements the published
   GriefLogger `name.value` vocabulary for action, user, include, exclude, time,
-  and required radius filters. The query is bounded to 20 rows, runs off-thread,
-  uses a 1..1024 cube around the issuing player, and rejects include/exclude
-  conflicts before SQL dispatch.
+  and required radius filters. `UnifiedEvidenceQueryService` merges native audit,
+  item observations, transformations, and imported `GRIEFLOGGER` observations on
+  the bounded query worker, preserving source and prefixed evidence IDs. The query
+  is bounded to 20 rows, uses a 1..1024 cube around the issuing player, and rejects
+  include/exclude conflicts before SQL dispatch.
+- Player lookup queries are cancelled after five seconds through the SQLite progress
+  handler, preserving the bounded worker queue under selective or poorly indexed scans.
 - Canceled chat, command, death, and block events are excluded; command and block
   callbacks are labeled attempts where the loader hook is pre-action, and canceled
   actions remain distinct from completed evidence.
