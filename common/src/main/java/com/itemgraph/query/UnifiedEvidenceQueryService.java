@@ -116,7 +116,7 @@ public final class UnifiedEvidenceQueryService {
                        COALESCE(origin.custom_label, dest.custom_label) AS player_name,
                        COALESCE(origin.owner_uuid, dest.owner_uuid) AS player_uuid,
                        f.item_id, origin.custom_label AS origin_label,
-                       dest.custom_label AS dest_label, o.raw_data
+                       dest.custom_label AS dest_label
                 FROM ig_observations o
                 LEFT JOIN ig_nodes origin ON origin.id = o.node_id
                 LEFT JOIN ig_nodes dest ON dest.id = o.target_node_id
@@ -149,10 +149,6 @@ public final class UnifiedEvidenceQueryService {
                             + (sourceEventId == null ? "" : " sourceEvent#" + sourceEventId)
                             + " origin=" + valueOr(rs.getString("origin_label"), "(unlabeled)")
                             + " destination=" + valueOr(rs.getString("dest_label"), "(unlabeled)");
-                    String rawData = rs.getString("raw_data");
-                    if (rawData != null && !rawData.isBlank()) {
-                        detail += " raw=" + rawData;
-                    }
                     rows.add(new UnifiedEvidenceDetail(
                             source, "observation#" + rs.getLong("id"), rs.getLong("timestamp_ms"),
                             rs.getString("level_id"), nullableDouble(rs, "x"), nullableDouble(rs, "y"),
