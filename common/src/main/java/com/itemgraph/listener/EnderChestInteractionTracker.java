@@ -43,6 +43,9 @@ public final class EnderChestInteractionTracker {
         if (playerUuid == null || snapshotSource == null) {
             return;
         }
+        // A menu switch can skip a loader close callback. Flush a block-container
+        // watch before replacing it with this player-owned inventory session.
+        ContainerInteractionTracker.getInstance().closeSession(playerUuid, 0.0, 0.0, 0.0);
         closeSession(playerUuid, 0.0, 0.0, 0.0);
         ContainerInteractionTracker.InventoryTotals totals = snapshotSource.get();
         sessions.put(playerUuid, new Session(
