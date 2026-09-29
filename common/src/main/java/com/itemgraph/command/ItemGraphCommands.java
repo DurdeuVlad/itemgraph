@@ -110,7 +110,8 @@ public final class ItemGraphCommands {
                         .then(buildStandalonePageCommand())
                         .then(buildLookupCommand())
                         .then(Commands.literal("ingest")
-                                .then(Commands.literal("now").executes(ItemGraphCommands::ingestNow)))
+                                .then(Commands.literal("now").executes(ItemGraphCommands::ingestNow))
+                                .then(Commands.literal("history").executes(ItemGraphCommands::ingestHistory)))
 
                         // /ig event <observationId>
                         .then(Commands.literal("event")
@@ -841,6 +842,14 @@ public final class ItemGraphCommands {
             SourceCheckpoint containersCp = ingestion.getCheckpoint(conn, IngestionService.SOURCE_CONTAINERS);
             String checkpoints = "items(rowid=" + itemsCp.lastSourceRowid() + ") containers(rowid="
                     + containersCp.lastSourceRowid() + ")";
+            String historicalImport;
+            try (var stmt = conn.createStatement();
+                 var rs = stmt.executeQuery("SELECT status, rows_imported, rows_opaque FROM ig_grieflogger_import_runs ORDER BY id DESC LIMIT 1")) {
+                historicalImport = rs.next()
+                        ? rs.getString("status") + " (" + rs.getLong("rows_imported")
+                        + " rows, " + rs.getLong("rows_opaque") + " opaque)"
+                        : "never run";
+            }
             return QueryDispatcher.QueryOutput.found(List.of(
                     "[ItemGraph] correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s"
                             + " lastPass=" + (lastCorrelation == null ? "never run yet"
@@ -852,6 +861,7 @@ public final class ItemGraphCommands {
                             + " totalObservations=" + totalObservations
                             + " nativeAuditEvents=" + totalAuditEvents
                             + " checkpoints=" + checkpoints
+                            + " historicalImport=" + historicalImport
                             + " lastCycle=" + (lastResult == null ? "never run yet"
                             : (lastResult.success() ? "OK" : "ERROR (" + lastResult.errorMessage() + ")")
                             + " (" + lastResult.itemsIngested() + " items, " + lastResult.containersIngested()
@@ -880,6 +890,17 @@ public final class ItemGraphCommands {
         }
         source.sendSuccess(() -> Component.literal(
                 "[ItemGraph] Manual ingestion and correlation queued on the background worker; check /ig status for the result."), false);
+        return 1;
+    }
+
+    private static int ingestHistory(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        if (!IngestionService.getInstance().requestHistoricalImportAsync()) {
+            source.sendFailure(Component.literal("[ItemGraph] Historical GriefLogger import was not queued: the worker is stopped or an import is already queued."));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal(
+                "[ItemGraph] Read-only historical GriefLogger import queued on the background worker; check /ig status for completion."), false);
         return 1;
     }
 }

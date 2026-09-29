@@ -70,7 +70,7 @@ class ItemGraphCommandsHelpTest {
         assertNotNull(root);
         assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect"),
                 root.getChildren().stream().map(CommandNode::getName).collect(Collectors.toSet()));
-        assertEquals(Set.of("now"), childNames(root, "ingest"));
+        assertEquals(Set.of("now", "history"), childNames(root, "ingest"));
         assertEquals(Set.of("item", "player", "container"), childNames(root, "trace"));
         assertEquals(Set.of("item", "player", "container"), childNames(root, "gui"));
         assertEquals(Set.of("on", "off", "status"), childNames(root, "inspect"));
@@ -78,7 +78,7 @@ class ItemGraphCommandsHelpTest {
         for (String topLevel : Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect")) {
             assertNotNull(CommandHelp.topicLines(topLevel), "missing help topic for /ig " + topLevel);
         }
-        for (String path : List.of("ingest now", "trace item", "trace player", "trace container",
+        for (String path : List.of("ingest now", "ingest history", "trace item", "trace player", "trace container",
                 "gui item", "gui player", "gui container")) {
             List<String> lines = CommandHelp.topicLines(path);
             assertNotNull(lines, "missing help topic for /ig " + path);
