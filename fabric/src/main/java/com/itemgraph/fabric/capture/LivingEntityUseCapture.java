@@ -23,7 +23,8 @@ public final class LivingEntityUseCapture {
     private LivingEntityUseCapture() {
     }
 
-    public record Site(StackTraceElement caller, int stackDepth) {
+    /** Stable invocation marker shared by the HEAD and RETURN callbacks. */
+    public record Site(String callerClass, String callerMethod, int stackDepth) {
     }
 
     public record Capture(ServerPlayer player, ItemStack original, InteractionHand hand, Site site) {
@@ -55,7 +56,7 @@ public final class LivingEntityUseCapture {
     public static Capture finish(Object entity) {
         Deque<Capture> pending = STACKS.get();
         Capture capture = (entity instanceof ServerPlayer player && !player.level().isClientSide())
-                ? removeMatching(pending, currentSite())
+                ? removeMatching(pending, player, currentSite())
                 : (pending == null || pending.isEmpty() ? null : pending.pop());
         if (pending != null && pending.isEmpty()) {
             STACKS.remove();
@@ -65,38 +66,48 @@ public final class LivingEntityUseCapture {
 
     private static Site currentSite() {
         return STACK_WALKER.walk(frames -> {
-            StackTraceElement caller = null;
+            String callerClass = null;
+            String callerMethod = null;
             int depth = 0;
             int index = 0;
             Iterator<StackWalker.StackFrame> iterator = frames.iterator();
             while (iterator.hasNext()) {
                 StackWalker.StackFrame frame = iterator.next();
-                if (index == 3) {
-                    caller = frame.toStackTraceElement();
+                // 0=currentSite, 1=begin/finish, 2=mixin handler,
+                // 3=LivingEntity.completeUsingItem, 4=its caller. The target
+                // method has different source lines at HEAD and RETURN, so
+                // use the stable caller class/method and stack depth instead
+                // of comparing a full StackTraceElement.
+                if (index == 4) {
+                    callerClass = frame.getClassName();
+                    callerMethod = frame.getMethodName();
                 }
                 depth++;
                 index++;
             }
-            return new Site(caller, depth);
+            return new Site(callerClass, callerMethod, depth);
         });
     }
 
-    private static Capture removeMatching(Deque<Capture> pending, Site site) {
+    private static Capture removeMatching(Deque<Capture> pending, ServerPlayer player, Site site) {
         if (pending == null || pending.isEmpty()) {
+            if (pending != null) {
+                pending.clear();
+            }
             return null;
         }
         Capture match = null;
         for (Capture candidate : pending) {
-            if (Objects.equals(candidate.site(), site)) {
+            if (candidate.player() == player && Objects.equals(candidate.site(), site)) {
                 match = candidate;
                 break;
             }
         }
         if (match == null) {
-            // A transformed or modded call path can add one frame between the
-            // HEAD and RETURN callbacks. Preserve the completed-use event by
-            // consuming the most recent bounded capture instead of dropping it.
-            return pending.pop();
+            // Never pair a completed use with a different nested invocation's
+            // original stack. Clear stale markers and drop only this capture.
+            pending.clear();
+            return null;
         }
         while (pending.peek() != match) {
             pending.pop();
