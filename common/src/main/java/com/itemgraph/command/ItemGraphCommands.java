@@ -35,6 +35,7 @@ import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -218,7 +219,8 @@ public final class ItemGraphCommands {
         // argument. Vanilla can serialize these nodes to connected clients; a
         // custom ArgumentType without an ArgumentTypeInfo disconnects operators
         // when the command tree is sent. The direct greedy filter branch below
-        // still owns dotted values such as radius.10.
+        // still owns dotted values such as radius.10 and routes mixed-case native
+        // event tokens through the same normalized execution path.
         for (String eventType : AuditEventQueryService.EVENT_TYPES) {
             lookup.then(buildAuditLookupType(eventType, null));
             if (!eventType.equals(eventType.toLowerCase(java.util.Locale.ROOT))) {
@@ -227,6 +229,7 @@ public final class ItemGraphCommands {
             if (!eventType.equals(eventType.toUpperCase(java.util.Locale.ROOT))) {
                 lookup.then(buildAuditLookupType(eventType.toUpperCase(java.util.Locale.ROOT), null));
             }
+            addMixedCaseAllLookupAliases(lookup, eventType, null);
         }
 
         var playerName = Commands.argument("playerName", StringArgumentType.string());
@@ -238,7 +241,9 @@ public final class ItemGraphCommands {
             if (!eventType.equals(eventType.toUpperCase(java.util.Locale.ROOT))) {
                 playerName.then(buildAuditLookupType(eventType.toUpperCase(java.util.Locale.ROOT), "playerName"));
             }
+            addMixedCaseAllPlayerAliases(playerName, eventType);
         }
+        playerName.then(buildCaseInsensitiveAuditLookupType("playerName"));
         lookup.then(Commands.literal("player").then(playerName));
 
         lookup.then(buildNearLookupCommand());
@@ -298,6 +303,26 @@ public final class ItemGraphCommands {
                                         StringArgumentType.getString(ctx, "session")))));
     }
 
+    /** Vanilla StringArgumentType preserves arbitrary case without a custom network serializer. */
+    private static RequiredArgumentBuilder<CommandSourceStack, String> buildCaseInsensitiveAuditLookupType(
+            String playerArgument) {
+        var type = Commands.argument("eventType", StringArgumentType.word())
+                .executes(ctx -> lookupAudit(ctx, StringArgumentType.getString(ctx, "eventType"),
+                        playerArgument == null ? null : StringArgumentType.getString(ctx, playerArgument),
+                        QueryLimits.DEFAULT_LIMIT, null));
+        var limit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAudit(ctx, StringArgumentType.getString(ctx, "eventType"),
+                        playerArgument == null ? null : StringArgumentType.getString(ctx, playerArgument),
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        limit.then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAudit(ctx, StringArgumentType.getString(ctx, "eventType"),
+                        playerArgument == null ? null : StringArgumentType.getString(ctx, playerArgument),
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes"))));
+        type.then(limit);
+        return type;
+    }
+
     private static LiteralArgumentBuilder<CommandSourceStack> buildPagedLookupCommand() {
         var page = Commands.argument("page", IntegerArgumentType.integer(1));
         for (String eventType : AuditEventQueryService.EVENT_TYPES) {
@@ -308,8 +333,27 @@ public final class ItemGraphCommands {
             if (!eventType.equals(eventType.toUpperCase(java.util.Locale.ROOT))) {
                 page.then(buildPagedAuditType(eventType.toUpperCase(java.util.Locale.ROOT)));
             }
+            addMixedCaseAllPagedAliases(page, eventType);
         }
+        page.then(buildCaseInsensitivePagedAuditType());
         return Commands.literal("page").then(page);
+    }
+
+    private static RequiredArgumentBuilder<CommandSourceStack, String> buildCaseInsensitivePagedAuditType() {
+        var eventType = Commands.argument("eventType", StringArgumentType.word())
+                .executes(ctx -> lookupAuditPage(ctx, StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "page"), QueryLimits.DEFAULT_LIMIT, null));
+        var limit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAuditPage(ctx, StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "page"),
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        limit.then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAuditPage(ctx, StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "page"),
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes"))));
+        eventType.then(limit);
+        return eventType;
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> buildPagedAuditType(String commandEventType) {
@@ -343,7 +387,9 @@ public final class ItemGraphCommands {
             if (!eventType.equals(eventType.toUpperCase(java.util.Locale.ROOT))) {
                 radius.then(buildNearAuditType(eventType.toUpperCase(java.util.Locale.ROOT)));
             }
+            addMixedCaseAllNearAliases(radius, eventType);
         }
+        radius.then(buildCaseInsensitiveNearAuditType());
         var z = Commands.argument("z", DoubleArgumentType.doubleArg());
         z.then(radius);
         var y = Commands.argument("y", DoubleArgumentType.doubleArg());
@@ -353,6 +399,21 @@ public final class ItemGraphCommands {
         var dimension = Commands.argument("dimension", ResourceLocationArgument.id());
         dimension.then(x);
         return Commands.literal("near").then(dimension);
+    }
+
+    private static RequiredArgumentBuilder<CommandSourceStack, String> buildCaseInsensitiveNearAuditType() {
+        var eventType = Commands.argument("eventType", StringArgumentType.word())
+                .executes(ctx -> lookupAuditNear(ctx, StringArgumentType.getString(ctx, "eventType"),
+                        QueryLimits.DEFAULT_LIMIT, null));
+        var limit = Commands.argument("limit", IntegerArgumentType.integer(1))
+                .executes(ctx -> lookupAuditNear(ctx, StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "limit"), null));
+        limit.then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
+                .executes(ctx -> lookupAuditNear(ctx, StringArgumentType.getString(ctx, "eventType"),
+                        IntegerArgumentType.getInteger(ctx, "limit"),
+                        LongArgumentType.getLong(ctx, "sinceMinutes"))));
+        eventType.then(limit);
+        return eventType;
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> buildNearAuditType(String commandEventType) {
@@ -369,6 +430,49 @@ public final class ItemGraphCommands {
                         LongArgumentType.getLong(ctx, "sinceMinutes"))));
         eventType.then(limit);
         return eventType;
+    }
+
+    private static void addMixedCaseAllLookupAliases(
+            LiteralArgumentBuilder<CommandSourceStack> parent, String eventType, String playerArgument) {
+        if (!"all".equals(eventType)) {
+            return;
+        }
+        for (String alias : List.of("All", "aLl", "alL", "ALl", "AlL", "aLL")) {
+            parent.then(buildAuditLookupType(alias, playerArgument));
+        }
+    }
+
+    private static void addMixedCaseAllPlayerAliases(
+            com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> parent,
+            String eventType) {
+        if (!"all".equals(eventType)) {
+            return;
+        }
+        for (String alias : List.of("All", "aLl", "alL", "ALl", "AlL", "aLL")) {
+            parent.then(buildAuditLookupType(alias, "playerName"));
+        }
+    }
+
+    private static void addMixedCaseAllPagedAliases(
+            com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, Integer> parent,
+            String eventType) {
+        if (!"all".equals(eventType)) {
+            return;
+        }
+        for (String alias : List.of("All", "aLl", "alL", "ALl", "AlL", "aLL")) {
+            parent.then(buildPagedAuditType(alias));
+        }
+    }
+
+    private static void addMixedCaseAllNearAliases(
+            com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, Double> parent,
+            String eventType) {
+        if (!"all".equals(eventType)) {
+            return;
+        }
+        for (String alias : List.of("All", "aLl", "alL", "ALl", "AlL", "aLL")) {
+            parent.then(buildNearAuditType(alias));
+        }
     }
 
     private static int help(CommandContext<CommandSourceStack> ctx) {
@@ -419,14 +523,22 @@ public final class ItemGraphCommands {
      * on their separate greedy branch.
      */
     private static String normalizeAuditEventType(CommandSourceStack source, String eventType) {
+        String canonical = canonicalAuditEventType(eventType);
+        if (canonical != null) {
+            return canonical;
+        }
+        source.sendFailure(Component.literal(
+                "[ItemGraph] Unknown audit event type '" + eventType + "'. Valid values: "
+                        + String.join(", ", AuditEventQueryService.EVENT_TYPES)));
+        return null;
+    }
+
+    private static String canonicalAuditEventType(String eventType) {
         for (String candidate : AuditEventQueryService.EVENT_TYPES) {
             if (candidate.equalsIgnoreCase(eventType)) {
                 return candidate;
             }
         }
-        source.sendFailure(Component.literal(
-                "[ItemGraph] Unknown audit event type '" + eventType + "'. Valid values: "
-                        + String.join(", ", AuditEventQueryService.EVENT_TYPES)));
         return null;
     }
 
@@ -643,6 +755,10 @@ public final class ItemGraphCommands {
 
     private static int lookupAuditNear(CommandContext<CommandSourceStack> ctx, String eventType,
                                        int limit, Long sinceMinutes) {
+        eventType = normalizeAuditEventType(ctx.getSource(), eventType);
+        if (eventType == null) {
+            return 0;
+        }
         return lookupAudit(ctx, eventType, null, limit, sinceMinutes,
                 ResourceLocationArgument.getId(ctx, "dimension").toString(),
                 DoubleArgumentType.getDouble(ctx, "x"),
@@ -676,6 +792,10 @@ public final class ItemGraphCommands {
     /** Executes the GriefLogger-compatible name.value filter form around the issuing player. */
     private static int lookupAuditFilters(CommandContext<CommandSourceStack> ctx, String expression) {
         CommandSourceStack source = ctx.getSource();
+        int nativeLookup = tryNativeLookupExpression(ctx, expression);
+        if (nativeLookup != Integer.MIN_VALUE) {
+            return nativeLookup;
+        }
         if (!(source.getEntity() instanceof ServerPlayer player)) {
             source.sendFailure(Component.literal(
                     "[ItemGraph] Filtered lookup requires a permission-level-2 player so radius can use the current position."));
@@ -701,6 +821,40 @@ public final class ItemGraphCommands {
                 filterDescription, System.currentTimeMillis());
         rememberPageSession(source, session);
         return dispatchAuditPage(source, "lookup filtered audit", session, 1, true);
+    }
+
+    /** Handles mixed-case native event syntax routed through the greedy filter branch. */
+    private static int tryNativeLookupExpression(CommandContext<CommandSourceStack> ctx, String expression) {
+        if (expression == null || expression.isBlank()) {
+            return Integer.MIN_VALUE;
+        }
+        String[] tokens = expression.trim().split("\\s+");
+        if (tokens.length < 1 || tokens.length > 3 || tokens[0].contains(".")) {
+            return Integer.MIN_VALUE;
+        }
+        String eventType = canonicalAuditEventType(tokens[0]);
+        if (eventType == null) {
+            return Integer.MIN_VALUE;
+        }
+        int limit = QueryLimits.DEFAULT_LIMIT;
+        Long sinceMinutes = null;
+        try {
+            if (tokens.length >= 2) {
+                limit = Integer.parseInt(tokens[1]);
+                if (limit < 1) {
+                    return Integer.MIN_VALUE;
+                }
+            }
+            if (tokens.length == 3) {
+                sinceMinutes = Long.parseLong(tokens[2]);
+                if (sinceMinutes < 1) {
+                    return Integer.MIN_VALUE;
+                }
+            }
+        } catch (NumberFormatException ignored) {
+            return Integer.MIN_VALUE;
+        }
+        return lookupAudit(ctx, eventType, null, limit, sinceMinutes);
     }
 
     private static int lookupHistoricalProvenance(CommandContext<CommandSourceStack> ctx, int requestedLimit) {

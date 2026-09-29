@@ -14,6 +14,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -116,12 +117,19 @@ public class InternalObservationService {
     /**
      * Maps a UUID event identity to the INTEGER source_event_id column used by
      * both SQLite and MySQL/MariaDB. The full UUID remains in raw_data; this
-     * stable 64-bit projection makes queued retries idempotent through the
-     * existing (source_type, source_event_id) unique index.
+     * stable positive projection makes queued retries idempotent through the
+     * existing (source_type, source_event_id) unique index. Persistence compares
+     * raw payloads and probes deterministic salted projections if a distinct
+     * payload ever collides with the preferred value.
      */
     public static long sourceEventIdForUuid(String eventId) {
+        return sourceEventIdForUuid(eventId, 0);
+    }
+
+    private static long sourceEventIdForUuid(String eventId, int salt) {
         UUID uuid = UUID.fromString(eventId);
         long value = uuid.getMostSignificantBits() ^ Long.rotateLeft(uuid.getLeastSignificantBits(), 29);
+        value ^= 0x9E3779B97F4A7C15L * salt;
         value ^= value >>> 33;
         value *= 0xff51afd7ed558ccdL;
         value ^= value >>> 33;
@@ -132,6 +140,55 @@ public class InternalObservationService {
         }
         value = Math.abs(value);
         return value == 0 ? 1 : value;
+    }
+
+    private record ExistingSourceEvent(boolean present, byte[] rawData) {}
+
+    /**
+     * Resolves the numeric compatibility key without allowing a hash collision
+     * to discard a distinct event. The original payload is the collision check;
+     * retries with the same payload keep the preferred key, while a different
+     * payload receives a deterministic salted key until a free value is found.
+     */
+    private static long collisionSafeSourceEventId(Connection conn, String table,
+                                                    long preferredId, byte[] rawData) throws SQLException {
+        if (rawData == null) {
+            return preferredId;
+        }
+        for (int salt = 0; salt < 64; salt++) {
+            long candidate = salt == 0
+                    ? preferredId
+                    : sourceEventIdForUuid(UUID.nameUUIDFromBytes(saltedPayload(rawData, salt)).toString(), salt);
+            ExistingSourceEvent existing = findSourceEvent(conn, table, candidate);
+            if (!existing.present() || Arrays.equals(existing.rawData(), rawData)) {
+                return candidate;
+            }
+        }
+        throw new SQLException("Unable to allocate a collision-free source event ID for " + table);
+    }
+
+    private static byte[] saltedPayload(byte[] rawData, int salt) {
+        byte[] salted = Arrays.copyOf(rawData, rawData.length + Integer.BYTES);
+        salted[salted.length - 4] = (byte) (salt >>> 24);
+        salted[salted.length - 3] = (byte) (salt >>> 16);
+        salted[salted.length - 2] = (byte) (salt >>> 8);
+        salted[salted.length - 1] = (byte) salt;
+        return salted;
+    }
+
+    private static ExistingSourceEvent findSourceEvent(Connection conn, String table, long sourceEventId)
+            throws SQLException {
+        String sql = "SELECT raw_data FROM " + table
+                + " WHERE source_type = 'ITEMGRAPH_INTERNAL' AND source_event_id = ? LIMIT 1";
+        try (PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setLong(1, sourceEventId);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    return new ExistingSourceEvent(false, null);
+                }
+                return new ExistingSourceEvent(true, result.getBytes("raw_data"));
+            }
+        }
     }
 
     public record InternalTransformation(
@@ -525,16 +582,16 @@ public class InternalObservationService {
                         if (event.sourceEventId() == null) {
                             pstmt.setNull(11, Types.BIGINT);
                         } else {
-                            pstmt.setLong(11, event.sourceEventId());
+                            pstmt.setLong(11, collisionSafeSourceEventId(conn, "ig_audit_events",
+                                    event.sourceEventId(), event.rawData()));
                         }
                         if (event.rawData() == null) {
                             pstmt.setNull(12, Types.BLOB);
                         } else {
                             pstmt.setBytes(12, event.rawData());
                         }
-                        pstmt.addBatch();
+                        pstmt.executeUpdate();
                     }
-                    pstmt.executeBatch();
                 }
                 conn.commit();
             } catch (SQLException e) {
@@ -629,8 +686,8 @@ public class InternalObservationService {
             conn.setAutoCommit(false);
 
             // INSERT OR IGNORE: source_event_id deduplicates durable producer
-            // identities; the V11 partial unique index protects legacy rows
-            // that intentionally have no source event identity.
+            // identities; collisionSafeSourceEventId prevents the lossy numeric
+            // UUID projection from silently discarding a distinct payload.
             String insertSql = """
                 INSERT OR IGNORE INTO ig_observations (
                     source_type, source_event_id, timestamp_ms, node_id, target_node_id,
@@ -742,7 +799,8 @@ public class InternalObservationService {
                     }
 
                     if (obs.sourceEventId() != null) {
-                        pstmt.setLong(1, obs.sourceEventId());
+                        pstmt.setLong(1, collisionSafeSourceEventId(conn, "ig_observations",
+                                obs.sourceEventId(), obs.rawData()));
                     } else {
                         pstmt.setNull(1, Types.BIGINT);
                     }
@@ -771,9 +829,8 @@ public class InternalObservationService {
                     } else {
                         pstmt.setNull(10, Types.BIGINT);
                     }
-                    pstmt.addBatch();
+                    pstmt.executeUpdate();
                 }
-                pstmt.executeBatch();
             }
 
             conn.commit();

@@ -273,6 +273,11 @@ class ItemGraphCommandsHelpTest {
         assertTrue(nativeUppercaseAllLookup.getContext().getNodes().stream()
                         .anyMatch(node -> node.getNode().getName().equals("ALL")),
                 "uppercase native all-events lookup was routed to the native literal branch");
+
+        assertParsedCompletely(dispatcher.parse("itemgraph lookup AlL", source),
+                "mixed-case native all-events lookup syntax");
+        assertParsedCompletely(dispatcher.parse("itemgraph lookup bReAk_BloCk 5 60", source),
+                "mixed-case native block lookup syntax");
     }
 
     @Test
@@ -287,17 +292,35 @@ class ItemGraphCommandsHelpTest {
                 "itemgraph lookup player Alex ALL 5 60", source),
                 "uppercase player all-events lookup syntax");
         assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup player Alex aLl 5 60", source),
+                "mixed-case player all-events lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup player Alex bReAk_BloCk 5 60", source),
+                "mixed-case player block lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
                 "itemgraph lookup page 2 break_block 5 60", source),
                 "lowercase paged audit lookup syntax");
         assertParsedCompletely(dispatcher.parse(
                 "itemgraph lookup page 2 ALL 5 60", source),
                 "uppercase paged all-events lookup syntax");
         assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup page 2 aLl 5 60", source),
+                "mixed-case paged all-events lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup page 2 bReAk_BloCk 5 60", source),
+                "mixed-case paged block lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
                 "itemgraph lookup near minecraft:overworld 0 64 0 10 SHOOT_ITEM 5 60", source),
                 "near audit lookup syntax");
         assertParsedCompletely(dispatcher.parse(
                 "itemgraph lookup near minecraft:overworld 0 64 0 10 ALL 5 60", source),
                 "uppercase near all-events lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup near minecraft:overworld 0 64 0 10 aLl 5 60", source),
+                "mixed-case near all-events lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup near minecraft:overworld 0 64 0 10 bReAk_BloCk 5 60", source),
+                "mixed-case near block lookup syntax");
     }
 
     @Test

@@ -140,6 +140,36 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void distinctAuditPayloadsSurviveAProjectedSourceIdCollision() throws Exception {
+        initializeTopologyDatabase();
+        long sourceEventId = InternalObservationService.sourceEventIdForUuid(
+                "123e4567-e89b-12d3-a456-426614174001");
+        InternalAuditEvent first = new InternalAuditEvent(
+                1234L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:arrow", "outcome=accepted", new byte[]{1}, sourceEventId);
+        InternalAuditEvent second = new InternalAuditEvent(
+                1235L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:arrow", "outcome=accepted", new byte[]{2}, sourceEventId);
+
+        persistAudit(first, second);
+
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT source_event_id, raw_data FROM ig_audit_events ORDER BY id")) {
+            try (ResultSet result = statement.executeQuery()) {
+                assertTrue(result.next());
+                long firstId = result.getLong(1);
+                assertArrayEquals(new byte[]{1}, result.getBytes(2));
+                assertTrue(result.next());
+                long secondId = result.getLong(1);
+                assertArrayEquals(new byte[]{2}, result.getBytes(2));
+                assertNotEquals(firstId, secondId,
+                        "a projected source ID collision must not drop a distinct audit payload");
+                assertFalse(result.next());
+            }
+        }
+    }
+
+    @Test
     void uninitializedDatabaseDoesNotClaimAuditEventsWerePersisted() {
         DatabaseManager.getInstance().close();
         assertTrue(service.submitAuditEvent(new InternalAuditEvent(
@@ -577,6 +607,40 @@ class InternalObservationServiceTest {
                 assertTrue(result.next());
                 assertEquals(sourceEventId, result.getLong(1));
                 assertEquals(1, result.getInt(2));
+                assertFalse(result.next());
+            }
+        }
+    }
+
+    @Test
+    void distinctObservationPayloadsSurviveAProjectedSourceIdCollision() throws Exception {
+        initializeTopologyDatabase();
+        long sourceEventId = InternalObservationService.sourceEventIdForUuid(
+                "123e4567-e89b-12d3-a456-426614174000");
+        InternalObservation first = new InternalObservation(
+                1234L, "THROW_ITEM", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 5, 64, 5,
+                "minecraft:overworld", null, null, null,
+                "UNKNOWN", DIAMOND.itemId(), new byte[]{1}, DIAMOND, 1, null, null, sourceEventId);
+        InternalObservation second = new InternalObservation(
+                1235L, "THROW_ITEM", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 5, 64, 5,
+                "minecraft:overworld", null, null, null,
+                "UNKNOWN", DIAMOND.itemId(), new byte[]{2}, DIAMOND, 1, null, null, sourceEventId);
+
+        persist(first, second);
+
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT source_event_id, raw_data FROM ig_observations ORDER BY id")) {
+            try (ResultSet result = statement.executeQuery()) {
+                assertTrue(result.next());
+                long firstId = result.getLong(1);
+                assertArrayEquals(new byte[]{1}, result.getBytes(2));
+                assertTrue(result.next());
+                long secondId = result.getLong(1);
+                assertArrayEquals(new byte[]{2}, result.getBytes(2));
+                assertNotEquals(firstId, secondId,
+                        "a projected source ID collision must not drop a distinct observation payload");
                 assertFalse(result.next());
             }
         }
