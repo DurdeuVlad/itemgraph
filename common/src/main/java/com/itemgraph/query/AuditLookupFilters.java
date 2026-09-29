@@ -129,8 +129,10 @@ public record AuditLookupFilters(
         List<String> result = new ArrayList<>(actions.size());
         for (String action : actions) {
             String normalized = action.toLowerCase(Locale.ROOT).replace('-', '_');
+            if ("all".equals(normalized)) {
+                return List.of();
+            }
             String eventType = switch (normalized) {
-                case "all" -> null;
                 case "join", "player_join" -> "PLAYER_JOIN";
                 case "quit", "player_quit" -> "PLAYER_QUIT";
                 case "chat", "chat_message" -> "CHAT_MESSAGE";
