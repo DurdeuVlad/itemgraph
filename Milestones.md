@@ -151,11 +151,13 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   inspection, and a per-player interactive lookup page session. Item-flow evidence stays
   in `ig_observations`; block, session, chat, command, and entity events use
   `ig_audit_events`.
-- Remaining: complete the registry entries tracked by issues #25–#31, including the
-  unified lookup surface, all inspector targets, exact projectile/interaction semantics,
-  read-only historical import, MySQL/MariaDB, operations controls, and differential
-  staging proof. The runtime matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact
-  current boundary.
+- Delivered through issue #25: the unified filtered lookup now merges native audit,
+  item-flow, transformation, and imported `GRIEFLOGGER` evidence with bounded paging,
+  source IDs, and canonical action filters. Remaining: complete the registry entries
+  tracked by issues #26–#31, including all inspector targets, exact projectile/interaction
+  semantics, read-only historical import, MySQL/MariaDB, operations controls, and
+  differential staging proof. The runtime matrix in `docs/GRIEFLOGGER_PARITY.md` records
+  the exact current boundary.
 - Proof: the compatibility registry, cross-loader tests, backend tests, and native-only
   staging replay tracked by issues #23–#31.
 
