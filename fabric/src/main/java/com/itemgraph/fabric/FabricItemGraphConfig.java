@@ -28,6 +28,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             properties.setProperty("database_name", "itemgraph");
             properties.setProperty("database_username", "itemgraph");
             properties.setProperty("database_password", "");
+            properties.setProperty("database_ssl_mode", "disable");
             properties.setProperty("database_connection_timeout_ms", "5000");
             properties.setProperty("grieflogger_database_path", "database.db");
             properties.setProperty("ground_bridge_max_seconds", "300");
@@ -61,7 +62,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
                         properties.getProperty("database_username", "itemgraph"),
                         properties.getProperty("database_password", ""),
                         parseInt(properties, "database_connection_timeout_ms", 5_000, configFile),
-                        true);
+                        true, properties.getProperty("database_ssl_mode", "disable"));
             } else {
                 throw new IOException("database_backend must be sqlite or mysql_mariadb in " + configFile);
             }

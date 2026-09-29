@@ -142,6 +142,7 @@
     {"grieflogger": "mysqlDatabase", "itemgraph": "general.database_name", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29},
     {"grieflogger": "mysqlUsername", "itemgraph": "general.database_username", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29},
     {"grieflogger": "mysqlPassword", "itemgraph": "general.database_password", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29, "redacted": true},
+    {"grieflogger": null, "itemgraph": "general.database_ssl_mode", "status": "extended", "implementation_state": "implemented", "owner_issue": 29, "compatibility_note": "disable, trust, verify-ca, and verify-full are accepted; verify-ca/full provide server-authenticated TLS for MySQL caching_sha2_password."},
     {"grieflogger": "mysqlTimeout", "itemgraph": "general.database_connection_timeout_ms", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29},
     {"grieflogger": "useIndexes", "itemgraph": "storage.index_policy", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
     {"grieflogger": "maxPageSize", "itemgraph": "query.max_page_size", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30},

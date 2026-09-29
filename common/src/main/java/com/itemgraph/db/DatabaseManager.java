@@ -70,7 +70,8 @@ public class DatabaseManager {
                 String url = "jdbc:mariadb://" + requestedSettings.host() + ":"
                         + requestedSettings.port() + "/" + requestedSettings.database()
                         + "?connectTimeout=" + requestedSettings.connectionTimeoutMs()
-                        + "&socketTimeout=" + requestedSettings.connectionTimeoutMs();
+                        + "&socketTimeout=" + requestedSettings.connectionTimeoutMs()
+                        + "&sslMode=" + requestedSettings.sslMode();
                 Properties properties = new Properties();
                 properties.setProperty("user", requestedSettings.username());
                 properties.setProperty("password", requestedSettings.password());
@@ -201,7 +202,8 @@ public class DatabaseManager {
         }
         String url = "jdbc:mariadb://" + current.host() + ":" + current.port() + "/" + current.database()
                 + "?connectTimeout=" + current.connectionTimeoutMs()
-                + "&socketTimeout=" + current.connectionTimeoutMs();
+                + "&socketTimeout=" + current.connectionTimeoutMs()
+                + "&sslMode=" + current.sslMode();
         Properties properties = new Properties();
         properties.setProperty("user", current.username());
         properties.setProperty("password", current.password());

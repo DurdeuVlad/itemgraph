@@ -17,6 +17,7 @@ class ItemGraphConfigTest {
         assertEquals("itemgraph", ItemGraphConfig.DATABASE_NAME.getDefault());
         assertEquals("itemgraph", ItemGraphConfig.DATABASE_USERNAME.getDefault());
         assertEquals(5_000, ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS.getDefault());
+        assertEquals("disable", ItemGraphConfig.DATABASE_SSL_MODE.getDefault());
         assertEquals("database.db", ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getDefault());
         assertEquals(Boolean.FALSE, ItemGraphConfig.DEBUG_LOGGING.getDefault());
         assertEquals(300, ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getDefault());

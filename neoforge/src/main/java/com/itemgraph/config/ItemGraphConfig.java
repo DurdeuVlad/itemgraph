@@ -14,6 +14,7 @@ public class ItemGraphConfig {
     public static final ModConfigSpec.ConfigValue<String> DATABASE_NAME;
     public static final ModConfigSpec.ConfigValue<String> DATABASE_USERNAME;
     public static final ModConfigSpec.ConfigValue<String> DATABASE_PASSWORD;
+    public static final ModConfigSpec.ConfigValue<String> DATABASE_SSL_MODE;
     public static final ModConfigSpec.IntValue DATABASE_CONNECTION_TIMEOUT_MS;
     public static final ModConfigSpec.ConfigValue<String> GRIEFLOGGER_DATABASE_PATH;
     public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
@@ -49,6 +50,9 @@ public class ItemGraphConfig {
         DATABASE_PASSWORD = BUILDER
                 .comment("MySQL/MariaDB password; ignored when database_backend=sqlite")
                 .define("database_password", "");
+        DATABASE_SSL_MODE = BUILDER
+                .comment("MySQL/MariaDB TLS mode: disable, trust, verify-ca, or verify-full")
+                .define("database_ssl_mode", "disable");
         DATABASE_CONNECTION_TIMEOUT_MS = BUILDER
                 .comment("Connection and socket timeout for MySQL/MariaDB in milliseconds")
                 .defineInRange("database_connection_timeout_ms", 5_000, 250, 120_000);
@@ -88,7 +92,7 @@ public class ItemGraphConfig {
             case "mysql", "mariadb", "mysql_mariadb" -> DatabaseSettings.mysqlMariaDb(
                     DATABASE_HOST.get(), DATABASE_PORT.get(), DATABASE_NAME.get(),
                     DATABASE_USERNAME.get(), DATABASE_PASSWORD.get(),
-                    DATABASE_CONNECTION_TIMEOUT_MS.get(), true);
+                    DATABASE_CONNECTION_TIMEOUT_MS.get(), true, DATABASE_SSL_MODE.get());
             default -> throw new IllegalArgumentException(
                     "database_backend must be sqlite or mysql_mariadb, got: " + DATABASE_BACKEND.get());
         };

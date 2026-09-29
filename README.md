@@ -32,9 +32,11 @@ On Fabric, configure `grieflogger_database_path` in `config/itemgraph.properties
 to point at GriefLogger's database file. The database remains read-only from
 ItemGraph. ItemGraph-owned storage defaults to SQLite; set `database_backend=mysql_mariadb`
 plus `database_host`, `database_port`, `database_name`, `database_username`,
-`database_password`, and `database_connection_timeout_ms` to use the shared
-MySQL/MariaDB storage contract. NeoForge exposes the same keys under `general` in
-its server TOML.
+`database_password`, `database_ssl_mode`, and `database_connection_timeout_ms` to
+use the shared MySQL/MariaDB storage contract. Set `database_ssl_mode=verify-full`
+or `verify-ca` for MySQL `caching_sha2_password`; `disable` is intended for a
+server authentication method that does not require RSA key retrieval. NeoForge
+exposes the same keys under `general` in its server TOML.
 
 > Evidence first. Inference second. Confidence explicit. Every conclusion traceable.
 
