@@ -152,7 +152,7 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   in `ig_observations`; block, session, chat, command, and entity events use
   `ig_audit_events`.
 - Remaining: complete the registry entries tracked by issues #25–#31, including the
-  unified lookup surface, all inspector targets, exact projectile/placement semantics,
+  unified lookup surface, all inspector targets, exact projectile/interaction semantics,
   read-only historical import, MySQL/MariaDB, operations controls, and differential
   staging proof. The runtime matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact
   current boundary.
