@@ -270,6 +270,22 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
+    void nativeLiteralLookupVariantsKeepPublishedArgumentOrder() {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup player Alex BREAK_BLOCK 5 60", source),
+                "player audit lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup page 2 break_block 5 60", source),
+                "lowercase paged audit lookup syntax");
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup near minecraft:overworld 0 64 0 10 SHOOT_ITEM 5 60", source),
+                "near audit lookup syntax");
+    }
+
+    @Test
     void logicalInspectionTargetsIncludeDoubleChestAndDoorPartners() {
         Level level = mock(Level.class);
 

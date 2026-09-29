@@ -324,23 +324,22 @@ public final class ItemGraphCommands {
 
     private static LiteralArgumentBuilder<CommandSourceStack> buildNearLookupCommand() {
         var radius = Commands.argument("radius", DoubleArgumentType.doubleArg(0.1));
-        // The event-type literals are attached below after the coordinate path is
-        // built. This keeps dotted GriefLogger filter tokens out of the native
-        // branch while retaining the documented /ig lookup near syntax.
-        var z = Commands.argument("z", DoubleArgumentType.doubleArg());
-        z.then(radius);
-        var y = Commands.argument("y", DoubleArgumentType.doubleArg());
-        y.then(z);
-        var x = Commands.argument("x", DoubleArgumentType.doubleArg());
-        x.then(y);
-        var dimension = Commands.argument("dimension", StringArgumentType.word());
-        dimension.then(x);
+        // Attach the event-type literals before the radius node is linked into
+        // the coordinate chain; Brigadier copies child nodes when linking them.
         for (String eventType : AuditEventQueryService.EVENT_TYPES) {
             radius.then(buildNearAuditType(eventType));
             if (!eventType.equals(eventType.toLowerCase(java.util.Locale.ROOT))) {
                 radius.then(buildNearAuditType(eventType.toLowerCase(java.util.Locale.ROOT)));
             }
         }
+        var z = Commands.argument("z", DoubleArgumentType.doubleArg());
+        z.then(radius);
+        var y = Commands.argument("y", DoubleArgumentType.doubleArg());
+        y.then(z);
+        var x = Commands.argument("x", DoubleArgumentType.doubleArg());
+        x.then(y);
+        var dimension = Commands.argument("dimension", ResourceLocationArgument.id());
+        dimension.then(x);
         return Commands.literal("near").then(dimension);
     }
 
@@ -633,7 +632,7 @@ public final class ItemGraphCommands {
     private static int lookupAuditNear(CommandContext<CommandSourceStack> ctx, String eventType,
                                        int limit, Long sinceMinutes) {
         return lookupAudit(ctx, eventType, null, limit, sinceMinutes,
-                StringArgumentType.getString(ctx, "dimension"),
+                ResourceLocationArgument.getId(ctx, "dimension").toString(),
                 DoubleArgumentType.getDouble(ctx, "x"),
                 DoubleArgumentType.getDouble(ctx, "y"),
                 DoubleArgumentType.getDouble(ctx, "z"),
