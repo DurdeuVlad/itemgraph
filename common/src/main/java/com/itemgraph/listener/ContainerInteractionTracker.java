@@ -191,7 +191,14 @@ public class ContainerInteractionTracker {
         if (key == null) {
             return true;
         }
-        Watch watch = watches.get(resolve(key));
+        // Prefer the exact watch key recorded when this player opened the menu.
+        // A later topology change may install an alias at that position for a new
+        // double-chest watch; resolving the old player's key first would flush their
+        // session against the wrong snapshot and orphan the original watch.
+        Watch watch = watches.get(key);
+        if (watch == null) {
+            watch = watches.get(resolve(key));
+        }
         if (watch == null) {
             playerSessions.remove(playerUuid, key);
             return true;

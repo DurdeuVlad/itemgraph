@@ -214,6 +214,29 @@ class ContainerInteractionTrackerTest {
         assertTrue(pendingObservations().isEmpty());
     }
 
+    @Test
+    void existingSingleWatchClosesAgainstItsOwnKeyWhenAliasIsClaimed() {
+        AtomicReference<InventoryTotals> oldSingle = new AtomicReference<>(totals(DIAMOND, 5));
+        tracker.openSession(STEVE, "Steve", KEY_B, oldSingle::get, List.of());
+
+        AtomicReference<InventoryTotals> doubleChest = new AtomicReference<>(totals(DIAMOND, 5));
+        tracker.openSession(ALEX, "Alex", KEY, doubleChest::get, List.of(KEY_B));
+
+        assertEquals(2, tracker.watchCount());
+        tracker.closeSession(STEVE, 1, 64, 1);
+        assertEquals(1, tracker.watchCount(),
+                "closing the older single-container session must not remove the double-chest watch");
+        assertEquals(1, tracker.sessionCount());
+
+        doubleChest.set(totals(DIAMOND, 8));
+        tracker.closeSession(ALEX, 1, 64, 1);
+        InternalObservationService.InternalObservation observation = pendingObservations().poll();
+        assertNotNull(observation);
+        assertEquals(ALEX.toString(), observation.playerUuid());
+        assertEquals(3, observation.amount());
+        assertTrue(pendingObservations().isEmpty());
+    }
+
     // -------------------------------------------------------------------------
     // Ambiguous attribution
     // -------------------------------------------------------------------------
