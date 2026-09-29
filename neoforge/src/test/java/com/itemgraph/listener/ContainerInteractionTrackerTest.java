@@ -195,6 +195,25 @@ class ContainerInteractionTrackerTest {
         assertEquals(0, tracker.watchCount(), "watch must be destroyed after last close");
     }
 
+    @Test
+    void reopeningFormerAliasStartsIndependentWatchAfterTopologyChange() {
+        AtomicReference<InventoryTotals> oldChest = new AtomicReference<>(totals(DIAMOND, 5));
+        tracker.openSession(STEVE, "Steve", KEY, oldChest::get, List.of(KEY_B));
+
+        // The double chest is split while Steve still has the original menu open.
+        AtomicReference<InventoryTotals> newContainer = new AtomicReference<>(empty());
+        tracker.openSession(ALEX, "Alex", KEY_B, newContainer::get, List.of());
+
+        assertEquals(2, tracker.watchCount(),
+                "a former partner position must not resolve to the old canonical watch");
+        assertTrue(tracker.isWatched(KEY_B));
+
+        tracker.closeSession(ALEX, 1, 64, 1);
+        tracker.closeSession(STEVE, 1, 64, 1);
+        assertEquals(0, tracker.watchCount());
+        assertTrue(pendingObservations().isEmpty());
+    }
+
     // -------------------------------------------------------------------------
     // Ambiguous attribution
     // -------------------------------------------------------------------------

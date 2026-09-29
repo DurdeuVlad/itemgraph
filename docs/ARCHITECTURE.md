@@ -571,7 +571,9 @@ serialize transactions on the shared ItemGraph JDBC connection.
   never substitute world origin coordinates.
 - Container resolution scans `menu.slots` for a `BlockEntity`-backed `Container`;
   double chests (`CompoundContainer`) recover the clicked position from
-  `RightClickBlock` in the same tick and alias the partner half. Menus without a
+  `RightClickBlock` in the same tick, choose a deterministic physical anchor, and
+  alias the partner half. A new standalone session at a former partner position
+  retires that stale alias before opening its watch. Menus without a
   block-entity container (crafting grids and anvils) are not watched by the block
   container tracker; Ender Chest menus are handled by the player-owned tracker above.
 

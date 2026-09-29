@@ -122,7 +122,14 @@ public class ContainerInteractionTracker {
             // the previous window, anchored at the previous container's position.
             closeSession(playerUuid, previous.x(), previous.y(), previous.z());
         }
-        ContainerKey canonical = resolve(key);
+        // The loader resolves the current block topology before opening a session and
+        // supplies that deterministic anchor as {@code key}. Treat it as authoritative
+        // here and retire any older alias for the same physical position. A double
+        // chest can be split while another viewer still has the old watch open; without
+        // this invalidation, a new standalone container at the former partner position
+        // would incorrectly attach to the old watch and snapshot source.
+        this.aliases.remove(key);
+        ContainerKey canonical = key;
         Watch watch = watches.computeIfAbsent(canonical, k -> {
             Watch w = new Watch(k, snapshotSource);
             InventoryTotals totals = snapshotSource.get();
