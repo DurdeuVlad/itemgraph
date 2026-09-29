@@ -289,6 +289,8 @@ class ItemGraphCommandsHelpTest {
                         new com.itemgraph.query.AuditEventQueryService.ExactPosition(
                                 chestPartner.getX(), chestPartner.getY(), chestPartner.getZ())),
                 BlockInspectionTargets.resolve(level, chest));
+        assertEquals(chest.compareTo(chestPartner) <= 0 ? chest : chestPartner,
+                BlockInspectionTargets.canonicalPosition(level, chest));
 
         when(level.getBlockState(chestPartner)).thenReturn(rightChest.setValue(ChestBlock.FACING, Direction.EAST));
         assertEquals(1, BlockInspectionTargets.resolve(level, chest).size(),

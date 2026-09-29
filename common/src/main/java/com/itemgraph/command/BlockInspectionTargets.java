@@ -11,6 +11,7 @@ import net.minecraft.world.level.block.state.properties.ChestType;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /** Resolves one clicked block into the bounded logical target used by inspection queries. */
@@ -25,11 +26,16 @@ public final class BlockInspectionTargets {
      * or door when the partner is present and belongs to the same block structure.
      */
     public static List<AuditEventQueryService.ExactPosition> resolve(Level level, BlockPos clicked) {
+        return resolveBlockPositions(level, clicked).stream().map(BlockInspectionTargets::position).toList();
+    }
+
+    /** Returns the physical positions belonging to the clicked logical structure. */
+    public static List<BlockPos> resolveBlockPositions(Level level, BlockPos clicked) {
         if (level == null || clicked == null) {
             return List.of();
         }
-        List<AuditEventQueryService.ExactPosition> positions = new ArrayList<>(MAX_TARGET_POSITIONS);
-        positions.add(position(clicked));
+        List<BlockPos> positions = new ArrayList<>(MAX_TARGET_POSITIONS);
+        positions.add(clicked.immutable());
 
         BlockState state = level.getBlockState(clicked);
         if (state == null) {
@@ -45,9 +51,18 @@ public final class BlockInspectionTargets {
         }
 
         if (partner != null && isMatchingPartner(level, state, partner)) {
-            positions.add(position(partner));
+            positions.add(partner.immutable());
         }
         return List.copyOf(positions);
+    }
+
+    /** Returns the stable anchor used for future container observations. */
+    public static BlockPos canonicalPosition(Level level, BlockPos clicked) {
+        return resolveBlockPositions(level, clicked).stream()
+                .min(Comparator.<BlockPos>comparingInt(pos -> pos.getX())
+                        .thenComparingInt(pos -> pos.getY())
+                        .thenComparingInt(pos -> pos.getZ()))
+                .orElse(clicked == null ? null : clicked.immutable());
     }
 
     private static boolean isMatchingPartner(Level level, BlockState state, BlockPos partner) {
