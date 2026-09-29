@@ -123,6 +123,51 @@ class AuditEventQueryServiceTest {
     }
 
     @Test
+    void exactLogicalTargetLookupMergesPositionsWithGlobalOrderingAndPagination() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement(
+                "INSERT INTO ig_audit_events (event_type, timestamp_ms, level_id, x, y, z, detail) VALUES ('INTERACT_BLOCK', ?, 'minecraft:overworld', ?, 64, 0, ?)")) {
+            insert.setLong(1, 3L);
+            insert.setDouble(2, 10.0);
+            insert.setString(3, "left-new");
+            insert.executeUpdate();
+            insert.setLong(1, 2L);
+            insert.setDouble(2, 11.0);
+            insert.setString(3, "right-old");
+            insert.executeUpdate();
+            insert.setLong(1, 1L);
+            insert.setDouble(2, 12.0);
+            insert.setString(3, "outside");
+            insert.executeUpdate();
+
+            insert.setLong(1, 4L);
+            insert.setDouble(2, 10.0);
+            insert.setString(3, "wrong-dimension");
+            insert.executeUpdate();
+        }
+        try (PreparedStatement update = conn.prepareStatement(
+                "UPDATE ig_audit_events SET level_id = 'minecraft:the_nether' WHERE detail = 'wrong-dimension'")) {
+            update.executeUpdate();
+        }
+
+        List<AuditEventDetail> first = service.findExact(
+                conn, "INTERACT_BLOCK", null, QueryWindow.unbounded(), "minecraft:overworld",
+                List.of(new AuditEventQueryService.ExactPosition(10, 64, 0),
+                        new AuditEventQueryService.ExactPosition(11, 64, 0),
+                        new AuditEventQueryService.ExactPosition(10, 64, 0)), 1, 0);
+        List<AuditEventDetail> second = service.findExact(
+                conn, "INTERACT_BLOCK", null, QueryWindow.unbounded(), "minecraft:overworld",
+                List.of(new AuditEventQueryService.ExactPosition(10, 64, 0),
+                        new AuditEventQueryService.ExactPosition(11, 64, 0)), 1, 1);
+
+        assertEquals(List.of("left-new"), first.stream().map(AuditEventDetail::detail).toList());
+        assertEquals(List.of("right-old"), second.stream().map(AuditEventDetail::detail).toList());
+        assertThrows(IllegalArgumentException.class, () -> service.findExact(
+                conn, "all", null, QueryWindow.unbounded(), "minecraft:overworld",
+                java.util.stream.IntStream.range(0, 9)
+                        .mapToObj(i -> new AuditEventQueryService.ExactPosition(i, 64, 0)).toList(), 10, 0));
+    }
+
+    @Test
     void formatterKeepsMultilineDetailsOnOneConsoleLine() throws Exception {
         try (PreparedStatement insert = conn.prepareStatement(
                 "INSERT INTO ig_audit_events (event_type, timestamp_ms, detail) VALUES ('CHAT_MESSAGE', 1, ?)") ) {

@@ -11,6 +11,7 @@ import java.util.Locale;
 /** Read-only queries for native GriefLogger-parity audit events. */
 public final class AuditEventQueryService {
     public static final double MAX_RADIUS_BLOCKS = 1_024.0;
+    public record ExactPosition(double x, double y, double z) {}
     public static final List<String> EVENT_TYPES = List.of(
             "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_ATTEMPT", "COMMAND_EXECUTED",
             "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK", "INTERACT_BLOCK_ATTEMPT", "INTERACT_ENTITY",
@@ -118,6 +119,82 @@ public final class AuditEventQueryService {
                             rs.getDouble("z"),
                             rs.getString("subject_id"),
                             rs.getString("detail")));
+                }
+                return List.copyOf(result);
+            }
+        }
+    }
+
+    /**
+     * Executes an exact logical-target lookup for a bounded set of block positions.
+     * The positions are ORed inside one ordered query so pagination remains global
+     * and no evidence row is duplicated in memory.
+     */
+    public List<AuditEventDetail> findExact(Connection conn, String eventType, String playerName,
+                                            QueryWindow window, String levelId,
+                                            List<ExactPosition> positions, int requestedLimit,
+                                            int requestedOffset) throws SQLException {
+        if (positions == null || positions.isEmpty()) {
+            throw new IllegalArgumentException("at least one exact position is required");
+        }
+        if (levelId == null || levelId.isBlank()) {
+            throw new IllegalArgumentException("dimension is required for an exact lookup");
+        }
+        List<ExactPosition> uniquePositions = positions.stream().distinct().toList();
+        int limit = QueryLimits.clampLimit(requestedLimit);
+        int offset = QueryLimits.clampOffset(requestedOffset);
+        if (uniquePositions.size() > 8) {
+            throw new IllegalArgumentException("at most eight exact positions are supported");
+        }
+        StringBuilder sql = new StringBuilder("""
+                SELECT id, event_type, timestamp_ms, player_uuid, player_name,
+                       level_id, x, y, z, subject_id, detail
+                FROM ig_audit_events
+                WHERE 1 = 1
+                """);
+        List<Object> args = new ArrayList<>();
+        if (eventType != null && !eventType.isBlank() && !"all".equalsIgnoreCase(eventType)) {
+            sql.append(" AND event_type = ?");
+            args.add(eventType.toUpperCase(Locale.ROOT));
+        }
+        if (playerName != null && !playerName.isBlank() && !"*".equals(playerName)) {
+            sql.append(" AND player_name = ?");
+            args.add(playerName);
+        }
+        if (window != null && window.sinceMs() != null) {
+            sql.append(" AND timestamp_ms >= ?");
+            args.add(window.sinceMs());
+        }
+        if (window != null && window.untilMs() != null) {
+            sql.append(" AND timestamp_ms <= ?");
+            args.add(window.untilMs());
+        }
+        sql.append(" AND level_id = ? AND (");
+        args.add(levelId);
+        for (int i = 0; i < uniquePositions.size(); i++) {
+            if (i > 0) {
+                sql.append(" OR ");
+            }
+            sql.append("(x = ? AND y = ? AND z = ?)");
+            ExactPosition position = uniquePositions.get(i);
+            args.add(position.x());
+            args.add(position.y());
+            args.add(position.z());
+        }
+        sql.append(") ORDER BY timestamp_ms DESC, id DESC LIMIT ? OFFSET ?");
+        args.add(limit);
+        args.add(offset);
+
+        try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+            bind(pstmt, args);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                List<AuditEventDetail> result = new ArrayList<>();
+                while (rs.next()) {
+                    result.add(new AuditEventDetail(
+                            rs.getLong("id"), rs.getString("event_type"), rs.getLong("timestamp_ms"),
+                            rs.getString("player_uuid"), rs.getString("player_name"), rs.getString("level_id"),
+                            rs.getDouble("x"), rs.getDouble("y"), rs.getDouble("z"),
+                            rs.getString("subject_id"), rs.getString("detail")));
                 }
                 return List.copyOf(result);
             }

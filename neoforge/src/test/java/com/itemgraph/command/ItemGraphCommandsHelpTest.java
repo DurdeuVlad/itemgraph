@@ -10,6 +10,13 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.neoforged.fml.loading.LoadingModList;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -260,6 +267,40 @@ class ItemGraphCommandsHelpTest {
         assertTrue(nativeAllLookup.getContext().getNodes().stream()
                         .anyMatch(node -> node.getNode().getName().equals("eventType")),
                 "native all-events lookup was routed to the direct filter argument");
+    }
+
+    @Test
+    void logicalInspectionTargetsIncludeDoubleChestAndDoorPartners() {
+        Level level = mock(Level.class);
+
+        BlockPos chest = new BlockPos(10, 64, 10);
+        var leftChest = Blocks.CHEST.defaultBlockState()
+                .setValue(ChestBlock.TYPE, ChestType.LEFT)
+                .setValue(ChestBlock.FACING, Direction.NORTH);
+        BlockPos chestPartner = chest.relative(ChestBlock.getConnectedDirection(leftChest));
+        var rightChest = Blocks.CHEST.defaultBlockState()
+                .setValue(ChestBlock.TYPE, ChestType.RIGHT)
+                .setValue(ChestBlock.FACING, Direction.NORTH);
+        when(level.getBlockState(chest)).thenReturn(leftChest);
+        when(level.getBlockState(chestPartner)).thenReturn(rightChest);
+
+        assertEquals(List.of(
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(10, 64, 10),
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(
+                                chestPartner.getX(), chestPartner.getY(), chestPartner.getZ())),
+                BlockInspectionTargets.resolve(level, chest));
+
+        BlockPos door = new BlockPos(20, 64, 20);
+        var lowerDoor = Blocks.OAK_DOOR.defaultBlockState().setValue(DoorBlock.HALF, DoubleBlockHalf.LOWER);
+        BlockPos upperDoor = door.above();
+        var upperDoorState = Blocks.OAK_DOOR.defaultBlockState().setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER);
+        when(level.getBlockState(door)).thenReturn(lowerDoor);
+        when(level.getBlockState(upperDoor)).thenReturn(upperDoorState);
+
+        assertEquals(List.of(
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(20, 64, 20),
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(20, 65, 20)),
+                BlockInspectionTargets.resolve(level, door));
     }
 
     private void assertParsedCompletely(com.mojang.brigadier.ParseResults<CommandSourceStack> parsed,
