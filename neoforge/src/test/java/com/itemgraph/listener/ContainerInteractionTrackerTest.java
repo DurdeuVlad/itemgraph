@@ -223,18 +223,17 @@ class ContainerInteractionTrackerTest {
         tracker.openSession(ALEX, "Alex", KEY, doubleChest::get, List.of(KEY_B));
 
         assertEquals(2, tracker.watchCount());
+        oldSingle.set(totals(DIAMOND, 8));
+        doubleChest.set(totals(DIAMOND, 8));
+        tracker.recordCapabilityDelta(KEY_B, DIAMOND, 3, true);
         tracker.closeSession(STEVE, 1, 64, 1);
         assertEquals(1, tracker.watchCount(),
                 "closing the older single-container session must not remove the double-chest watch");
         assertEquals(1, tracker.sessionCount());
 
-        doubleChest.set(totals(DIAMOND, 8));
         tracker.closeSession(ALEX, 1, 64, 1);
-        InternalObservationService.InternalObservation observation = pendingObservations().poll();
-        assertNotNull(observation);
-        assertEquals(ALEX.toString(), observation.playerUuid());
-        assertEquals(3, observation.amount());
-        assertTrue(pendingObservations().isEmpty());
+        assertTrue(pendingObservations().isEmpty(),
+                "a capability-mediated change must not be attributed to either viewer");
     }
 
     // -------------------------------------------------------------------------

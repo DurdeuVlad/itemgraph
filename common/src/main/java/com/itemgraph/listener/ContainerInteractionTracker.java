@@ -154,19 +154,37 @@ public class ContainerInteractionTracker {
         if (!persisted) {
             totalCapabilityQueueRejections.incrementAndGet();
         }
-        Watch watch = watches.get(resolve(key));
-        if (watch == null) {
+        ContainerKey resolvedKey = resolve(key);
+        Watch exactWatch = watches.get(key);
+        Watch resolvedWatch = watches.get(resolvedKey);
+        if (exactWatch == null && resolvedWatch == null) {
             return;
         }
 
-        watch.capabilityDelta.merge(item.fingerprintHash(), delta, Long::sum);
-        if (!persisted) {
-            String actionType = delta > 0 ? "CAPABILITY_INSERT" : "CAPABILITY_EXTRACT";
-            CapabilityGapKey gapKey = new CapabilityGapKey(item.fingerprintHash(), actionType);
-            watch.unpersistedCapabilityTransfers.merge(gapKey,
-                    new CapabilityGap(item, Math.abs(delta)),
-                    (existing, added) -> new CapabilityGap(existing.item(), existing.amount() + added.amount()));
+        // During a topology transition, an older single-container watch can still
+        // coexist with the new canonical double-chest watch. Credit both watches so
+        // neither can mistake the same capability-mediated change for player traffic.
+        // Queue-overflow recovery is emitted once on the resolved/current watch.
+        if (exactWatch != null) {
+            applyCapabilityDelta(exactWatch, item, delta,
+                    !persisted && exactWatch == resolvedWatch);
         }
+        if (resolvedWatch != null && resolvedWatch != exactWatch) {
+            applyCapabilityDelta(resolvedWatch, item, delta, !persisted);
+        }
+    }
+
+    private static void applyCapabilityDelta(Watch watch, CanonicalItem item, long delta,
+                                             boolean recoverQueueOverflow) {
+        watch.capabilityDelta.merge(item.fingerprintHash(), delta, Long::sum);
+        if (!recoverQueueOverflow) {
+            return;
+        }
+        String actionType = delta > 0 ? "CAPABILITY_INSERT" : "CAPABILITY_EXTRACT";
+        CapabilityGapKey gapKey = new CapabilityGapKey(item.fingerprintHash(), actionType);
+        watch.unpersistedCapabilityTransfers.merge(gapKey,
+                new CapabilityGap(item, Math.abs(delta)),
+                (existing, added) -> new CapabilityGap(existing.item(), existing.amount() + added.amount()));
     }
 
     public long getTotalCapabilityQueueRejections() {

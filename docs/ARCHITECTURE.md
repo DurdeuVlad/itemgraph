@@ -573,7 +573,9 @@ serialize transactions on the shared ItemGraph JDBC connection.
   double chests (`CompoundContainer`) recover the clicked position from
   `RightClickBlock` in the same tick, choose a deterministic physical anchor, and
   alias the partner half. A new standalone session at a former partner position
-  retires that stale alias before opening its watch. Menus without a
+  retires that stale alias before opening its watch. If a single-container watch
+  overlaps a new double-chest watch, close resolution keeps each viewer on its
+  recorded key and capability deltas credit both live watches. Menus without a
   block-entity container (crafting grids and anvils) are not watched by the block
   container tracker; Ender Chest menus are handled by the player-owned tracker above.
 
