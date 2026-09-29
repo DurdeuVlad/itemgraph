@@ -1,7 +1,7 @@
 # ItemGraph Milestones
 
 Document status: active
-Last reviewed: 2026-09-25
+Last reviewed: 2026-09-29
 Owner: Vlad Durdeu
 
 Milestones describe outcomes and proof, not a list of implementation chores.
@@ -153,11 +153,26 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   `ig_audit_events`.
 - Delivered through issue #25: the unified filtered lookup now merges native audit,
   item-flow, transformation, and imported `GRIEFLOGGER` evidence with bounded paging,
-  source IDs, and canonical action filters. Remaining: complete the registry entries
-  tracked by issues #26–#31, including all inspector targets, exact projectile/interaction
-  semantics, read-only historical import, MySQL/MariaDB, operations controls, and
+  source IDs, and canonical action filters. Remaining: freeze the source/profile authority
+  in #43, then complete #24, #26–#31 for all inspector targets, all 18 pinned actions,
+  read-only import of all 11 GriefLogger tables, MySQL/MariaDB, operations controls, and
   differential staging proof. The runtime matrix in `docs/GRIEFLOGGER_PARITY.md` records
   the exact current boundary.
-- Proof: the compatibility registry, cross-loader tests, backend tests, and native-only
-  staging replay tracked by issues #23–#31.
+- Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
+  fixtures, and native-only staging replay tracked by issues #24–#31 and #43.
+
+## M9: ItemGraph audit++ performance and extra events
+
+- Status: planned; GitHub milestone
+  https://github.com/DurdeuVlad/itemgraph/milestone/5.
+- Outcome: extend the compatibility surface with measured throughput, creative/admin
+  causes, modded inventory and automation, world/entity causes, cross-loader integration,
+  tamper-evident exports, first-class uncertainty, and component-aware/absolute-time
+  investigation queries.
+- Scope boundary: staging and CI proof only. Every extension preserves evidence classes,
+  quantity conservation, privacy, bounded queues, and asynchronous database work.
+- Dependencies: M8 compatibility profile and native proof precede the M9 extensions;
+  #32–#37, #44, and #45 own the implementation slices.
+- Acceptance evidence: reproducible benchmark output, cross-loader fixtures, malformed and
+  opaque evidence cases, export verification, and read-only auditor review.
 

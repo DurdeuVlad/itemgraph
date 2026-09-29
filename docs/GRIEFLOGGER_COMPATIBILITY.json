@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "compatibility_version": "m8.1.0",
+  "compatibility_version": "m8.2.0",
   "mod_id": "itemgraph",
   "supported_commands": ["/ig", "/itemgraph"],
   "unsupported_aliases": ["/gl", "/grieflogger"],
@@ -8,6 +8,14 @@
     "name": "GriefLogger",
     "documentation": "https://daqem.com/projects/grieflogger",
     "database_policy": "read_only"
+  },
+  "audit_baseline": {
+    "ref": "26.2",
+    "commit": "d315098b3f37317a5cddfbd75086f4f912f16a83",
+    "retrieved": "2026-09-29",
+    "source_tree": "https://github.com/DAQEM/GriefLogger/tree/26.2",
+    "authority_rule": "Published operator safety semantics are the default compatibility contract; pinned source behavior is a versioned fixture; every contradiction is explicit as extended or unresolved.",
+    "owner_issue": 43
   },
   "statuses": ["compatible", "extended", "unsupported", "unresolved"],
   "evidence_classes": ["observed", "inferred", "ambiguous", "unresolved"],
@@ -37,14 +45,18 @@
     {"grieflogger": "BREAK_BLOCK", "itemgraph": "BREAK_BLOCK", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "INTERACT_BLOCK", "itemgraph": "INTERACT_BLOCK_ATTEMPT", "status": "unresolved", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"], "owner_issue": 27},
     {"grieflogger": "KILL_ENTITY", "itemgraph": "KILL_ENTITY", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "INTERACT_ENTITY", "itemgraph": "INTERACT_ENTITY", "status": "unresolved", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "GriefLogger 26.2 records successful armor-stand/entity interaction; native cross-loader parity is not closed."},
     {"grieflogger": "JOIN", "itemgraph": "PLAYER_JOIN", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "QUIT", "itemgraph": "PLAYER_QUIT", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "CHAT", "itemgraph": "CHAT_MESSAGE", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "COMMAND", "itemgraph": "COMMAND_ATTEMPT", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
-    {"grieflogger": "SMELT", "itemgraph": "SMELT", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "ItemGraph preserves transformation lineage and source/result fingerprints."},
-    {"grieflogger": "ANVIL_RENAME", "itemgraph": "ANVIL_RENAME", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "ItemGraph preserves transformation lineage and source/result fingerprints."},
+    {"grieflogger": null, "itemgraph": "SMELT", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "GriefLogger records furnace output under CRAFT_ITEM; ItemGraph preserves a separate SMELT transformation type and source/result fingerprints."},
+    {"grieflogger": null, "itemgraph": "ANVIL_RENAME", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "GriefLogger 26.2 has no ANVIL_RENAME action; ItemGraph adds lineage for server-side anvil rename results."},
+    {"grieflogger": null, "itemgraph": "ANVIL_REPAIR", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "GriefLogger 26.2 has no ANVIL_REPAIR action; ItemGraph adds lineage for server-side anvil repair results."},
     {"grieflogger": null, "itemgraph": "HOPPER_INSERT", "status": "extended", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental automation evidence with unknown endpoints; GriefLogger does not publish an equivalent hopper action."},
-    {"grieflogger": null, "itemgraph": "HOPPER_EXTRACT", "status": "extended", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental automation evidence with unknown endpoints; GriefLogger does not publish an equivalent hopper action."}
+    {"grieflogger": null, "itemgraph": "HOPPER_EXTRACT", "status": "extended", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental automation evidence with unknown endpoints; GriefLogger does not publish an equivalent hopper action."},
+    {"grieflogger": "ADD_ITEM_ENDER", "itemgraph": "ADD_ITEM_ENDER", "status": "unresolved", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "The 26.2 source defines Ender inventory action ID 9; native capture and endpoint semantics are not closed."},
+    {"grieflogger": "REMOVE_ITEM_ENDER", "itemgraph": "REMOVE_ITEM_ENDER", "status": "unresolved", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "The 26.2 source defines Ender inventory action ID 10; native capture and endpoint semantics are not closed."}
   ],
   "filters": {
     "names": ["action", "a", "user", "u", "include", "i", "exclude", "e", "time", "t", "radius", "r"],
@@ -54,6 +66,7 @@
     "time_units": ["m", "h", "d", "y"],
     "include_exclude_mutually_exclusive": true,
     "value_separator": ",",
+    "published_filter_names": ["action", "user", "include", "exclude", "time", "radius"],
     "lookup_sources": ["ig_audit_events", "ig_observations", "ig_item_transformations"],
     "imported_source_type": "GRIEFLOGGER",
     "owner_issue": 25
@@ -97,7 +110,8 @@
     {"grieflogger": "right_click_functional_block_history", "itemgraph": "functional_block_right_click_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
     {"grieflogger": "container_history", "itemgraph": "container_history", "status": "compatible", "owner_issue": 26},
     {"grieflogger": "double_chest_history", "itemgraph": "double_chest_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
-    {"grieflogger": "door_history", "itemgraph": "door_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26}
+    {"grieflogger": "door_history", "itemgraph": "door_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
+    {"grieflogger": "interaction_cleanup_on_block_removal", "itemgraph": "raw_observation_plus_supersession", "status": "unresolved", "implementation_state": "profile_required", "owner_issue": 26}
   ],
   "extensions": [
     {"itemgraph": "transformation_lineage", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental source/result fingerprints and lineage metadata for CRAFT, SMELT, and ANVIL_RENAME."}
@@ -105,6 +119,7 @@
   "storage": {
     "native": ["sqlite"],
     "planned": ["mysql", "mariadb"],
+    "source_tables": ["items", "containers", "blocks", "sessions", "chats", "commands", "users", "usernames", "levels", "materials", "entities"],
     "grieflogger_database_mutation": false
   },
   "owner_issues": {
@@ -116,6 +131,9 @@
     "historical_import": 28,
     "storage": 29,
     "operations": 30,
-    "differential_proof": 31
+    "differential_proof": 31,
+    "source_profile": 43,
+    "uncertainty_queries": 44,
+    "component_time_queries": 45
   }
 }

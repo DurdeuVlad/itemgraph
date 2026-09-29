@@ -45,23 +45,41 @@ The contract uses GriefLogger's published documentation:
 - https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/inspect-command
 - https://daqem.com/projects/grieflogger/wiki/getting-started/configuration
 
+### Pinned source baseline
+
+The source audit is pinned to GriefLogger ref `26.2`, commit
+`d315098b3f37317a5cddfbd75086f4f912f16a83` ([source tree](https://github.com/DAQEM/GriefLogger/tree/26.2)), retrieved 2026-09-29.
+The source defines 18 actions across block, session, and item enums and creates
+11 tables: `items`, `containers`, `blocks`, `sessions`, `chats`, `commands`,
+`users`, `usernames`, `levels`, `materials`, and `entities`. The profile and
+contradiction matrix are tracked in [issue #43](https://github.com/DurdeuVlad/itemgraph/issues/43).
+
+The published pages and source disagree on several observable details: the pages
+require a radius while `LookupCommand` accepts an empty/no-radius query; the
+source lookup merge excludes chat and command rows even though those tables are
+stored; and the source default `maxPageSize` is 10. ItemGraph records the chosen
+operator-safe behavior and the source behavior as a versioned fixture instead of
+claiming that the two are identical.
+
 | GriefLogger capability | ItemGraph native source | Storage | Query/UI status | Evidence status |
 | --- | --- | --- | --- | --- |
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested; the 2026-09-29 Fabric replay persisted `ADD_ITEM` and `REMOVE_ITEM` rows |
 | Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge paths and Fabric normal, vanilla player-death, and custom death-event item additions are implemented; the Fabric replay persisted accepted `DROP_ITEM` and `PICKUP_ITEM` rows |
 | Hopper/mechanical automation (ItemGraph supplemental) | NeoForge capability wrappers; Fabric `HopperBlockEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | GriefLogger's published feature surface has no hopper or mechanical-automation event; ItemGraph records successful vanilla hopper net deltas with unknown endpoints, while modded automation adapters remain an optional extension |
-| Crafting, smelting, anvil rename/repair | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | Both loaders capture crafting, furnace-family smelting, and anvil rename/repair results at server result-take boundaries; the Fabric replay persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows |
+| Crafting and smelting; anvil lineage extension | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | GriefLogger records crafting and furnace output under `CRAFT_ITEM`; both loaders preserve that source meaning and add ItemGraph `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR` lineage rows at server result-take boundaries; the Fabric replay persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows |
 | Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted `PLAYER_JOIN` and `PLAYER_QUIT` rows |
 | Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted `CHAT_MESSAGE` rows and returned them through `/ig lookup` |
 | Player commands | `NativeAuditEventListener`, Fabric `CommandsMixin` | `ig_audit_events` | `/ig lookup` | Both loaders record `COMMAND_ATTEMPT` at the pre-execution dispatch boundary, matching GriefLogger's documented behavior of recording attempts regardless of permission or command success; `COMMAND_EXECUTED` remains reserved for legacy rows and is never fabricated |
 | Block place/break | `NativeAuditEventListener`, Fabric break callback, Fabric `BlockItemMixin` | `ig_audit_events` | `/ig lookup` | NeoForge place/break and Fabric place/break capture/query implemented; the Fabric replay persisted `PLACE_BLOCK` and `BREAK_BLOCK` rows |
 | Block interaction | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Both loaders record `INTERACT_BLOCK_ATTEMPT`; the Fabric replay persisted interaction attempts and the pre-action callbacks do not claim that the block use completed |
 | Player-killed entities | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted a `KILL_ENTITY` row for a player-killed zombie |
+| Entity interaction and Ender inventory actions | Armor-stand/entity adapters; Ender inventory session adapters | `ig_audit_events`, `ig_observations` | Planned in `/ig lookup` and `/ig trace` | GriefLogger 26.2 defines `INTERACT_ENTITY`, `ADD_ITEM_ENDER`, and `REMOVE_ITEM_ENDER`; cross-loader native capture and exact endpoint semantics remain open in [#27](https://github.com/DurdeuVlad/itemgraph/issues/27) |
 | Armor stand equip/unequip | `ArmorStandEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
 | Consume, break, throw, shoot item actions | NeoForge `NativeItemActionEventListener`, `ItemEntityEventListener`; Fabric `LivingEntityMixin`, `ItemStackMixin`, `ServerLevelMixin` | `ig_observations` for consume/break; `ig_audit_events` for native projectile spawn evidence | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record completed eat/drink consumption at the return boundary, Fabric records durability breaks at the `ItemStack.hurtAndBreak` shrink boundary, and both loaders record fresh player-owned projectile spawns as non-quantity `THROW_ITEM`/`SHOOT_ITEM` audit evidence; the Fabric replay persisted all four action types |
 | Location/action filtered lookup | `AuditLookupFilters`, `UnifiedEvidenceQueryService`, `AuditEventQueryService` | `ig_audit_events`, `ig_observations`, `ig_item_transformations` | `/ig lookup`, `/ig lookup near`, `/ig lookup filters` | GriefLogger-style action/user/include/exclude/time/radius filters use one bounded asynchronous merge across native audit, item-flow, transformation, and imported `GRIEFLOGGER` observations. Five-filter cap, required cube radius, AND semantics, global timestamp ordering, and source/evidence IDs are tested; the Fabric replay returned rows from both `/ig lookup CHAT_MESSAGE 10 60` and `/ig lookup filters action.chat_message time.1h radius.50` |
 | Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `FlowBrowserService`, `TraceQueryService` | `ig_observations` | `/ig inspect`, `/ig trace container` | Read-only coordinate history and paginated flow browser implemented on both loaders; the Fabric replay opened a read-only `minecraft:generic_9x6` flow browser for a populated chest |
 | Paginated generic audit results | `AuditEventQueryService` offset paging | `ig_audit_events` | `/ig lookup page <page> ...` | Bounded 1-based page offsets and server-generated Previous/Next chat controls implemented |
+| Historical GriefLogger schema | `GriefLoggerAdapter` and future table readers | ItemGraph-owned evidence tables | Imported item/container rows only | The adapter currently reads only `items` and `containers`; full read-only import of all 11 source tables, reference identities, and opaque rows is [#28](https://github.com/DurdeuVlad/itemgraph/issues/28) |
 | MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite | — | Deliberate scope boundary |
 
 ## Data boundary
@@ -71,6 +89,15 @@ non-quantity evidence so a chat message, command, block action, or session event
 cannot be misrepresented as an item transfer. Both tables are owned by ItemGraph;
 the GriefLogger database remains read-only during migration and can be removed
 after native coverage and staging verification meet this matrix.
+
+GriefLogger stores chat and command rows for external review and does not include
+them in its in-game lookup merge. ItemGraph's unified lookup intentionally extends
+that surface; the extension remains labeled by source and evidence class.
+
+GriefLogger removes interaction rows when a block or door is removed. ItemGraph's
+raw evidence is immutable, so parity work must use an explicit supersession or
+tombstone record to reproduce the visible active-history result without deleting
+the supporting observation.
 
 The hopper/mechanical-automation row is supplemental ItemGraph coverage. It is
 not required to replace a GriefLogger capability because GriefLogger does not
@@ -179,6 +206,11 @@ record those transfers.
    the five-filter GriefLogger syntax and uses a required cube radius around the player.
 4. The existing item-flow tests remain green and the GriefLogger database is not
    opened by the native-only path.
+5. M8 is not complete while [#43](https://github.com/DurdeuVlad/itemgraph/issues/43),
+   [#24](https://github.com/DurdeuVlad/itemgraph/issues/24), [#26](https://github.com/DurdeuVlad/itemgraph/issues/26),
+   [#27](https://github.com/DurdeuVlad/itemgraph/issues/27), [#28](https://github.com/DurdeuVlad/itemgraph/issues/28),
+   [#29](https://github.com/DurdeuVlad/itemgraph/issues/29), [#30](https://github.com/DurdeuVlad/itemgraph/issues/30),
+   or [#31](https://github.com/DurdeuVlad/itemgraph/issues/31) still has an unresolved acceptance criterion.
 
 References: [GriefLogger feature overview](https://daqem.com/projects/grieflogger),
 [item usage](https://daqem.com/projects/grieflogger/wiki/player-actions/item-usage),
