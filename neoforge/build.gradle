@@ -27,6 +27,8 @@ neoForge {
     mods {
         "${rootProject.mod_id}" {
             sourceSet(sourceSets.main)
+            sourceSet(project(':common').sourceSets.main)
+            sourceSet(project(':core').sourceSets.main)
         }
     }
 }

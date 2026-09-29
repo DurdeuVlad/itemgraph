@@ -184,6 +184,13 @@ checksummed historical database when an operator explicitly configures it.
 
 ## Verification notes
 
+- **2026-09-30, NeoForge native-only startup:** the staging `:neoforge:runServer`
+  launch now includes the shared `common` and `core` source sets in the ModDev
+  run. The dedicated server loaded `itemgraph-neoforge.mixins.json`, initialized
+  Mixin 0.8.7, reached `Done`, applied schema migration v16, and reported
+  GriefLogger disabled without a mod-loading or mixin error. This proves the
+  NeoForge runtime can load the mixin configuration; a connected player replay
+  is still required for end-to-end projectile action evidence.
 - **2026-09-29, Fabric native-only smoke:** the dedicated loopback staging server
   started with no GriefLogger JAR, applied the ItemGraph schema 13 migrations,
   loaded the Fabric mixins, and reached `Done` on port 27992. The ingestion worker

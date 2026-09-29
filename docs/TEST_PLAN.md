@@ -616,3 +616,9 @@ and `/ig inspect on` opened a read-only `minecraft:generic_9x6` flow browser for
 the populated chest. The remaining cutover work is the documented migration and
 retention procedure; no production change is authorized by this test.
 
+The 2026-09-30 NeoForge staging startup additionally ran `:neoforge:runServer`
+with the shared `common` and `core` source sets attached to the ModDev run. It
+loaded the NeoForge mixin configuration, applied migration v16, reached `Done`,
+and shut down without a mod-loading or mixin error. This is loader startup
+evidence only; it does not replace a connected-player projectile replay.
+
