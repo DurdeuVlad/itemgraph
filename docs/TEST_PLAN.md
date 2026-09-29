@@ -14,6 +14,16 @@ Testing should focus on correctness, explainability, quantity conservation, temp
 
 Never use production as the primary test environment.
 
+## Compatibility profile gate
+
+Run `python tools/validate_grieflogger_profile.py` from the repository root.
+The check is read-only and must pass before any M8 parity issue is marked
+complete. It verifies the pinned GriefLogger 26.2 commit, all 18 audited source
+actions, all 11 source tables, the canonical source-profile SHA-256, source-file
+citations, parity-document references, and milestone issue references. CI also
+reads the eight M8 issue records through the read-only GitHub API and verifies
+their milestone and acceptance-criteria sections.
+
 ## Core correctness tests
 
 ### Simple transfer
