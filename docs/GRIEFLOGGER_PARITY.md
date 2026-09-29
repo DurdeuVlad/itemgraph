@@ -10,7 +10,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested; the 2026-09-29 Fabric replay persisted `ADD_ITEM` and `REMOVE_ITEM` rows |
 | Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge paths and Fabric normal, vanilla player-death, and custom death-event item additions are implemented; the Fabric replay persisted accepted `DROP_ITEM` and `PICKUP_ITEM` rows |
 | Hopper/mechanical automation (ItemGraph supplemental) | NeoForge capability wrappers; Fabric `HopperBlockEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | GriefLogger's published feature surface has no hopper or mechanical-automation event; ItemGraph records successful vanilla hopper net deltas with unknown endpoints, while modded automation adapters remain an optional extension |
-| Crafting, smelting, anvil rename/repair | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | Both loaders capture crafting, furnace-family smelting, and anvil rename/repair results at server result-take boundaries; Fabric staging verification remains pending |
+| Crafting, smelting, anvil rename/repair | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | Both loaders capture crafting, furnace-family smelting, and anvil rename/repair results at server result-take boundaries; the Fabric replay persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows |
 | Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted `PLAYER_JOIN` and `PLAYER_QUIT` rows |
 | Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted `CHAT_MESSAGE` rows and returned them through `/ig lookup` |
 | Player commands | `NativeAuditEventListener`, Fabric `CommandsMixin` | `ig_audit_events` | `/ig lookup` | Both loaders record `COMMAND_ATTEMPT` at the pre-execution dispatch boundary, matching GriefLogger's documented behavior of recording attempts regardless of permission or command success; `COMMAND_EXECUTED` remains reserved for legacy rows and is never fabricated |
@@ -20,7 +20,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | Armor stand equip/unequip | `ArmorStandEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
 | Consume, break, throw, shoot item actions | NeoForge `NativeItemActionEventListener`, `ItemEntityEventListener`; Fabric `LivingEntityMixin`, `ItemStackMixin`, `ServerLevelMixin` | `ig_observations` for consume/break; `ig_audit_events` for native projectile spawn evidence | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record completed eat/drink consumption at the return boundary, Fabric records durability breaks at the `ItemStack.hurtAndBreak` shrink boundary, and both loaders record fresh player-owned projectile spawns as non-quantity `THROW_ITEM`/`SHOOT_ITEM` audit evidence; the Fabric replay persisted all four action types |
 | Location/action filtered lookup | `AuditLookupFilters`, `AuditEventQueryService` | `ig_audit_events` | `/ig lookup`, `/ig lookup near`, `/ig lookup filters` | GriefLogger-style action/user/include/exclude/time/radius filters implemented for native audit actions with five-filter cap, required bounded cube radius, and conflict validation; the Fabric replay returned rows from both `/ig lookup CHAT_MESSAGE 10 60` and `/ig lookup filters action.chat_message time.1h radius.50`; quantity-flow drop/pickup actions remain under `/ig trace` |
-| Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `FlowBrowserService`, `TraceQueryService` | `ig_observations` | `/ig inspect`, `/ig trace container` | Read-only coordinate history and paginated flow browser implemented on both loaders; staging verification pending |
+| Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `FlowBrowserService`, `TraceQueryService` | `ig_observations` | `/ig inspect`, `/ig trace container` | Read-only coordinate history and paginated flow browser implemented on both loaders; the Fabric replay opened a read-only `minecraft:generic_9x6` flow browser for a populated chest |
 | Paginated generic audit results | `AuditEventQueryService` offset paging | `ig_audit_events` | `/ig lookup page <page> ...` | Bounded 1-based page offsets and server-generated Previous/Next chat controls implemented |
 | MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite | — | Deliberate scope boundary |
 
@@ -35,6 +35,25 @@ after native coverage and staging verification meet this matrix.
 The hopper/mechanical-automation row is supplemental ItemGraph coverage. It is
 not required to replace a GriefLogger capability because GriefLogger does not
 record those transfers.
+
+## Native-only cutover and retention plan
+
+1. Before cutover, stop the staging server and make an immutable, checksummed
+   copy of the GriefLogger database. ItemGraph may read the source during the
+   comparison window, but never writes to it.
+2. Run ItemGraph native-only with the GriefLogger JAR absent for a complete
+   24-hour staging window. Verify the acceptance gates above and record the
+   ItemGraph schema version and row-count report.
+3. Keep the immutable GriefLogger copy for 30 days after native-only cutover.
+   Store its checksum beside the backup and keep the original database read-only.
+4. After the 30-day retention window, keep the checksummed GriefLogger copy
+   under the operator's archive policy and remove only the GriefLogger JAR/config
+   after an operator approves the checksum and acceptance report. Leave
+   `grieflogger_database_path` unset for native-only operation.
+5. Rollback is bounded: restore the GriefLogger JAR and its immutable database
+   copy, leave ItemGraph's database untouched, and re-run the staging checks
+   before any production decision. This plan does not authorize production
+   changes.
 
 ## Verification notes
 
@@ -82,8 +101,13 @@ record those transfers.
   GriefLogger does not provide an equivalent hopper event.
 - **2026-09-29, Fabric transformations:** result-slot hooks capture crafting,
   furnace-family smelting, and anvil rename/repair outputs with source/result
-  canonical fingerprints. Staging action replay remains required for row-level
-  verification.
+  canonical fingerprints. The isolated replay persisted one `CRAFT`, one
+  `SMELT`, and one `ANVIL_RENAME` row.
+- **2026-09-29, Fabric inspector replay:** with `/ig inspect on` enabled for an
+  operator-level bot, right-clicking the populated chest opened the shared
+  read-only `minecraft:generic_9x6` flow browser. Display rows were present and
+  no normal mutable container window was opened; `/ig inspect off` cleared the
+  mode before disconnect.
 - **2026-09-29, filtered lookup implementation:** `/ig lookup filters` accepts up
   to five `name.value` filters matching GriefLogger's action, user, include,
   exclude, time, and radius vocabulary. Radius is required, clamped to 1..1024,

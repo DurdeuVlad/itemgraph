@@ -576,5 +576,8 @@ commands, block actions, entity kills, containers, consume, durability break,
 throw, shoot, projectile, and hopper events through the real server. After clean
 shutdown, the isolated SQLite database contained rows for every exercised event,
 and the bot received results from both generic and filtered `/ig lookup` commands.
-Fabric transformation and inspector UI replay remain separate follow-up checks.
+The same staging checkout persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows,
+and `/ig inspect on` opened a read-only `minecraft:generic_9x6` flow browser for
+the populated chest. The remaining cutover work is the documented migration and
+retention procedure; no production change is authorized by this test.
 
