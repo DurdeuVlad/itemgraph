@@ -65,15 +65,26 @@ public final class AuditEventQueryService {
             args.add(levelId);
         }
         if (centerX != null && centerY != null && centerZ != null && requestedRadius != null) {
-            double radius = Math.max(1.0, Math.min(MAX_RADIUS_BLOCKS, requestedRadius));
-            sql.append(" AND ((x - ?) * (x - ?) + (y - ?) * (y - ?) + (z - ?) * (z - ?)) <= ?");
-            args.add(centerX);
-            args.add(centerX);
-            args.add(centerY);
-            args.add(centerY);
-            args.add(centerZ);
-            args.add(centerZ);
-            args.add(radius * radius);
+            if (requestedRadius == 0.0) {
+                // The inspector needs the clicked block's history, not a nearby-radius
+                // approximation that can include adjacent blocks. This sentinel is only
+                // used by the server-side inspector; public near lookups still clamp to
+                // the documented minimum radius.
+                sql.append(" AND x = ? AND y = ? AND z = ?");
+                args.add(centerX);
+                args.add(centerY);
+                args.add(centerZ);
+            } else {
+                double radius = Math.max(1.0, Math.min(MAX_RADIUS_BLOCKS, requestedRadius));
+                sql.append(" AND ((x - ?) * (x - ?) + (y - ?) * (y - ?) + (z - ?) * (z - ?)) <= ?");
+                args.add(centerX);
+                args.add(centerX);
+                args.add(centerY);
+                args.add(centerY);
+                args.add(centerZ);
+                args.add(centerZ);
+                args.add(radius * radius);
+            }
         }
         sql.append(" ORDER BY timestamp_ms DESC, id DESC LIMIT ? OFFSET ?");
         args.add(limit);

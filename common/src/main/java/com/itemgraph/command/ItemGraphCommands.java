@@ -489,7 +489,7 @@ public final class ItemGraphCommands {
                 sinceMinutes);
     }
 
-    /** /ig inspect - toggle the caller's container-inspection mode. */
+    /** /ig inspect - toggle the caller's in-world inspection mode. */
     private static int inspectToggle(CommandContext<CommandSourceStack> ctx) {
         ServerPlayer player = inspectionPlayer(ctx.getSource());
         if (player == null) {
@@ -497,8 +497,8 @@ public final class ItemGraphCommands {
         }
         boolean enabled = InspectionService.getInstance().toggle(player.getUUID());
         ctx.getSource().sendSuccess(() -> Component.literal(enabled
-                ? "[ItemGraph] Container inspection enabled. Right-click a supported container to open its read-only flow; use /ig inspect off to disable."
-                : "[ItemGraph] Container inspection disabled."), false);
+                ? "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable."
+                : "[ItemGraph] Inspection disabled."), false);
         return 1;
     }
 
@@ -511,11 +511,11 @@ public final class ItemGraphCommands {
         boolean changed = InspectionService.getInstance().setEnabled(player.getUUID(), enabled);
         ctx.getSource().sendSuccess(() -> Component.literal(enabled
                 ? changed
-                        ? "[ItemGraph] Container inspection enabled. Right-click a supported container to open its read-only flow."
-                        : "[ItemGraph] Container inspection is already enabled."
+                        ? "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history."
+                        : "[ItemGraph] Inspection is already enabled."
                 : changed
-                        ? "[ItemGraph] Container inspection disabled."
-                        : "[ItemGraph] Container inspection is already disabled."), false);
+                        ? "[ItemGraph] Inspection disabled."
+                        : "[ItemGraph] Inspection is already disabled."), false);
         return 1;
     }
 
@@ -527,7 +527,7 @@ public final class ItemGraphCommands {
         }
         boolean enabled = InspectionService.getInstance().isEnabled(player.getUUID());
         ctx.getSource().sendSuccess(() -> Component.literal(
-                "[ItemGraph] Container inspection is " + (enabled ? "enabled" : "disabled") + "."), false);
+                "[ItemGraph] Inspection is " + (enabled ? "enabled" : "disabled") + "."), false);
         return 1;
     }
 
@@ -535,7 +535,7 @@ public final class ItemGraphCommands {
         if (source.getEntity() instanceof ServerPlayer player) {
             return player;
         }
-        source.sendFailure(Component.literal("[ItemGraph] Container inspection requires a player."));
+        source.sendFailure(Component.literal("[ItemGraph] Inspection requires a player."));
         return null;
     }
 
@@ -562,6 +562,26 @@ public final class ItemGraphCommands {
                 DoubleArgumentType.getDouble(ctx, "y"),
                 DoubleArgumentType.getDouble(ctx, "z"),
                 DoubleArgumentType.getDouble(ctx, "radius"));
+    }
+
+    /**
+     * Starts the bounded, exact-position audit view used by {@code /ig inspect}.
+     * A zero radius is an internal sentinel for exact block coordinates; public
+     * near lookups continue to use the documented minimum radius of one block.
+     */
+    public static int openBlockInspection(CommandSourceStack source, String dimension, int x, int y, int z) {
+        if (!(source.getEntity() instanceof ServerPlayer) || !source.hasPermission(2)) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] Block inspection requires a permission-level-2 player."));
+            return 0;
+        }
+        AuditPageSession session = new AuditPageSession(
+                UUID.randomUUID(), "all", null, QueryWindow.unbounded(), QueryLimits.DEFAULT_LIMIT,
+                dimension, (double) x, (double) y, (double) z, 0.0, null,
+                "inspect block=" + dimension + " [" + x + "," + y + "," + z + "]",
+                System.currentTimeMillis());
+        rememberPageSession(source, session);
+        return dispatchAuditPage(source, "inspect block", session, 1, true);
     }
 
     /** Executes the GriefLogger-compatible name.value filter form around the issuing player. */

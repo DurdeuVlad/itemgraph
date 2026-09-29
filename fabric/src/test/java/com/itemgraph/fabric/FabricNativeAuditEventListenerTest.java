@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
@@ -89,6 +90,31 @@ class FabricNativeAuditEventListenerTest {
         assertNull(FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, l, pos) -> { opens.incrementAndGet(); return 0; },
                 player, serverLevelWithContainer(), BlockPos.ZERO));
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void activeNonContainerFabricInspectionUsesBlockHistoryOpener() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = org.mockito.Mockito.mock(ServerLevel.class);
+        when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(mock(BlockEntity.class));
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
+                inspections,
+                (openingPlayer, openingLevel, clickedPos) -> fail("non-container must not open the flow browser"),
+                (openingPlayer, openingLevel, clickedPos) -> {
+                    assertSame(player, openingPlayer);
+                    assertSame(level, openingLevel);
+                    assertEquals(BlockPos.ZERO, clickedPos);
+                    opens.incrementAndGet();
+                    return 1;
+                },
+                player, level, BlockPos.ZERO);
+
+        assertEquals(InteractionResult.SUCCESS, result);
         assertEquals(1, opens.get());
     }
 

@@ -45,7 +45,7 @@ final class CommandHelp {
                 "[ItemGraph] /ig gui item <query> [sinceMinutes]",
                 "[ItemGraph] /ig gui player <playerName> [sinceMinutes]",
                 "[ItemGraph] /ig gui container <dimension> <x> <y> <z> [sinceMinutes]",
-                "[ItemGraph] /ig inspect [on|off|status] — toggle in-world container inspection.",
+                "[ItemGraph] /ig inspect [on|off|status] — toggle in-world block, functional-block, and container inspection.",
                 "[ItemGraph] Defaults: limit=20, capped at 100; sinceMinutes is omitted for all history and uses minutes when present.",
                 "[ItemGraph] Historical reads are asynchronous and read-only. OBSERVED rows stay distinct from inferred edges, ambiguity, UNKNOWN endpoints, and confidence.");
     }
@@ -177,8 +177,8 @@ final class CommandHelp {
         List<String> inspect = List.of(
                 "[ItemGraph] Syntax: /ig inspect [on|off|status]",
                 "[ItemGraph] The command and each supported click enforce the same permission check. /ig inspect toggles; /ig inspect on enables; /ig inspect off disables; /ig inspect status reports without changing.",
-                "[ItemGraph] While enabled, right-click a supported block-entity Container to open its read-only flow browser for the exact dimension and coordinates.",
-                "[ItemGraph] No wand or ItemGraph item is registered. The click does not consume the held item or become transfer evidence; state clears on logout and server stop.",
+                "[ItemGraph] While enabled, left-click any block or right-click a block/container to open read-only history for the exact dimension and coordinates.",
+                "[ItemGraph] Container clicks open the flow browser; block clicks open paginated audit history. The click does not consume the held item or become transfer evidence; state clears on logout and server stop.",
                 "[ItemGraph] Example: /ig inspect on");
         topics.put("inspect", inspect);
         return Map.copyOf(topics);

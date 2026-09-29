@@ -150,6 +150,33 @@ class AuditEventQueryServiceTest {
     }
 
     @Test
+    void zeroRadiusInspectorLookupMatchesOnlyTheClickedBlock() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement(
+                "INSERT INTO ig_audit_events (event_type, timestamp_ms, level_id, x, y, z) VALUES ('BREAK_BLOCK', ?, 'minecraft:overworld', ?, ?, ?)")) {
+            insert.setLong(1, 1L);
+            insert.setDouble(2, 10.0);
+            insert.setDouble(3, 64.0);
+            insert.setDouble(4, -3.0);
+            insert.executeUpdate();
+
+            insert.setLong(1, 2L);
+            insert.setDouble(2, 11.0);
+            insert.setDouble(3, 64.0);
+            insert.setDouble(4, -3.0);
+            insert.executeUpdate();
+        }
+
+        List<AuditEventDetail> exact = service.find(
+                conn, "all", null, QueryWindow.unbounded(),
+                "minecraft:overworld", 10.0, 64.0, -3.0, 0.0, 100);
+
+        assertEquals(1, exact.size());
+        assertEquals(10.0, exact.get(0).x());
+        assertEquals(64.0, exact.get(0).y());
+        assertEquals(-3.0, exact.get(0).z());
+    }
+
+    @Test
     void pageOffsetUsesStableTimestampAndIdOrdering() throws Exception {
         try (PreparedStatement insert = conn.prepareStatement(
                 "INSERT INTO ig_audit_events (event_type, timestamp_ms, detail) VALUES ('CHAT_MESSAGE', ?, ?)")) {
