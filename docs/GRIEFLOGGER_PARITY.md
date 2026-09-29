@@ -36,6 +36,11 @@ and tamper-evident exports. Research informing the design includes
 [Ledger's server-side event scope](https://modrinth.com/mod/ledger), and
 [Fabric's event guidance](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md).
 
+The machine-readable compatibility registry is
+[`docs/GRIEFLOGGER_COMPATIBILITY.json`](GRIEFLOGGER_COMPATIBILITY.json). Its
+`status` and `evidence_class` fields are normative: unresolved or inferred rows
+must not be presented as direct GriefLogger observations.
+
 ### M8 staging gates
 
 The native-only cutover proof in issue [#31](https://github.com/DurdeuVlad/itemgraph/issues/31)

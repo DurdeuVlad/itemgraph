@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "compatibility_version": "m8",
+  "mod_id": "itemgraph",
+  "supported_commands": ["/ig", "/itemgraph"],
+  "unsupported_aliases": ["/gl", "/grieflogger"],
+  "source": {
+    "name": "GriefLogger",
+    "documentation": "https://daqem.com/projects/grieflogger",
+    "database_policy": "read_only"
+  },
+  "statuses": ["compatible", "extended", "unsupported", "unresolved"],
+  "evidence_classes": ["observed", "inferred", "ambiguous", "unresolved"],
+  "actions": [
+    {"grieflogger": "ADD_ITEM", "itemgraph": "ADD_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "REMOVE_ITEM", "itemgraph": "REMOVE_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "DROP_ITEM", "itemgraph": "DROP_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "PICKUP_ITEM", "itemgraph": "PICKUP_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "CRAFT_ITEM", "itemgraph": "CRAFT", "status": "compatible", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "CONSUME_ITEM", "itemgraph": "CONSUME_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "BREAK_ITEM", "itemgraph": "BREAK_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "THROW_ITEM", "itemgraph": "THROW_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "non_quantity_projectile_evidence", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "SHOOT_ITEM", "itemgraph": "SHOOT_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "non_quantity_projectile_evidence", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "PLACE_BLOCK", "itemgraph": "PLACE_BLOCK", "status": "unresolved", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"], "owner_issue": 27},
+    {"grieflogger": "BREAK_BLOCK", "itemgraph": "BREAK_BLOCK", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "INTERACT_BLOCK", "itemgraph": "INTERACT_BLOCK_ATTEMPT", "status": "unresolved", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"], "owner_issue": 27},
+    {"grieflogger": "KILL_ENTITY", "itemgraph": "KILL_ENTITY", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "JOIN", "itemgraph": "PLAYER_JOIN", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "QUIT", "itemgraph": "PLAYER_QUIT", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "CHAT", "itemgraph": "CHAT_MESSAGE", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
+    {"grieflogger": "COMMAND", "itemgraph": "COMMAND_ATTEMPT", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]}
+  ],
+  "filters": {
+    "names": ["action", "user", "include", "exclude", "time", "radius"],
+    "maximum": 5,
+    "radius_required": true,
+    "combination": "and",
+    "time_units": ["m", "h", "d", "y"]
+  },
+  "controls": {
+    "permission_level": 2,
+    "page_size_maximum": 100,
+    "query_worker_queue_maximum": 64,
+    "ingestion_queue_maximum": 10000,
+    "entityless_query_timeout_seconds": 5
+  },
+  "storage": {
+    "native": ["sqlite"],
+    "planned": ["mysql", "mariadb"],
+    "grieflogger_database_mutation": false
+  },
+  "owner_issues": {
+    "contract": 23,
+    "commands": 24,
+    "lookup": 25,
+    "inspector": 26,
+    "native_events": 27,
+    "historical_import": 28,
+    "storage": 29,
+    "operations": 30,
+    "differential_proof": 31
+  }
+}
