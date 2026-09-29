@@ -10,14 +10,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * Captures the server's fresh-entity boundary for player-owned projectiles and
- * player drops. Loaded entities use a separate addWithUUID path, so this hook
- * does not reinterpret chunk loading as a new spawn.
+ * item drops, including custom entities accepted during a player death. Loaded
+ * entities use a separate addWithUUID path, so this hook does not reinterpret
+ * chunk loading as a new spawn.
  */
 @Mixin(ServerLevel.class)
 public final class ServerLevelMixin {
     @Inject(method = "addFreshEntity", at = @At("RETURN"))
-    private void itemgraph$recordProjectileSpawn(Entity entity,
-                                                  CallbackInfoReturnable<Boolean> callback) {
+    private void itemgraph$recordFreshEntity(Entity entity,
+                                             CallbackInfoReturnable<Boolean> callback) {
         FabricNativeAuditEventListener.onItemEntityAdded(entity, callback.getReturnValueZ());
         FabricNativeAuditEventListener.onProjectileAdded(entity, callback.getReturnValueZ());
     }

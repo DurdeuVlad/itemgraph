@@ -3,6 +3,7 @@ package com.itemgraph.fabric.mixin;
 import com.itemgraph.fabric.FabricNativeAuditEventListener;
 import com.itemgraph.fabric.FabricContainerSessionListener;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
@@ -43,5 +44,15 @@ public abstract class ServerPlayerMixin {
     @Inject(method = "doCloseContainer", at = @At("HEAD"))
     private void itemgraph$closeContainerMenu(CallbackInfo callback) {
         FabricContainerSessionListener.onMenuClosing((ServerPlayer) (Object) this);
+    }
+
+    @Inject(method = "die", at = @At("HEAD"))
+    private void itemgraph$beginPlayerDeathCapture(DamageSource source, CallbackInfo callback) {
+        FabricNativeAuditEventListener.beginPlayerDeathCapture((ServerPlayer) (Object) this);
+    }
+
+    @Inject(method = "die", at = @At("RETURN"))
+    private void itemgraph$finishPlayerDeathCapture(DamageSource source, CallbackInfo callback) {
+        FabricNativeAuditEventListener.finishPlayerDeathCapture((ServerPlayer) (Object) this);
     }
 }

@@ -13,6 +13,7 @@ import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.PlayerChatMessage;
@@ -28,6 +29,8 @@ import net.minecraft.world.entity.projectile.ItemSupplier;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.projectile.ThrowableItemProjectile;
 import net.minecraft.world.entity.projectile.ThrownTrident;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.HopperBlockEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.UseAnim;
@@ -36,12 +39,14 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.lang.StackWalker;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -52,8 +57,40 @@ public final class FabricNativeAuditEventListener {
     private static final int MAX_DETAIL_LENGTH = 16_384;
     private static final int MAX_DROP_CAPTURE_DEPTH = 32;
     private static final ThreadLocal<Deque<DropCapture>> PENDING_PLAYER_DROPS = new ThreadLocal<>();
+    private static final int MAX_HOPPER_CAPTURE_DEPTH = 16;
+    private static final StackWalker HOPPER_STACK_WALKER = StackWalker.getInstance();
+    private static final ThreadLocal<Deque<HopperCapture>> PENDING_HOPPER_TRANSFERS = new ThreadLocal<>();
+    private static final int MAX_DEATH_CAPTURE_DEPTH = 8;
+    private static final StackWalker DEATH_STACK_WALKER = StackWalker.getInstance();
+    private static final ThreadLocal<Deque<DeathCapture>> PENDING_PLAYER_DEATHS = new ThreadLocal<>();
 
     private record DropCapture(Set<ItemEntity> addedEntities, String actionType) {
+    }
+
+    private record HopperSite(StackTraceElement caller, int stackDepth) {
+    }
+
+    private record HopperCapture(ServerLevel level, HopperBlockEntity hopper, BlockPos hopperPos,
+                                 HopperSite site,
+                                 Map<BlockPos, Map<CanonicalItem, Integer>> before) {
+    }
+
+    private record DeathSite(String callerClass, String callerMethod, int stackDepth) {
+    }
+
+    private static final class DeathCapture {
+        private final ServerPlayer player;
+        private final DeathSite site;
+        private final Set<ItemEntity> acceptedEntities = Collections.newSetFromMap(new IdentityHashMap<>());
+        private final Set<ItemEntity> recordedEntities = Collections.newSetFromMap(new IdentityHashMap<>());
+
+        private DeathCapture(ServerPlayer player, DeathSite site) {
+            this.player = player;
+            this.site = site;
+        }
+    }
+
+    record HopperDelta(BlockPos containerPos, CanonicalItem item, int amount, boolean inserted) {
     }
 
     private FabricNativeAuditEventListener() {
@@ -227,6 +264,95 @@ public final class FabricNativeAuditEventListener {
         if (pending != null && !pending.isEmpty()) {
             pending.peek().addedEntities().add(itemEntity);
         }
+        Deque<DeathCapture> deaths = PENDING_PLAYER_DEATHS.get();
+        if (deaths != null && !deaths.isEmpty()) {
+            deaths.peek().acceptedEntities.add(itemEntity);
+        }
+    }
+
+    /** Starts a bounded capture for custom item entities spawned during player death handling. */
+    public static void beginPlayerDeathCapture(ServerPlayer player) {
+        if (player == null || player.level().isClientSide()) {
+            return;
+        }
+        Deque<DeathCapture> pending = PENDING_PLAYER_DEATHS.get();
+        if (pending == null) {
+            pending = new java.util.ArrayDeque<>();
+            PENDING_PLAYER_DEATHS.set(pending);
+        }
+        if (pending.size() >= MAX_DEATH_CAPTURE_DEPTH) {
+            pending.clear();
+        }
+        pending.push(new DeathCapture(player, currentDeathSite()));
+    }
+
+    /** Finishes a death capture and records accepted custom entities not already seen by ServerPlayer.drop. */
+    public static void finishPlayerDeathCapture(ServerPlayer player) {
+        Deque<DeathCapture> pending = PENDING_PLAYER_DEATHS.get();
+        DeathCapture capture = removeMatchingDeathCapture(pending, player, currentDeathSite());
+        if (pending != null && pending.isEmpty()) {
+            PENDING_PLAYER_DEATHS.remove();
+        }
+        if (capture == null) {
+            return;
+        }
+        for (ItemEntity itemEntity : capture.acceptedEntities) {
+            if (capture.recordedEntities.contains(itemEntity) || itemEntity.isRemoved()) {
+                continue;
+            }
+            ItemStack stack = itemEntity.getItem();
+            onItemDropped(capture.player, itemEntity,
+                    stack == null ? ItemStack.EMPTY : stack.copy(), "DEATH_DROP");
+        }
+    }
+
+    private static DeathCapture removeMatchingDeathCapture(Deque<DeathCapture> pending,
+                                                            ServerPlayer player, DeathSite site) {
+        if (pending == null || pending.isEmpty() || player == null) {
+            if (pending != null) {
+                pending.clear();
+            }
+            return null;
+        }
+        DeathCapture match = null;
+        for (DeathCapture candidate : pending) {
+            if (candidate.player == player && Objects.equals(candidate.site, site)) {
+                match = candidate;
+                break;
+            }
+        }
+        if (match == null) {
+            pending.clear();
+            return null;
+        }
+        while (pending.peek() != match) {
+            pending.pop();
+        }
+        return pending.pop();
+    }
+
+    private static DeathSite currentDeathSite() {
+        return DEATH_STACK_WALKER.walk(frames -> {
+            String callerClass = null;
+            String callerMethod = null;
+            int depth = 0;
+            int index = 0;
+            java.util.Iterator<StackWalker.StackFrame> iterator = frames.iterator();
+            while (iterator.hasNext()) {
+                StackWalker.StackFrame frame = iterator.next();
+                // 0=currentDeathSite, 1=begin/finish, 2=mixin handler,
+                // 3=ServerPlayer.die, 4=its caller. Use class/method rather
+                // than a source line because HEAD and RETURN are different
+                // injection sites in the same die method.
+                if (index == 4) {
+                    callerClass = frame.getClassName();
+                    callerMethod = frame.getMethodName();
+                }
+                depth++;
+                index++;
+            }
+            return new DeathSite(callerClass, callerMethod, depth);
+        });
     }
 
     /** Finishes a drop capture and records only an entity accepted by addFreshEntity. */
@@ -255,12 +381,36 @@ public final class FabricNativeAuditEventListener {
                 || actionType == null || player.level().isClientSide() || itemEntity.isRemoved()) {
             return;
         }
+        ItemStack entityStack = itemEntity.getItem();
+        if (entityStack == null || entityStack.isEmpty()) {
+            return;
+        }
+        int amount = entityStack.getCount();
+        if (amount <= 0) {
+            return;
+        }
         CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(originalStack);
-        recordItemObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
+        boolean submitted = recordItemObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
                 player.level().dimension().location().toString(),
                 player.getX(), player.getY(), player.getZ(),
                 itemEntity.getX(), itemEntity.getY(), itemEntity.getZ(),
-                "GROUND", canonical, itemEntity.getItem().getCount(), itemEntity.getUUID().toString());
+                "GROUND", canonical, amount, itemEntity.getUUID().toString());
+        if (submitted && "DEATH_DROP".equals(actionType)) {
+            markDeathEntityRecorded(itemEntity);
+        }
+    }
+
+    private static void markDeathEntityRecorded(ItemEntity itemEntity) {
+        Deque<DeathCapture> pending = PENDING_PLAYER_DEATHS.get();
+        if (pending == null || itemEntity == null) {
+            return;
+        }
+        for (DeathCapture capture : pending) {
+            if (capture.acceptedEntities.contains(itemEntity)) {
+                capture.recordedEntities.add(itemEntity);
+                return;
+            }
+        }
     }
 
     /** Records the exact count delta consumed by a successful item-entity pickup. */
@@ -308,6 +458,175 @@ public final class FabricNativeAuditEventListener {
             return;
         }
         recordUnknownItemObservation(player, "BREAK_ITEM", originalStack.copy(), 1);
+    }
+
+    /** Captures the bounded container neighborhood around one vanilla hopper. */
+    public static void beginHopperTransferCapture(Level level, BlockPos hopperPos, HopperBlockEntity hopper) {
+        if (!(level instanceof ServerLevel serverLevel) || hopperPos == null || hopper == null) {
+            PENDING_HOPPER_TRANSFERS.remove();
+            return;
+        }
+        Deque<HopperCapture> pending = PENDING_HOPPER_TRANSFERS.get();
+        if (pending == null) {
+            pending = new java.util.ArrayDeque<>();
+            PENDING_HOPPER_TRANSFERS.set(pending);
+        }
+        if (pending.size() >= MAX_HOPPER_CAPTURE_DEPTH) {
+            // A modded nested call can skip a RETURN injector. Bound stale
+            // snapshots so automation cannot retain server-thread state.
+            pending.clear();
+        }
+        pending.push(new HopperCapture(serverLevel, hopper,
+                hopperPos.immutable(),
+                currentHopperSite(),
+                snapshotHopperContainers(serverLevel, hopperPos)));
+    }
+
+    /** Emits only net changes when the hopper transfer method reports success. */
+    public static void finishHopperTransferCapture(Level level, BlockPos hopperPos,
+                                                   HopperBlockEntity hopper, boolean moved) {
+        Deque<HopperCapture> pending = PENDING_HOPPER_TRANSFERS.get();
+        HopperCapture capture = removeMatchingHopperCapture(
+                pending, level, hopperPos, hopper, currentHopperSite());
+        if (pending != null && pending.isEmpty()) {
+            PENDING_HOPPER_TRANSFERS.remove();
+        }
+        if (capture == null || !moved) {
+            return;
+        }
+        Map<BlockPos, Map<CanonicalItem, Integer>> after = snapshotHopperContainers(
+                capture.level(), capture.before().keySet());
+        for (HopperDelta delta : computeHopperDeltas(capture.before(), after)) {
+            recordHopperDelta(capture.level(), delta);
+        }
+    }
+
+    private static HopperCapture removeMatchingHopperCapture(Deque<HopperCapture> pending,
+                                                              Level level, BlockPos hopperPos,
+                                                              HopperBlockEntity hopper,
+                                                              HopperSite site) {
+        if (pending == null || pending.isEmpty() || !(level instanceof ServerLevel serverLevel)
+                || hopperPos == null || hopper == null) {
+            if (pending != null) {
+                pending.clear();
+            }
+            return null;
+        }
+        HopperCapture match = null;
+        for (HopperCapture candidate : pending) {
+            if (candidate.level() == serverLevel && candidate.hopper() == hopper
+                    && candidate.hopperPos().equals(hopperPos)
+                    && Objects.equals(candidate.site(), site)) {
+                match = candidate;
+                break;
+            }
+        }
+        if (match == null) {
+            // A throwing nested invocation has no RETURN callback. Do not let its
+            // snapshot pair with a later, unrelated hopper transfer.
+            pending.clear();
+            return null;
+        }
+        while (pending.peek() != match) {
+            pending.pop();
+        }
+        return pending.pop();
+    }
+
+    private static HopperSite currentHopperSite() {
+        return HOPPER_STACK_WALKER.walk(frames -> {
+            StackTraceElement caller = null;
+            int depth = 0;
+            int index = 0;
+            java.util.Iterator<StackWalker.StackFrame> iterator = frames.iterator();
+            while (iterator.hasNext()) {
+                StackWalker.StackFrame frame = iterator.next();
+                // 0=currentHopperSite, 1=begin/finish, 2=mixin handler,
+                // 3=HopperBlockEntity.tryMoveItems, 4=its caller. The
+                // target method's source line differs between HEAD and RETURN.
+                if (index == 4) {
+                    caller = frame.toStackTraceElement();
+                }
+                depth++;
+                index++;
+            }
+            return new HopperSite(caller, depth);
+        });
+    }
+
+    private static Map<BlockPos, Map<CanonicalItem, Integer>> snapshotHopperContainers(
+            ServerLevel level, BlockPos hopperPos) {
+        java.util.LinkedHashSet<BlockPos> positions = new java.util.LinkedHashSet<>();
+        positions.add(hopperPos.immutable());
+        for (Direction direction : Direction.values()) {
+            positions.add(hopperPos.relative(direction).immutable());
+        }
+        return snapshotHopperContainers(level, positions);
+    }
+
+    private static Map<BlockPos, Map<CanonicalItem, Integer>> snapshotHopperContainers(
+            ServerLevel level, java.util.Collection<BlockPos> positions) {
+        Map<BlockPos, Map<CanonicalItem, Integer>> snapshot = new java.util.LinkedHashMap<>();
+        for (BlockPos position : positions) {
+            BlockEntity blockEntity = level.getBlockEntity(position);
+            if (!(blockEntity instanceof Container container)) {
+                continue;
+            }
+            Map<CanonicalItem, Integer> totals = new java.util.LinkedHashMap<>();
+            for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                ItemStack stack = container.getItem(slot);
+                if (stack == null || stack.isEmpty()) {
+                    continue;
+                }
+                CanonicalItem item = ItemCanonicalizer.canonicalizeStack(stack);
+                totals.merge(item, stack.getCount(), Integer::sum);
+            }
+            snapshot.put(position.immutable(), Map.copyOf(totals));
+        }
+        return Map.copyOf(snapshot);
+    }
+
+    /** Computes per-container net deltas without observing intermediate slot mutations. */
+    static List<HopperDelta> computeHopperDeltas(
+            Map<BlockPos, Map<CanonicalItem, Integer>> before,
+            Map<BlockPos, Map<CanonicalItem, Integer>> after) {
+        if (before == null || after == null || before.isEmpty()) {
+            return List.of();
+        }
+        List<HopperDelta> deltas = new ArrayList<>();
+        for (Map.Entry<BlockPos, Map<CanonicalItem, Integer>> entry : before.entrySet()) {
+            BlockPos position = entry.getKey();
+            Map<CanonicalItem, Integer> beforeItems = entry.getValue();
+            Map<CanonicalItem, Integer> afterItems = after.getOrDefault(position, Map.of());
+            Set<CanonicalItem> items = new java.util.LinkedHashSet<>(beforeItems.keySet());
+            items.addAll(afterItems.keySet());
+            for (CanonicalItem item : items) {
+                int previous = beforeItems.getOrDefault(item, 0);
+                int current = afterItems.getOrDefault(item, 0);
+                int delta = current - previous;
+                if (delta > 0) {
+                    deltas.add(new HopperDelta(position, item, delta, true));
+                } else if (delta < 0) {
+                    deltas.add(new HopperDelta(position, item, -delta, false));
+                }
+            }
+        }
+        return List.copyOf(deltas);
+    }
+
+    private static void recordHopperDelta(ServerLevel level, HopperDelta delta) {
+        BlockPos containerPos = delta.containerPos();
+        String levelName = level.dimension().location().toString();
+        byte[] rawData = "{\"capture\":\"fabric_hopper_net_delta\",\"endpoint\":\"unknown\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+                System.currentTimeMillis(), delta.inserted() ? "HOPPER_INSERT" : "HOPPER_EXTRACT",
+                com.itemgraph.listener.ContainerInteractionTracker.UNKNOWN_CALLER_UUID,
+                com.itemgraph.listener.ContainerInteractionTracker.UNKNOWN_CALLER_NAME, levelName,
+                containerPos.getX(), containerPos.getY(), containerPos.getZ(),
+                levelName, (double) containerPos.getX(), (double) containerPos.getY(),
+                (double) containerPos.getZ(), "CONTAINER", delta.item().itemId(), rawData,
+                delta.item(), delta.amount(), null, null));
     }
 
     /** Records a crafting result taken from a server-side crafting result slot. */
@@ -400,14 +719,14 @@ public final class FabricNativeAuditEventListener {
                 level, null, null, null, "UNKNOWN", canonical, amount, null));
     }
 
-    static void recordItemObservation(String actionType, String playerUuid, String playerName,
+    static boolean recordItemObservation(String actionType, String playerUuid, String playerName,
                                        String levelName, double sourceX, double sourceY, double sourceZ,
                                        double targetX, double targetY, double targetZ, String targetType,
                                        CanonicalItem canonical, int amount, String itemEntityUuid) {
         if (actionType == null || playerUuid == null || levelName == null || canonical == null || amount <= 0) {
-            return;
+            return false;
         }
-        InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+        return InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
                 System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
                 sourceX, sourceY, sourceZ, levelName, targetX, targetY, targetZ,
                 targetType, canonical, amount, itemEntityUuid));

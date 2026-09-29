@@ -8,7 +8,8 @@ lookup, pagination, and SQLite/MySQL storage.
 | GriefLogger capability | ItemGraph native source | Storage | Query/UI status | Evidence status |
 | --- | --- | --- | --- | --- |
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
-| Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge drop/pickup/death-drop paths and Fabric normal plus vanilla player-death inventory drops are implemented and unit-tested; custom death-event additions and automation remain parity gaps |
+| Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge paths and Fabric normal, vanilla player-death, and custom death-event item additions are implemented; accepted entities are recorded once |
+| Automated hopper movement | NeoForge capability wrappers; Fabric `HopperBlockEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | Fabric records successful vanilla hopper net deltas as `HOPPER_INSERT`/`HOPPER_EXTRACT` with unknown endpoints and no player attribution; modded automation still requires adapter coverage |
 | Crafting, smelting, anvil rename/repair | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | Both loaders capture crafting, furnace-family smelting, and anvil rename/repair results at server result-take boundaries; Fabric staging verification remains pending |
 | Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
 | Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
@@ -45,8 +46,9 @@ after native coverage and staging verification meet this matrix.
   return hooks. Drop rows require the `addFreshEntity` acceptance result; pickup
   rows use the entity stack count delta, so partial pickups cannot manufacture
   quantity. Drops observed while `ServerPlayer.isDeadOrDying()` are labeled
-  `DEATH_DROP`; custom death-event additions and non-player automation remain
-  outside this slice.
+  `DEATH_DROP`; custom item entities accepted during `ServerPlayer.die` are
+  captured by a bounded death window and deduplicated against the normal drop
+  hook.
 - **2026-09-29, Fabric inspector implementation:** the Fabric `UseBlockCallback`
   now matches NeoForge inspection semantics. An enabled permission-level-2 player
   receives the shared read-only flow browser only for a block entity implementing
@@ -56,8 +58,9 @@ after native coverage and staging verification meet this matrix.
 - **2026-09-29, Fabric container sessions:** server menu initialization and close
   hooks now reuse the shared interval tracker for block containers and double chests;
   an orderly server stop flushes active session deltas before ItemGraph closes its
-  database. Automated transfers remain outside Fabric's player-session attribution
-  boundary.
+  database. `HopperBlockEntityMixin` snapshots only the hopper and its six adjacent
+  container cells, then records successful net deltas with unknown endpoints; it does
+  not infer a player or a modded automation cause.
 - **2026-09-29, Fabric transformations:** result-slot hooks capture crafting,
   furnace-family smelting, and anvil rename/repair outputs with source/result
   canonical fingerprints. Staging action replay remains required for row-level
