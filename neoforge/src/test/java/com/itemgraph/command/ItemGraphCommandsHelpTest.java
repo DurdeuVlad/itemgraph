@@ -181,6 +181,18 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
+    void standalonePageAcceptsAQuerySessionToken() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+
+        assertEquals(0, dispatcher.execute(
+                "itemgraph page 2 00000000-0000-0000-0000-000000000001", source));
+        verify(source).sendFailure(failure.capture());
+        assertTrue(failure.getValue().getString().contains("No active lookup page session"));
+    }
+
+    @Test
     void suggestionsCoverLiteralsPlayersItemsTopicsAndDimensions() {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();

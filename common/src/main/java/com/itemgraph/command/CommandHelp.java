@@ -86,7 +86,7 @@ final class CommandHelp {
         topics.put("page", List.of(
                 "[ItemGraph] Syntax: /ig page <page>",
                 "[ItemGraph] Continues the issuing player's last lookup with the same filters and bounded page size.",
-                "[ItemGraph] Page state is per-player, expires after 30 minutes, and is read-only.",
+                "[ItemGraph] Page state is per-player, expires after 30 minutes, and is read-only; generated buttons carry a session token so older results stay bound to their query.",
                 "[ItemGraph] Example: /ig page 2"));
         List<String> lookup = List.of(
                 "[ItemGraph] Syntax: /ig lookup <eventType> [limit] [sinceMinutes]",

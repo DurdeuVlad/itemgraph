@@ -62,7 +62,8 @@ public final class ItemGraphCommands {
     private static final ExplainQueryService EXPLAIN_QUERIES = new ExplainQueryService();
     private static final TraceQueryService TRACE_QUERIES = new TraceQueryService();
     private static final AuditService AUDIT_SERVICE = new AuditService();
-    private static final Map<UUID, AuditPageSession> AUDIT_PAGE_SESSIONS = new ConcurrentHashMap<>();
+    private static final int MAX_PAGE_SESSIONS_PER_PLAYER = 8;
+    private static final Map<UUID, Map<UUID, AuditPageSession>> AUDIT_PAGE_SESSIONS = new ConcurrentHashMap<>();
     private static final long PAGE_SESSION_TTL_MS = 30L * 60L * 1_000L;
     private static volatile RuntimeInformationPort runtimeInformation = new RuntimeInformationPort() {
         @Override public String modVersion() { return "unknown"; }
@@ -70,6 +71,7 @@ public final class ItemGraphCommands {
     };
 
     private record AuditPageSession(
+            UUID sessionId,
             String eventType,
             String playerName,
             QueryWindow window,
@@ -258,7 +260,11 @@ public final class ItemGraphCommands {
         return Commands.literal("page")
                 .then(Commands.argument("page", IntegerArgumentType.integer(1))
                         .executes(ctx -> lookupAuditSessionPage(ctx,
-                                IntegerArgumentType.getInteger(ctx, "page"))));
+                                IntegerArgumentType.getInteger(ctx, "page"), null))
+                        .then(Commands.argument("session", StringArgumentType.word())
+                                .executes(ctx -> lookupAuditSessionPage(ctx,
+                                        IntegerArgumentType.getInteger(ctx, "page"),
+                                        StringArgumentType.getString(ctx, "session")))));
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> buildPagedLookupCommand() {
@@ -569,7 +575,7 @@ public final class ItemGraphCommands {
                 + " dimension=" + levelId
                 + " center=" + centerX + "," + centerY + "," + centerZ;
         AuditPageSession session = new AuditPageSession(
-                null, null, filters.window(), null, QueryLimits.DEFAULT_LIMIT, levelId,
+                UUID.randomUUID(), null, null, filters.window(), null, QueryLimits.DEFAULT_LIMIT, levelId,
                 centerX, centerY, centerZ, filters.radiusBlocks(), filters,
                 filterDescription, System.currentTimeMillis());
         rememberPageSession(source, session);
@@ -583,7 +589,7 @@ public final class ItemGraphCommands {
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
         AuditPageSession session = new AuditPageSession(
-                eventType, null, window, sinceMinutes, clampedLimit, null,
+                UUID.randomUUID(), eventType, null, window, sinceMinutes, clampedLimit, null,
                 null, null, null, null, null,
                 "type=" + eventType + " window=" + window.describe(),
                 System.currentTimeMillis());
@@ -591,14 +597,27 @@ public final class ItemGraphCommands {
         return dispatchAuditPage(ctx.getSource(), "lookup audit", session, page, false);
     }
 
-    private static int lookupAuditSessionPage(CommandContext<CommandSourceStack> ctx, int page) {
+    private static int lookupAuditSessionPage(CommandContext<CommandSourceStack> ctx, int page,
+                                              String sessionToken) {
         CommandSourceStack source = ctx.getSource();
         if (!(source.getEntity() instanceof ServerPlayer)) {
             source.sendFailure(Component.literal(
                     "[ItemGraph] /ig page requires a player with an active lookup session."));
             return 0;
         }
-        AuditPageSession session = activePageSession(source);
+        AuditPageSession session;
+        if (sessionToken == null) {
+            session = activePageSession(source);
+        } else {
+            UUID sessionId;
+            try {
+                sessionId = UUID.fromString(sessionToken);
+            } catch (IllegalArgumentException e) {
+                source.sendFailure(Component.literal("[ItemGraph] Invalid lookup page session."));
+                return 0;
+            }
+            session = pageSession(source, sessionId);
+        }
         if (session == null) {
             source.sendFailure(Component.literal(
                     "[ItemGraph] No active lookup page session. Run /ig lookup first."));
@@ -630,13 +649,13 @@ public final class ItemGraphCommands {
             List<QueryDispatcher.QueryAction> actions = new java.util.ArrayList<>();
             if (effectivePage > 1) {
                 actions.add(new QueryDispatcher.QueryAction("Previous", standaloneCommand
-                        ? standalonePageCommand(effectivePage - 1)
+                        ? standalonePageCommand(effectivePage - 1, session.sessionId())
                         : auditPageCommand(effectivePage - 1, session.eventType(), clampedLimit,
                         session.sinceMinutes())));
             }
             if (shouldOfferNextAuditPage(effectivePage, clampedLimit, offset, events.size())) {
                 actions.add(new QueryDispatcher.QueryAction("Next", standaloneCommand
-                        ? standalonePageCommand(effectivePage + 1)
+                        ? standalonePageCommand(effectivePage + 1, session.sessionId())
                         : auditPageCommand(effectivePage + 1, session.eventType(), clampedLimit,
                         session.sinceMinutes())));
             }
@@ -649,7 +668,19 @@ public final class ItemGraphCommands {
         if (source.getEntity() instanceof ServerPlayer player) {
             UUID playerId = player.getUUID();
             if (playerId != null) {
-                AUDIT_PAGE_SESSIONS.put(playerId, session);
+                Map<UUID, AuditPageSession> sessions = AUDIT_PAGE_SESSIONS.computeIfAbsent(
+                        playerId, ignored -> new ConcurrentHashMap<>());
+                sessions.put(session.sessionId(), session);
+                while (sessions.size() > MAX_PAGE_SESSIONS_PER_PLAYER) {
+                    UUID oldestId = sessions.values().stream()
+                            .min(java.util.Comparator.comparingLong(AuditPageSession::createdAtMs))
+                            .map(AuditPageSession::sessionId)
+                            .orElse(null);
+                    if (oldestId == null) {
+                        break;
+                    }
+                    sessions.remove(oldestId);
+                }
             }
         }
     }
@@ -662,12 +693,39 @@ public final class ItemGraphCommands {
         if (playerId == null) {
             return null;
         }
-        AuditPageSession session = AUDIT_PAGE_SESSIONS.get(playerId);
+        Map<UUID, AuditPageSession> sessions = AUDIT_PAGE_SESSIONS.get(playerId);
+        if (sessions == null || sessions.isEmpty()) {
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        sessions.values().removeIf(session -> now - session.createdAtMs() > PAGE_SESSION_TTL_MS);
+        AuditPageSession active = sessions.values().stream()
+                .max(java.util.Comparator.comparingLong(AuditPageSession::createdAtMs))
+                .orElse(null);
+        if (sessions.isEmpty()) {
+            AUDIT_PAGE_SESSIONS.remove(playerId, sessions);
+        }
+        return active;
+    }
+
+    private static AuditPageSession pageSession(CommandSourceStack source, UUID sessionId) {
+        if (!(source.getEntity() instanceof ServerPlayer player) || sessionId == null) {
+            return null;
+        }
+        UUID playerId = player.getUUID();
+        if (playerId == null) {
+            return null;
+        }
+        Map<UUID, AuditPageSession> sessions = AUDIT_PAGE_SESSIONS.get(playerId);
+        if (sessions == null) {
+            return null;
+        }
+        AuditPageSession session = sessions.get(sessionId);
         if (session == null) {
             return null;
         }
         if (System.currentTimeMillis() - session.createdAtMs() > PAGE_SESSION_TTL_MS) {
-            AUDIT_PAGE_SESSIONS.remove(playerId, session);
+            sessions.remove(sessionId, session);
             return null;
         }
         return session;
@@ -690,8 +748,8 @@ public final class ItemGraphCommands {
                 + (sinceMinutes == null ? "" : " " + Math.max(1L, sinceMinutes));
     }
 
-    private static String standalonePageCommand(int page) {
-        return "/ig page " + Math.max(1, page);
+    private static String standalonePageCommand(int page, UUID sessionId) {
+        return "/ig page " + Math.max(1, page) + " " + sessionId;
     }
 
     static boolean shouldOfferNextAuditPage(int effectivePage, int clampedLimit,
@@ -715,7 +773,7 @@ public final class ItemGraphCommands {
                 + (levelId == null ? "" : " dimension=" + levelId)
                 + (radius == null ? "" : " center=" + centerX + "," + centerY + "," + centerZ + " radius=" + radius)
                 + " window=" + window.describe();
-        AuditPageSession session = new AuditPageSession(eventType, playerName, window, null,
+        AuditPageSession session = new AuditPageSession(UUID.randomUUID(), eventType, playerName, window, null,
                 QueryLimits.clampLimit(limit), levelId, centerX, centerY, centerZ, radius,
                 null, filter, System.currentTimeMillis());
         rememberPageSession(ctx.getSource(), session);

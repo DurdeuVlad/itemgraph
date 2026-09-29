@@ -21,13 +21,17 @@ import java.util.Deque;
 @Mixin(ItemEntity.class)
 public abstract class ItemEntityMixin {
     private static final int MAX_PICKUP_CAPTURE_DEPTH = 32;
-    private static final ThreadLocal<Deque<ItemStack>> ITEMGRAPH_PICKUP_STACKS = new ThreadLocal<>();
+    record PickupCapture(ItemEntity entity, ServerPlayer player, ItemStack original) {
+    }
+
+    private static final ThreadLocal<Deque<PickupCapture>> ITEMGRAPH_PICKUP_STACKS = new ThreadLocal<>();
 
     @Inject(method = "playerTouch", at = @At("HEAD"))
     private void itemgraph$capturePickup(Player player, CallbackInfo callback) {
         if (player instanceof ServerPlayer && !player.level().isClientSide()) {
-            ItemStack stack = ((ItemEntity) (Object) this).getItem();
-            Deque<ItemStack> pending = ITEMGRAPH_PICKUP_STACKS.get();
+            ItemEntity entity = (ItemEntity) (Object) this;
+            ItemStack stack = entity.getItem();
+            Deque<PickupCapture> pending = ITEMGRAPH_PICKUP_STACKS.get();
             if (pending == null) {
                 pending = new ArrayDeque<>();
                 ITEMGRAPH_PICKUP_STACKS.set(pending);
@@ -37,7 +41,8 @@ public abstract class ItemEntityMixin {
                 // repeated failures cannot retain an unbounded server-thread stack.
                 pending.clear();
             }
-            pending.push(stack == null ? ItemStack.EMPTY : stack.copy());
+            pending.push(new PickupCapture(entity, (ServerPlayer) player,
+                    stack == null ? ItemStack.EMPTY : stack.copy()));
         } else {
             ITEMGRAPH_PICKUP_STACKS.remove();
         }
@@ -45,16 +50,46 @@ public abstract class ItemEntityMixin {
 
     @Inject(method = "playerTouch", at = @At("RETURN"))
     private void itemgraph$recordPickup(Player player, CallbackInfo callback) {
-        Deque<ItemStack> pending = ITEMGRAPH_PICKUP_STACKS.get();
-        ItemStack original = pending == null || pending.isEmpty() ? ItemStack.EMPTY : pending.pop();
-        if (pending != null && pending.isEmpty()) {
+        if (!(player instanceof ServerPlayer serverPlayer) || serverPlayer.level().isClientSide()) {
             ITEMGRAPH_PICKUP_STACKS.remove();
-        }
-        if (!(player instanceof ServerPlayer serverPlayer) || original == null || original.isEmpty()) {
             return;
         }
         ItemEntity entity = (ItemEntity) (Object) this;
-        FabricNativeAuditEventListener.onItemPickedUp(serverPlayer, entity, original,
+        Deque<PickupCapture> pending = ITEMGRAPH_PICKUP_STACKS.get();
+        PickupCapture capture = removeMatching(pending, entity, serverPlayer);
+        if (pending != null && pending.isEmpty()) {
+            ITEMGRAPH_PICKUP_STACKS.remove();
+        }
+        if (capture == null || capture.original() == null || capture.original().isEmpty()) {
+            return;
+        }
+        FabricNativeAuditEventListener.onItemPickedUp(serverPlayer, entity, capture.original(),
                 entity.isRemoved() ? 0 : entity.getItem().getCount());
+    }
+
+    static PickupCapture removeMatching(Deque<PickupCapture> pending,
+                                        ItemEntity entity, ServerPlayer player) {
+        if (pending == null || pending.isEmpty()) {
+            return null;
+        }
+        PickupCapture match = null;
+        for (PickupCapture candidate : pending) {
+            if (candidate.entity() == entity && candidate.player() == player) {
+                match = candidate;
+                break;
+            }
+        }
+        if (match == null) {
+            return null;
+        }
+        // If an inner invocation unwound without its RETURN callback, discard
+        // captures above the matching outer invocation before consuming it.
+        while (!pending.isEmpty()) {
+            PickupCapture candidate = pending.pop();
+            if (candidate == match) {
+                return match;
+            }
+        }
+        return null;
     }
 }
