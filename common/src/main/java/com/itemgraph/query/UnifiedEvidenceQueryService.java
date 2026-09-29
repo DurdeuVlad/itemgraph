@@ -4,6 +4,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -15,9 +17,9 @@ import java.util.Locale;
  *
  * <p>Each source is fetched only far enough to satisfy the requested global page. The rows
  * are then merged by timestamp on the query worker. This avoids an unbounded server-thread
- * scan while still making page offsets global across the three independently keyed tables.
- * Imported GriefLogger records are already immutable ItemGraph observations and therefore
- * enter the same path without opening or mutating the GriefLogger database.
+ * scan while still making page offsets global across the independently keyed tables.
+ * Historical GriefLogger rows are read from ItemGraph's normalized projection; the source
+ * database is never opened by a lookup.
  */
 public final class UnifiedEvidenceQueryService {
 
@@ -25,7 +27,7 @@ public final class UnifiedEvidenceQueryService {
     public static final List<String> ACTION_TYPES = List.of(
             "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_ATTEMPT",
             "COMMAND_EXECUTED", "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK_ATTEMPT",
-            "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "ADD_ITEM", "REMOVE_ITEM",
+            "INTERACT_ENTITY", "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "ADD_ITEM", "REMOVE_ITEM",
             "DROP_ITEM", "PICKUP_ITEM", "CRAFT", "SMELT", "ANVIL_RENAME", "ANVIL_REPAIR", "BREAK_ITEM",
             "CONSUME_ITEM", "HOPPER_INSERT", "HOPPER_EXTRACT", "DEATH_DROP",
             "ADD_ITEM_ENDER", "REMOVE_ITEM_ENDER");
@@ -51,6 +53,7 @@ public final class UnifiedEvidenceQueryService {
         all.addAll(findAudit(conn, filters, levelId, centerX, centerY, centerZ, sourceLimit));
         all.addAll(findObservations(conn, filters, levelId, centerX, centerY, centerZ, sourceLimit));
         all.addAll(findTransformations(conn, filters, levelId, centerX, centerY, centerZ, sourceLimit));
+        all.addAll(findHistoricalGriefLogger(conn, filters, levelId, centerX, centerY, centerZ, sourceLimit));
 
         all.sort(Comparator.comparingLong(UnifiedEvidenceDetail::timestampMs).reversed()
                 .thenComparing(UnifiedEvidenceDetail::source)
@@ -60,6 +63,116 @@ public final class UnifiedEvidenceQueryService {
         }
         int end = Math.min(all.size(), offset + limit);
         return List.copyOf(all.subList(offset, end));
+    }
+
+    /**
+     * Returns raw imported rows for an explicit source/table/key provenance lookup.
+     * Reference and identity tables intentionally do not enter the radius timeline:
+     * they have no event location and must only be opened by an exact provenance request.
+     */
+    public List<UnifiedEvidenceDetail> findHistoricalProvenance(Connection conn,
+                                                                  String sourceSha256,
+                                                                  String tableName,
+                                                                  String sourceKey,
+                                                                  int requestedLimit,
+                                                                  int requestedOffset) throws SQLException {
+        if (sourceSha256 == null || sourceSha256.isBlank()
+                || tableName == null || tableName.isBlank()
+                || sourceKey == null || sourceKey.isBlank()) {
+            throw new IllegalArgumentException("source hash, table, and source key are required");
+        }
+        int limit = QueryLimits.clampLimit(requestedLimit);
+        int offset = QueryLimits.clampOffset(requestedOffset);
+        String sql = """
+                SELECT source_sha256, table_name, source_key, source_rowid, payload_json,
+                       payload_blob, action_id, imported_at, unresolved_reason
+                FROM ig_grieflogger_rows
+                WHERE source_sha256 = ? AND table_name = ? AND source_key = ?
+                ORDER BY row_ordinal ASC
+                LIMIT ? OFFSET ?
+                """;
+        List<UnifiedEvidenceDetail> rows = new ArrayList<>();
+        try (PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setString(1, sourceSha256);
+            statement.setString(2, tableName);
+            statement.setString(3, sourceKey);
+            statement.setInt(4, limit);
+            statement.setInt(5, offset);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    String unresolved = rs.getString("unresolved_reason");
+                    byte[] rawBytes = rs.getBytes("payload_blob");
+                    String detail = "source=GRIEFLOGGER table=" + rs.getString("table_name")
+                            + " key=" + rs.getString("source_key")
+                            + " payload=" + rs.getString("payload_json")
+                            + (rawBytes == null ? "" : " rawByteSha256=" + sha256(rawBytes))
+                            + (unresolved == null ? "" : " unresolved=" + unresolved);
+                    rows.add(new UnifiedEvidenceDetail(
+                            "GRIEFLOGGER", "provenance#" + rs.getString("table_name")
+                                    + "#" + rs.getString("source_key"),
+                            rs.getLong("imported_at"), null, null, null, null, null,
+                            "HISTORICAL_PROVENANCE", 0, null, detail,
+                            unresolved == null ? "PROVENANCE_ONLY" : "UNRESOLVED"));
+                }
+            }
+        }
+        return List.copyOf(rows);
+    }
+
+    private List<UnifiedEvidenceDetail> findHistoricalGriefLogger(Connection conn,
+                                                                    AuditLookupFilters filters,
+                                                                    String levelId, double centerX,
+                                                                    double centerY, double centerZ,
+                                                                    int limit) throws SQLException {
+        StringBuilder sql = new StringBuilder("""
+                SELECT g.source_sha256, g.table_name, g.source_key, g.source_rowid, g.timestamp_ms,
+                       g.level_name, g.x, g.y, g.z, g.player_name, g.player_uuid, g.action_type, g.quantity,
+                       g.subject_id, g.detail, g.evidence_class
+                FROM ig_grieflogger_lookup g
+                WHERE (NOT EXISTS (SELECT 1 FROM ig_grieflogger_import_runs WHERE status = 'COMPLETE')
+                       OR g.source_sha256 = (SELECT source_sha256 FROM ig_grieflogger_import_runs
+                                             WHERE status = 'COMPLETE'
+                                             ORDER BY completed_at DESC, id DESC LIMIT 1))
+                """);
+        List<Object> args = new ArrayList<>();
+        appendActionFilter(sql, args, "UPPER(g.action_type)", filters.eventTypes(), true);
+        appendUserFilter(sql, args, List.of("g.player_name"), List.of("g.player_uuid"), filters.playerNames());
+        appendWindow(sql, args, filters.window(), "g.timestamp_ms");
+        appendLocation(sql, args, "g.level_name", "g.x", "g.y", "g.z", levelId,
+                centerX, centerY, centerZ, filters.radiusBlocks());
+        appendSubjectFilter(sql, args, "g.subject_id", filters.includeSubjects(), false);
+        appendSubjectFilter(sql, args, "g.subject_id", filters.excludeSubjects(), true);
+        sql.append(" ORDER BY g.timestamp_ms DESC, g.table_name, g.source_key LIMIT ?");
+        args.add(limit);
+
+        List<UnifiedEvidenceDetail> rows = new ArrayList<>();
+        try (PreparedStatement statement = conn.prepareStatement(sql.toString())) {
+            bind(statement, args);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    String table = rs.getString("table_name");
+                    String sourceKey = rs.getString("source_key");
+                    rows.add(new UnifiedEvidenceDetail(
+                            "GRIEFLOGGER",
+                            "historical#" + table + "#" + sourceKey,
+                            rs.getLong("timestamp_ms"),
+                            rs.getString("level_name"),
+                            nullableDouble(rs, "x"), nullableDouble(rs, "y"), nullableDouble(rs, "z"),
+                            firstNonBlank(rs.getString("player_name"), rs.getString("player_uuid")),
+                            rs.getString("action_type"), rs.getInt("quantity"),
+                            rs.getString("subject_id"), rs.getString("detail"),
+                            valueOr(rs.getString("evidence_class"), "OBSERVED")));
+                }
+            }
+        } catch (SQLException failure) {
+            // Databases created before migration 15 remain readable while the
+            // migration is pending; their native sources still produce results.
+            if (failure.getMessage() != null && failure.getMessage().contains("no such table")) {
+                return List.of();
+            }
+            throw failure;
+        }
+        return rows;
     }
 
     private List<UnifiedEvidenceDetail> findAudit(Connection conn, AuditLookupFilters filters,
@@ -370,5 +483,13 @@ public final class UnifiedEvidenceQueryService {
 
     private static String firstNonBlank(String first, String second) {
         return valueOr(first, valueOr(second, null));
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required", e);
+        }
     }
 }

@@ -280,8 +280,9 @@ Correlation runs on the **existing ingestion worker thread**, from the same sche
 
 Two engineering rules collide at the command layer and both have to hold at once:
 
-- a historical query is a multi-join read over `ig_observations` and
-  `ig_inferred_edges`, and **database scans must never run on the server thread**;
+- a historical query is a bounded merge over native audit, observation,
+  transformation, normalized GriefLogger event, and inferred-edge tables, and
+  **database scans must never run on the server thread**;
 - `CommandSourceStack.sendSuccess` / `sendFailure` reach player and entity state, and
   **thread-unsafe Minecraft state must never be touched from a worker thread**.
 

@@ -142,6 +142,7 @@ public record AuditLookupFilters(
                 case "break_block" -> "BREAK_BLOCK";
                 case "interact_block" -> "INTERACT_BLOCK_ATTEMPT";
                 case "interact_block_attempt" -> "INTERACT_BLOCK_ATTEMPT";
+                case "interact_entity" -> "INTERACT_ENTITY";
                 case "kill_entity" -> "KILL_ENTITY";
                 case "throw_item" -> "THROW_ITEM";
                 case "shoot_item" -> "SHOOT_ITEM";

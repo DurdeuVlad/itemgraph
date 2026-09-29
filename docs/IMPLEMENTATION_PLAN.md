@@ -367,10 +367,11 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
 - `/ig lookup filters <filter1> ... <filter5>` implements the published
   GriefLogger `name.value` vocabulary for action, user, include, exclude, time,
   and required radius filters. `UnifiedEvidenceQueryService` merges native audit,
-  item observations, transformations, and already-normalized `GRIEFLOGGER`
-  observations on the bounded query worker, preserving source and prefixed evidence
-  IDs. Generic rows in `ig_grieflogger_rows` remain provenance-only until #28's
-  normalized historical projection is implemented. The query
+  item observations, transformations, and normalized historical `GRIEFLOGGER`
+  event projections on the bounded query worker, preserving source and prefixed evidence
+  IDs. Generic rows in `ig_grieflogger_rows` remain the immutable source ledger; exact
+  source-hash/table/key queries expose reference and identity rows as provenance-only.
+  The query
   is bounded to 20 rows, uses a 1..1024 cube around the issuing player, and rejects
   include/exclude conflicts before SQL dispatch.
 - Player lookup queries are cancelled after five seconds through the SQLite progress

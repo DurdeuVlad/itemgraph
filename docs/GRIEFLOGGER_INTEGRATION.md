@@ -155,6 +155,27 @@ The import report records missing tables, source/schema fingerprints, row counts
 opaque counts, checkpoint keys, and completion status in
 `ig_grieflogger_import_runs` and `ig_grieflogger_import_checkpoints`.
 
+### Normalized historical lookup
+
+Migration v15 adds the rebuildable `ig_grieflogger_lookup` projection. Rows from
+`items`, `containers`, `blocks`, `sessions`, `chats`, and `commands` are normalized
+while the source connection is open read-only. The projection preserves the source
+table and stable source key, original action ID, timestamp, actor UUID/name, level
+and coordinates, material/entity subject, quantity, and an evidence class. A
+historical username row is selected by UUID and the latest username timestamp at or
+before the event, so a rename does not rewrite earlier evidence. Opaque component
+bytes remain in `ig_grieflogger_rows`; the projection stores their SHA-256 and marks
+the row `UNRESOLVED` with an explicit reason.
+
+`UnifiedEvidenceQueryService.findFiltered` merges these normalized rows with native
+audit, observations, and transformations. Reference and identity tables have no
+event location, so they are available only through the exact
+`source_sha256`/`table_name`/`source_key` method
+`findHistoricalProvenance`; those rows are labeled `PROVENANCE_ONLY` and never
+contribute item quantity. When multiple immutable source snapshots exist, the
+bounded timeline uses the latest completed snapshot; exact provenance lookup can
+still open any earlier snapshot by its source hash.
+
 ## Source identity
 
 Imported observations should preserve:

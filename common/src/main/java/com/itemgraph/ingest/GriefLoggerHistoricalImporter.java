@@ -85,6 +85,8 @@ public final class GriefLoggerHistoricalImporter {
              Connection targetConn = target.openWriteConnection()) {
             Map<String, List<Column>> schema = discoverSchema(sourceConn);
             String schemaFingerprint = schemaFingerprint(schema);
+            GriefLoggerHistoricalProjection.SourceReferences references =
+                    GriefLoggerHistoricalProjection.loadReferences(sourceConn);
             boolean originalAutoCommit = targetConn.getAutoCommit();
             long runId = insertRun(targetConn, source.getDatabasePath().toString(), sourceHash,
                     schemaFingerprint, startedAt);
@@ -101,7 +103,7 @@ public final class GriefLoggerHistoricalImporter {
                                 "MISSING", "table is absent from source schema");
                     } else {
                         report = importTable(sourceConn, targetConn, sourceHash,
-                                schemaFingerprint, table, columns);
+                                schemaFingerprint, table, columns, references);
                     }
                     // A table boundary is a durable checkpoint. This prevents a later
                     // table failure from contradicting counts already persisted.
@@ -156,7 +158,8 @@ public final class GriefLoggerHistoricalImporter {
 
     private TableReport importTable(Connection sourceConn, Connection targetConn,
                                     String sourceHash, String schemaFingerprint,
-                                    String table, List<Column> columns) throws SQLException {
+                                    String table, List<Column> columns,
+                                    GriefLoggerHistoricalProjection.SourceReferences references) throws SQLException {
         String checkpoint = null;
         boolean checkpointFound = false;
         long seen = 0;
@@ -178,13 +181,15 @@ public final class GriefLoggerHistoricalImporter {
                             ordinal++;
                             RowData row = rowData(rows, columns, ordinal, true);
                             if (!checkpointFound) {
+                                ensureProjection(targetConn, sourceHash, schemaFingerprint, table, row, references);
                                 if (row.sourceKey().equals(checkpoint)) {
                                     checkpointFound = true;
                                 }
                                 continue;
                             }
                             seen++;
-                            boolean inserted = insertRow(targetConn, sourceHash, schemaFingerprint, table, row);
+                            boolean inserted = insertRow(targetConn, sourceHash, schemaFingerprint, table, row,
+                                    references);
                             if (inserted) {
                                 imported++;
                             }
@@ -215,13 +220,15 @@ public final class GriefLoggerHistoricalImporter {
                         ordinal++;
                         RowData row = rowData(rows, columns, ordinal, false);
                         if (!checkpointFound) {
+                            ensureProjection(targetConn, sourceHash, schemaFingerprint, table, row, references);
                             if (row.sourceKey().equals(checkpoint)) {
                                 checkpointFound = true;
                             }
                             continue;
                         }
                         seen++;
-                        boolean inserted = insertRow(targetConn, sourceHash, schemaFingerprint, table, row);
+                        boolean inserted = insertRow(targetConn, sourceHash, schemaFingerprint, table, row,
+                                references);
                         if (inserted) {
                             imported++;
                         }
@@ -256,7 +263,7 @@ public final class GriefLoggerHistoricalImporter {
 
     private record RowData(String sourceKey, Long sourceRowid, long ordinal,
                            String payloadJson, byte[] payloadBlob, Integer actionId,
-                           String unresolvedReason) {}
+                           String unresolvedReason, Map<String, Object> values) {}
 
     private RowData rowData(ResultSet rows, List<Column> columns, long ordinal,
                             boolean hasRowid) throws SQLException {
@@ -298,11 +305,12 @@ public final class GriefLoggerHistoricalImporter {
             unresolved = "opaque_binary_field";
         }
         return new RowData(sourceKey, sourceRowid, ordinal, payloadJson, opaqueBlob,
-                actionId, unresolved);
+                actionId, unresolved, Collections.unmodifiableMap(new LinkedHashMap<>(values)));
     }
 
     private boolean insertRow(Connection conn, String sourceHash, String schemaFingerprint,
-                              String table, RowData row) throws SQLException {
+                              String table, RowData row,
+                              GriefLoggerHistoricalProjection.SourceReferences references) throws SQLException {
         String sql = """
                 INSERT OR IGNORE INTO ig_grieflogger_rows
                 (source_sha256, schema_fingerprint, table_name, source_key, source_rowid,
@@ -321,8 +329,27 @@ public final class GriefLoggerHistoricalImporter {
             if (row.actionId() == null) stmt.setNull(9, Types.INTEGER); else stmt.setInt(9, row.actionId());
             stmt.setLong(10, System.currentTimeMillis());
             if (row.unresolvedReason() == null) stmt.setNull(11, Types.VARCHAR); else stmt.setString(11, row.unresolvedReason());
-            return stmt.executeUpdate() > 0;
+            boolean inserted = stmt.executeUpdate() > 0;
+            if (inserted || GriefLoggerHistoricalProjection.isEventTable(table)) {
+                GriefLoggerHistoricalProjection.insert(conn, sourceHash, table,
+                        new GriefLoggerHistoricalProjection.Row(row.sourceKey(), row.sourceRowid(),
+                                row.values(), row.payloadBlob() == null ? null : sha256(row.payloadBlob()),
+                                row.unresolvedReason()), references);
+            }
+            return inserted;
         }
+    }
+
+    private void ensureProjection(Connection conn, String sourceHash, String schemaFingerprint,
+                                  String table, RowData row,
+                                  GriefLoggerHistoricalProjection.SourceReferences references) throws SQLException {
+        if (!GriefLoggerHistoricalProjection.isEventTable(table)) {
+            return;
+        }
+        GriefLoggerHistoricalProjection.insert(conn, sourceHash, table,
+                new GriefLoggerHistoricalProjection.Row(row.sourceKey(), row.sourceRowid(),
+                        row.values(), row.payloadBlob() == null ? null : sha256(row.payloadBlob()),
+                        row.unresolvedReason()), references);
     }
 
     private static String readCheckpoint(Connection conn, String hash, String table) throws SQLException {
