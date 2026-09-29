@@ -386,7 +386,7 @@ public final class ItemGraphCommands {
 
     private static CompletableFuture<Suggestions> suggestAuditEventTypes(
             CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
-        return SharedSuggestionProvider.suggest(UnifiedEvidenceQueryService.ACTION_TYPES, builder);
+        return SharedSuggestionProvider.suggest(AuditEventQueryService.EVENT_TYPES, builder);
     }
 
     /**

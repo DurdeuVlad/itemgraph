@@ -1,6 +1,6 @@
 package com.itemgraph.command;
 
-import com.itemgraph.query.UnifiedEvidenceQueryService;
+import com.itemgraph.query.AuditEventQueryService;
 import com.mojang.brigadier.StringReader;
 import com.mojang.brigadier.arguments.ArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -37,7 +37,7 @@ final class AuditEventTypeArgument implements ArgumentType<String> {
         int cursor = reader.getCursor();
         String value = reader.readUnquotedString();
         String normalized = value.toUpperCase(Locale.ROOT);
-        if (!UnifiedEvidenceQueryService.ACTION_TYPES.contains(normalized)) {
+        if (!AuditEventQueryService.EVENT_TYPES.contains(normalized)) {
             reader.setCursor(cursor);
             throw INVALID.createWithContext(reader);
         }
@@ -47,11 +47,11 @@ final class AuditEventTypeArgument implements ArgumentType<String> {
     @Override
     public <S> CompletableFuture<Suggestions> listSuggestions(CommandContext<S> context,
                                                                SuggestionsBuilder builder) {
-        return SharedSuggestionProvider.suggest(UnifiedEvidenceQueryService.ACTION_TYPES, builder);
+        return SharedSuggestionProvider.suggest(AuditEventQueryService.EVENT_TYPES, builder);
     }
 
     @Override
     public java.util.Collection<String> getExamples() {
-        return UnifiedEvidenceQueryService.ACTION_TYPES;
+        return AuditEventQueryService.EVENT_TYPES;
     }
 }

@@ -242,6 +242,9 @@ class ItemGraphCommandsHelpTest {
         assertTrue(nativeLookup.getContext().getNodes().stream()
                         .anyMatch(node -> node.getNode().getName().equals("eventType")),
                 "native event lookup was routed to the direct filter argument");
+
+        var nativeInteractionLookup = dispatcher.parse("itemgraph lookup INTERACT_BLOCK", source);
+        assertParsedCompletely(nativeInteractionLookup, "native block-interaction lookup syntax");
     }
 
     private void assertParsedCompletely(com.mojang.brigadier.ParseResults<CommandSourceStack> parsed,
