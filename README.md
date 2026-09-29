@@ -19,6 +19,14 @@ is absent. The four release files are:
 - `itemgraph-<version>-neoforge.jar`
 - `itemgraph-<version>-neoforge-grieflogger-compatible.jar`
 
+The compatible variants are a migration bridge while the M8 parity gates remain
+open. ItemGraph will switch to the standard loader jar as the only supported
+artifact only after every M8 acceptance gate, the differential replay, the
+native-only 24-hour staging window, and the recorded rollback rehearsal in [the
+cutover plan](docs/GRIEFLOGGER_PARITY.md) are complete. That cutover retires the
+GriefLogger jar dependency; it does not change the read-only importer or delete
+the retained source database copy.
+
 On Fabric, configure `grieflogger_database_path` in `config/itemgraph.properties`
 to point at GriefLogger's database file. The database remains read-only from
 ItemGraph.
