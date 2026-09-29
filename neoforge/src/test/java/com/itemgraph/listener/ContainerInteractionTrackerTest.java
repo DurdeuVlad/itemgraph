@@ -195,6 +195,47 @@ class ContainerInteractionTrackerTest {
         assertEquals(0, tracker.watchCount(), "watch must be destroyed after last close");
     }
 
+    @Test
+    void reopeningFormerAliasStartsIndependentWatchAfterTopologyChange() {
+        AtomicReference<InventoryTotals> oldChest = new AtomicReference<>(totals(DIAMOND, 5));
+        tracker.openSession(STEVE, "Steve", KEY, oldChest::get, List.of(KEY_B));
+
+        // The double chest is split while Steve still has the original menu open.
+        AtomicReference<InventoryTotals> newContainer = new AtomicReference<>(empty());
+        tracker.openSession(ALEX, "Alex", KEY_B, newContainer::get, List.of());
+
+        assertEquals(2, tracker.watchCount(),
+                "a former partner position must not resolve to the old canonical watch");
+        assertTrue(tracker.isWatched(KEY_B));
+
+        tracker.closeSession(ALEX, 1, 64, 1);
+        tracker.closeSession(STEVE, 1, 64, 1);
+        assertEquals(0, tracker.watchCount());
+        assertTrue(pendingObservations().isEmpty());
+    }
+
+    @Test
+    void existingSingleWatchClosesAgainstItsOwnKeyWhenAliasIsClaimed() {
+        AtomicReference<InventoryTotals> oldSingle = new AtomicReference<>(totals(DIAMOND, 5));
+        tracker.openSession(STEVE, "Steve", KEY_B, oldSingle::get, List.of());
+
+        AtomicReference<InventoryTotals> doubleChest = new AtomicReference<>(totals(DIAMOND, 5));
+        tracker.openSession(ALEX, "Alex", KEY, doubleChest::get, List.of(KEY_B));
+
+        assertEquals(2, tracker.watchCount());
+        oldSingle.set(totals(DIAMOND, 8));
+        doubleChest.set(totals(DIAMOND, 8));
+        tracker.recordCapabilityDelta(KEY_B, DIAMOND, 3, true);
+        tracker.closeSession(STEVE, 1, 64, 1);
+        assertEquals(1, tracker.watchCount(),
+                "closing the older single-container session must not remove the double-chest watch");
+        assertEquals(1, tracker.sessionCount());
+
+        tracker.closeSession(ALEX, 1, 64, 1);
+        assertTrue(pendingObservations().isEmpty(),
+                "a capability-mediated change must not be attributed to either viewer");
+    }
+
     // -------------------------------------------------------------------------
     // Ambiguous attribution
     // -------------------------------------------------------------------------

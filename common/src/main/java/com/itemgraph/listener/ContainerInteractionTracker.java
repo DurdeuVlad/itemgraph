@@ -122,7 +122,14 @@ public class ContainerInteractionTracker {
             // the previous window, anchored at the previous container's position.
             closeSession(playerUuid, previous.x(), previous.y(), previous.z());
         }
-        ContainerKey canonical = resolve(key);
+        // The loader resolves the current block topology before opening a session and
+        // supplies that deterministic anchor as {@code key}. Treat it as authoritative
+        // here and retire any older alias for the same physical position. A double
+        // chest can be split while another viewer still has the old watch open; without
+        // this invalidation, a new standalone container at the former partner position
+        // would incorrectly attach to the old watch and snapshot source.
+        this.aliases.remove(key);
+        ContainerKey canonical = key;
         Watch watch = watches.computeIfAbsent(canonical, k -> {
             Watch w = new Watch(k, snapshotSource);
             InventoryTotals totals = snapshotSource.get();
@@ -147,19 +154,37 @@ public class ContainerInteractionTracker {
         if (!persisted) {
             totalCapabilityQueueRejections.incrementAndGet();
         }
-        Watch watch = watches.get(resolve(key));
-        if (watch == null) {
+        ContainerKey resolvedKey = resolve(key);
+        Watch exactWatch = watches.get(key);
+        Watch resolvedWatch = watches.get(resolvedKey);
+        if (exactWatch == null && resolvedWatch == null) {
             return;
         }
 
-        watch.capabilityDelta.merge(item.fingerprintHash(), delta, Long::sum);
-        if (!persisted) {
-            String actionType = delta > 0 ? "CAPABILITY_INSERT" : "CAPABILITY_EXTRACT";
-            CapabilityGapKey gapKey = new CapabilityGapKey(item.fingerprintHash(), actionType);
-            watch.unpersistedCapabilityTransfers.merge(gapKey,
-                    new CapabilityGap(item, Math.abs(delta)),
-                    (existing, added) -> new CapabilityGap(existing.item(), existing.amount() + added.amount()));
+        // During a topology transition, an older single-container watch can still
+        // coexist with the new canonical double-chest watch. Credit both watches so
+        // neither can mistake the same capability-mediated change for player traffic.
+        // Queue-overflow recovery is emitted once on the resolved/current watch.
+        if (exactWatch != null) {
+            applyCapabilityDelta(exactWatch, item, delta,
+                    !persisted && exactWatch == resolvedWatch);
         }
+        if (resolvedWatch != null && resolvedWatch != exactWatch) {
+            applyCapabilityDelta(resolvedWatch, item, delta, !persisted);
+        }
+    }
+
+    private static void applyCapabilityDelta(Watch watch, CanonicalItem item, long delta,
+                                             boolean recoverQueueOverflow) {
+        watch.capabilityDelta.merge(item.fingerprintHash(), delta, Long::sum);
+        if (!recoverQueueOverflow) {
+            return;
+        }
+        String actionType = delta > 0 ? "CAPABILITY_INSERT" : "CAPABILITY_EXTRACT";
+        CapabilityGapKey gapKey = new CapabilityGapKey(item.fingerprintHash(), actionType);
+        watch.unpersistedCapabilityTransfers.merge(gapKey,
+                new CapabilityGap(item, Math.abs(delta)),
+                (existing, added) -> new CapabilityGap(existing.item(), existing.amount() + added.amount()));
     }
 
     public long getTotalCapabilityQueueRejections() {
@@ -184,7 +209,14 @@ public class ContainerInteractionTracker {
         if (key == null) {
             return true;
         }
-        Watch watch = watches.get(resolve(key));
+        // Prefer the exact watch key recorded when this player opened the menu.
+        // A later topology change may install an alias at that position for a new
+        // double-chest watch; resolving the old player's key first would flush their
+        // session against the wrong snapshot and orphan the original watch.
+        Watch watch = watches.get(key);
+        if (watch == null) {
+            watch = watches.get(resolve(key));
+        }
         if (watch == null) {
             playerSessions.remove(playerUuid, key);
             return true;
