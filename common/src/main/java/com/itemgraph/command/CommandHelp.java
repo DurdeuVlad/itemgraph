@@ -33,7 +33,8 @@ final class CommandHelp {
                 "[ItemGraph] /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes] — bound results to a location.",
                 "[ItemGraph] /ig lookup page <page> <eventType> [limit] [sinceMinutes] — continue a bounded audit result page.",
                 "[ItemGraph] /ig lookup player <playerName> <eventType> [limit] [sinceMinutes] — filter native audit events by player.",
-                "[ItemGraph] /ig lookup filters <filter1> [filter2] ... — GriefLogger-compatible action/user/include/exclude/time/radius lookup (maximum five; radius required).",
+                "[ItemGraph] /ig lookup <filter1> [filter2] ... — published GriefLogger-compatible action/user/include/exclude/time/radius lookup (maximum five; radius required; default page size 10).",
+                "[ItemGraph] /ig lookup filters <filter1> [filter2] ... — explicit ItemGraph spelling for the same filtered lookup.",
                 "[ItemGraph] /ig lookup provenance <sourceSha256> <table> <sourceKey> [limit] — exact read-only lookup of an imported GriefLogger row, including reference and identity tables.",
                 "[ItemGraph] /ig ingest now — queue one complete ingest and correlate cycle.",
                 "[ItemGraph] /ig ingest history — queue a bounded, read-only import of all present GriefLogger history tables.",
@@ -103,12 +104,13 @@ final class CommandHelp {
                 "[ItemGraph] playerName is an exact stored player name; eventType uses the same values as /ig lookup.",
                 "[ItemGraph] Example: /ig lookup player Alex COMMAND_ATTEMPT 50 1440"));
         topics.put("lookup filters", List.of(
-                "[ItemGraph] Syntax: /ig lookup filters <filter1> [filter2] [filter3] [filter4] [filter5]",
+                "[ItemGraph] Syntax: /ig lookup <filter1> [filter2] [filter3] [filter4] [filter5]",
+                "[ItemGraph] The explicit extension spelling /ig lookup filters <filter1> ... is also accepted.",
                 "[ItemGraph] Filters use name.value: action, user, include, exclude, time (m/h/d/y), and radius.",
                 "[ItemGraph] action values cover native audit, item-flow, and transformation evidence (join, quit, chat, command_attempt, place_block, break_block, drop_item, pickup_item, craft, smelt, anvil_rename, anvil_repair, and more).",
                 "[ItemGraph] radius is required, uses the issuing player's current dimension and position, and searches a cube clamped to 1..1024 blocks.",
-                "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and unified evidence results are bounded to 20 rows with source and evidence IDs.",
-                "[ItemGraph] Example: /ig lookup filters action.break_block include.diamond_ore time.1h radius.50"));
+                "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and unified evidence results default to 10 rows (maximum 100) with source and evidence IDs.",
+                "[ItemGraph] Example: /ig lookup action.break_block include.diamond_ore time.1h radius.50"));
         topics.put("lookup provenance", List.of(
                 "[ItemGraph] Syntax: /ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]",
                 "[ItemGraph] Opens one exact imported GriefLogger row from ItemGraph's read-only ledger, including reference and identity tables.",

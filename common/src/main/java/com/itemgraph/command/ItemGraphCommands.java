@@ -65,6 +65,8 @@ public final class ItemGraphCommands {
     private static final ExplainQueryService EXPLAIN_QUERIES = new ExplainQueryService();
     private static final TraceQueryService TRACE_QUERIES = new TraceQueryService();
     private static final AuditService AUDIT_SERVICE = new AuditService();
+    /** Published GriefLogger lookup pages default to ten rows; native extensions use twenty. */
+    private static final int GRIEFLOGGER_DEFAULT_LIMIT = 10;
     private static final int MAX_PAGE_SESSIONS_PER_PLAYER = 8;
     private static final Map<UUID, Map<UUID, AuditPageSession>> AUDIT_PAGE_SESSIONS = new ConcurrentHashMap<>();
     private static final long PAGE_SESSION_TTL_MS = 30L * 60L * 1_000L;
@@ -256,6 +258,14 @@ public final class ItemGraphCommands {
                 .then(Commands.argument("filters", StringArgumentType.greedyString())
                         .executes(ctx -> lookupAuditFilters(ctx,
                                 StringArgumentType.getString(ctx, "filters")))));
+        // Keep the published GriefLogger spelling: `/gl lookup action.foo radius.10`.
+        // The explicit `filters` literal remains as a discoverable ItemGraph extension,
+        // while this greedy argument accepts the documented direct form without adding
+        // any GriefLogger alias to the command root.
+        lookup.then(Commands.argument("lookupFilters", StringArgumentType.greedyString())
+                .suggests(ItemGraphCommands::suggestLookupFilters)
+                .executes(ctx -> lookupAuditFilters(ctx,
+                        StringArgumentType.getString(ctx, "lookupFilters"))));
         lookup.then(Commands.literal("provenance")
                 .then(Commands.argument("sourceSha256", StringArgumentType.word())
                         .then(Commands.argument("table", StringArgumentType.word())
@@ -377,6 +387,38 @@ public final class ItemGraphCommands {
     private static CompletableFuture<Suggestions> suggestAuditEventTypes(
             CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
         return SharedSuggestionProvider.suggest(UnifiedEvidenceQueryService.ACTION_TYPES, builder);
+    }
+
+    /**
+     * Completes the published GriefLogger lookup vocabulary on the direct greedy form.
+     * Suggestions replace only the token currently being typed, preserving earlier
+     * filters such as {@code action.break_block }.
+     */
+    private static CompletableFuture<Suggestions> suggestLookupFilters(
+            CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
+        String remaining = builder.getRemaining();
+        int tokenStart = remaining.lastIndexOf(' ') + 1;
+        SuggestionsBuilder tokenBuilder = builder.createOffset(builder.getStart() + tokenStart);
+        String token = remaining.substring(tokenStart).toLowerCase(java.util.Locale.ROOT);
+        if (!token.contains(".")) {
+            return SharedSuggestionProvider.suggest(List.of(
+                    "action.", "user.", "include.", "exclude.", "time.", "radius."), tokenBuilder);
+        }
+        String name = token.substring(0, token.indexOf('.'));
+        if (name.equals("action") || name.equals("a")) {
+            List<String> values = UnifiedEvidenceQueryService.ACTION_TYPES.stream()
+                    .filter(value -> !"all".equalsIgnoreCase(value))
+                    .map(value -> "action." + value.toLowerCase(java.util.Locale.ROOT))
+                    .toList();
+            return SharedSuggestionProvider.suggest(values, tokenBuilder);
+        }
+        if (name.equals("time") || name.equals("t")) {
+            return SharedSuggestionProvider.suggest(List.of("time.5m", "time.1h", "time.1d"), tokenBuilder);
+        }
+        if (name.equals("radius") || name.equals("r")) {
+            return SharedSuggestionProvider.suggest(List.of("radius.5", "radius.10", "radius.50"), tokenBuilder);
+        }
+        return CompletableFuture.completedFuture(tokenBuilder.build());
     }
 
     /** /ig event <observationId> - one raw observation, labelled OBSERVED. */
@@ -607,7 +649,7 @@ public final class ItemGraphCommands {
                 + " dimension=" + levelId
                 + " center=" + centerX + "," + centerY + "," + centerZ;
         AuditPageSession session = new AuditPageSession(
-                UUID.randomUUID(), null, null, filters.window(), QueryLimits.DEFAULT_LIMIT, levelId,
+                UUID.randomUUID(), null, null, filters.window(), GRIEFLOGGER_DEFAULT_LIMIT, levelId,
                 centerX, centerY, centerZ, filters.radiusBlocks(), filters,
                 filterDescription, System.currentTimeMillis());
         rememberPageSession(source, session);

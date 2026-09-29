@@ -116,6 +116,7 @@
   },
   "controls": {
     "permission_level": 2,
+    "page_size_default": 10,
     "page_size_maximum": 100,
     "query_worker_queue_maximum": 64,
     "ingestion_queue_maximum": 10000,
