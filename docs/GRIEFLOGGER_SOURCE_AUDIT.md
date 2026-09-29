@@ -8,8 +8,26 @@ This is a behavior and storage audit. It is not a binary compatibility claim for
 ItemGraph's `1.21.1` artifacts: the pinned source metadata targets Minecraft 26.2,
 Java 25, NeoForge 26.2.0.37-beta, Fabric Loader 0.19.3, and Fabric API
 0.156.0+26.2. ItemGraph's published compatibility artifact currently targets
-GriefLogger `1.2.10-1.21.1`; that release pair needs its own source fixture before
-the dependency can be called bytecode-compatible.
+GriefLogger `1.2.10-1.21.1`. The exact Fabric and NeoForge release bytes are
+pinned in the [checked-in release fixture](grieflogger-fixtures/1.2.10-1.21.1.json),
+including official file IDs, SHA-1/SHA-256/SHA-512 digests, manifests, mixins, embedded
+JDBC versions, action IDs, table columns, commands, configuration, and inspector
+contracts. The source audit below remains behavior research; it does not replace
+the release-byte fixture.
+
+## Exact 1.21.1 release evidence
+
+The official release listing is the [CurseForge 1.21.1 file page](https://www.curseforge.com/minecraft/mc-mods/grieflogger/files/all?page=1&pageSize=20&version=1.21.1).
+The artifact hashes and metadata were independently checked against the
+[Modrinth version records](https://api.modrinth.com/v2/project/8oGVUFuX/version)
+and the downloaded official CDN bytes. Fabric is version `zPIDeXeI`, file
+`YhNX9z4z`, 18,952,593 bytes; NeoForge is version `IrRNGJIR`, file `XvmPP9qD`,
+18,956,227 bytes. Both jars target Minecraft 1.21.1 and Java 21, embed SQLite
+JDBC 3.47.2.0 and MySQL Connector/J 8.4.0, and carry required common mixins.
+The fixture digest is
+`160f77435c9527304adba691388295ead00af40db482338fcbf87951d929e648`.
+It records the runtime-target mismatch as unresolved under #54 and the
+remaining native-only differential-replay proof as unresolved under #31.
 
 ## User-visible contract
 

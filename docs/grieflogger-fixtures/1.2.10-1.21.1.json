@@ -1,0 +1,388 @@
+{
+  "fixture_schema_version": 1,
+  "fixture_sha256": "160f77435c9527304adba691388295ead00af40db482338fcbf87951d929e648",
+  "project": {
+    "name": "GriefLogger",
+    "mod_id": "grieflogger",
+    "version": "1.2.10-1.21.1",
+    "minecraft": "1.21.1",
+    "release_pages": {
+      "curseforge": "https://www.curseforge.com/minecraft/mc-mods/grieflogger/files/all?page=1&pageSize=20&version=1.21.1",
+      "modrinth": "https://modrinth.com/mod/grieflogger/version/zPIDeXeI"
+    },
+    "source_repository": "https://github.com/DAQEM/GriefLogger"
+  },
+  "source_tag": {
+    "ref": "1.2.10-1.21.1",
+    "commit": "9fc5ea2001373e729424fa6b0ffbc103cd6e0746",
+    "authority": "published artifact metadata and bytes",
+    "source_metadata_note": "The Git tag source metadata declares the 26.2 development line; the published 1.2.10-1.21.1 jars are the authoritative target fixture for ItemGraph 1.21.1."
+  },
+  "artifacts": {
+    "fabric": {
+      "modrinth_version_id": "zPIDeXeI",
+      "modrinth_file_id": "YhNX9z4z",
+      "filename": "grieflogger-1.2.10-1.21.1-fabric.jar",
+      "url": "https://cdn.modrinth.com/data/8oGVUFuX/versions/zPIDeXeI/grieflogger-1.2.10-1.21.1-fabric.jar",
+      "size_bytes": 18952593,
+      "sha1": "2ec491f633d3f429d301ccf2f203cde24504f32b",
+      "sha512": "54341ca0a7870968ea86f109cbd439b4e0d2d04822907a5d65f4ef66a8b069f0daedd6fe7d51e4566a15b8d7bc93a1ee8d04011dbd9ea209c9c2824fd5f37c3b",
+      "loader": "fabric",
+      "loader_version": "0.19.3",
+      "java_major": 21,
+      "class_count": 2059,
+      "dependencies": {
+        "fabric": "*",
+        "minecraft": ">=1.21.1",
+        "architectury": ">=13.0.8",
+        "supermartijn642configlib": ">=1.1.8"
+      },
+      "entrypoints": [
+        "com.daqem.grieflogger.fabric.GriefLoggerFabricServer"
+      ],
+      "mixins": [
+        "grieflogger-fabric.mixins.json",
+        "grieflogger-common.mixins.json"
+      ],
+      "mixin_contract": {
+        "required": true,
+        "compatibility_level": "JAVA_21",
+        "default_require": 1,
+        "common": [
+          "ItemMixin",
+          "MixinBucketItem",
+          "MixinItemStack",
+          "MixinServerPlayer",
+          "ProjectileMixin"
+        ],
+        "loader_specific": [
+          "MixinBucketItem"
+        ]
+      },
+      "sha256": "07839dca10f93b3c0be543fa9f529ba69dcb8fe347d5234f8bc5248ec0113278"
+    },
+    "neoforge": {
+      "modrinth_version_id": "IrRNGJIR",
+      "modrinth_file_id": "XvmPP9qD",
+      "filename": "grieflogger-1.2.10-1.21.1-neoforge.jar",
+      "url": "https://cdn.modrinth.com/data/8oGVUFuX/versions/IrRNGJIR/grieflogger-1.2.10-1.21.1-neoforge.jar",
+      "size_bytes": 18956227,
+      "sha1": "57b15265ae4aec0c2c5182f4f26b0ea1b3ff63f4",
+      "sha512": "7de200b30c7ee63f8b2900e2a61fc0950b700db0cb73989e7c1070af410912a077bfda1a53bf1de1595a1b6fca1d03c5c73a509d4414e5679733e12da9b6c7d5",
+      "loader": "neoforge",
+      "loader_version": "[3,)",
+      "java_major": 21,
+      "class_count": 2062,
+      "dependencies": {
+        "neoforge": "[3,)",
+        "minecraft": "[1.21.1,)",
+        "architectury": "[13.0.8,)",
+        "supermartijn642configlib": "[1.1.8,)",
+        "side": "SERVER"
+      },
+      "mixins": [
+        "grieflogger-common.mixins.json",
+        "grieflogger-neoforge.mixins.json"
+      ],
+      "mixin_contract": {
+        "required": true,
+        "compatibility_level": "JAVA_21",
+        "default_require": 1,
+        "common": [
+          "ItemMixin",
+          "MixinBucketItem",
+          "MixinItemStack",
+          "MixinServerPlayer",
+          "ProjectileMixin"
+        ],
+        "loader_specific": [
+          "MixinBucketItem"
+        ]
+      },
+      "sha256": "fd252bc5466bb94e38d2386bafb9926b798bc250b26e1a3aa80f878ebccbc4a5"
+    }
+  },
+  "embedded_libraries": [
+    {
+      "group": "org.xerial",
+      "artifact": "sqlite-jdbc",
+      "version": "3.47.2.0",
+      "version_file": "META-INF/maven/org.xerial/sqlite-jdbc/pom.properties",
+      "packages": [
+        "org.sqlite"
+      ]
+    },
+    {
+      "group": "com.mysql",
+      "artifact": "mysql-connector-j",
+      "version": "8.4.0",
+      "version_evidence": "com/mysql/cj/Constants.class contains mysql-connector-j-8.4.0 and 8.4.0",
+      "packages": [
+        "com.mysql"
+      ]
+    }
+  ],
+  "actions": {
+    "block": [
+      {
+        "name": "BREAK_BLOCK",
+        "id": 0,
+        "operation": "REMOVE"
+      },
+      {
+        "name": "PLACE_BLOCK",
+        "id": 1,
+        "operation": "ADD"
+      },
+      {
+        "name": "INTERACT_BLOCK",
+        "id": 2,
+        "operation": "NEUTRAL"
+      },
+      {
+        "name": "KILL_ENTITY",
+        "id": 3,
+        "operation": "REMOVE"
+      }
+    ],
+    "item": [
+      {
+        "name": "REMOVE_ITEM",
+        "id": 0,
+        "operation": "REMOVE"
+      },
+      {
+        "name": "ADD_ITEM",
+        "id": 1,
+        "operation": "ADD"
+      },
+      {
+        "name": "DROP_ITEM",
+        "id": 2,
+        "operation": "REMOVE"
+      },
+      {
+        "name": "PICKUP_ITEM",
+        "id": 3,
+        "operation": "ADD"
+      },
+      {
+        "name": "CRAFT_ITEM",
+        "id": 4,
+        "operation": "ADD"
+      },
+      {
+        "name": "BREAK_ITEM",
+        "id": 5,
+        "operation": "REMOVE"
+      },
+      {
+        "name": "CONSUME_ITEM",
+        "id": 6,
+        "operation": "REMOVE"
+      },
+      {
+        "name": "THROW_ITEM",
+        "id": 7,
+        "operation": "REMOVE"
+      },
+      {
+        "name": "SHOOT_ITEM",
+        "id": 8,
+        "operation": "REMOVE"
+      },
+      {
+        "name": "ADD_ITEM_ENDER",
+        "id": 9,
+        "operation": "ADD"
+      },
+      {
+        "name": "REMOVE_ITEM_ENDER",
+        "id": 10,
+        "operation": "REMOVE"
+      }
+    ],
+    "session": [
+      {
+        "name": "JOIN",
+        "id": 0,
+        "operation": "ADD"
+      },
+      {
+        "name": "QUIT",
+        "id": 1,
+        "operation": "REMOVE"
+      }
+    ]
+  },
+  "database": {
+    "engine": [
+      "sqlite",
+      "mysql_or_mariadb"
+    ],
+    "tables": {
+      "blocks": [
+        "time",
+        "user",
+        "level",
+        "x",
+        "y",
+        "z",
+        "type",
+        "action"
+      ],
+      "containers": [
+        "time",
+        "user",
+        "level",
+        "x",
+        "y",
+        "z",
+        "type",
+        "data",
+        "amount",
+        "action"
+      ],
+      "items": [
+        "time",
+        "user",
+        "level",
+        "x",
+        "y",
+        "z",
+        "type",
+        "data",
+        "amount",
+        "action"
+      ],
+      "sessions": [
+        "time",
+        "user",
+        "level",
+        "x",
+        "y",
+        "z",
+        "action"
+      ],
+      "chats": [
+        "time",
+        "user",
+        "level",
+        "x",
+        "y",
+        "z",
+        "message"
+      ],
+      "commands": [
+        "time",
+        "user",
+        "level",
+        "x",
+        "y",
+        "z",
+        "command"
+      ],
+      "users": [
+        "id",
+        "name",
+        "uuid"
+      ],
+      "usernames": [
+        "id",
+        "time",
+        "uuid",
+        "name"
+      ],
+      "levels": [
+        "id",
+        "name"
+      ],
+      "materials": [
+        "id",
+        "name"
+      ],
+      "entities": [
+        "id",
+        "name"
+      ]
+    },
+    "indexes": "coordinate indexes are created when useIndexes=true",
+    "mutation_contract": "ItemGraph reads GriefLogger databases only; it never writes, migrates, indexes, vacuums, or purges them."
+  },
+  "commands": {
+    "root": "/grieflogger",
+    "aliases": [
+      "/gl"
+    ],
+    "subcommands": [
+      "inspect",
+      "lookup",
+      "page"
+    ],
+    "permission_level": 2,
+    "lookup_filters": [
+      "action",
+      "user",
+      "include",
+      "exclude",
+      "time",
+      "radius"
+    ],
+    "maximum_filters": 5,
+    "combination": "AND",
+    "page_size_default": 10,
+    "page_size_maximum": 100,
+    "page_command": "/grieflogger page <number>"
+  },
+  "configuration": {
+    "file": "config/grieflogger/grieflogger-server.toml",
+    "keys": {
+      "useMysql": false,
+      "mysqlHost": "localhost",
+      "mysqlPort": 3306,
+      "mysqlDatabase": "database",
+      "mysqlUsername": "username",
+      "mysqlPassword": "password",
+      "mysqlTimeout": 5000,
+      "useIndexes": true,
+      "maxPageSize": 10,
+      "serverSideOnlyMode": true,
+      "queueFrequency": 20,
+      "helloFrequency": 600
+    }
+  },
+  "inspector": {
+    "command": "/gl inspect",
+    "toggle": true,
+    "suppresses_gameplay_actions": true,
+    "targets": [
+      "block_left_click",
+      "functional_block_right_click",
+      "container",
+      "double_chest",
+      "door"
+    ],
+    "result_delivery": "asynchronous chat"
+  },
+  "source_comparison": {
+    "pinned_source_commit": "d315098b3f37317a5cddfbd75086f4f912f16a83",
+    "differences": [
+      {
+        "area": "runtime_target",
+        "artifact": "Minecraft 1.21.1 / Java 21 / published 1.2.10-1.21.1",
+        "source": "Minecraft 26.2 / Java 25 / 21.1.7 source metadata",
+        "status": "unresolved",
+        "owner_issue": 54,
+        "meaning": "The published 1.21.1 bytes are authoritative for this target; the 26.2 source tree is behavior research only."
+      },
+      {
+        "area": "behavioral_parity",
+        "artifact": "bytecode contract extracted from the exact 1.21.1 jars",
+        "source": "26.2 source behavior profile",
+        "status": "unresolved",
+        "owner_issue": 31,
+        "meaning": "Native-only differential replay must prove observable parity before the replacement claim is complete."
+      }
+    ]
+  }
+}
