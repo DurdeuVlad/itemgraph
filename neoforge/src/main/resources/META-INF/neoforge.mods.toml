@@ -16,6 +16,9 @@ logoFile="itemgraph_icon.png"
 logoBlur=false
 description='''${mod_description}'''
 
+[[mixins]]
+config="itemgraph-neoforge.mixins.json"
+
 [[dependencies.${mod_id}]]
     modId="neoforge"
     type="required"

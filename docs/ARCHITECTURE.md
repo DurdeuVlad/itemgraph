@@ -31,8 +31,10 @@ GriefLogger's documented command-attempt behavior and avoids inventing a success
 NeoForge-only inventory hooks remain an explicit platform coverage boundary in
 `docs/GRIEFLOGGER_PARITY.md`; Fabric `BlockItemMixin` captures completed BlockItem
 placements, `LivingEntityMixin` captures completed eat/drink uses, `ItemStackMixin` captures
-durability breaks at the shrink boundary, and Fabric projectile callbacks are non-quantity
-spawn evidence. Fabric result-slot mixins capture crafting, smelting, and anvil transformations
+durability breaks at the shrink boundary. Both loaders use a `ProjectileMixin` at
+`Projectile.shootFromRotation` HEAD for the GriefLogger-compatible quantity row; their
+fresh-entity callbacks retain accepted-spawn evidence without a second quantity row. Fabric
+result-slot mixins capture crafting, smelting, and anvil transformations
 into the shared ledger. Both loaders
 share the read-only `FlowBrowserService` for coordinate inspection; GriefLogger ingestion
 remains optional and read-only on both loaders.

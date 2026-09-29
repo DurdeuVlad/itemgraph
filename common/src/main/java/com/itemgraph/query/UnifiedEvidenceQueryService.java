@@ -30,6 +30,7 @@ public final class UnifiedEvidenceQueryService {
             "INTERACT_ENTITY", "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "ADD_ITEM", "REMOVE_ITEM",
             "DROP_ITEM", "PICKUP_ITEM", "CRAFT", "SMELT", "ANVIL_RENAME", "ANVIL_REPAIR", "BREAK_ITEM",
             "CONSUME_ITEM", "HOPPER_INSERT", "HOPPER_EXTRACT", "DEATH_DROP",
+            "PROJECTILE_SPAWN_ACCEPTED",
             "ADD_ITEM_ENDER", "REMOVE_ITEM_ENDER");
 
     private static final String OBSERVATION_ACTION = "CASE WHEN UPPER(o.action_type) = 'CRAFT_ITEM' THEN 'CRAFT' ELSE UPPER(o.action_type) END";

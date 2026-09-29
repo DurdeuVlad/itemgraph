@@ -4,6 +4,7 @@ import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ItemSupplier;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -66,11 +67,36 @@ public final class NativeItemActionEventListener {
         if (stack == null || stack.isEmpty()) {
             return;
         }
+        // GriefLogger's compatible quantity row is created at the
+        // shootFromRotation attempt boundary. The accepted spawn is retained as
+        // separate raw evidence and must not create a second quantity row.
+        submitProjectileSpawnAccepted(player, stack, projectile);
+    }
+
+    /** Records the same attempt boundary as GriefLogger's ProjectileMixin. */
+    public static void onProjectileShootAttempt(Projectile projectile, Entity source) {
+        if (!(source instanceof ServerPlayer player) || projectile == null
+                || player.level().isClientSide()) {
+            return;
+        }
+        ItemStack stack = projectile instanceof ThrowableItemProjectile throwable
+                ? throwable.getItem()
+                : projectile instanceof AbstractArrow arrow
+                ? arrow.getPickupItemStackOrigin()
+                : ItemStack.EMPTY;
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
         // GriefLogger classifies every arrow-family projectile, including a
         // thrown trident, as SHOOT_ITEM; only ThrowableItemProjectile is THROW_ITEM.
         String actionType = projectile instanceof ThrowableItemProjectile
                 ? "THROW_ITEM" : "SHOOT_ITEM";
-        submitProjectileObservation(player, actionType, stack, projectile);
+        CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(stack.copy());
+        String level = player.level().dimension().location().toString();
+        recordProjectileObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
+                level, player.getX(), player.getY(), player.getZ(),
+                projectile.getX(), projectile.getY(), projectile.getZ(), canonical, stack.getCount(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString());
     }
 
     private static void submitUnknown(ServerPlayer player, String actionType, ItemStack stack, int amount) {
@@ -83,14 +109,16 @@ public final class NativeItemActionEventListener {
                 level, null, null, null, "UNKNOWN", canonical, amount, null));
     }
 
-    private static void submitProjectileObservation(ServerPlayer player, String actionType, ItemStack stack,
-                                                    Projectile projectile) {
+    private static void submitProjectileSpawnAccepted(ServerPlayer player, ItemStack stack,
+                                                       Projectile projectile) {
         String level = player.level().dimension().location().toString();
         String projectileId = BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString();
         CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(stack.copy());
-        recordProjectileObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
-                level, player.getX(), player.getY(), player.getZ(), projectile.getX(), projectile.getY(),
-                projectile.getZ(), canonical, stack.getCount(), projectileId);
+        String actionType = projectile instanceof ThrowableItemProjectile
+                ? "THROW_ITEM" : "SHOOT_ITEM";
+        recordProjectileSpawnAccepted(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
+                level, projectile.getX(), projectile.getY(), projectile.getZ(), canonical,
+                stack.getCount(), projectileId);
     }
 
     static void recordProjectileObservation(String actionType, String playerUuid, String playerName,
@@ -101,10 +129,10 @@ public final class NativeItemActionEventListener {
             return;
         }
         String eventId = java.util.UUID.randomUUID().toString();
-        byte[] rawData = ("{\"capture\":\"projectile_spawn\",\"event_id\":\""
+        byte[] rawData = ("{\"capture\":\"projectile_shoot_attempt\",\"event_id\":\""
                 + eventId + "\",\"projectile\":\"" + projectileId + "\",\"spawn_x\":" + projectileX
                 + ",\"spawn_y\":" + projectileY + ",\"spawn_z\":" + projectileZ
-                + ",\"evidence\":\"spawned_by_player\"}")
+                + ",\"outcome\":\"attempt\",\"evidence\":\"shoot_from_rotation\"}")
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8);
         InternalObservationService service = InternalObservationService.getInstance();
         InternalObservationService.InternalObservation observation = new InternalObservationService.InternalObservation(
@@ -120,7 +148,29 @@ public final class NativeItemActionEventListener {
                     System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
                     projectileX, projectileY, projectileZ, item.itemId(),
                     "projectile=" + projectileId + " event_id=" + eventId
-                            + " evidence=spawned_by_player quantity=" + amount, rawData));
+                            + " outcome=attempt evidence=shoot_from_rotation quantity=" + amount, rawData));
         }
+    }
+
+    static void recordProjectileSpawnAccepted(String actionType, String playerUuid, String playerName,
+                                               String levelName, double projectileX, double projectileY,
+                                               double projectileZ, CanonicalItem item, int amount,
+                                               String projectileId) {
+        if (item == null || amount <= 0) {
+            return;
+        }
+        String eventId = java.util.UUID.randomUUID().toString();
+        byte[] rawData = ("{\"capture\":\"projectile_spawn\",\"event_id\":\""
+                + eventId + "\",\"projectile\":\"" + projectileId + "\",\"spawn_x\":" + projectileX
+                + ",\"spawn_y\":" + projectileY + ",\"spawn_z\":" + projectileZ
+                + ",\"outcome\":\"accepted\",\"evidence\":\"spawned_by_player\"}")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        InternalObservationService.getInstance().submitAuditEvent(
+                new InternalObservationService.InternalAuditEvent(
+                        System.currentTimeMillis(), "PROJECTILE_SPAWN_ACCEPTED", playerUuid, playerName,
+                        levelName, projectileX, projectileY, projectileZ, item.itemId(),
+                        "action=" + actionType + " projectile=" + projectileId + " event_id=" + eventId
+                                + " outcome=accepted evidence=spawned_by_player quantity=" + amount,
+                        rawData));
     }
 }

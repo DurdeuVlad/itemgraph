@@ -323,8 +323,8 @@ API promise.
 ## Phase 11 — Native GriefLogger replacement parity
 
 The native replacement is staged by evidence category. `ig_observations` remains
-the item-flow ledger; `ig_audit_events` stores non-quantity audit events plus a
-legacy direct-lookup projection for accepted projectile observations.
+the item-flow ledger; `ig_audit_events` stores non-quantity audit events,
+including accepted projectile-spawn evidence.
 
 ### Delivered in the current slice
 
@@ -334,11 +334,12 @@ legacy direct-lookup projection for accepted projectile observations.
   NeoForge also captures block place,
   block break, block interaction, and player-kill events asynchronously.
 - NeoForge captures consume and durability break into the existing quantity-flow
-  ledger, and accepted projectile spawns as quantity observations with an explicit
-  `UNKNOWN` destination; Fabric captures
+  ledger, and both loaders capture `THROW_ITEM`/`SHOOT_ITEM` at
+  `Projectile.shootFromRotation` HEAD with an explicit `UNKNOWN` destination;
+  accepted projectile spawns remain separate raw evidence. Fabric captures
   join/quit, chat, block break/interaction, player-kill events through Fabric API callbacks,
-  fresh player-owned projectile spawns through `ServerLevelMixin` into the same
-  quantity ledger, and completed
+  fresh player-owned projectile spawns through `ServerLevelMixin` as accepted-spawn
+  evidence, and completed
   `BlockItem.place` actions through `BlockItemMixin`. Fabric also captures normal
   player drops and full or partial pickups through server-only `ServerPlayer.drop`
   and `ItemEntity.playerTouch` return hooks; the returned entity UUID and stack

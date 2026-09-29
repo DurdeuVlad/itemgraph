@@ -73,6 +73,9 @@ Important semantics and limits:
   backpacks, and arbitrary modded storage are not covered.
 - Item rows are aggregated by player tick and item/component equality.
 - Crafting and smelting both become `CRAFT_ITEM`.
+- `ProjectileMixin` injects at `Projectile.shootFromRotation` HEAD and queues
+  `THROW_ITEM` for `ThrowableItemProjectile` or `SHOOT_ITEM` for arrow-family
+  projectiles before spawn acceptance is known ([pinned source](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/mixin/ProjectileMixin.java)).
 - Projectile rows carry item data but no projectile entity UUID.
 - Entity interaction is implemented for armor stands only.
 - The interactable block list is hard-coded.

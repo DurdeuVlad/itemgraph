@@ -8,6 +8,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -49,6 +50,8 @@ class NativeItemActionEventListenerTest {
         assertEquals(2, captured.getValue().amount());
         assertEquals("UNKNOWN", captured.getValue().targetType());
         org.junit.jupiter.api.Assertions.assertNull(captured.getValue().targetX());
+        assertTrue(new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("projectile_shoot_attempt"));
 
         ArgumentCaptor<InternalObservationService.InternalAuditEvent> audit =
                 ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
@@ -71,5 +74,26 @@ class NativeItemActionEventListenerTest {
                     "minecraft:ender_pearl");
         }
         org.mockito.Mockito.verify(service, org.mockito.Mockito.never()).submitAuditEvent(any());
+    }
+
+    @Test
+    void acceptedProjectileSpawnIsRawEvidenceWithoutSecondQuantityRow() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            NativeItemActionEventListener.recordProjectileSpawnAccepted(
+                    "SHOOT_ITEM", "player-uuid", "Alex", "minecraft:overworld",
+                    11.5, 65.0, -2.5,
+                    new CanonicalItem("minecraft:arrow", "fingerprint", null, null, null), 1,
+                    "minecraft:arrow");
+        }
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("PROJECTILE_SPAWN_ACCEPTED", captured.getValue().eventType());
+        assertTrue(new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("\"outcome\":\"accepted\""));
+        org.mockito.Mockito.verify(service, org.mockito.Mockito.never())
+                .submit(any(InternalObservationService.InternalObservation.class));
     }
 }
