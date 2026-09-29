@@ -181,6 +181,43 @@ class UnifiedEvidenceQueryServiceTest {
         assertTrue(rows.get(0).detail().contains("OldAlex"));
     }
 
+    @Test
+    void unifiedHistoricalLookupUsesLatestCompletedSourceSnapshot() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_grieflogger_import_runs
+                    (source_path, source_sha256, schema_fingerprint, started_at, completed_at, status)
+                VALUES ('old.db', 'old-hash', 'schema', 1, 10, 'COMPLETE'),
+                       ('new.db', 'new-hash', 'schema', 2, 20, 'COMPLETE')
+                """)) {
+            statement.executeUpdate();
+        }
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_grieflogger_lookup
+                    (source_sha256, table_name, source_key, timestamp_ms, level_name,
+                     x, y, z, action_type, quantity, detail, evidence_class)
+                VALUES (?, 'items', 'pk:1', ?, 'minecraft:overworld', 10, 64, 10,
+                        'DROP_ITEM', 1, ?, 'OBSERVED')
+                """)) {
+            statement.setString(1, "old-hash");
+            statement.setLong(2, 1_000);
+            statement.setString(3, "old snapshot");
+            statement.addBatch();
+            statement.setString(1, "new-hash");
+            statement.setLong(2, 2_000);
+            statement.setString(3, "new snapshot");
+            statement.addBatch();
+            statement.executeBatch();
+        }
+
+        AuditLookupFilters filters = AuditLookupFilters.parse("action.drop_item radius.5", 10_000L);
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(
+                conn, filters, "minecraft:overworld", 10, 64, 10, 10, 0);
+
+        assertEquals(1, rows.size());
+        assertEquals(2_000, rows.get(0).timestampMs());
+        assertTrue(rows.get(0).detail().contains("new snapshot"));
+    }
+
     private long node(String type, double x, double y, double z, String label, String owner) throws Exception {
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_nodes (node_type, owner_uuid, level_id, x, y, z, custom_label)

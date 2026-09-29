@@ -125,21 +125,24 @@ public final class UnifiedEvidenceQueryService {
                                                                     double centerY, double centerZ,
                                                                     int limit) throws SQLException {
         StringBuilder sql = new StringBuilder("""
-                SELECT source_sha256, table_name, source_key, source_rowid, timestamp_ms,
-                       level_name, x, y, z, player_name, player_uuid, action_type, quantity,
-                       subject_id, detail, evidence_class
-                FROM ig_grieflogger_lookup
-                WHERE 1 = 1
+                SELECT g.source_sha256, g.table_name, g.source_key, g.source_rowid, g.timestamp_ms,
+                       g.level_name, g.x, g.y, g.z, g.player_name, g.player_uuid, g.action_type, g.quantity,
+                       g.subject_id, g.detail, g.evidence_class
+                FROM ig_grieflogger_lookup g
+                WHERE (NOT EXISTS (SELECT 1 FROM ig_grieflogger_import_runs WHERE status = 'COMPLETE')
+                       OR g.source_sha256 = (SELECT source_sha256 FROM ig_grieflogger_import_runs
+                                             WHERE status = 'COMPLETE'
+                                             ORDER BY completed_at DESC, id DESC LIMIT 1))
                 """);
         List<Object> args = new ArrayList<>();
-        appendActionFilter(sql, args, "UPPER(action_type)", filters.eventTypes(), true);
-        appendUserFilter(sql, args, List.of("player_name"), List.of("player_uuid"), filters.playerNames());
-        appendWindow(sql, args, filters.window(), "timestamp_ms");
-        appendLocation(sql, args, "level_name", "x", "y", "z", levelId,
+        appendActionFilter(sql, args, "UPPER(g.action_type)", filters.eventTypes(), true);
+        appendUserFilter(sql, args, List.of("g.player_name"), List.of("g.player_uuid"), filters.playerNames());
+        appendWindow(sql, args, filters.window(), "g.timestamp_ms");
+        appendLocation(sql, args, "g.level_name", "g.x", "g.y", "g.z", levelId,
                 centerX, centerY, centerZ, filters.radiusBlocks());
-        appendSubjectFilter(sql, args, "subject_id", filters.includeSubjects(), false);
-        appendSubjectFilter(sql, args, "subject_id", filters.excludeSubjects(), true);
-        sql.append(" ORDER BY timestamp_ms DESC, table_name, source_key LIMIT ?");
+        appendSubjectFilter(sql, args, "g.subject_id", filters.includeSubjects(), false);
+        appendSubjectFilter(sql, args, "g.subject_id", filters.excludeSubjects(), true);
+        sql.append(" ORDER BY g.timestamp_ms DESC, g.table_name, g.source_key LIMIT ?");
         args.add(limit);
 
         List<UnifiedEvidenceDetail> rows = new ArrayList<>();

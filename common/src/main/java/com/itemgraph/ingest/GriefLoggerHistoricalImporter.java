@@ -181,6 +181,7 @@ public final class GriefLoggerHistoricalImporter {
                             ordinal++;
                             RowData row = rowData(rows, columns, ordinal, true);
                             if (!checkpointFound) {
+                                ensureProjection(targetConn, sourceHash, schemaFingerprint, table, row, references);
                                 if (row.sourceKey().equals(checkpoint)) {
                                     checkpointFound = true;
                                 }
@@ -219,6 +220,7 @@ public final class GriefLoggerHistoricalImporter {
                         ordinal++;
                         RowData row = rowData(rows, columns, ordinal, false);
                         if (!checkpointFound) {
+                            ensureProjection(targetConn, sourceHash, schemaFingerprint, table, row, references);
                             if (row.sourceKey().equals(checkpoint)) {
                                 checkpointFound = true;
                             }
@@ -336,6 +338,18 @@ public final class GriefLoggerHistoricalImporter {
             }
             return inserted;
         }
+    }
+
+    private void ensureProjection(Connection conn, String sourceHash, String schemaFingerprint,
+                                  String table, RowData row,
+                                  GriefLoggerHistoricalProjection.SourceReferences references) throws SQLException {
+        if (!GriefLoggerHistoricalProjection.isEventTable(table)) {
+            return;
+        }
+        GriefLoggerHistoricalProjection.insert(conn, sourceHash, table,
+                new GriefLoggerHistoricalProjection.Row(row.sourceKey(), row.sourceRowid(),
+                        row.values(), row.payloadBlob() == null ? null : sha256(row.payloadBlob()),
+                        row.unresolvedReason()), references);
     }
 
     private static String readCheckpoint(Connection conn, String hash, String table) throws SQLException {

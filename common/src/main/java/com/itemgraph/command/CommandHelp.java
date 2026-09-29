@@ -34,6 +34,7 @@ final class CommandHelp {
                 "[ItemGraph] /ig lookup page <page> <eventType> [limit] [sinceMinutes] — continue a bounded audit result page.",
                 "[ItemGraph] /ig lookup player <playerName> <eventType> [limit] [sinceMinutes] — filter native audit events by player.",
                 "[ItemGraph] /ig lookup filters <filter1> [filter2] ... — GriefLogger-compatible action/user/include/exclude/time/radius lookup (maximum five; radius required).",
+                "[ItemGraph] /ig lookup provenance <sourceSha256> <table> <sourceKey> [limit] — exact read-only lookup of an imported GriefLogger row, including reference and identity tables.",
                 "[ItemGraph] /ig ingest now — queue one complete ingest and correlate cycle.",
                 "[ItemGraph] /ig ingest history — queue a bounded, read-only import of all present GriefLogger history tables.",
                 "[ItemGraph] /ig event <observationId> — show one raw observed evidence row.",
@@ -91,7 +92,7 @@ final class CommandHelp {
                 "[ItemGraph] Example: /ig page 2"));
         List<String> lookup = List.of(
                 "[ItemGraph] Syntax: /ig lookup <eventType> [limit] [sinceMinutes]",
-                "[ItemGraph] eventType: all, PLAYER_JOIN, PLAYER_QUIT, CHAT_MESSAGE, COMMAND_ATTEMPT, COMMAND_EXECUTED, PLACE_BLOCK, BREAK_BLOCK, INTERACT_BLOCK, INTERACT_BLOCK_ATTEMPT, KILL_ENTITY, THROW_ITEM, or SHOOT_ITEM.",
+                "[ItemGraph] eventType: all, PLAYER_JOIN, PLAYER_QUIT, CHAT_MESSAGE, COMMAND_ATTEMPT, COMMAND_EXECUTED, PLACE_BLOCK, BREAK_BLOCK, INTERACT_BLOCK, INTERACT_BLOCK_ATTEMPT, INTERACT_ENTITY, KILL_ENTITY, THROW_ITEM, or SHOOT_ITEM.",
                 "[ItemGraph] Results are native OBSERVED evidence from ig_audit_events; limit defaults to 20 and is capped at 100.",
                 "[ItemGraph] /ig lookup near clamps radius to 1..1024 blocks and requires an exact dimension id.",
                 "[ItemGraph] Pages are 1-based; offsets are capped at 10,000 rows.",
@@ -108,6 +109,11 @@ final class CommandHelp {
                 "[ItemGraph] radius is required, uses the issuing player's current dimension and position, and searches a cube clamped to 1..1024 blocks.",
                 "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and unified evidence results are bounded to 20 rows with source and evidence IDs.",
                 "[ItemGraph] Example: /ig lookup filters action.break_block include.diamond_ore time.1h radius.50"));
+        topics.put("lookup provenance", List.of(
+                "[ItemGraph] Syntax: /ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]",
+                "[ItemGraph] Opens one exact imported GriefLogger row from ItemGraph's read-only ledger, including reference and identity tables.",
+                "[ItemGraph] Results are labeled PROVENANCE_ONLY or UNRESOLVED and never contribute item quantity.",
+                "[ItemGraph] Example: /ig lookup provenance 0123abcd... usernames pk:7 20"));
         List<String> ingest = List.of(
                 "[ItemGraph] Syntax: /ig ingest now",
                 "[ItemGraph] Queues one complete ingest-and-correlate cycle on the bounded background worker.",

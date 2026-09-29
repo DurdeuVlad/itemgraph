@@ -172,7 +172,9 @@ audit, observations, and transformations. Reference and identity tables have no
 event location, so they are available only through the exact
 `source_sha256`/`table_name`/`source_key` method
 `findHistoricalProvenance`; those rows are labeled `PROVENANCE_ONLY` and never
-contribute item quantity.
+contribute item quantity. When multiple immutable source snapshots exist, the
+bounded timeline uses the latest completed snapshot; exact provenance lookup can
+still open any earlier snapshot by its source hash.
 
 ## Source identity
 

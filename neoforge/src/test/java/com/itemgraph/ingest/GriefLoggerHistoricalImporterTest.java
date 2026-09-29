@@ -131,6 +131,9 @@ class GriefLoggerHistoricalImporterTest {
             assertFalse(rows.next());
         }
 
+        try (Statement statement = database.getConnection().createStatement()) {
+            statement.executeUpdate("DELETE FROM ig_grieflogger_lookup");
+        }
         GriefLoggerHistoricalImporter.ImportReport second = new GriefLoggerHistoricalImporter(
                 new GriefLoggerAdapter(sourcePath), database).importAll();
         assertEquals(0, second.rowsImported());

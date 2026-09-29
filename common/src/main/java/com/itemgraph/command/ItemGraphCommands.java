@@ -256,6 +256,15 @@ public final class ItemGraphCommands {
                 .then(Commands.argument("filters", StringArgumentType.greedyString())
                         .executes(ctx -> lookupAuditFilters(ctx,
                                 StringArgumentType.getString(ctx, "filters")))));
+        lookup.then(Commands.literal("provenance")
+                .then(Commands.argument("sourceSha256", StringArgumentType.word())
+                        .then(Commands.argument("table", StringArgumentType.word())
+                                .then(Commands.argument("sourceKey", StringArgumentType.word())
+                                        .executes(ctx -> lookupHistoricalProvenance(ctx,
+                                                QueryLimits.DEFAULT_LIMIT))
+                                        .then(Commands.argument("limit", IntegerArgumentType.integer(1))
+                                                .executes(ctx -> lookupHistoricalProvenance(ctx,
+                                                        IntegerArgumentType.getInteger(ctx, "limit"))))))));
         return lookup;
     }
 
@@ -583,6 +592,23 @@ public final class ItemGraphCommands {
                 filterDescription, System.currentTimeMillis());
         rememberPageSession(source, session);
         return dispatchAuditPage(source, "lookup filtered audit", session, 1, true);
+    }
+
+    private static int lookupHistoricalProvenance(CommandContext<CommandSourceStack> ctx, int requestedLimit) {
+        CommandSourceStack source = ctx.getSource();
+        String sourceSha256 = StringArgumentType.getString(ctx, "sourceSha256");
+        String table = StringArgumentType.getString(ctx, "table");
+        String sourceKey = StringArgumentType.getString(ctx, "sourceKey");
+        int limit = QueryLimits.clampLimit(requestedLimit);
+        return QueryDispatcher.dispatch(source, "lookup provenance", conn -> {
+            List<UnifiedEvidenceDetail> evidence = UNIFIED_EVIDENCE_QUERIES.findHistoricalProvenance(
+                    conn, sourceSha256, table, sourceKey, limit, 0);
+            return QueryDispatcher.QueryOutput.found(
+                    QueryFormatter.formatUnifiedEvidence(evidence,
+                            "source=" + sourceSha256 + " table=" + table + " key=" + sourceKey
+                                    + " limit=" + limit),
+                    List.of());
+        });
     }
 
     private static int lookupAuditPage(CommandContext<CommandSourceStack> ctx, String eventType,
