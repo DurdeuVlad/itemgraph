@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "compatibility_version": "m8.2.0",
+  "compatibility_version": "m8.2.1",
   "mod_id": "itemgraph",
   "supported_commands": ["/ig", "/itemgraph"],
   "unsupported_aliases": ["/gl", "/grieflogger"],
@@ -82,8 +82,8 @@
     {"grieflogger": "CRAFT_ITEM", "itemgraph": "CRAFT", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "ItemGraph preserves transformation lineage and source/result fingerprints."},
     {"grieflogger": "CONSUME_ITEM", "itemgraph": "CONSUME_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "BREAK_ITEM", "itemgraph": "BREAK_ITEM", "status": "compatible", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"]},
-    {"grieflogger": "THROW_ITEM", "itemgraph": "THROW_ITEM", "status": "unresolved", "evidence_class": "observed", "quantity": "non_quantity_projectile_evidence", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "ItemGraph currently records projectile spawn evidence without claiming a quantity transfer; GriefLogger's item-usage row includes item/count semantics."},
-    {"grieflogger": "SHOOT_ITEM", "itemgraph": "SHOOT_ITEM", "status": "unresolved", "evidence_class": "observed", "quantity": "non_quantity_projectile_evidence", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "ItemGraph currently records projectile spawn evidence without claiming a quantity transfer; GriefLogger's item-usage row includes item/count semantics."},
+    {"grieflogger": "THROW_ITEM", "itemgraph": "THROW_ITEM", "status": "unresolved", "evidence_class": "observed", "quantity": "observed_stack_count", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "Both loaders now persist the accepted spawn's canonical source stack/components and count to an explicit UNKNOWN endpoint; spawn coordinates and type remain raw evidence without claiming that the item landed there or assigning a projectile UUID. Attempt-vs-outcome timing parity with GriefLogger's shootFromRotation hook remains open."},
+    {"grieflogger": "SHOOT_ITEM", "itemgraph": "SHOOT_ITEM", "status": "unresolved", "evidence_class": "observed", "quantity": "observed_stack_count", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "Both loaders now persist the accepted spawn's canonical source stack/components and count to an explicit UNKNOWN endpoint; spawn coordinates and type remain raw evidence without claiming that the item landed there or assigning a projectile UUID. Attempt-vs-outcome timing parity with GriefLogger's shootFromRotation hook remains open."},
     {"grieflogger": "PLACE_BLOCK", "itemgraph": "PLACE_BLOCK", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "BREAK_BLOCK", "itemgraph": "BREAK_BLOCK", "status": "compatible", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"]},
     {"grieflogger": "INTERACT_BLOCK", "itemgraph": "INTERACT_BLOCK_ATTEMPT", "status": "unresolved", "evidence_class": "observed", "quantity": "none", "loaders": ["fabric", "neoforge"], "owner_issue": 27},

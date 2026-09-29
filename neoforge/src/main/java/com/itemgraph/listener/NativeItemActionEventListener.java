@@ -8,7 +8,6 @@ import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ItemSupplier;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.projectile.ThrowableItemProjectile;
-import net.minecraft.world.entity.projectile.ThrownTrident;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.UseAnim;
@@ -67,9 +66,11 @@ public final class NativeItemActionEventListener {
         if (stack == null || stack.isEmpty()) {
             return;
         }
-        String actionType = projectile instanceof ThrowableItemProjectile || projectile instanceof ThrownTrident
+        // GriefLogger classifies every arrow-family projectile, including a
+        // thrown trident, as SHOOT_ITEM; only ThrowableItemProjectile is THROW_ITEM.
+        String actionType = projectile instanceof ThrowableItemProjectile
                 ? "THROW_ITEM" : "SHOOT_ITEM";
-        submitProjectileAudit(player, actionType, stack, projectile);
+        submitProjectileObservation(player, actionType, stack, projectile);
     }
 
     private static void submitUnknown(ServerPlayer player, String actionType, ItemStack stack, int amount) {
@@ -82,16 +83,44 @@ public final class NativeItemActionEventListener {
                 level, null, null, null, "UNKNOWN", canonical, amount, null));
     }
 
-    private static void submitProjectileAudit(ServerPlayer player, String actionType, ItemStack stack,
-                                               Projectile projectile) {
+    private static void submitProjectileObservation(ServerPlayer player, String actionType, ItemStack stack,
+                                                    Projectile projectile) {
         String level = player.level().dimension().location().toString();
-        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
         String projectileId = BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString();
-        InternalObservationService.getInstance().submitAuditEvent(
-                new InternalObservationService.InternalAuditEvent(
+        CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(stack.copy());
+        recordProjectileObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
+                level, player.getX(), player.getY(), player.getZ(), projectile.getX(), projectile.getY(),
+                projectile.getZ(), canonical, stack.getCount(), projectileId);
+    }
+
+    static void recordProjectileObservation(String actionType, String playerUuid, String playerName,
+                                             String levelName, double playerX, double playerY, double playerZ,
+                                             double projectileX, double projectileY, double projectileZ,
+                                             CanonicalItem item, int amount, String projectileId) {
+        if (item == null || amount <= 0) {
+            return;
+        }
+        String eventId = java.util.UUID.randomUUID().toString();
+        byte[] rawData = ("{\"capture\":\"projectile_spawn\",\"event_id\":\""
+                + eventId + "\",\"projectile\":\"" + projectileId + "\",\"spawn_x\":" + projectileX
+                + ",\"spawn_y\":" + projectileY + ",\"spawn_z\":" + projectileZ
+                + ",\"evidence\":\"spawned_by_player\"}")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        InternalObservationService service = InternalObservationService.getInstance();
+        InternalObservationService.InternalObservation observation = new InternalObservationService.InternalObservation(
                 System.currentTimeMillis(), actionType,
-                player.getUUID().toString(), player.getGameProfile().getName(), level,
-                projectile.getX(), projectile.getY(), projectile.getZ(), itemId,
-                "projectile=" + projectileId + " evidence=spawned_by_player", null));
+                playerUuid, playerName, levelName,
+                playerX, playerY, playerZ, levelName,
+                null, null, null, "UNKNOWN",
+                item.itemId(), rawData, item, amount, null, null);
+        if (service.submit(observation)) {
+            // Keep the legacy native-audit lookup path readable while the
+            // quantity observation remains the single unified source.
+            service.submitAuditEvent(new InternalObservationService.InternalAuditEvent(
+                    System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
+                    projectileX, projectileY, projectileZ, item.itemId(),
+                    "projectile=" + projectileId + " event_id=" + eventId
+                            + " evidence=spawned_by_player quantity=" + amount, rawData));
+        }
     }
 }
