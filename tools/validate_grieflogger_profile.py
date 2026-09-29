@@ -131,6 +131,13 @@ EXPECTED_ACTION_CONTRACT: dict[str, tuple[str, str, str, str]] = {
     "ADD_ITEM_ENDER": ("ADD_ITEM_ENDER", "unresolved", "observed", "signed_delta"),
     "REMOVE_ITEM_ENDER": ("REMOVE_ITEM_ENDER", "unresolved", "observed", "signed_delta"),
 }
+EXPECTED_EXTENSION_ACTION_CONTRACT: dict[str, tuple[str, str, str]] = {
+    "SMELT": ("extended", "observed", "transformation"),
+    "ANVIL_RENAME": ("extended", "observed", "transformation"),
+    "ANVIL_REPAIR": ("extended", "observed", "transformation"),
+    "HOPPER_INSERT": ("extended", "observed", "signed_delta"),
+    "HOPPER_EXTRACT": ("extended", "observed", "signed_delta"),
+}
 REQUIRED_MILESTONE_ISSUES = {24, 25, 26, 27, 28, 29, 30, 31, 43}
 M8_MILESTONE_TITLE = "M8: Drop-in GriefLogger parity"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -219,6 +226,15 @@ def validate_registry(registry: dict[str, Any]) -> None:
         source_action_counts == Counter(EXPECTED_SOURCE_ACTIONS),
         "registry does not enumerate every audited source action exactly once",
     )
+    extension_itemgraphs = {
+        row.get("itemgraph")
+        for row in actions
+        if isinstance(row, dict) and row.get("grieflogger") is None
+    }
+    require(
+        extension_itemgraphs == set(EXPECTED_EXTENSION_ACTION_CONTRACT),
+        "registry ItemGraph-only action set is incomplete or has an extra value",
+    )
     allowed_statuses = set(registry.get("statuses", []))
     require(allowed_statuses == {"compatible", "extended", "unsupported", "unresolved"}, "registry status vocabulary changed")
     allowed_evidence_classes = set(registry.get("evidence_classes", []))
@@ -249,6 +265,14 @@ def validate_registry(registry: dict[str, Any]) -> None:
                 require(row.get("owner_issue") == 27, f"actions[{index}] unresolved {source_action} must remain owned by issue #27")
             else:
                 require("owner_issue" not in row, f"actions[{index}] compatible/extended {source_action} must not claim an unresolved owner issue")
+        elif source_action is None:
+            expected_status, expected_evidence, expected_quantity = EXPECTED_EXTENSION_ACTION_CONTRACT[itemgraph]
+            require(
+                (row["status"], evidence_class, quantity)
+                == (expected_status, expected_evidence, expected_quantity),
+                f"actions[{index}] ItemGraph-only contract for {itemgraph} changed",
+            )
+            require("owner_issue" not in row, f"actions[{index}] ItemGraph-only action {itemgraph} must not claim an owner issue")
         if row.get("status") == "unresolved":
             require(isinstance(row.get("owner_issue"), int), f"actions[{index}] unresolved row needs owner_issue")
 
@@ -259,6 +283,10 @@ def validate_registry(registry: dict[str, Any]) -> None:
         "registry source_tables do not match the source fixture",
     )
     require(storage.get("grieflogger_database_mutation") is False, "GriefLogger database mutation must remain disabled")
+
+    filters = registry.get("filters")
+    require(isinstance(filters, dict), "registry filters must be an object")
+    require(filters.get("owner_issue") == 25, "registry filters owner_issue must remain 25")
 
 
 def validate_documents(registry: dict[str, Any]) -> None:
@@ -284,9 +312,9 @@ def validate_documents(registry: dict[str, Any]) -> None:
         for row in section:
             if isinstance(row, dict) and isinstance(row.get("owner_issue"), int):
                 owner_issues.add(row["owner_issue"])
-    filters = registry.get("filters", {})
-    if isinstance(filters, dict) and isinstance(filters.get("owner_issue"), int):
-        owner_issues.add(filters["owner_issue"])
+    filters = registry.get("filters")
+    require(isinstance(filters, dict) and filters.get("owner_issue") == 25, "filters owner_issue must remain 25")
+    owner_issues.add(filters["owner_issue"])
     owner_issues.add(baseline["owner_issue"])
     for issue in sorted(owner_issues):
         require(f"#{issue}" in parity, f"parity document does not reference owner issue #{issue}")
