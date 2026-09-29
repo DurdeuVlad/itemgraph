@@ -137,3 +137,20 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Risk: external source identity, inventory identity, backpressure, and sensitive query
   results require explicit contracts and consumer-side permission checks.
 
+## M8: Drop-in GriefLogger parity
+
+- Status: planned; GitHub milestone https://github.com/DurdeuVlad/itemgraph/milestone/4.
+- Outcome: ItemGraph keeps `/ig` and `/itemgraph` while matching GriefLogger behavior
+  for commands, filters, inspector, events, read-only history import, storage, and
+  operations. `/gl` and `/grieflogger` are not aliases.
+- Proof: the compatibility registry, cross-loader tests, backend tests, and native-only
+  staging replay tracked by issues #23–#31.
+
+## M9: ItemGraph audit++ performance and extra events
+
+- Status: planned; GitHub milestone https://github.com/DurdeuVlad/itemgraph/milestone/5.
+- Outcome: measured performance controls, extra administrative/world/entity events,
+  modded inventory adapters, cross-loader APIs, and tamper-evident exports.
+- Proof: reproducible CI benchmarks, conservation reports, adapter fixtures, and export
+  verification tracked by issues #32–#37.
+
