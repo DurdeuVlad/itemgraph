@@ -2,6 +2,7 @@ package com.itemgraph.listener;
 
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
+import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.listener.ContainerInteractionTracker.ContainerKey;
 import com.itemgraph.listener.ContainerInteractionTracker.InventoryTotals;
 import net.minecraft.core.BlockPos;
@@ -13,10 +14,7 @@ import net.minecraft.world.inventory.PlayerEnderChestContainer;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.ChestType;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerContainerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
@@ -143,11 +141,12 @@ public class ContainerSessionListener {
         if (containerEntity != null) {
             BlockPos pos = containerEntity.getBlockPos();
             Container observed = blockContainer;
+            BlockPos canonical = BlockInspectionTargets.canonicalPosition(player.level(), pos);
             ContainerInteractionTracker.getInstance().openSession(
                     player.getUUID(), player.getGameProfile().getName(),
-                    new ContainerKey(levelId, pos.getX(), pos.getY(), pos.getZ()),
+                    key(levelId, canonical),
                     () -> snapshotTotals(observed),
-                    List.of());
+                    aliases(levelId, pos, canonical, player.level()));
             return;
         }
 
@@ -163,19 +162,24 @@ public class ContainerSessionListener {
         }
 
         CompoundContainer observed = merged;
-        List<ContainerKey> aliases = List.of();
-        BlockState state = player.level().getBlockState(click.pos());
-        if (state.getBlock() instanceof ChestBlock
-                && state.getValue(ChestBlock.TYPE) != ChestType.SINGLE) {
-            BlockPos partner = click.pos().relative(ChestBlock.getConnectedDirection(state));
-            aliases = List.of(new ContainerKey(levelId, partner.getX(), partner.getY(), partner.getZ()));
-        }
+        BlockPos canonical = BlockInspectionTargets.canonicalPosition(player.level(), click.pos());
 
         ContainerInteractionTracker.getInstance().openSession(
                 player.getUUID(), player.getGameProfile().getName(),
-                new ContainerKey(levelId, click.pos().getX(), click.pos().getY(), click.pos().getZ()),
+                key(levelId, canonical),
                 () -> snapshotTotals(observed),
-                aliases);
+                aliases(levelId, click.pos(), canonical, player.level()));
+    }
+
+    private static ContainerKey key(String levelId, BlockPos pos) {
+        return new ContainerKey(levelId, pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    private static List<ContainerKey> aliases(String levelId, BlockPos clicked, BlockPos canonical, Level level) {
+        return BlockInspectionTargets.resolveBlockPositions(level, clicked).stream()
+                .filter(pos -> !pos.equals(canonical))
+                .map(pos -> key(levelId, pos))
+                .toList();
     }
 
     /**
