@@ -10,6 +10,7 @@ import com.mojang.brigadier.ParseResults;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.commands.CommandSourceStack;
@@ -128,6 +129,14 @@ public final class FabricNativeAuditEventListener {
                 FabricContainerSessionListener.rememberClick(serverPlayer, serverLevel, hit.getBlockPos());
                 submit("INTERACT_BLOCK_ATTEMPT", serverPlayer, serverLevel, hit.getBlockPos(),
                         BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit.getBlockPos()).getBlock()).toString(), null);
+            }
+            return InteractionResult.PASS;
+        });
+        UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
+            if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
+                submit("INTERACT_ENTITY", serverPlayer, serverLevel, entity.blockPosition(),
+                        BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
+                        "outcome=attempt hand=" + hand.name().toLowerCase(java.util.Locale.ROOT));
             }
             return InteractionResult.PASS;
         });

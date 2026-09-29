@@ -47,7 +47,7 @@ public class InternalObservationService {
             double x, double y, double z,
             String targetLevelName,
             Double targetX, Double targetY, Double targetZ,
-            String targetType, // e.g. "ARMOR_STAND", "PLAYER", "GROUND", "CONTAINER", "UNKNOWN"
+            String targetType, // e.g. "ARMOR_STAND", "PLAYER", "GROUND", "CONTAINER", "ENDER_CHEST", "UNKNOWN"
             String itemId,
             byte[] rawData,
             CanonicalItem item,
@@ -593,6 +593,22 @@ public class InternalObservationService {
                                     originNodeId = containerNodeId;
                                     targetNodeId = null;
                                 }
+                            }
+                        }
+                        case "ENDER_CHEST" -> {
+                            long enderNodeId = nodeManager.getOrCreateExternalInventoryNode(
+                                    conn,
+                                    "minecraft:ender_chest/" + obs.playerUuid(),
+                                    "Ender Chest of " + obs.playerName(),
+                                    obs.targetLevelName(), null, null, null);
+                            if ("ADD_ITEM_ENDER".equals(obs.actionType())) {
+                                originNodeId = playerNode(conn, nodeManager, obs);
+                                targetNodeId = enderNodeId;
+                            } else if ("REMOVE_ITEM_ENDER".equals(obs.actionType())) {
+                                originNodeId = enderNodeId;
+                                targetNodeId = playerNode(conn, nodeManager, obs);
+                            } else {
+                                originNodeId = enderNodeId;
                             }
                         }
                         case "UNKNOWN" -> {

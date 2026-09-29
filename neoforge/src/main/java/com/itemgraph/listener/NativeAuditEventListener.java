@@ -8,6 +8,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.EventPriority;
@@ -103,6 +104,36 @@ public final class NativeAuditEventListener {
         }
         submit("INTERACT_BLOCK_ATTEMPT", player, level, event.getPos(),
                 blockId(level.getBlockState(event.getPos())), null);
+    }
+
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
+        if (event.isCanceled() || !(event.getEntity() instanceof ServerPlayer player)
+                || !(event.getLevel() instanceof ServerLevel level)) {
+            return;
+        }
+        Entity target = event.getTarget();
+        if (target instanceof ArmorStand) {
+            // Armor stands use EntityInteractSpecific when the local hit is
+            // handled by the stand; the dedicated handler below records that
+            // path so a failed specific attempt is not double-counted here.
+            return;
+        }
+        submit("INTERACT_ENTITY", player, level, target.blockPosition(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(),
+                "outcome=attempt hand=" + event.getHand().name().toLowerCase(java.util.Locale.ROOT));
+    }
+
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public void onEntityInteractSpecific(PlayerInteractEvent.EntityInteractSpecific event) {
+        if (event.isCanceled() || !(event.getEntity() instanceof ServerPlayer player)
+                || !(event.getLevel() instanceof ServerLevel level)
+                || !(event.getTarget() instanceof ArmorStand target)) {
+            return;
+        }
+        submit("INTERACT_ENTITY", player, level, target.blockPosition(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(),
+                "outcome=attempt specific=true hand=" + event.getHand().name().toLowerCase(java.util.Locale.ROOT));
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)

@@ -579,8 +579,8 @@ The current source-level verification runs without producing a release artifact:
 
 These checks cover V13 audit persistence, cancellation filtering, shutdown-loss
 accounting, defensive raw-data copying, opaque-detail formatting, location/radius
-filters, stable page offsets, native item-action wiring, and the Fabric callback
-adapter. The 2026-09-29 GriefLogger-absent Fabric replay in the isolated
+filters, stable page offsets, native item-action wiring, Ender session delta
+conservation, and the Fabric callback adapter. The 2026-09-29 GriefLogger-absent Fabric replay in the isolated
 `C:\Users\User\itemgraph-staging-replay` checkout exercised join/quit, chat,
 commands, block actions, entity kills, containers, consume, durability break,
 throw, shoot, projectile, and hopper events through the real server. After clean
