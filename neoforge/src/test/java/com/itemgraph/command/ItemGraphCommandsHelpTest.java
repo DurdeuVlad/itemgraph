@@ -126,6 +126,12 @@ class ItemGraphCommandsHelpTest {
         assertTrue(inspectHelp.contains("Permission: level 2"));
         assertTrue(inspectHelp.contains("does not consume the held item"));
         assertTrue(inspectHelp.contains("Example: /ig inspect on"));
+
+        successes.clear();
+        assertEquals(1, dispatcher.execute("itemgraph help lookup filters", source));
+        String filteredLookupHelp = String.join("\n", successes);
+        assertTrue(filteredLookupHelp.contains("Syntax: /ig lookup <filter1>"));
+        assertTrue(filteredLookupHelp.contains("default to 10 rows"));
     }
 
     @Test
@@ -199,6 +205,8 @@ class ItemGraphCommandsHelpTest {
 
         assertSuggestions(dispatcher, source, "itemgraph ", "help", "status", "audit", "lookup", "page", "trace", "gui", "inspect");
         assertSuggestions(dispatcher, source, "itemgraph lookup ", "all", "BREAK_BLOCK", "CHAT_MESSAGE");
+        assertSuggestions(dispatcher, source, "itemgraph lookup action.", "action.break_block", "action.chat_message");
+        assertSuggestions(dispatcher, source, "itemgraph lookup action.break_block ", "user.", "include.", "exclude.", "time.", "radius.");
         assertSuggestions(dispatcher, source, "itemgraph help ", "trace item", "gui container", "inspect");
         assertSuggestions(dispatcher, source, "itemgraph inspect ", "on", "off", "status");
         assertSuggestions(dispatcher, source, "itemgraph trace player ", "Alex", "Steve");
@@ -206,6 +214,54 @@ class ItemGraphCommandsHelpTest {
         assertSuggestions(dispatcher, source, "itemgraph trace item ", "minecraft:stone");
         assertSuggestions(dispatcher, source, "itemgraph gui item ", "minecraft:stone");
         assertSuggestions(dispatcher, source, "itemgraph gui container ", "minecraft:overworld");
+    }
+
+    @Test
+    void publishedGriefLoggerLookupFilterSyntaxParsesDirectly() {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+
+        var parsed = dispatcher.parse(
+                "itemgraph lookup action.break_block \"include.diamond_ore,gold_ore\" radius.20",
+                source);
+
+        assertParsedCompletely(parsed, "direct GriefLogger filter syntax");
+
+        var explicit = dispatcher.parse(
+                "itemgraph lookup filters action.break_block radius.20", source);
+        assertParsedCompletely(explicit, "explicit ItemGraph filter syntax");
+
+        var radiusOnly = dispatcher.parse("itemgraph lookup radius.10", source);
+        assertParsedCompletely(radiusOnly, "one-token GriefLogger filter syntax");
+        assertTrue(radiusOnly.getContext().getNodes().stream()
+                        .anyMatch(node -> node.getNode().getName().equals("lookupFilters")),
+                "radius-only filter was routed to the native event-type argument");
+
+        var nativeLookup = dispatcher.parse("itemgraph lookup BREAK_BLOCK 50 60", source);
+        assertParsedCompletely(nativeLookup, "native audit lookup syntax");
+        assertTrue(nativeLookup.getContext().getNodes().stream()
+                        .anyMatch(node -> node.getNode().getName().equals("eventType")),
+                "native event lookup was routed to the direct filter argument");
+
+        var nativeInteractionLookup = dispatcher.parse("itemgraph lookup INTERACT_BLOCK", source);
+        assertParsedCompletely(nativeInteractionLookup, "native block-interaction lookup syntax");
+        assertTrue(nativeInteractionLookup.getContext().getNodes().stream()
+                        .anyMatch(node -> node.getNode().getName().equals("eventType")),
+                "native block-interaction lookup was routed to the direct filter argument");
+
+        var nativeAllLookup = dispatcher.parse("itemgraph lookup all", source);
+        assertParsedCompletely(nativeAllLookup, "native all-events lookup syntax");
+        assertTrue(nativeAllLookup.getContext().getNodes().stream()
+                        .anyMatch(node -> node.getNode().getName().equals("eventType")),
+                "native all-events lookup was routed to the direct filter argument");
+    }
+
+    private void assertParsedCompletely(com.mojang.brigadier.ParseResults<CommandSourceStack> parsed,
+                                        String description) {
+        assertFalse(parsed.getReader().canRead(),
+                description + " was not consumed: " + parsed.getReader().getRemaining());
+        assertTrue(parsed.getExceptions().isEmpty(),
+                description + " produced parse errors: " + parsed.getExceptions());
     }
 
     private CommandDispatcher<CommandSourceStack> dispatcher() {
