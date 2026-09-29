@@ -571,6 +571,25 @@ database were not copied or accessed. This startup smoke establishes that the mo
 resolution crash is gone. The isolated folder had no GriefLogger database schema,
 so this run does not verify event ingestion against the source clone's existing DB.
 
+## SQLite and MySQL/MariaDB storage contract
+
+The shared `DialectSqlTest` covers the deterministic rewrites for identity
+columns, text/blob types, idempotent indexes, SQLite `PRAGMA table_info`, and
+upserts. `MariaDbDialectIntegrationTest` is skipped locally unless endpoints
+are supplied, then runs the same migration and basic evidence contract against
+each configured server. CI provisions MariaDB 10.11 on port 3306 and MySQL 8.0
+on port 3307 with the following environment variables:
+
+```text
+ITEMGRAPH_TEST_MARIADB_URL=jdbc:mariadb://127.0.0.1:3306/itemgraph
+ITEMGRAPH_TEST_MYSQL_URL=jdbc:mariadb://127.0.0.1:3307/itemgraph
+```
+
+The test verifies clean schema setup, a second idempotent migration pass,
+translated `INSERT IGNORE`, generated-column dedup support, and translated
+`ON CONFLICT ... excluded.column` upserts. It does not access the GriefLogger
+source database; that adapter remains a separate SQLite read-only path.
+
 ## Native GriefLogger parity slice (source verification)
 
 The current source-level verification runs without producing a release artifact:

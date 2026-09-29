@@ -58,7 +58,7 @@ public final class ItemGraphFabric implements ModInitializer {
         }
         ItemCanonicalizer.setRegistryAccess(server.registryAccess());
         CorrelationEngine.setDefaultWindowSeconds(config.groundBridgeMaxSeconds());
-        DatabaseManager.getInstance().initialize(config.databasePath());
+        DatabaseManager.getInstance().initialize(config.databaseSettings());
         InternalObservationService.getInstance().start();
         IngestionService.getInstance().setAdapter(new GriefLoggerAdapter(config.griefLoggerDatabasePath()));
         IngestionService.getInstance().start();

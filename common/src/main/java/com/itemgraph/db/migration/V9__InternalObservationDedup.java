@@ -1,5 +1,6 @@
 package com.itemgraph.db.migration;
 
+import com.itemgraph.db.DatabaseDialect;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -33,14 +34,31 @@ public class V9__InternalObservationDedup implements SchemaMigration {
 
     @Override
     public void apply(Connection conn) throws SQLException {
+        apply(conn, DatabaseDialect.fromConnection(conn));
+    }
+
+    @Override
+    public void apply(Connection conn, DatabaseDialect dialect) throws SQLException {
         try (Statement stmt = conn.createStatement()) {
-            // Partial unique index: only covers internal observations (source_event_id IS NULL).
-            // Prevents double-writes when the same real-world event is submitted twice.
-            stmt.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_internal_dedup
-                ON ig_observations(source_type, timestamp_ms, node_id, fingerprint_id, amount, action_type)
-                WHERE source_event_id IS NULL;
-            """);
+            if (dialect == DatabaseDialect.MYSQL_MARIADB) {
+                // MySQL/MariaDB do not have SQLite's partial-index predicate.  A
+                // generated sentinel keeps NULL internal events in one unique scope,
+                // while non-NULL source events remain distinct by their source id.
+                stmt.execute("ALTER TABLE ig_observations ADD COLUMN IF NOT EXISTS "
+                        + "ig_internal_dedup_source BIGINT AS (COALESCE(source_event_id, -1)) STORED;");
+                stmt.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_internal_dedup
+                    ON ig_observations(source_type, timestamp_ms, node_id, fingerprint_id, amount, action_type, ig_internal_dedup_source);
+                """);
+            } else {
+                // Partial unique index: only covers internal observations (source_event_id IS NULL).
+                // Prevents double-writes when the same real-world event is submitted twice.
+                stmt.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_internal_dedup
+                    ON ig_observations(source_type, timestamp_ms, node_id, fingerprint_id, amount, action_type)
+                    WHERE source_event_id IS NULL;
+                """);
+            }
 
             // Performance index for the new DEATH_DROP action type alongside existing drop actions.
             stmt.execute("""

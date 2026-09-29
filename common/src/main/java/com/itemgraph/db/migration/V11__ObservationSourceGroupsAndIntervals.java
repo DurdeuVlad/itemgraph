@@ -1,5 +1,6 @@
 package com.itemgraph.db.migration;
 
+import com.itemgraph.db.DatabaseDialect;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -19,6 +20,11 @@ public class V11__ObservationSourceGroupsAndIntervals implements SchemaMigration
 
     @Override
     public void apply(Connection conn) throws SQLException {
+        apply(conn, DatabaseDialect.fromConnection(conn));
+    }
+
+    @Override
+    public void apply(Connection conn, DatabaseDialect dialect) throws SQLException {
         try (Statement stmt = conn.createStatement()) {
             if (!hasColumn(conn, "ig_observations", "timestamp_end_ms")) {
                 stmt.execute("ALTER TABLE ig_observations ADD COLUMN timestamp_end_ms INTEGER DEFAULT NULL;");
@@ -28,11 +34,20 @@ public class V11__ObservationSourceGroupsAndIntervals implements SchemaMigration
             }
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_edges_state_time ON ig_inferred_edges(edge_state, time_start);");
             stmt.execute("DROP INDEX IF EXISTS idx_obs_internal_dedup;");
-            stmt.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_internal_dedup
-                ON ig_observations(source_type, timestamp_ms, node_id, COALESCE(target_node_id, -1), fingerprint_id, amount, action_type, item_entity_uuid)
-                WHERE source_event_id IS NULL;
-            """);
+            if (dialect == DatabaseDialect.MYSQL_MARIADB) {
+                stmt.execute("ALTER TABLE ig_observations ADD COLUMN IF NOT EXISTS "
+                        + "ig_target_node_dedup BIGINT AS (COALESCE(target_node_id, -1)) STORED;");
+                stmt.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_internal_dedup
+                    ON ig_observations(source_type, timestamp_ms, node_id, ig_target_node_dedup, fingerprint_id, amount, action_type, item_entity_uuid, ig_internal_dedup_source);
+                """);
+            } else {
+                stmt.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_internal_dedup
+                    ON ig_observations(source_type, timestamp_ms, node_id, COALESCE(target_node_id, -1), fingerprint_id, amount, action_type, item_entity_uuid)
+                    WHERE source_event_id IS NULL;
+                """);
+            }
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS ig_observation_groups (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

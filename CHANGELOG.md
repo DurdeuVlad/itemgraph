@@ -8,6 +8,13 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Changed
 
+- **One storage contract for SQLite and MySQL/MariaDB:** ItemGraph now exposes
+  validated backend settings on NeoForge and Fabric, runs the shared migrations
+  and JDBC queries through one dialect layer, preserves SQLite partial-dedup
+  semantics with generated sentinel columns on network databases, and bundles
+  MariaDB Connector/J 3.5.7. CI provisions MariaDB 10.11 and MySQL 8.0 for the
+  same migration, upsert, constraint, and read-only integration contract. Issue
+  #29 remains open until hosted CI completes its full acceptance run.
 - **Compatibility profile m8.2.1:** projectile action rows now preserve observed stack counts without claiming a landing location; the direct lookup projection is paired with accepted observation enqueueing and the unified lookup suppresses it only when the shared raw event identity is durably persisted.
 - **Observation retry integrity:** failed internal observation transactions are retained in the bounded queue with backoff, and shutdown failures are counted as dropped evidence instead of being reported as persisted.
 - **GriefLogger parity profile:** pins the audited GriefLogger 26.2 source commit, records all 18 source actions and 11 source tables, separates ItemGraph-only transformations and automation from true source actions, and links the M8/M9 delivery issues for unresolved parity and audit++ work.

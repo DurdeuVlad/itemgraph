@@ -1,5 +1,6 @@
 package com.itemgraph.db.migration;
 
+import com.itemgraph.db.DatabaseDialect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,6 +34,13 @@ public class MigrationRunner {
     );
 
     public static int runMigrations(Connection conn) throws SQLException {
+        return runMigrations(conn, DatabaseDialect.fromConnection(conn));
+    }
+
+    public static int runMigrations(Connection conn, DatabaseDialect dialect) throws SQLException {
+        if (dialect == null) {
+            throw new IllegalArgumentException("database dialect must not be null");
+        }
         ensureMigrationTable(conn);
         int currentVersion = getCurrentVersion(conn);
         LOGGER.info("Current ItemGraph schema version: {}", currentVersion);
@@ -53,7 +61,7 @@ public class MigrationRunner {
             conn.setAutoCommit(false);
             for (SchemaMigration migration : pending) {
                 LOGGER.info("Applying ItemGraph migration v{}: {}", migration.getVersion(), migration.getDescription());
-                migration.apply(conn);
+                migration.apply(conn, dialect);
                 recordMigration(conn, migration);
                 conn.commit();
                 currentVersion = migration.getVersion();

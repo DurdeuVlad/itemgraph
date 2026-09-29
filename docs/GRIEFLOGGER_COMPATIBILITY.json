@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "compatibility_version": "m8.2.1",
+  "compatibility_version": "m8.3.0",
   "mod_id": "itemgraph",
   "supported_commands": ["/ig", "/itemgraph"],
   "unsupported_aliases": ["/gl", "/grieflogger"],
@@ -136,13 +136,13 @@
     }
   },
   "configuration_controls": [
-    {"grieflogger": "useMysql", "itemgraph": "storage.backend", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlHost", "itemgraph": "storage.mysql.host", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlPort", "itemgraph": "storage.mysql.port", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlDatabase", "itemgraph": "storage.mysql.database", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlUsername", "itemgraph": "storage.mysql.username", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
-    {"grieflogger": "mysqlPassword", "itemgraph": "storage.mysql.password", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29, "redacted": true},
-    {"grieflogger": "mysqlTimeout", "itemgraph": "storage.connection_timeout", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
+    {"grieflogger": "useMysql", "itemgraph": "general.database_backend", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29, "compatibility_note": "sqlite is the default; mysql, mariadb, and mysql_mariadb select the shared MySQL/MariaDB backend."},
+    {"grieflogger": "mysqlHost", "itemgraph": "general.database_host", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29},
+    {"grieflogger": "mysqlPort", "itemgraph": "general.database_port", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29},
+    {"grieflogger": "mysqlDatabase", "itemgraph": "general.database_name", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29},
+    {"grieflogger": "mysqlUsername", "itemgraph": "general.database_username", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29},
+    {"grieflogger": "mysqlPassword", "itemgraph": "general.database_password", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29, "redacted": true},
+    {"grieflogger": "mysqlTimeout", "itemgraph": "general.database_connection_timeout_ms", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29},
     {"grieflogger": "useIndexes", "itemgraph": "storage.index_policy", "status": "unresolved", "implementation_state": "planned", "owner_issue": 29},
     {"grieflogger": "maxPageSize", "itemgraph": "query.max_page_size", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30},
     {"grieflogger": "serverSideOnlyMode", "itemgraph": "server_side_only", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30},
@@ -161,8 +161,8 @@
     {"itemgraph": "transformation_lineage", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental source/result fingerprints and lineage metadata for CRAFT, SMELT, and ANVIL_RENAME."}
   ],
   "storage": {
-    "native": ["sqlite"],
-    "planned": ["mysql", "mariadb"],
+    "native": ["sqlite", "mysql", "mariadb"],
+    "planned": [],
     "source_tables": ["items", "containers", "blocks", "sessions", "chats", "commands", "users", "usernames", "levels", "materials", "entities"],
     "grieflogger_database_mutation": false
   },

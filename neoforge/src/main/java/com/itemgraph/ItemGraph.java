@@ -70,7 +70,7 @@ public class ItemGraph {
     private void onServerStarting(ServerStartingEvent event) {
         ItemCanonicalizer.setRegistryAccess(event.getServer().registryAccess());
         CorrelationEngine.setDefaultWindowSeconds(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.get());
-        DatabaseManager.getInstance().initialize(DatabaseManager.resolvePath(ItemGraphConfig.DATABASE_PATH.get()));
+        DatabaseManager.getInstance().initialize(ItemGraphConfig.databaseSettings());
         com.itemgraph.ingest.InternalObservationService.getInstance().start();
         com.itemgraph.ingest.IngestionService.getInstance().setAdapter(
                 new com.itemgraph.ingest.GriefLoggerAdapter(
