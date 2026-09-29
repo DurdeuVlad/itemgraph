@@ -153,7 +153,7 @@ public class InternalObservationService {
     private static long collisionSafeSourceEventId(Connection conn, String table,
                                                     long preferredId, byte[] rawData) throws SQLException {
         if (rawData == null) {
-            return preferredId;
+            throw new SQLException("source_event_id requires raw_data for collision-safe persistence");
         }
         for (int salt = 0; salt < 64; salt++) {
             long candidate = salt == 0
@@ -178,17 +178,21 @@ public class InternalObservationService {
 
     private static ExistingSourceEvent findSourceEvent(Connection conn, String table, long sourceEventId)
             throws SQLException {
-        String sql = "SELECT raw_data FROM " + table
-                + " WHERE source_type = 'ITEMGRAPH_INTERNAL' AND source_event_id = ? LIMIT 1";
-        try (PreparedStatement statement = conn.prepareStatement(sql)) {
-            statement.setLong(1, sourceEventId);
-            try (ResultSet result = statement.executeQuery()) {
-                if (!result.next()) {
-                    return new ExistingSourceEvent(false, null);
+        // Probe both ledgers: a shared producer event must resolve to the same
+        // salted ID regardless of which table is persisted first.
+        for (String candidateTable : List.of("ig_observations", "ig_audit_events")) {
+            String sql = "SELECT raw_data FROM " + candidateTable
+                    + " WHERE source_type = 'ITEMGRAPH_INTERNAL' AND source_event_id = ? LIMIT 1";
+            try (PreparedStatement statement = conn.prepareStatement(sql)) {
+                statement.setLong(1, sourceEventId);
+                try (ResultSet result = statement.executeQuery()) {
+                    if (result.next()) {
+                        return new ExistingSourceEvent(true, result.getBytes("raw_data"));
+                    }
                 }
-                return new ExistingSourceEvent(true, result.getBytes("raw_data"));
             }
         }
+        return new ExistingSourceEvent(false, null);
     }
 
     public record InternalTransformation(

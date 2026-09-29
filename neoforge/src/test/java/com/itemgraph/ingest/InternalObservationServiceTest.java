@@ -647,4 +647,43 @@ class InternalObservationServiceTest {
             }
         }
     }
+
+    @Test
+    void pairedAuditAndObservationRowsShareCollisionRemap() throws Exception {
+        initializeTopologyDatabase();
+        long sourceEventId = InternalObservationService.sourceEventIdForUuid(
+                "123e4567-e89b-12d3-a456-426614174000");
+        persistAudit(new InternalAuditEvent(
+                1234L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:arrow", "conflicting-payload", new byte[]{9}, sourceEventId));
+
+        InternalObservation pairedObservation = new InternalObservation(
+                1235L, "THROW_ITEM", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 5, 64, 5,
+                "minecraft:overworld", null, null, null,
+                "UNKNOWN", DIAMOND.itemId(), new byte[]{1}, DIAMOND, 1, null, null, sourceEventId);
+        persist(pairedObservation);
+        persistAudit(new InternalAuditEvent(
+                1236L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:arrow", "paired-payload", new byte[]{1}, sourceEventId));
+
+        long observationId;
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT source_event_id FROM ig_observations WHERE raw_data = ?")) {
+            statement.setBytes(1, new byte[]{1});
+            try (ResultSet result = statement.executeQuery()) {
+                assertTrue(result.next());
+                observationId = result.getLong(1);
+            }
+        }
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT source_event_id FROM ig_audit_events WHERE raw_data = ?")) {
+            statement.setBytes(1, new byte[]{1});
+            try (ResultSet result = statement.executeQuery()) {
+                assertTrue(result.next());
+                assertEquals(observationId, result.getLong(1),
+                        "paired ledgers must use one collision remap for the shared source event");
+            }
+        }
+    }
 }
