@@ -6,6 +6,7 @@ import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.FlowBrowserService;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.command.ItemGraphCommands;
+import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import com.mojang.brigadier.ParseResults;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -122,6 +123,7 @@ public final class FabricNativeAuditEventListener {
                 InteractionResult inspectionResult = tryOpenInspection(
                         InspectionService.getInstance(),
                         FabricNativeAuditEventListener::openFlowBrowser,
+                        FabricNativeAuditEventListener::openBlockHistory,
                         serverPlayer, serverLevel, hit.getBlockPos());
                 if (inspectionResult != null) {
                     return inspectionResult;
@@ -131,6 +133,20 @@ public final class FabricNativeAuditEventListener {
                         BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit.getBlockPos()).getBlock()).toString(), null);
             }
             return InteractionResult.PASS;
+        });
+        AttackBlockCallback.EVENT.register((player, level, hand, pos, face) -> {
+            if (!(player instanceof ServerPlayer serverPlayer) || !(level instanceof ServerLevel serverLevel)
+                    || !InspectionService.getInstance().isEnabled(serverPlayer.getUUID())) {
+                return InteractionResult.PASS;
+            }
+            if (!serverPlayer.createCommandSourceStack().hasPermission(2)) {
+                InspectionService.getInstance().clear(serverPlayer.getUUID());
+                return InteractionResult.PASS;
+            }
+            // Inspection mode owns the attack even when the read-only query is
+            // rejected, so a failed lookup cannot break the block.
+            openBlockHistory(serverPlayer, serverLevel, pos);
+            return InteractionResult.SUCCESS;
         });
         UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
@@ -154,14 +170,28 @@ public final class FabricNativeAuditEventListener {
         int open(ServerPlayer player, ServerLevel level, BlockPos pos);
     }
 
+    @FunctionalInterface
+    interface BlockHistoryOpener {
+        int open(ServerPlayer player, ServerLevel level, BlockPos pos);
+    }
+
     /**
      * Handles the Fabric equivalent of NeoForge's high-priority inspection
-     * listener. A supported container click is consumed only after the async
-     * flow-browser request is accepted; unsupported blocks remain ordinary
-     * interactions and are still recorded as audit evidence.
+     * listener. A supported container or block-history click is consumed only
+     * after the asynchronous read-only request is accepted; rejected requests
+     * remain ordinary interactions and are still recorded as audit evidence.
      */
     static InteractionResult tryOpenInspection(InspectionService inspections,
                                                 BrowserOpener browserOpener,
+                                                ServerPlayer player,
+                                                ServerLevel level,
+                                                BlockPos pos) {
+        return tryOpenInspection(inspections, browserOpener, null, player, level, pos);
+    }
+
+    static InteractionResult tryOpenInspection(InspectionService inspections,
+                                                BrowserOpener browserOpener,
+                                                BlockHistoryOpener blockHistoryOpener,
                                                 ServerPlayer player,
                                                 ServerLevel level,
                                                 BlockPos pos) {
@@ -174,6 +204,12 @@ public final class FabricNativeAuditEventListener {
             return null;
         }
         if (!(level.getBlockEntity(pos) instanceof Container)) {
+            if (blockHistoryOpener != null) {
+                // The inspection click is canceled even when the query is rejected;
+                // otherwise it would fall through to held-item use or block action.
+                blockHistoryOpener.open(player, level, pos);
+                return InteractionResult.SUCCESS;
+            }
             return null;
         }
         return browserOpener.open(player, level, pos) == 0 ? null : InteractionResult.SUCCESS;
@@ -182,6 +218,11 @@ public final class FabricNativeAuditEventListener {
     private static int openFlowBrowser(ServerPlayer player, ServerLevel level, BlockPos pos) {
         return FlowBrowserService.openContainer(player.createCommandSourceStack(),
                 level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ(), null);
+    }
+
+    private static int openBlockHistory(ServerPlayer player, ServerLevel level, BlockPos pos) {
+        return ItemGraphCommands.openBlockInspection(player.createCommandSourceStack(),
+                level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ());
     }
 
     /**

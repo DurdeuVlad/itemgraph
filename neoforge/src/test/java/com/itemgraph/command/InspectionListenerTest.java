@@ -3,6 +3,7 @@ package com.itemgraph.command;
 import com.itemgraph.listener.ContainerSessionListener;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
@@ -72,7 +73,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void inactiveAndUnsupportedClicksPreserveVanillaBehavior() {
+    void inactiveClicksPreserveVanillaBehaviorButRejectedBlockInspectionIsSafe() {
         UUID playerUuid = UUID.randomUUID();
         ServerPlayer player = permittedPlayer(playerUuid);
         AtomicInteger opens = new AtomicInteger();
@@ -80,7 +81,8 @@ class InspectionListenerTest {
                 (openingPlayer, openingLevel, clickedPos) -> {
                     opens.incrementAndGet();
                     return 1;
-                });
+                },
+                (openingPlayer, openingLevel, clickedPos) -> 0);
 
         Level unsupportedLevel = mock(Level.class);
         when(unsupportedLevel.isClientSide()).thenReturn(false);
@@ -95,7 +97,8 @@ class InspectionListenerTest {
         PlayerInteractEvent.RightClickBlock unsupported = rightClick(player, CONTAINER_POS);
 
         listener.onRightClickBlock(unsupported);
-        assertFalse(unsupported.isCanceled());
+        assertTrue(unsupported.isCanceled());
+        assertEquals(InteractionResult.SUCCESS, unsupported.getCancellationResult());
         assertEquals(0, opens.get());
     }
 
@@ -139,6 +142,116 @@ class InspectionListenerTest {
     }
 
     @Test
+    void activeNonContainerRightClickOpensExactBlockHistoryAndCancelsInteraction() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockEntity(CONTAINER_POS)).thenReturn(mock(BlockEntity.class));
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+        AtomicInteger opens = new AtomicInteger();
+
+        listener(service,
+                (openingPlayer, openingLevel, clickedPos) -> fail("non-container must not open the flow browser"),
+                (openingPlayer, openingLevel, clickedPos) -> {
+                    assertSame(player, openingPlayer);
+                    assertSame(level, openingLevel);
+                    assertEquals(CONTAINER_POS, clickedPos);
+                    opens.incrementAndGet();
+                    return 1;
+                }).onRightClickBlock(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(InteractionResult.SUCCESS, event.getCancellationResult());
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void rejectedNonContainerRightClickStillCancelsGameplay() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockEntity(CONTAINER_POS)).thenReturn(mock(BlockEntity.class));
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> 0,
+                (openingPlayer, openingLevel, clickedPos) -> 0).onRightClickBlock(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(InteractionResult.SUCCESS, event.getCancellationResult());
+    }
+
+    @Test
+    void activeLeftClickOpensExactBlockHistoryAndCancelsBreaking() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.LeftClickBlock event = leftClick(player, CONTAINER_POS);
+        AtomicInteger opens = new AtomicInteger();
+
+        listener(service,
+                (openingPlayer, openingLevel, clickedPos) -> fail("left-click must not open the flow browser"),
+                (openingPlayer, openingLevel, clickedPos) -> {
+                    assertSame(player, openingPlayer);
+                    assertSame(level, openingLevel);
+                    assertEquals(CONTAINER_POS, clickedPos);
+                    opens.incrementAndGet();
+                    return 1;
+                }).onLeftClickBlock(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void rejectedLeftClickStillCancelsBreaking() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.LeftClickBlock event = leftClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> 0,
+                (openingPlayer, openingLevel, clickedPos) -> 0).onLeftClickBlock(event);
+
+        assertTrue(event.isCanceled());
+    }
+
+    @Test
+    void repeatedLeftClickHoldPacketsDoNotOpenAnotherInspection() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.LeftClickBlock event = new PlayerInteractEvent.LeftClickBlock(
+                player, CONTAINER_POS, Direction.NORTH,
+                PlayerInteractEvent.LeftClickBlock.Action.STOP);
+        AtomicInteger opens = new AtomicInteger();
+
+        listener(service,
+                (openingPlayer, openingLevel, clickedPos) -> 0,
+                (openingPlayer, openingLevel, clickedPos) -> {
+                    opens.incrementAndGet();
+                    return 1;
+                }).onLeftClickBlock(event);
+
+        assertFalse(event.isCanceled());
+        assertEquals(0, opens.get());
+    }
+
+    @Test
     void logoutClearsOnlyThatPlayersInspectionMode() {
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
@@ -174,6 +287,11 @@ class InspectionListenerTest {
         return new InspectionListener(inspections, opener);
     }
 
+    private InspectionListener listener(InspectionService inspections, InspectionListener.BrowserOpener opener,
+                                        InspectionListener.BlockHistoryOpener blockHistoryOpener) {
+        return new InspectionListener(inspections, opener, blockHistoryOpener);
+    }
+
     private ServerPlayer permittedPlayer(UUID uuid) {
         return player(uuid, true);
     }
@@ -199,5 +317,10 @@ class InspectionListenerTest {
     private PlayerInteractEvent.RightClickBlock rightClick(ServerPlayer player, BlockPos pos) {
         return new PlayerInteractEvent.RightClickBlock(
                 player, InteractionHand.MAIN_HAND, pos, mock(BlockHitResult.class));
+    }
+
+    private PlayerInteractEvent.LeftClickBlock leftClick(ServerPlayer player, BlockPos pos) {
+        return new PlayerInteractEvent.LeftClickBlock(player, pos, Direction.NORTH,
+                PlayerInteractEvent.LeftClickBlock.Action.START);
     }
 }
