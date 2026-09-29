@@ -81,42 +81,48 @@ public final class GriefLoggerHistoricalImporter {
             Map<String, List<Column>> schema = discoverSchema(sourceConn);
             String schemaFingerprint = schemaFingerprint(schema);
             Connection targetConn = target.getConnection();
-            boolean originalAutoCommit = targetConn.getAutoCommit();
-            long runId = insertRun(targetConn, source.getDatabasePath().toString(), sourceHash,
-                    schemaFingerprint, startedAt);
-            List<TableReport> reports = new ArrayList<>();
-            long imported = 0;
-            long opaque = 0;
-            try {
-                targetConn.setAutoCommit(false);
-                for (String table : SOURCE_TABLES) {
-                    List<Column> columns = schema.get(table);
-                    TableReport report;
-                    if (columns == null) {
-                        report = new TableReport(table, false, 0, 0, 0,
-                                "MISSING", "table is absent from source schema");
-                    } else {
-                        report = importTable(sourceConn, targetConn, sourceHash,
-                                schemaFingerprint, table, columns);
+            // InternalObservationService serializes live writes on this same connection.
+            // Hold the connection monitor for the complete import transaction so a live
+            // observation cannot enter the transaction and be committed or rolled back
+            // together with historical rows.
+            synchronized (targetConn) {
+                boolean originalAutoCommit = targetConn.getAutoCommit();
+                long runId = insertRun(targetConn, source.getDatabasePath().toString(), sourceHash,
+                        schemaFingerprint, startedAt);
+                List<TableReport> reports = new ArrayList<>();
+                long imported = 0;
+                long opaque = 0;
+                try {
+                    targetConn.setAutoCommit(false);
+                    for (String table : SOURCE_TABLES) {
+                        List<Column> columns = schema.get(table);
+                        TableReport report;
+                        if (columns == null) {
+                            report = new TableReport(table, false, 0, 0, 0,
+                                    "MISSING", "table is absent from source schema");
+                        } else {
+                            report = importTable(sourceConn, targetConn, sourceHash,
+                                    schemaFingerprint, table, columns);
+                        }
+                        reports.add(report);
+                        imported += report.rowsImported();
+                        opaque += report.rowsOpaque();
                     }
-                    reports.add(report);
-                    imported += report.rowsImported();
-                    opaque += report.rowsOpaque();
+                    targetConn.commit();
+                    updateRun(targetConn, runId, "COMPLETE", reports.size(), imported, opaque,
+                            reportJson(reports));
+                    targetConn.commit();
+                    return new ImportReport(source.getDatabasePath().toString(), sourceHash,
+                            schemaFingerprint, runId, reports, imported, opaque, "COMPLETE");
+                } catch (SQLException | RuntimeException e) {
+                    targetConn.rollback();
+                    updateRun(targetConn, runId, "FAILED", 0, 0, 0,
+                            "{\"error\":\"" + escapeJson(e.toString()) + "\"}");
+                    targetConn.commit();
+                    throw e;
+                } finally {
+                    targetConn.setAutoCommit(originalAutoCommit);
                 }
-                targetConn.commit();
-                updateRun(targetConn, runId, "COMPLETE", reports.size(), imported, opaque,
-                        reportJson(reports));
-                targetConn.commit();
-                return new ImportReport(source.getDatabasePath().toString(), sourceHash,
-                        schemaFingerprint, runId, reports, imported, opaque, "COMPLETE");
-            } catch (SQLException | RuntimeException e) {
-                targetConn.rollback();
-                updateRun(targetConn, runId, "FAILED", 0, 0, 0,
-                        "{\"error\":\"" + escapeJson(e.toString()) + "\"}");
-                targetConn.commit();
-                throw e;
-            } finally {
-                targetConn.setAutoCommit(originalAutoCommit);
             }
         }
     }
