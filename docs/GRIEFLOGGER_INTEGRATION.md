@@ -124,16 +124,26 @@ last_seen_timestamp = ...
 
 ## Incremental ingestion
 
-Avoid full rescans.
+The historical importer is an explicit operator-triggered pass; it does not run
+on every 60-second item/container ingestion tick. `GriefLoggerHistoricalImporter`
+reads all eleven pinned 26.2 tables through the read-only adapter and writes only
+ItemGraph-owned `ig_grieflogger_*` tables.
 
 Preferred behavior:
 
-1. Read events after the last durable checkpoint.
-2. Normalize them into ItemGraph observations.
-3. Commit ItemGraph observations.
-4. Advance the checkpoint only after successful persistence.
+1. Compute the source file SHA-256 and deterministic schema fingerprint.
+2. Read each present table in bounded batches, using a primary-key source key,
+   SQLite `rowid`, or a deterministic payload-hash/ordinal fallback.
+3. Preserve every row as canonical JSON plus original binary fields and explicit
+   unresolved reasons for opaque payloads or unknown action IDs.
+4. Commit ItemGraph-owned rows and advance the per-table checkpoint only after
+   successful persistence.
+5. Re-running the same source is idempotent through the source-hash/table/key
+   primary key; a failed source snapshot can resume without writing the source.
 
-This should be idempotent.
+The import report records missing tables, source/schema fingerprints, row counts,
+opaque counts, checkpoint keys, and completion status in
+`ig_grieflogger_import_runs` and `ig_grieflogger_import_checkpoints`.
 
 ## Source identity
 
