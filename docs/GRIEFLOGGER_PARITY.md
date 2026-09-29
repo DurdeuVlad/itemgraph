@@ -9,7 +9,7 @@ lookup, pagination, and SQLite/MySQL storage.
 | --- | --- | --- | --- | --- |
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
 | Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge paths and Fabric normal, vanilla player-death, and custom death-event item additions are implemented; accepted entities are recorded once |
-| Automated hopper movement | NeoForge capability wrappers; Fabric `HopperBlockEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | Fabric records successful vanilla hopper net deltas as `HOPPER_INSERT`/`HOPPER_EXTRACT` with unknown endpoints and no player attribution; modded automation still requires adapter coverage |
+| Hopper/mechanical automation (ItemGraph supplemental) | NeoForge capability wrappers; Fabric `HopperBlockEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | GriefLogger's published feature surface has no hopper or mechanical-automation event; ItemGraph records successful vanilla hopper net deltas with unknown endpoints, while modded automation adapters remain an optional extension |
 | Crafting, smelting, anvil rename/repair | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | Both loaders capture crafting, furnace-family smelting, and anvil rename/repair results at server result-take boundaries; Fabric staging verification remains pending |
 | Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
 | Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; staging verification pending |
@@ -31,6 +31,10 @@ non-quantity evidence so a chat message, command, block action, or session event
 cannot be misrepresented as an item transfer. Both tables are owned by ItemGraph;
 the GriefLogger database remains read-only during migration and can be removed
 after native coverage and staging verification meet this matrix.
+
+The hopper/mechanical-automation row is supplemental ItemGraph coverage. It is
+not required to replace a GriefLogger capability because GriefLogger does not
+record those transfers.
 
 ## Verification notes
 
@@ -60,7 +64,8 @@ after native coverage and staging verification meet this matrix.
   an orderly server stop flushes active session deltas before ItemGraph closes its
   database. `HopperBlockEntityMixin` snapshots only the hopper and its six adjacent
   container cells, then records successful net deltas with unknown endpoints; it does
-  not infer a player or a modded automation cause.
+  not infer a player or a modded automation cause. This is supplemental coverage;
+  GriefLogger does not provide an equivalent hopper event.
 - **2026-09-29, Fabric transformations:** result-slot hooks capture crafting,
   furnace-family smelting, and anvil rename/repair outputs with source/result
   canonical fingerprints. Staging action replay remains required for row-level

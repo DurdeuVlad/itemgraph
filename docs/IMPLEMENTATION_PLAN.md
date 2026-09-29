@@ -396,16 +396,17 @@ result before a ground entity is recorded, while the `ItemEntity.playerTouch`
 before/after count delta proves how many items were actually absorbed. Drops
 observed while `ServerPlayer.isDeadOrDying()` are labeled `DEATH_DROP`; custom
 item entities accepted during `ServerPlayer.die` are captured in a bounded death
-window and deduplicated against the normal drop hook. Modded automation still
-needs loader-native coverage. Vanilla Fabric hopper transfers now emit
-endpoint-unknown net deltas through `HopperBlockEntityMixin`.
+window and deduplicated against the normal drop hook. Vanilla Fabric hopper
+transfers now emit endpoint-unknown net deltas through `HopperBlockEntityMixin`.
+GriefLogger has no hopper or mechanical-automation event, so modded automation
+adapters are supplemental work outside the replacement-parity gate.
 
 ### Remaining parity slices
 
-- Staging verification with GriefLogger absent and a migration/retention plan.
-- Modded automation remains outside the current loader-native hooks; vanilla
-  hopper movement is covered by the bounded Fabric `HopperBlockEntityMixin`
-  observer.
+- Real-server row verification with GriefLogger absent plus a documented
+  migration/retention plan remain the replacement-parity gate. Modded
+  automation adapters are optional supplemental work because GriefLogger has
+  no equivalent event coverage.
 
 Prefer small commits such as:
 
