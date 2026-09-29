@@ -387,6 +387,27 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
+    void hopperDeltasUseNetCanonicalQuantitiesAndPreserveDirection() {
+        CanonicalItem dirt = new CanonicalItem("minecraft:dirt", "fp-dirt", null, null, null);
+        CanonicalItem stone = new CanonicalItem("minecraft:stone", "fp-stone", null, null, null);
+        BlockPos hopper = new BlockPos(0, 64, 0);
+        BlockPos destination = hopper.east();
+
+        List<FabricNativeAuditEventListener.HopperDelta> deltas =
+                FabricNativeAuditEventListener.computeHopperDeltas(
+                        Map.of(hopper, Map.of(dirt, 8, stone, 2),
+                                destination, Map.of(dirt, 1)),
+                        Map.of(hopper, Map.of(dirt, 5, stone, 2),
+                                destination, Map.of(dirt, 4)));
+
+        assertEquals(2, deltas.size());
+        assertEquals(List.of(
+                        new FabricNativeAuditEventListener.HopperDelta(hopper, dirt, 3, false),
+                        new FabricNativeAuditEventListener.HopperDelta(destination, dirt, 3, true)),
+                deltas.stream().sorted(java.util.Comparator.comparing(delta -> delta.containerPos().toShortString())).toList());
+    }
+
+    @Test
     void dropCaptureRequiresAcceptedEntityAndSupportsNesting() {
         ItemEntity outer = mock(ItemEntity.class);
         ItemEntity inner = mock(ItemEntity.class);
@@ -405,5 +426,47 @@ class FabricNativeAuditEventListenerTest {
         FabricNativeAuditEventListener.beginItemDropCapture(outerPlayer);
         FabricNativeAuditEventListener.onItemEntityAdded(outer, false);
         assertNull(FabricNativeAuditEventListener.finishItemDropCapture(null, outer, null));
+    }
+
+    @Test
+    void customDeathEntityIsRecordedOnceAfterAcceptedSpawn() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        ItemEntity itemEntity = mock(ItemEntity.class);
+        UUID playerUuid = UUID.randomUUID();
+        UUID entityUuid = UUID.randomUUID();
+        ItemStack stack = new ItemStack(Items.DIAMOND, 2);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+        when(player.level()).thenReturn(level);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getX()).thenReturn(1.0);
+        when(player.getY()).thenReturn(2.0);
+        when(player.getZ()).thenReturn(3.0);
+        when(itemEntity.isRemoved()).thenReturn(false);
+        when(itemEntity.getItem()).thenReturn(stack);
+        when(itemEntity.getX()).thenReturn(4.0);
+        when(itemEntity.getY()).thenReturn(5.0);
+        when(itemEntity.getZ()).thenReturn(6.0);
+        when(itemEntity.getUUID()).thenReturn(entityUuid);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            FabricNativeAuditEventListener.beginPlayerDeathCapture(player);
+            FabricNativeAuditEventListener.onItemEntityAdded(itemEntity, true);
+            FabricNativeAuditEventListener.finishPlayerDeathCapture(player);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalObservation.class);
+        verify(service).submit(captured.capture());
+        assertEquals("DEATH_DROP", captured.getValue().actionType());
+        assertEquals(2, captured.getValue().amount());
+        assertEquals(entityUuid.toString(), captured.getValue().itemEntityUuid());
     }
 }

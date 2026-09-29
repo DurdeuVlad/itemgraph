@@ -11,6 +11,7 @@
     "ItemEntityMixin",
     "LivingEntityMixin",
     "ItemStackMixin",
+    "HopperBlockEntityMixin",
     "ResultSlotMixin",
     "FurnaceResultSlotMixin",
     "AnvilMenuMixin",

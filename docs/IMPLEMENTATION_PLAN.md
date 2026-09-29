@@ -345,9 +345,15 @@ the item-flow ledger; `ig_audit_events` stores non-quantity audit events.
   bounded nested capture and records only a consumed result. `ItemStackMixin`
   captures durability breaks at the `hurtAndBreak` shrink boundary, before the
   broken stack is removed.
+- Fabric captures custom item entities accepted during `ServerPlayer.die` in a
+  bounded death window and deduplicates them against the normal
+  `ServerPlayer.drop` path, preserving the returned entity UUID and stack count.
 - Fabric result-slot mixins capture crafting, furnace-family smelting, and anvil
   rename/repair results into `ig_item_transformations` with canonical source and
   result fingerprints.
+- Fabric `HopperBlockEntityMixin` captures successful vanilla hopper transfers as
+  endpoint-unknown `HOPPER_INSERT`/`HOPPER_EXTRACT` net deltas, preserving quantity
+  without attributing automation to a player.
 - Both loaders expose the same read-only container inspector: NeoForge uses its
   high-priority `InspectionListener`, while Fabric uses `UseBlockCallback` and the
   shared `FlowBrowserService`. A click is consumed only after the asynchronous query
@@ -389,14 +395,17 @@ execution. Fabric's drop and pickup hooks use the same narrow boundary rule:
 result before a ground entity is recorded, while the `ItemEntity.playerTouch`
 before/after count delta proves how many items were actually absorbed. Drops
 observed while `ServerPlayer.isDeadOrDying()` are labeled `DEATH_DROP`; custom
-death-event additions and non-player automation still need loader-native
-coverage before this matrix can be marked complete.
+item entities accepted during `ServerPlayer.die` are captured in a bounded death
+window and deduplicated against the normal drop hook. Modded automation still
+needs loader-native coverage. Vanilla Fabric hopper transfers now emit
+endpoint-unknown net deltas through `HopperBlockEntityMixin`.
 
 ### Remaining parity slices
 
 - Staging verification with GriefLogger absent and a migration/retention plan.
-- Fabric coverage for custom death-event item additions and automated non-player
-  movement remains outside the current loader-native hooks.
+- Modded automation remains outside the current loader-native hooks; vanilla
+  hopper movement is covered by the bounded Fabric `HopperBlockEntityMixin`
+  observer.
 
 Prefer small commits such as:
 
