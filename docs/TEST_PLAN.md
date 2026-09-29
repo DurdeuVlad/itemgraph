@@ -585,6 +585,10 @@ ITEMGRAPH_TEST_MARIADB_URL=jdbc:mariadb://127.0.0.1:3306/itemgraph
 ITEMGRAPH_TEST_MYSQL_URL=jdbc:mariadb://127.0.0.1:3307/itemgraph?allowPublicKeyRetrieval=true
 ```
 
+The public-key retrieval option is CI-only for the disposable MySQL service. ItemGraph
+application connections leave it disabled; production MySQL authentication must use
+verified TLS or a server authentication method that does not require RSA key retrieval.
+
 The test verifies clean schema setup, a second idempotent migration pass,
 translated `INSERT IGNORE`, generated-column dedup support, and translated
 `ON CONFLICT ... excluded.column` upserts. It does not access the GriefLogger

@@ -38,6 +38,11 @@ same keys in `config/itemgraph.properties`. Use `mysql_mariadb` for the network
 backend. The supported CI floor is MySQL 8.0.29+ and MariaDB 10.6+; the bundled
 MariaDB Connector/J 3.5.7 driver is used for both server families. GriefLogger's
 source database remains SQLite and read-only regardless of ItemGraph's own backend.
+Application connections do not enable RSA public-key retrieval and do not weaken
+TLS verification; MySQL deployments using `caching_sha2_password` must configure
+verified TLS or a server authentication method that does not require key retrieval.
+The CI-only MySQL fixture explicitly enables `allowPublicKeyRetrieval` with dummy
+credentials to exercise the disposable service.
 
 The compatibility artifact's tested scope is GriefLogger `1.2.10-1.21.1` on
 Minecraft 1.21.1 / NeoForge 21.1.248. Other GriefLogger versions need a separate
