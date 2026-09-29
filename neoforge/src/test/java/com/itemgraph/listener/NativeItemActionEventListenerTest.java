@@ -52,6 +52,7 @@ class NativeItemActionEventListenerTest {
         verify(service).submitAuditEvent(audit.capture());
         assertEquals("THROW_ITEM", audit.getValue().eventType());
         assertEquals("minecraft:ender_pearl", audit.getValue().subjectId());
+        assertTrue(audit.getValue().sourceEventId() != null);
         org.junit.jupiter.api.Assertions.assertTrue(audit.getValue().detail().contains("quantity=2"));
     }
 
@@ -88,6 +89,7 @@ class NativeItemActionEventListenerTest {
         assertTrue(new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
                 .contains("\"outcome\":\"accepted\""));
         assertTrue(!captured.getValue().detail().contains("quantity="));
+        assertTrue(captured.getValue().sourceEventId() != null);
         org.mockito.Mockito.verify(service, org.mockito.Mockito.never())
                 .submit(any(InternalObservationService.InternalObservation.class));
     }

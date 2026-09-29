@@ -144,7 +144,8 @@ public final class NativeItemActionEventListener {
                     System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
                     projectileX, projectileY, projectileZ, item.itemId(),
                     "projectile=" + projectileId + " event_id=" + eventId
-                            + " outcome=attempt evidence=shoot_from_rotation quantity=" + amount, rawData));
+                            + " outcome=attempt evidence=shoot_from_rotation quantity=" + amount,
+                    rawData, InternalObservationService.sourceEventIdForUuid(eventId)));
         }
     }
 
@@ -167,6 +168,6 @@ public final class NativeItemActionEventListener {
                         levelName, projectileX, projectileY, projectileZ, item.itemId(),
                         "action=" + actionType + " projectile=" + projectileId + " event_id=" + eventId
                                 + " outcome=accepted evidence=spawned_by_player",
-                        rawData));
+                        rawData, InternalObservationService.sourceEventIdForUuid(eventId)));
     }
 }

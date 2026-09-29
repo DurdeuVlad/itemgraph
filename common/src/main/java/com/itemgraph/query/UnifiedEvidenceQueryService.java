@@ -166,7 +166,7 @@ public final class UnifiedEvidenceQueryService {
                 }
             }
         } catch (SQLException failure) {
-            // Databases created before migration 15 remain readable while the
+            // Databases created before migration 16 remain readable while the
             // migration is pending; their native sources still produce results.
             if (failure.getMessage() != null && failure.getMessage().contains("no such table")) {
                 return List.of();

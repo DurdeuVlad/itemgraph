@@ -163,8 +163,26 @@ public class InternalObservationService {
             double z,
             String subjectId,
             String detail,
-            byte[] rawData
+            byte[] rawData,
+            Long sourceEventId
     ) {
+        public InternalAuditEvent(
+                long timestampMs,
+                String eventType,
+                String playerUuid,
+                String playerName,
+                String levelName,
+                double x,
+                double y,
+                double z,
+                String subjectId,
+                String detail,
+                byte[] rawData
+        ) {
+            this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z,
+                    subjectId, detail, rawData, null);
+        }
+
         public InternalAuditEvent {
             rawData = rawData == null ? null : rawData.clone();
         }
@@ -487,10 +505,10 @@ public class InternalObservationService {
             try {
                 conn.setAutoCommit(false);
                 String insertSql = """
-                    INSERT INTO ig_audit_events (
+                    INSERT OR IGNORE INTO ig_audit_events (
                         event_type, timestamp_ms, player_uuid, player_name,
                         level_id, x, y, z, subject_id, detail, source_type, source_event_id, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ITEMGRAPH_INTERNAL', NULL, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ITEMGRAPH_INTERNAL', ?, ?)
                 """;
                 try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
                     for (InternalAuditEvent event : batch) {
@@ -504,10 +522,15 @@ public class InternalObservationService {
                         pstmt.setDouble(8, event.z());
                         setNullableString(pstmt, 9, event.subjectId());
                         setNullableString(pstmt, 10, event.detail());
-                        if (event.rawData() == null) {
-                            pstmt.setNull(11, Types.BLOB);
+                        if (event.sourceEventId() == null) {
+                            pstmt.setNull(11, Types.BIGINT);
                         } else {
-                            pstmt.setBytes(11, event.rawData());
+                            pstmt.setLong(11, event.sourceEventId());
+                        }
+                        if (event.rawData() == null) {
+                            pstmt.setNull(12, Types.BLOB);
+                        } else {
+                            pstmt.setBytes(12, event.rawData());
                         }
                         pstmt.addBatch();
                     }

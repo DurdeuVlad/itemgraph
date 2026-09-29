@@ -30,7 +30,8 @@ public class MigrationRunner {
             new V12__PreviewApiSourcesAndExternalNodes(),
             new V13__AuditEvents(),
             new V14__GriefLoggerHistoricalImport(),
-            new V15__GriefLoggerHistoricalLookup()
+            new V15__GriefLoggerHistoricalLookup(),
+            new V16__AuditEventDeduplication()
     );
 
     public static int runMigrations(Connection conn) throws SQLException {

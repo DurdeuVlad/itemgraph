@@ -117,6 +117,29 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void durableAuditSourceEventIdDeduplicatesProjectileAcceptanceRetry() throws Exception {
+        initializeTopologyDatabase();
+        long sourceEventId = InternalObservationService.sourceEventIdForUuid(
+                "123e4567-e89b-12d3-a456-426614174001");
+        InternalAuditEvent event = new InternalAuditEvent(
+                1234L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:arrow", "outcome=accepted", new byte[]{1, 2}, sourceEventId);
+
+        persistAudit(event);
+        persistAudit(event);
+
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT source_event_id, COUNT(*) FROM ig_audit_events GROUP BY source_event_id")) {
+            try (ResultSet result = statement.executeQuery()) {
+                assertTrue(result.next());
+                assertEquals(sourceEventId, result.getLong(1));
+                assertEquals(1, result.getInt(2));
+                assertFalse(result.next());
+            }
+        }
+    }
+
+    @Test
     void uninitializedDatabaseDoesNotClaimAuditEventsWerePersisted() {
         DatabaseManager.getInstance().close();
         assertTrue(service.submitAuditEvent(new InternalAuditEvent(

@@ -224,6 +224,7 @@ class FabricNativeAuditEventListenerTest {
         verify(service).submitAuditEvent(audit.capture());
         assertEquals("SHOOT_ITEM", audit.getValue().eventType());
         assertEquals("minecraft:arrow", audit.getValue().subjectId());
+        assertNotNull(audit.getValue().sourceEventId());
         org.junit.jupiter.api.Assertions.assertTrue(audit.getValue().detail().contains("quantity=3"));
     }
 
@@ -257,6 +258,7 @@ class FabricNativeAuditEventListenerTest {
                 ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
         verify(service).submitAuditEvent(captured.capture());
         assertEquals("PROJECTILE_SPAWN_ACCEPTED", captured.getValue().eventType());
+        assertNotNull(captured.getValue().sourceEventId());
         org.junit.jupiter.api.Assertions.assertTrue(
                 new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
                         .contains("\"outcome\":\"accepted\""));

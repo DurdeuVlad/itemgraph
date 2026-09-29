@@ -333,7 +333,8 @@ public final class FabricNativeAuditEventListener {
                     System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
                     projectileX, projectileY, projectileZ, item.itemId(),
                     "projectile=" + projectileId + " event_id=" + eventId
-                            + " outcome=attempt evidence=shoot_from_rotation quantity=" + amount, rawData));
+                            + " outcome=attempt evidence=shoot_from_rotation quantity=" + amount,
+                    rawData, InternalObservationService.sourceEventIdForUuid(eventId)));
         }
     }
 
@@ -356,7 +357,7 @@ public final class FabricNativeAuditEventListener {
                         levelName, projectileX, projectileY, projectileZ, item.itemId(),
                         "action=" + actionType + " projectile=" + projectileId + " event_id=" + eventId
                                 + " outcome=accepted evidence=spawned_by_player",
-                        rawData));
+                        rawData, InternalObservationService.sourceEventIdForUuid(eventId)));
     }
 
     /** Starts a nested-safe drop capture until the addFreshEntity result is known. */

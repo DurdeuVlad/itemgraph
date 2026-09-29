@@ -178,7 +178,9 @@ opaque counts, checkpoint keys, and completion status in
 
 ### Normalized historical lookup
 
-Migration v15 adds the rebuildable `ig_grieflogger_lookup` projection. Rows from
+Migration v15 adds the rebuildable `ig_grieflogger_lookup` projection. Migration
+v16 adds a unique `(source_type, source_event_id)` index to `ig_audit_events` so
+native events with durable producer identities are retry-safe. Rows from
 `items`, `containers`, `blocks`, `sessions`, `chats`, and `commands` are normalized
 while the source connection is open read-only. The projection preserves the source
 table and stable source key, original action ID, timestamp, actor UUID/name, level
