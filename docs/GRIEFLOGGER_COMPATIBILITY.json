@@ -53,7 +53,10 @@
     "combination": "and",
     "time_units": ["m", "h", "d", "y"],
     "include_exclude_mutually_exclusive": true,
-    "value_separator": ","
+    "value_separator": ",",
+    "lookup_sources": ["ig_audit_events", "ig_observations", "ig_item_transformations"],
+    "imported_source_type": "GRIEFLOGGER",
+    "owner_issue": 25
   },
   "controls": {
     "permission_level": 2,

@@ -59,7 +59,7 @@ The contract uses GriefLogger's published documentation:
 | Player-killed entities | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted a `KILL_ENTITY` row for a player-killed zombie |
 | Armor stand equip/unequip | `ArmorStandEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
 | Consume, break, throw, shoot item actions | NeoForge `NativeItemActionEventListener`, `ItemEntityEventListener`; Fabric `LivingEntityMixin`, `ItemStackMixin`, `ServerLevelMixin` | `ig_observations` for consume/break; `ig_audit_events` for native projectile spawn evidence | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record completed eat/drink consumption at the return boundary, Fabric records durability breaks at the `ItemStack.hurtAndBreak` shrink boundary, and both loaders record fresh player-owned projectile spawns as non-quantity `THROW_ITEM`/`SHOOT_ITEM` audit evidence; the Fabric replay persisted all four action types |
-| Location/action filtered lookup | `AuditLookupFilters`, `AuditEventQueryService` | `ig_audit_events` | `/ig lookup`, `/ig lookup near`, `/ig lookup filters` | GriefLogger-style action/user/include/exclude/time/radius filters implemented for native audit actions with five-filter cap, required bounded cube radius, and conflict validation; the Fabric replay returned rows from both `/ig lookup CHAT_MESSAGE 10 60` and `/ig lookup filters action.chat_message time.1h radius.50`; quantity-flow drop/pickup actions remain under `/ig trace` |
+| Location/action filtered lookup | `AuditLookupFilters`, `UnifiedEvidenceQueryService`, `AuditEventQueryService` | `ig_audit_events`, `ig_observations`, `ig_item_transformations` | `/ig lookup`, `/ig lookup near`, `/ig lookup filters` | GriefLogger-style action/user/include/exclude/time/radius filters use one bounded asynchronous merge across native audit, item-flow, transformation, and imported `GRIEFLOGGER` observations. Five-filter cap, required cube radius, AND semantics, global timestamp ordering, and source/evidence IDs are tested; the Fabric replay returned rows from both `/ig lookup CHAT_MESSAGE 10 60` and `/ig lookup filters action.chat_message time.1h radius.50` |
 | Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `FlowBrowserService`, `TraceQueryService` | `ig_observations` | `/ig inspect`, `/ig trace container` | Read-only coordinate history and paginated flow browser implemented on both loaders; the Fabric replay opened a read-only `minecraft:generic_9x6` flow browser for a populated chest |
 | Paginated generic audit results | `AuditEventQueryService` offset paging | `ig_audit_events` | `/ig lookup page <page> ...` | Bounded 1-based page offsets and server-generated Previous/Next chat controls implemented |
 | MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite | — | Deliberate scope boundary |
@@ -156,9 +156,10 @@ record those transfers.
   centered on the issuing player, and applied as a cube; include/exclude conflicts
   are rejected before the asynchronous SQL query. Native subject IDs are normalized
   so bare Minecraft IDs such as `diamond_ore` match `minecraft:diamond_ore`.
-  Quantity-flow actions such as `drop_item` and `pickup_item` are rejected on this
-  native-audit command rather than being misclassified as projectile events; those
-  records remain available through `/ig trace`.
+  The filtered lookup now merges all three ItemGraph evidence tables. Quantity-flow
+  and transformation actions retain their original action type and source/evidence
+  reference; imported rows retain `GRIEFLOGGER` provenance. Every query remains
+  bounded by the five-filter, radius, page-size, offset, and query-worker limits.
 
 ## Acceptance gates
 
