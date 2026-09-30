@@ -98,6 +98,9 @@ class MariaDbDialectIntegrationTest {
             assertEquals(DatabaseDialect.MYSQL_MARIADB, DatabaseDialect.fromConnection(conn));
             assertEquals(MigrationRunner.LATEST_VERSION,
                     MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
+            // The V5 archive check deletes active observations. Run it before inserting
+            // the V20 disposition fixture, which intentionally holds an FK to its row.
+            assertPopulatedLegacyObservationArchive(conn);
             assertLegacyArmorStandDispositionIsPortable(conn);
             assertEquals("longtext", columnDataType(conn, "ig_grieflogger_row_supersessions", "source_key"),
                     "raw imported keys must not be truncated by the bounded supersession index");
@@ -206,7 +209,6 @@ class MariaDbDialectIntegrationTest {
             }
 
             assertHistoricalImportAndLookup(endpoint, conn, tempDir);
-            assertPopulatedLegacyObservationArchive(conn);
         }
     }
 
