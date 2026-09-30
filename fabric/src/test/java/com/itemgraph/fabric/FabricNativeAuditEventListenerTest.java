@@ -130,6 +130,8 @@ class FabricNativeAuditEventListenerTest {
         verify(service).submitAuditEvent(captured.capture());
         assertEquals("INTERACT_BLOCK_ATTEMPT", captured.getValue().eventType());
         assertEquals("outcome=attempt", captured.getValue().detail());
+        assertEquals(playerUuid.toString(), captured.getValue().playerUuid());
+        assertEquals("Alex", captured.getValue().playerName());
         assertEquals("minecraft:crafting_table", captured.getValue().subjectId());
         assertEquals("minecraft:overworld", captured.getValue().levelName());
     }
