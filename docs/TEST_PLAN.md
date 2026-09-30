@@ -335,12 +335,13 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `FlowBrowserMenuTest` | vanilla six-row menu type, compact resolved-menu titles, textual provenance/confidence/evidence labels, every click category rejected or handled as navigation/detail only, and permission recheck (3 tests) |
 | `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container and `/ig inspect` command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
 | `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest` | per-player inspect state, deterministic command forms, permission denial, supported/unsupported clicks, browser-queue rejection fallback, logout cleanup, and canceled-click isolation from session tracking (3 + 6 + 2 tests) |
-| `ItemGraphCommandsHelpTest` | bare-root overview, every help topic, invalid-topic diagnostics, permission denial, registered-path/help synchronization, and literal/player/item/dimension suggestions (7 tests) |
-| `FabricItemGraphCommandsParityTest` | Fabric-side shared command registration, direct and explicit GriefLogger filter parsing, standalone page and inspect syntax, and published lookup/inspect suggestions |
+| `ItemGraphCommandsHelpTest` | bare-root overview, every help topic, invalid-topic diagnostics, permission denial, registered-path/help synchronization, literal/player/item/dimension suggestions, published filter examples under both roots, aliases and bounds, value completion, and page-session expiry (expanded in #24) |
+| `FabricItemGraphCommandsParityTest` | Fabric-side command registration, all published lookup examples under both roots, filter aliases and bounds, action/user/item value suggestions, duplicate/conflicting/fifth-filter completion limits, permission denial, invalid pages, and inspect/page syntax |
+| `LookupPageSessionPolicyTest`, `QueryDispatcherNoResultTest` | page expiry boundary and paging limits on Fabric; asynchronous no-result delivery as a command failure on the server thread |
 | `ItemGraphApiTest` | service-issued `SourceHandle`, registration idempotency/spoof rejection, deduplication, endpoint/field validation, malformed-map/custom-name validation, stale-source/database/shutdown outcomes, coordinate-less external inventories, opaque evidence refs, ambiguity, player-coordinate suppression, limit/window conversion, canonical separator-forgery resistance, provenance, explanation/supporting evidence, and lifecycle (15 tests) |
 | `V12PreviewApiSourcesAndExternalNodesTest` | `ig_api_sources`, `ig_nodes.external_key`, unique external identity, and coordinate-less `EXTERNAL_INVENTORY` schema (3 tests) |
 
-Total automated test count: **300 tests, 0 failures, 0 skipped** (`./gradlew clean build`, 2026-09-25).
+Latest full loader test run: **433 tests, 0 failures, 3 skipped** (`:neoforge:test :fabric:test`, 2026-09-30). The skipped tests require local MySQL/MariaDB services; hosted CI runs those integration tests against MariaDB 10.11 and MySQL 8.0.
 
 ## M6 issue #8: vanilla flow browser verification
 

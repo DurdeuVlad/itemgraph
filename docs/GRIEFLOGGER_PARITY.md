@@ -144,6 +144,14 @@ GriefLogger stores chat and command rows for external review and does not includ
 them in its in-game lookup merge. ItemGraph's unified lookup intentionally extends
 that surface; the extension remains labeled by source and evidence class.
 
+The lookup filter parser accepts the published aliases and value forms, and
+completion offers unused filters, pinned GriefLogger action names, ItemGraph
+actions, registered item identifiers, and online player names. GriefLogger's
+`UserFilter` suggests cached historical usernames; ItemGraph currently suggests
+online players only. Offline usernames remain valid lookup filter values when
+known, but are not discoverable through completion. This suggestion gap remains
+part of [#24](https://github.com/DurdeuVlad/itemgraph/issues/24).
+
 GriefLogger removes interaction rows when a block or door is removed. ItemGraph's
 raw evidence is immutable, so parity work must use an explicit supersession or
 tombstone record to reproduce the visible active-history result without deleting
