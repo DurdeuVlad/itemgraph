@@ -14,12 +14,13 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Asynchronous, bounded worker for recording internal/supplemental observations (Phase 8/9/10).
@@ -35,6 +36,8 @@ public class InternalObservationService {
     private static final long AUDIT_RETRY_INITIAL_BACKOFF_MS = 25L;
     private static final long AUDIT_RETRY_MAX_BACKOFF_MS = 5_000L;
     private static final long AUDIT_RETRY_LOG_INTERVAL_MS = 10_000L;
+    private static final Pattern SOURCE_EVENT_UUID = Pattern.compile(
+            "\\\"event_id\\\"\\s*:\\s*\\\"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\\\"");
 
     public static InternalObservationService getInstance() {
         return INSTANCE;
@@ -142,57 +145,70 @@ public class InternalObservationService {
         return value == 0 ? 1 : value;
     }
 
-    private record ExistingSourceEvent(boolean present, byte[] rawData) {}
+    private record ExistingSourceEvent(boolean present, boolean sameEvent) {}
 
     /**
      * Resolves the numeric compatibility key without allowing a hash collision
-     * to discard a distinct event. The original payload is the collision check;
-     * retries with the same payload keep the preferred key, while a different
-     * payload receives a deterministic salted key until a free value is found.
+     * to discard a distinct event. The producer UUID is the shared identity;
+     * payloads may differ between the audit and quantity ledgers. A colliding
+     * producer receives a deterministic salted key in both ledgers.
      */
     private static long collisionSafeSourceEventId(Connection conn, String table,
                                                     long preferredId, byte[] rawData) throws SQLException {
         if (rawData == null) {
             throw new SQLException("source_event_id requires raw_data for collision-safe persistence");
         }
+        String eventUuid = sourceEventUuid(rawData);
+        if (eventUuid == null) {
+            throw new SQLException("source_event_id raw_data must contain a UUID event_id");
+        }
         for (int salt = 0; salt < 64; salt++) {
             long candidate = salt == 0
                     ? preferredId
-                    : sourceEventIdForUuid(UUID.nameUUIDFromBytes(saltedPayload(rawData, salt)).toString(), salt);
-            ExistingSourceEvent existing = findSourceEvent(conn, table, candidate);
-            if (!existing.present() || Arrays.equals(existing.rawData(), rawData)) {
+                    : sourceEventIdForUuid(eventUuid, salt);
+            ExistingSourceEvent existing = findSourceEvent(conn, candidate, eventUuid);
+            if (!existing.present() || existing.sameEvent()) {
                 return candidate;
             }
         }
         throw new SQLException("Unable to allocate a collision-free source event ID for " + table);
     }
 
-    private static byte[] saltedPayload(byte[] rawData, int salt) {
-        byte[] salted = Arrays.copyOf(rawData, rawData.length + Integer.BYTES);
-        salted[salted.length - 4] = (byte) (salt >>> 24);
-        salted[salted.length - 3] = (byte) (salt >>> 16);
-        salted[salted.length - 2] = (byte) (salt >>> 8);
-        salted[salted.length - 1] = (byte) salt;
-        return salted;
+    private static String sourceEventUuid(byte[] rawData) {
+        Matcher matcher = SOURCE_EVENT_UUID.matcher(new String(rawData, java.nio.charset.StandardCharsets.UTF_8));
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(matcher.group(1)).toString();
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
-    private static ExistingSourceEvent findSourceEvent(Connection conn, String table, long sourceEventId)
+    private static ExistingSourceEvent findSourceEvent(Connection conn, long sourceEventId, String eventUuid)
             throws SQLException {
         // Probe both ledgers: a shared producer event must resolve to the same
-        // salted ID regardless of which table is persisted first.
+        // salted ID regardless of which table is persisted first. Inspect all
+        // matches before accepting so a conflicting row in either ledger cannot
+        // be hidden by an earlier match in the other ledger.
+        boolean found = false;
         for (String candidateTable : List.of("ig_observations", "ig_audit_events")) {
             String sql = "SELECT raw_data FROM " + candidateTable
-                    + " WHERE source_type = 'ITEMGRAPH_INTERNAL' AND source_event_id = ? LIMIT 1";
+                    + " WHERE source_type = 'ITEMGRAPH_INTERNAL' AND source_event_id = ?";
             try (PreparedStatement statement = conn.prepareStatement(sql)) {
                 statement.setLong(1, sourceEventId);
                 try (ResultSet result = statement.executeQuery()) {
-                    if (result.next()) {
-                        return new ExistingSourceEvent(true, result.getBytes("raw_data"));
+                    while (result.next()) {
+                        found = true;
+                        if (!eventUuid.equals(sourceEventUuid(result.getBytes("raw_data")))) {
+                            return new ExistingSourceEvent(true, false);
+                        }
                     }
                 }
             }
         }
-        return new ExistingSourceEvent(false, null);
+        return new ExistingSourceEvent(found, found);
     }
 
     public record InternalTransformation(

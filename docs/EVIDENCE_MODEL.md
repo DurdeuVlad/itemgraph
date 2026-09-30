@@ -73,6 +73,13 @@ with no plausible destination event. In Phase 7, this is formally tracked as `CL
 an ItemGraph event ID. ItemGraph preserves both raw observations and stores their derived
 relationship in `ig_observation_groups` / `ig_observation_group_members`.
 
+For native projectile events, `source_event_id` is a positive 63-bit projection of the
+producer UUID retained as `event_id` in `raw_data`. Persistence checks that UUID in both
+native ledgers and derives deterministic salted projections when distinct UUIDs collide;
+the paired audit and quantity rows therefore keep one shared ID even when their additional
+raw payload fields differ. A row that supplies a source ID without a parseable UUID payload
+fails persistence explicitly.
+
 A pair is `CONFIRMED` only when a unique cross-source counterpart shares a non-null
 `item_entity_uuid`, action family, fingerprint, amount, actor, and a timestamp within 250 ms.
 The canonical row is the only row with quantity capacity; corroborating rows are added to

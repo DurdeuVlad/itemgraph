@@ -67,8 +67,9 @@ The project follows a simple pre-1.0 development changelog model.
   literal aliases cover suggestions and the greedy fallback handles mixed-case
   root, player, paged, and near queries, including legacy `ALL` spellings.
 - **Source-event collision handling:** native UUID-derived numeric source IDs now
-  compare the raw payload before deduplicating and probe deterministic salted IDs
-  when a distinct payload collides, preserving both observations and audit rows.
+  compare the producer UUID across both evidence tables and probe deterministic
+  salted IDs when a distinct event collides, preserving paired observation and
+  audit rows even when their raw payload details differ.
 
 ## [0.3.2] — 2026-09-28
 

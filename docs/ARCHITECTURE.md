@@ -34,6 +34,11 @@ placements, `LivingEntityMixin` captures completed eat/drink uses, `ItemStackMix
 durability breaks at the shrink boundary. Both loaders use a `ProjectileMixin` at
 `Projectile.shootFromRotation` HEAD for the GriefLogger-compatible quantity row. The attempt
 UUID remains in raw data and is projected into `source_event_id` for retry-safe persistence.
+If two UUIDs share the same 63-bit projection, persistence checks `event_id` against
+both `ig_observations` and `ig_audit_events`, then derives a deterministic salted
+projection from the producer UUID. Paired rows use the same remapped ID even when
+their raw payload details differ; a non-null source ID without a parseable UUID
+payload fails persistence explicitly instead of being silently ignored.
 Their `ServerLevel.addFreshEntity` return callbacks retain accepted-spawn evidence only when
 the server reports `true`, without a second quantity row. Fabric
 result-slot mixins capture crafting, smelting, and anvil transformations

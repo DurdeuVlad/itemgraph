@@ -123,7 +123,8 @@ class InternalObservationServiceTest {
                 "123e4567-e89b-12d3-a456-426614174001");
         InternalAuditEvent event = new InternalAuditEvent(
                 1234L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
-                10, 64, -20, "minecraft:arrow", "outcome=accepted", new byte[]{1, 2}, sourceEventId);
+                10, 64, -20, "minecraft:arrow", "outcome=accepted",
+                eventPayload("123e4567-e89b-12d3-a456-426614174001", "accepted"), sourceEventId);
 
         persistAudit(event);
         persistAudit(event);
@@ -146,10 +147,12 @@ class InternalObservationServiceTest {
                 "123e4567-e89b-12d3-a456-426614174001");
         InternalAuditEvent first = new InternalAuditEvent(
                 1234L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
-                10, 64, -20, "minecraft:arrow", "outcome=accepted", new byte[]{1}, sourceEventId);
+                10, 64, -20, "minecraft:arrow", "outcome=accepted",
+                eventPayload("123e4567-e89b-12d3-a456-426614174001", "first"), sourceEventId);
         InternalAuditEvent second = new InternalAuditEvent(
                 1235L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
-                10, 64, -20, "minecraft:arrow", "outcome=accepted", new byte[]{2}, sourceEventId);
+                10, 64, -20, "minecraft:arrow", "outcome=accepted",
+                eventPayload("123e4567-e89b-12d3-a456-426614174002", "second"), sourceEventId);
 
         persistAudit(first, second);
         persistAudit(first, second);
@@ -159,10 +162,10 @@ class InternalObservationServiceTest {
             try (ResultSet result = statement.executeQuery()) {
                 assertTrue(result.next());
                 long firstId = result.getLong(1);
-                assertArrayEquals(new byte[]{1}, result.getBytes(2));
+                assertArrayEquals(eventPayload("123e4567-e89b-12d3-a456-426614174001", "first"), result.getBytes(2));
                 assertTrue(result.next());
                 long secondId = result.getLong(1);
-                assertArrayEquals(new byte[]{2}, result.getBytes(2));
+                assertArrayEquals(eventPayload("123e4567-e89b-12d3-a456-426614174002", "second"), result.getBytes(2));
                 assertNotEquals(firstId, secondId,
                         "a projected source ID collision must not drop a distinct audit payload");
                 assertFalse(result.next());
@@ -617,17 +620,19 @@ class InternalObservationServiceTest {
     void distinctObservationPayloadsSurviveAProjectedSourceIdCollision() throws Exception {
         initializeTopologyDatabase();
         long sourceEventId = InternalObservationService.sourceEventIdForUuid(
-                "123e4567-e89b-12d3-a456-426614174000");
+                "123e4567-e89b-12d3-a456-426614174010");
         InternalObservation first = new InternalObservation(
                 1234L, "THROW_ITEM", PLAYER_UUID, "Steve",
                 "minecraft:overworld", 5, 64, 5,
                 "minecraft:overworld", null, null, null,
-                "UNKNOWN", DIAMOND.itemId(), new byte[]{1}, DIAMOND, 1, null, null, sourceEventId);
+                "UNKNOWN", DIAMOND.itemId(), eventPayload("123e4567-e89b-12d3-a456-426614174010", "first"),
+                DIAMOND, 1, null, null, sourceEventId);
         InternalObservation second = new InternalObservation(
                 1235L, "THROW_ITEM", PLAYER_UUID, "Steve",
                 "minecraft:overworld", 5, 64, 5,
                 "minecraft:overworld", null, null, null,
-                "UNKNOWN", DIAMOND.itemId(), new byte[]{2}, DIAMOND, 1, null, null, sourceEventId);
+                "UNKNOWN", DIAMOND.itemId(), eventPayload("123e4567-e89b-12d3-a456-426614174011", "second"),
+                DIAMOND, 1, null, null, sourceEventId);
 
         persist(first, second);
         persist(first, second);
@@ -637,10 +642,10 @@ class InternalObservationServiceTest {
             try (ResultSet result = statement.executeQuery()) {
                 assertTrue(result.next());
                 long firstId = result.getLong(1);
-                assertArrayEquals(new byte[]{1}, result.getBytes(2));
+                assertArrayEquals(eventPayload("123e4567-e89b-12d3-a456-426614174010", "first"), result.getBytes(2));
                 assertTrue(result.next());
                 long secondId = result.getLong(1);
-                assertArrayEquals(new byte[]{2}, result.getBytes(2));
+                assertArrayEquals(eventPayload("123e4567-e89b-12d3-a456-426614174011", "second"), result.getBytes(2));
                 assertNotEquals(firstId, secondId,
                         "a projected source ID collision must not drop a distinct observation payload");
                 assertFalse(result.next());
@@ -652,38 +657,53 @@ class InternalObservationServiceTest {
     void pairedAuditAndObservationRowsShareCollisionRemap() throws Exception {
         initializeTopologyDatabase();
         long sourceEventId = InternalObservationService.sourceEventIdForUuid(
-                "123e4567-e89b-12d3-a456-426614174000");
-        persistAudit(new InternalAuditEvent(
-                1234L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
-                10, 64, -20, "minecraft:arrow", "conflicting-payload", new byte[]{9}, sourceEventId));
+                "123e4567-e89b-12d3-a456-426614174020");
+        try (Statement statement = conn.createStatement()) {
+            statement.execute("INSERT INTO ig_nodes (id, node_type, level_id) "
+                    + "VALUES (99998, 'PLAYER', 'minecraft:overworld')");
+            statement.execute("INSERT INTO ig_item_fingerprints (id, item_id, fingerprint_hash) "
+                    + "VALUES (99998, 'minecraft:stone', 'collision-test')");
+            statement.execute("INSERT INTO ig_observations "
+                    + "(source_type, source_event_id, timestamp_ms, node_id, fingerprint_id, action_type, amount, raw_data) "
+                    + "VALUES ('ITEMGRAPH_INTERNAL', " + sourceEventId + ", 1234, 99998, 99998, 'BREAK_BLOCK', 1, X'7B226576656E745F6964223A2231323365343536372D653839622D313264332D613435362D343236363134313734303938227D')");
+            statement.execute("INSERT INTO ig_audit_events "
+                    + "(event_type, timestamp_ms, source_type, source_event_id, raw_data) "
+                    + "VALUES ('BREAK_BLOCK', 1234, 'ITEMGRAPH_INTERNAL', " + sourceEventId
+                    + ", X'7B226576656E745F6964223A2231323365343536372D653839622D313264332D613435362D343236363134313734303939227D')");
+        }
 
         InternalObservation pairedObservation = new InternalObservation(
                 1235L, "THROW_ITEM", PLAYER_UUID, "Steve",
                 "minecraft:overworld", 5, 64, 5,
                 "minecraft:overworld", null, null, null,
-                "UNKNOWN", DIAMOND.itemId(), new byte[]{1}, DIAMOND, 1, null, null, sourceEventId);
+                "UNKNOWN", DIAMOND.itemId(), eventPayload("123e4567-e89b-12d3-a456-426614174020", "observation"),
+                DIAMOND, 1, null, null, sourceEventId);
         persist(pairedObservation);
         persistAudit(new InternalAuditEvent(
                 1236L, "PROJECTILE_SPAWN_ACCEPTED", PLAYER_UUID, "Alex", "minecraft:overworld",
-                10, 64, -20, "minecraft:arrow", "paired-payload", new byte[]{1}, sourceEventId));
+                10, 64, -20, "minecraft:arrow", "paired-payload",
+                eventPayload("123e4567-e89b-12d3-a456-426614174020", "audit"), sourceEventId));
 
         long observationId;
         try (PreparedStatement statement = conn.prepareStatement(
-                "SELECT source_event_id FROM ig_observations WHERE raw_data = ?")) {
-            statement.setBytes(1, new byte[]{1});
+                "SELECT source_event_id FROM ig_observations WHERE action_type = 'THROW_ITEM'")) {
             try (ResultSet result = statement.executeQuery()) {
                 assertTrue(result.next());
                 observationId = result.getLong(1);
             }
         }
         try (PreparedStatement statement = conn.prepareStatement(
-                "SELECT source_event_id FROM ig_audit_events WHERE raw_data = ?")) {
-            statement.setBytes(1, new byte[]{1});
+                "SELECT source_event_id FROM ig_audit_events WHERE detail = 'paired-payload'")) {
             try (ResultSet result = statement.executeQuery()) {
                 assertTrue(result.next());
                 assertEquals(observationId, result.getLong(1),
                         "paired ledgers must use one collision remap for the shared source event");
             }
         }
+    }
+
+    private static byte[] eventPayload(String eventUuid, String payloadKind) {
+        return ("{\"event_id\":\"" + eventUuid + "\",\"payload_kind\":\"" + payloadKind + "\"}")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 }
