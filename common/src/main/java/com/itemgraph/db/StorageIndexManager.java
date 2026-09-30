@@ -5,9 +5,12 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /** Applies the configured policy to ItemGraph's optional, non-unique indexes. */
@@ -67,6 +70,14 @@ final class StorageIndexManager {
                 if (useIndexes && !present) {
                     statement.execute(index.createSql());
                 } else if (!useIndexes && present) {
+                    // MySQL and MariaDB require an index whose leading columns
+                    // cover each foreign key. If this is the only such index,
+                    // retain it; dropping it makes valid schema constraints
+                    // impossible to maintain.
+                    if (dialect == DatabaseDialect.MYSQL_MARIADB
+                            && isOnlyForeignKeySupportingIndex(connection, index)) {
+                        continue;
+                    }
                     statement.execute(dialect == DatabaseDialect.SQLITE
                             ? "DROP INDEX " + index.name()
                             : "DROP INDEX " + index.name() + " ON " + index.table());
@@ -92,6 +103,56 @@ final class StorageIndexManager {
             }
         }
         return indexes;
+    }
+
+    private static boolean isOnlyForeignKeySupportingIndex(Connection connection, Index candidate)
+            throws SQLException {
+        DatabaseMetaData metadata = connection.getMetaData();
+        Map<String, List<String>> indexColumns = new HashMap<>();
+        try (ResultSet rows = metadata.getIndexInfo(connection.getCatalog(), null,
+                candidate.table(), false, false)) {
+            while (rows.next()) {
+                String name = rows.getString("INDEX_NAME");
+                String column = rows.getString("COLUMN_NAME");
+                if (name == null || column == null) continue;
+                int ordinal = rows.getInt("ORDINAL_POSITION");
+                List<String> columns = indexColumns.computeIfAbsent(normalize(name), ignored -> new ArrayList<>());
+                while (columns.size() < ordinal) columns.add(null);
+                columns.set(ordinal - 1, normalize(column));
+            }
+        }
+        List<String> candidateColumns = indexColumns.get(normalize(candidate.name()));
+        if (candidateColumns == null) return false;
+
+        Map<String, List<String>> foreignKeys = new HashMap<>();
+        try (ResultSet rows = metadata.getImportedKeys(connection.getCatalog(), null, candidate.table())) {
+            while (rows.next()) {
+                String name = rows.getString("FK_NAME");
+                String column = rows.getString("FKCOLUMN_NAME");
+                if (name == null || column == null) continue;
+                int sequence = rows.getInt("KEY_SEQ");
+                List<String> columns = foreignKeys.computeIfAbsent(normalize(name), ignored -> new ArrayList<>());
+                while (columns.size() < sequence) columns.add(null);
+                columns.set(sequence - 1, normalize(column));
+            }
+        }
+
+        for (List<String> foreignKeyColumns : foreignKeys.values()) {
+            if (!startsWith(candidateColumns, foreignKeyColumns)) continue;
+            boolean alternative = indexColumns.entrySet().stream()
+                    .filter(entry -> !entry.getKey().equals(normalize(candidate.name())))
+                    .anyMatch(entry -> startsWith(entry.getValue(), foreignKeyColumns));
+            if (!alternative) return true;
+        }
+        return false;
+    }
+
+    private static boolean startsWith(List<String> indexColumns, List<String> prefix) {
+        if (prefix.isEmpty() || indexColumns.size() < prefix.size()) return false;
+        for (int i = 0; i < prefix.size(); i++) {
+            if (!prefix.get(i).equals(indexColumns.get(i))) return false;
+        }
+        return true;
     }
 
     private static String normalize(String name) {

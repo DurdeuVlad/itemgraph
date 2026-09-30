@@ -39,7 +39,9 @@ other keys in `config/itemgraph.properties`. `use_indexes=true` is the default
 and manages ItemGraph's optional non-unique lookup indexes on startup. Set it
 to `false` and restart to remove
 those performance indexes; setting it back to `true` and restarting recreates
-them. Migration-owned unique indexes remain enabled. This setting applies only to
+them. MySQL/MariaDB retain an index when it is the only index supporting a
+foreign key, because those engines require the index to enforce the constraint.
+Migration-owned unique indexes remain enabled. This setting applies only to
 ItemGraph's database and never changes GriefLogger's read-only database.
 The SSL mode accepts
 `disable`, `trust`, `verify-ca`, or `verify-full`. Use `mysql_mariadb` for the network

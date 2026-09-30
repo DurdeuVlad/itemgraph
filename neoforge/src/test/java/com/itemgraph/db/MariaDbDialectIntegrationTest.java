@@ -68,6 +68,8 @@ class MariaDbDialectIntegrationTest {
             }
             StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, false);
             assertFalse(hasIndex(conn, "ig_observations", "idx_obs_time_fp"));
+            assertTrue(hasIndex(conn, "ig_observations", "idx_obs_bridge_lookup"),
+                    "the sole index supporting the node_id foreign key must remain present");
             assertTrue(hasIndex(conn, "ig_audit_events", "idx_obs_time_fp"),
                     "same-named index on another table must not be dropped by policy");
             assertTrue(hasIndex(conn, "ig_observations", "idx_obs_source_unique"));
@@ -79,6 +81,8 @@ class MariaDbDialectIntegrationTest {
             assertTrue(hasIndex(conn, "ig_grieflogger_lookup", "idx_gl_lookup_subject"));
             StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, false);
             assertFalse(hasIndex(conn, "ig_grieflogger_lookup", "idx_gl_lookup_subject"));
+            assertTrue(hasIndex(conn, "ig_observations", "idx_obs_bridge_lookup"),
+                    "the sole index supporting the node_id foreign key must remain present after re-disable");
             assertTrue(hasIndex(conn, "ig_observations", "idx_obs_source_unique"));
             assertTrue(hasIndex(conn, "ig_observations", "idx_obs_internal_dedup"));
             assertTrue(hasIndex(conn, "ig_nodes", "idx_nodes_external_key"));

@@ -35,9 +35,10 @@ plus `database_host`, `database_port`, `database_name`, `database_username`,
 `database_password`, `database_ssl_mode`, and `database_connection_timeout_ms` to
 use the shared MySQL/MariaDB storage contract. Optional non-unique lookup
 indexes default to enabled. Set NeoForge `storage.use_indexes=false` or Fabric
-`use_indexes=false` and restart to drop them from ItemGraph's database; set either
-key to `true` and restart to recreate them. Required unique indexes stay enabled
-for deduplication. Set `database_ssl_mode=verify-full` or `verify-ca` for MySQL
+`use_indexes=false` and restart to drop optional indexes from ItemGraph's database;
+set either key to `true` and restart to recreate them. Required unique indexes
+stay enabled for deduplication. MySQL/MariaDB also retain an index when it is the
+only index supporting a foreign key. Set `database_ssl_mode=verify-full` or `verify-ca` for MySQL
 `caching_sha2_password`; `disable` is intended for a server authentication method
 that does not require RSA key retrieval and keeps database traffic plaintext. Use
 `verify-full` for production, or `verify-ca` with an explicitly trusted CA;

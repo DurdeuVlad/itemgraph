@@ -13,7 +13,8 @@ The project follows a simple pre-1.0 development changelog model.
   startup, ItemGraph creates any missing optional lookup
   indexes or drops only those optional non-unique indexes when disabled. Existing
   databases support either toggle direction after restart; required unique
-  deduplication indexes remain active. Invalid Fabric boolean values fail config
+  deduplication indexes remain active, and MySQL/MariaDB retain indexes needed
+  to support foreign keys. Invalid Fabric boolean values fail config
   loading with the offending key named.
 
 ### Changed
