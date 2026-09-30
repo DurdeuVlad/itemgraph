@@ -76,6 +76,27 @@ class MariaDbDialectIntegrationTest {
             assertTrue(hasIndex(conn, "ig_observations", "idx_obs_internal_dedup"));
             assertTrue(hasIndex(conn, "ig_nodes", "idx_nodes_external_key"));
             assertTrue(hasIndex(conn, "ig_audit_events", "idx_audit_events_source_unique"));
+            String alternateForeignKeyIndex = "idx_fk_alt_"
+                    + Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
+            boolean createdAlternateForeignKeyIndex = false;
+            try {
+                try (Statement statement = conn.createStatement()) {
+                    statement.execute("CREATE INDEX " + alternateForeignKeyIndex
+                            + " ON ig_observations(node_id, timestamp_ms)");
+                }
+                createdAlternateForeignKeyIndex = true;
+                StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, false);
+                assertFalse(hasIndex(conn, "ig_observations", "idx_obs_bridge_lookup"),
+                        "the managed index should be dropped when another same-table index supports the foreign key");
+                assertTrue(hasIndex(conn, "ig_observations", alternateForeignKeyIndex),
+                        "the alternate foreign-key support index must remain");
+            } finally {
+                if (createdAlternateForeignKeyIndex) {
+                    try (Statement statement = conn.createStatement()) {
+                        statement.execute("DROP INDEX " + alternateForeignKeyIndex + " ON ig_observations");
+                    }
+                }
+            }
             StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, true);
             assertTrue(hasIndex(conn, "ig_observations", "idx_obs_time_fp"));
             assertTrue(hasIndex(conn, "ig_grieflogger_lookup", "idx_gl_lookup_subject"));
