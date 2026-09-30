@@ -140,8 +140,14 @@ EXPECTED_ACTION_CONTRACT: dict[str, tuple[str, str, str, str]] = {
     "QUIT": ("PLAYER_QUIT", "compatible", "observed", "none"),
     "CHAT": ("CHAT_MESSAGE", "compatible", "observed", "none"),
     "COMMAND": ("COMMAND_ATTEMPT", "compatible", "observed", "none"),
-    "ADD_ITEM_ENDER": ("ADD_ITEM_ENDER", "unresolved", "observed", "signed_delta"),
-    "REMOVE_ITEM_ENDER": ("REMOVE_ITEM_ENDER", "unresolved", "observed", "signed_delta"),
+    "ADD_ITEM_ENDER": ("ADD_ITEM_ENDER", "unsupported-no-writer", "unresolved", "signed_delta"),
+    "REMOVE_ITEM_ENDER": ("REMOVE_ITEM_ENDER", "unsupported-no-writer", "unresolved", "signed_delta"),
+}
+ENDER_NO_WRITER_REASON = "NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE"
+ENDER_EXTENSION_CONTRACT = {
+    "source_type": "ITEMGRAPH_INTERNAL",
+    "capture": "ender_inventory_session_net_delta",
+    "compatibility_mapping": False,
 }
 EXPECTED_EXTENSION_ACTION_CONTRACT: dict[str, tuple[str, str, str]] = {
     "SMELT": ("extended", "observed", "transformation"),
@@ -150,7 +156,7 @@ EXPECTED_EXTENSION_ACTION_CONTRACT: dict[str, tuple[str, str, str]] = {
     "HOPPER_INSERT": ("extended", "observed", "signed_delta"),
     "HOPPER_EXTRACT": ("extended", "observed", "signed_delta"),
 }
-REQUIRED_MILESTONE_ISSUES = {24, 25, 26, 27, 28, 29, 30, 31, 43, 54}
+REQUIRED_MILESTONE_ISSUES = {24, 25, 26, 27, 28, 29, 30, 31, 43, 54, 76}
 M8_MILESTONE_TITLE = "M8: Drop-in GriefLogger parity"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -275,7 +281,8 @@ def validate_registry(registry: dict[str, Any]) -> None:
         "INTERACT_ENTITY outcome model must distinguish attempts/results and retain the stable unsupported-target reason",
     )
     allowed_statuses = set(registry.get("statuses", []))
-    require(allowed_statuses == {"compatible", "extended", "unsupported", "unresolved"}, "registry status vocabulary changed")
+    require(allowed_statuses == {"compatible", "extended", "unsupported", "unsupported-no-writer", "unresolved"},
+            "registry status vocabulary changed")
     allowed_evidence_classes = set(registry.get("evidence_classes", []))
     require(
         allowed_evidence_classes == {"observed", "inferred", "ambiguous", "unresolved"},
@@ -302,8 +309,18 @@ def validate_registry(registry: dict[str, Any]) -> None:
             )
             if expected_status == "unresolved":
                 require(row.get("owner_issue") == 27, f"actions[{index}] unresolved {source_action} must remain owned by issue #27")
+            elif expected_status == "unsupported-no-writer":
+                require(row.get("evidence_issue") == 76,
+                        f"actions[{index}] unsupported-no-writer {source_action} needs evidence from issue #76")
+                require(row.get("reason_code") == ENDER_NO_WRITER_REASON,
+                        f"actions[{index}] unsupported-no-writer {source_action} needs a stable reason code")
+                require(row.get("itemgraph_extension") == ENDER_EXTENSION_CONTRACT,
+                        f"actions[{index}] {source_action} must label the independent ItemGraph extension")
+                require("owner_issue" not in row,
+                        f"actions[{index}] unsupported-no-writer {source_action} must not remain open under #27")
             else:
-                require("owner_issue" not in row, f"actions[{index}] compatible/extended {source_action} must not claim an unresolved owner issue")
+                require("owner_issue" not in row and "evidence_issue" not in row,
+                        f"actions[{index}] compatible/extended {source_action} must not claim an unresolved owner issue")
         elif source_action is None:
             expected_status, expected_evidence, expected_quantity = EXPECTED_EXTENSION_ACTION_CONTRACT[itemgraph]
             require(
@@ -314,6 +331,9 @@ def validate_registry(registry: dict[str, Any]) -> None:
             require("owner_issue" not in row, f"actions[{index}] ItemGraph-only action {itemgraph} must not claim an owner issue")
         if row.get("status") == "unresolved":
             require(isinstance(row.get("owner_issue"), int), f"actions[{index}] unresolved row needs owner_issue")
+        if isinstance(row.get("evidence_issue"), int):
+            require(row["evidence_issue"] == 76,
+                    f"actions[{index}] evidence_issue must refer to the Ender writer determination #76")
 
     storage = registry.get("storage")
     require(isinstance(storage, dict), "registry storage must be an object")
@@ -343,7 +363,7 @@ def validate_documents(registry: dict[str, Any]) -> None:
         "11 tables",
         "18 actions",
         "1.2.10-1.21.1",
-        "160f77435c9527304adba691388295ead00af40db482338fcbf87951d929e648",
+        "f0e922f3b3c4b926b2d115a2809ea0d157cfba1f3941b5836da30a3f84a54574",
         "issue #54",
     ]
     for fragment in required_parity_fragments:
@@ -352,8 +372,11 @@ def validate_documents(registry: dict[str, Any]) -> None:
     owner_issues = set()
     for section in (registry.get("actions", []), registry.get("configuration_controls", []), registry.get("inspector_behavior", [])):
         for row in section:
-            if isinstance(row, dict) and isinstance(row.get("owner_issue"), int):
-                owner_issues.add(row["owner_issue"])
+            if isinstance(row, dict):
+                if isinstance(row.get("owner_issue"), int):
+                    owner_issues.add(row["owner_issue"])
+                if isinstance(row.get("evidence_issue"), int):
+                    owner_issues.add(row["evidence_issue"])
     filters = registry.get("filters")
     require(isinstance(filters, dict) and filters.get("owner_issue") == 25, "filters owner_issue must remain 25")
     owner_issues.add(filters["owner_issue"])

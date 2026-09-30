@@ -1,6 +1,5 @@
 {
   "fixture_schema_version": 1,
-  "fixture_sha256": "160f77435c9527304adba691388295ead00af40db482338fcbf87951d929e648",
   "project": {
     "name": "GriefLogger",
     "mod_id": "grieflogger",
@@ -101,6 +100,30 @@
       },
       "sha256": "fd252bc5466bb94e38d2386bafb9926b798bc250b26e1a3aa80f878ebccbc4a5"
     }
+  },
+  "ender_action_writer_audit": {
+    "result": "unsupported-no-writer",
+    "method": "parse checksum-verified classfile constant pools and Code instructions; allow Ender constant fields only in ItemAction and pin values()/fromId callsites to catalog, enum decoder, and persisted-history reconstruction",
+    "enum_class": "com/daqem/grieflogger/model/action/ItemAction.class",
+    "actions": {
+      "ADD_ITEM_ENDER": 9,
+      "REMOVE_ITEM_ENDER": 10
+    },
+    "expected_classfiles_containing_symbols": [
+      "com/daqem/grieflogger/model/action/ItemAction.class"
+    ],
+    "expected_classfiles_referencing_action_constants": [
+      "com/daqem/grieflogger/model/action/ItemAction.class"
+    ],
+    "expected_selector_callsites": [
+      "com/daqem/grieflogger/model/action/Actions.class#<clinit>->values",
+      "com/daqem/grieflogger/model/action/ItemAction.class#fromId->values"
+    ],
+    "expected_id_factory_callsites": [
+      "com/daqem/grieflogger/model/history/ItemHistory.class#<init>->fromId"
+    ],
+    "source_audit_commit": "d315098b3f37317a5cddfbd75086f4f912f16a83",
+    "source_audit_note": "The pinned source defines both enum values but contains no writer references outside the enum; the verified binaries reference Ender enum constants only inside ItemAction, values() is called by the generic Actions catalog and the enum's fromId decoder, and the only fromId caller is ItemHistory.<init> reconstructing a stored row."
   },
   "embedded_libraries": [
     {
@@ -384,5 +407,6 @@
         "meaning": "Native-only differential replay must prove observable parity before the replacement claim is complete."
       }
     ]
-  }
+  },
+  "fixture_sha256": "f0e922f3b3c4b926b2d115a2809ea0d157cfba1f3941b5836da30a3f84a54574"
 }

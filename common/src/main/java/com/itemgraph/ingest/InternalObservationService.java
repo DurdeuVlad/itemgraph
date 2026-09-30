@@ -19,6 +19,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -351,6 +352,7 @@ public class InternalObservationService {
     }
 
     private final BlockingQueue<InternalObservation> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+    private final Object observationQueueLock = new Object();
     private final BlockingQueue<InternalTransformation> transformationQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
     private final BlockingQueue<InternalAuditEvent> auditEventQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -459,20 +461,46 @@ public class InternalObservationService {
     }
 
     public boolean submit(InternalObservation obs) {
+        if (obs == null) {
+            return false;
+        }
+        return submitAll(List.of(obs));
+    }
+
+    /**
+     * Enqueues a related set of observations all-or-none. Producers share one
+     * lock, and the worker only removes queue entries, so a capacity check under
+     * this lock guarantees each following offer succeeds without a partial batch.
+     */
+    public boolean submitAll(List<InternalObservation> observations) {
+        if (observations == null || observations.stream().anyMatch(Objects::isNull)) {
+            return false;
+        }
         if (!captureEnabled) {
             return true;
         }
-        boolean ok = queue.offer(obs);
-        if (ok) {
-            totalEnqueued.incrementAndGet();
-        } else {
-            long dropped = totalDropped.incrementAndGet();
-            if (dropped == 1 || dropped % 1000 == 0) {
-                LOGGER.warn("Internal observation queue is full — dropped {} observation ({} dropped total; evidence loss)",
-                        obs.actionType(), dropped);
-            }
+        if (observations.isEmpty()) {
+            return true;
         }
-        return ok;
+        synchronized (observationQueueLock) {
+            if (queue.remainingCapacity() < observations.size()) {
+                long dropped = totalDropped.addAndGet(observations.size());
+                if (dropped == observations.size() || dropped % 1000 < observations.size()) {
+                    LOGGER.warn("Internal observation queue is full — rejected {} observation batch ({} dropped total; evidence loss)",
+                            observations.size(), dropped);
+                }
+                return false;
+            }
+            for (InternalObservation observation : observations) {
+                // Capacity cannot shrink while producers are locked out; the worker
+                // only frees slots, so this batch cannot be partially accepted.
+                if (!queue.offer(observation)) {
+                    throw new IllegalStateException("Observation queue capacity changed during atomic batch enqueue");
+                }
+            }
+            totalEnqueued.addAndGet(observations.size());
+            return true;
+        }
     }
 
     public boolean submitTransformation(InternalTransformation trans) {
@@ -797,12 +825,14 @@ public class InternalObservationService {
             LOGGER.error("Could not persist {} internal observations; retaining them for retry (backoff={} ms)",
                     batch.size(), observationRetryBackoffMs, failure);
         }
-        for (InternalObservation observation : batch) {
-            if (!queue.offer(observation)) {
-                long dropped = totalDropped.incrementAndGet();
-                if (dropped == 1 || dropped % 1000 == 0) {
-                    LOGGER.warn("Internal observation queue remained full while retrying; dropped {} ({} dropped total)",
-                            observation.actionType(), dropped);
+        synchronized (observationQueueLock) {
+            for (InternalObservation observation : batch) {
+                if (!queue.offer(observation)) {
+                    long dropped = totalDropped.incrementAndGet();
+                    if (dropped == 1 || dropped % 1000 == 0) {
+                        LOGGER.warn("Internal observation queue remained full while retrying; dropped {} ({} dropped total)",
+                                observation.actionType(), dropped);
+                    }
                 }
             }
         }

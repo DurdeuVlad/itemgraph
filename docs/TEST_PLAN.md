@@ -693,6 +693,39 @@ spawn audit row for each, non-null source event IDs on all four rows, and zero
 duplicate source-event groups. Fabric passed the identical replay and query on
 port 27993; NeoForge used port 27994. These replays are staging evidence only.
 
+## M8 issue #76: Ender action writer determination and session deltas
+
+- `python tools/validate_grieflogger_release_fixture.py --check-remote` downloads
+  the pinned Fabric and NeoForge 1.2.10-1.21.1 jars, verifies their recorded
+  hashes, and scans every classfile to prove Ender action symbols occur only in
+  `ItemAction.class`.
+- `python tools/validate_grieflogger_profile.py` checks the
+  `unsupported-no-writer` status, stable reason code, evidence issue, and the
+  separately labeled `ITEMGRAPH_INTERNAL` session-delta extension.
+- `EnderChestInteractionTrackerTest` checks duplicate menu opens, reconnect
+  sessions, signed partial-transfer counts, unchanged sessions, and opaque
+  component redaction. It also rejects a multi-fingerprint delta batch, verifies
+  the complete session remains retryable, and then accepts the batch once.
+  `orderlyShutdownRetriesQueueRejectedSessionBeforeClearingIt` verifies shutdown
+  retries a rejected batch and clears the session only after acceptance.
+  The shared shutdown retry deadline is five seconds total across all player
+  sessions; `shutdownQueueRetryBudgetIsSharedAcrossAllSessions` checks it does
+  not multiply by the number of sessions.
+  `InternalObservationService.submitAll` and worker batch requeues share the
+  producer lock; `atomicObservationBatchCannotBePartiallyAcceptedDuringWorkerRequeue`
+  races both producers with one free queue slot and verifies no partial batch
+  enqueue. `InternalObservationServiceTest`
+  `enderSessionDeltaRemainsQueryableAfterDatabaseRestart` verifies one durable
+  player-owned endpoint and amount after restart, with no duplicate row and no
+  fingerprint in raw data. `ItemGraphCommandsHelpTest` checks an unprivileged
+  caller is denied at the command root.
+- The GriefLogger release database is never opened by these checks. The
+  determination uses checksum-verified published jars and the pinned source
+  audit; no source rows are read or mutated.
+- Run `./gradlew.bat :neoforge:test :neoforge:runGameTestServer :fabric:test
+  :fabric:runGameTest` for loader unit and GameTest coverage. The no-writer
+  result does not claim transaction-level cross-loader GriefLogger replay.
+
 ## M8 issue #26: exact block/container inspector and immutable supersession
 
 Automated checks currently cover the shared query and both loader adapters:
