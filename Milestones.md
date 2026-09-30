@@ -1,7 +1,7 @@
 # ItemGraph Milestones
 
 Document status: active
-Last reviewed: 2026-09-29
+Last reviewed: 2026-10-01
 Owner: Vlad Durdeu
 
 Milestones describe outcomes and proof, not a list of implementation chores.
@@ -156,20 +156,26 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   bounded paging, source IDs, and canonical action filters. The generic eleven-table
   historical ledger remains the immutable source of truth and its normalized event
   projection is delivered by #28. The pinned 26.2 source/profile authority is recorded
-  in #43. Remaining: complete #24, #26, #27, #30, and #31 for inspector
-  targets, all 18 pinned actions, configuration and operations controls, and
-  differential staging proof. The runtime
+  in #43. PR #86 delivered the cross-loader entity-interaction slice for #75.
+  Remaining open M8 issues are #24 (command semantics and accepted replay scope),
+  #27 (aggregate action mapping), #30 (configuration and operations controls),
+  and #31 (differential proof). Issue #76 establishes the exact-release Ender
+  action no-writer result and separately labels ItemGraph session deltas. The runtime
   matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact current boundary.
+  Issue #26's visible-client click matrix remains unverified because the
+  maintainer explicitly asked to skip live clicks.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
-  #24–#28, #30–#31, #43, and #54. Issue #29 is delivered in PR #79, including
+  #24–#28, #30–#31, #43, #54, #75, and #76. Issue #29 is delivered in PR #79, including
   SQLite/MariaDB/MySQL storage and configurable optional indexes. The current
-  registry is `m8.5.0`; four action mappings and three configuration mappings
-  remain unresolved. Query page size is now configurable; server-side mode is a
+  registry is `m8.7.0`; two action mappings and three configuration mappings
+  remain unresolved. Ender actions 9 and 10 are `unsupported-no-writer` for the
+  exact release, and ItemGraph's session net-delta rows are documented as an
+  independent extension. Query page size is now configurable; server-side mode is a
   true-only invariant, raw evidence retention is indefinite, and queue/hello
   cadence still needs staging evidence. Issue #27 is decomposed into #73 (projectile outcomes),
-  #74 (block interaction outcomes), #75 (entity interaction outcomes), and #76
-  (Ender action writers and deltas). Compatibility artifacts remain supported
+  #74 (block interaction outcomes), #75 (entity interaction outcomes, completed
+  in PR #86), and #76 (Ender action writer determination). Compatibility artifacts remain supported
   until the M8 gate and the native-only cutover evidence pass.
 
 ## M9: ItemGraph audit++ performance and extra events

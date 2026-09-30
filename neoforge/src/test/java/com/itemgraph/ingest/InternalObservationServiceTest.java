@@ -32,7 +32,9 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -439,6 +441,48 @@ class InternalObservationServiceTest {
         assertFalse(overCapacity, "10,001st item must be rejected when queue is full");
         assertEquals(10_000, service.getQueueSize(), "Queue size must remain at capacity");
         assertEquals(10_000, service.getTotalEnqueued(), "Total enqueued counter must not increment on rejection");
+    }
+
+    @Test
+    void atomicObservationBatchCannotBePartiallyAcceptedDuringWorkerRequeue() throws Exception {
+        for (int i = 0; i < 9_999; i++) {
+            assertTrue(service.submit(createDummyObservation(i)));
+        }
+        Method requeue = InternalObservationService.class.getDeclaredMethod(
+                "requeueObservationBatch", List.class, Exception.class);
+        requeue.setAccessible(true);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicReference<Boolean> acceptedBatch = new AtomicReference<>();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> batchProducer = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                acceptedBatch.set(service.submitAll(List.of(
+                        createDummyObservation(20_001), createDummyObservation(20_002))));
+                return null;
+            });
+            Future<?> retryProducer = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                requeue.invoke(service, List.of(createDummyObservation(20_003)),
+                        new IllegalStateException("synthetic persistence failure"));
+                return null;
+            });
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            executor.shutdown();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+            batchProducer.get();
+            retryProducer.get();
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertEquals(Boolean.FALSE, acceptedBatch.get(), "one free slot cannot accept half of a two-row batch");
+        assertEquals(10_000, service.getQueueSize(), "the retry producer and batch producer share bounded capacity");
+        assertEquals(9_999, service.getTotalEnqueued(), "rejected related rows must not increment enqueue count");
     }
 
     @Test
@@ -929,6 +973,52 @@ class InternalObservationServiceTest {
                 assertTrue(result.next());
                 assertEquals("minecraft:ender_chest/" + PLAYER_UUID, result.getString(1));
             }
+        }
+    }
+
+    @Test
+    void enderSessionDeltaRemainsQueryableAfterDatabaseRestart() throws Exception {
+        Path databasePath = tempDir.resolve("itemgraph.db");
+        initializeTopologyDatabase();
+        CanonicalItem opaqueEnderItem = new CanonicalItem(
+                "example:opaque_item", "sha256:canonical-fingerprint", null, null, null);
+        byte[] enderSession = "{\"capture\":\"ender_inventory_session_net_delta\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        service.submit(new InternalObservation(
+                System.currentTimeMillis(), "ADD_ITEM_ENDER", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 10, 64, -20,
+                "minecraft:overworld", null, null, null,
+                "ENDER_CHEST", opaqueEnderItem.itemId(), enderSession, opaqueEnderItem, 2,
+                null, System.currentTimeMillis()));
+        service.stop();
+        DatabaseManager.getInstance().close();
+
+        DatabaseManager.getInstance().initialize(databasePath);
+        IngestionService.getInstance().getNodeManager().clearCaches();
+        conn = DatabaseManager.getInstance().getConnection();
+        try (Statement statement = conn.createStatement();
+             ResultSet result = statement.executeQuery("""
+                     SELECT action_type, amount, raw_data, source_type, target_node_id
+                     FROM ig_observations
+                     """)) {
+            assertTrue(result.next());
+            assertEquals("ADD_ITEM_ENDER", result.getString("action_type"));
+            assertEquals(2, result.getInt("amount"));
+            assertEquals("ITEMGRAPH_INTERNAL", result.getString("source_type"));
+            assertEquals("EXTERNAL_INVENTORY", nodeTypeOf(result.getLong("target_node_id")));
+            String enderKey;
+            try (PreparedStatement endpoint = conn.prepareStatement(
+                    "SELECT external_key FROM ig_nodes WHERE id = ?")) {
+                endpoint.setLong(1, result.getLong("target_node_id"));
+                try (ResultSet node = endpoint.executeQuery()) {
+                    assertTrue(node.next());
+                    enderKey = node.getString(1);
+                }
+            }
+            assertEquals("minecraft:ender_chest/" + PLAYER_UUID, enderKey);
+            assertFalse(new String(result.getBytes("raw_data"), java.nio.charset.StandardCharsets.UTF_8)
+                    .contains("canonical-fingerprint"));
+            assertFalse(result.next(), "restart must not duplicate the persisted Ender delta");
         }
     }
 

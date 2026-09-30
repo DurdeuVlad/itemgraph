@@ -25,7 +25,7 @@ and the downloaded official CDN bytes. Fabric is version `zPIDeXeI`, file
 18,956,227 bytes. Both jars target Minecraft 1.21.1 and Java 21, embed SQLite
 JDBC 3.47.2.0 and MySQL Connector/J 8.4.0, and carry required common mixins.
 The fixture digest is
-`160f77435c9527304adba691388295ead00af40db482338fcbf87951d929e648`.
+`f0e922f3b3c4b926b2d115a2809ea0d157cfba1f3941b5836da30a3f84a54574`.
 It records the runtime-target mismatch as unresolved under #54 and the
 remaining native-only differential-replay proof as unresolved under #31.
 
@@ -123,6 +123,39 @@ The source writes six event tables and five reference/identity tables:
 The complete action enum is pinned in
 [`common/src/main/java/com/daqem/grieflogger/model/action`](https://github.com/DAQEM/GriefLogger/tree/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/model/action).
 Ender action IDs exist in the enum but the audited source has no writer for them.
+
+### Ender action writers in the exact release (#76)
+
+The [release fixture](grieflogger-fixtures/1.2.10-1.21.1.json) pins the exact
+Fabric and NeoForge `1.2.10-1.21.1` jar bytes. A read-only scan of every
+checksum-verified classfile found the strings `ADD_ITEM_ENDER` and
+`REMOVE_ITEM_ENDER` only in `com/daqem/grieflogger/model/action/ItemAction.class`
+for both loaders. The bytecode parser also found no field references to either
+enum constant outside the enum declaration. The only `ItemAction.values()`
+callers are `Actions.<clinit>`, which enumerates available actions for the
+generic name lookup catalog, and `ItemAction.fromId`, the enum's own ID decoder.
+The only external `fromId` call is `ItemHistory.<init>`, which reconstructs a
+stored history row. No writer class uses the decoder or selects Ender actions
+dynamically. This rules out direct or dynamically selected enum
+references from writer classes.
+The classfile scan is enforced by `tools/validate_grieflogger_release_fixture.py`
+whenever CI validates the official release bytes. The [pinned `ItemAction`
+source](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/model/action/ItemAction.java)
+defines IDs 9 and 10 but no other source class references either enum value to
+write an Ender event. The published 1.21.1 bytecode is the target-specific
+authority; the pinned 26.2 source is behavior research because its declared
+runtime target differs. Together, the exact binary scan and source audit
+establish `unsupported-no-writer` for the published release.
+
+ItemGraph's separate Ender menu tracking emits interval net deltas as
+`ITEMGRAPH_INTERNAL` observations with raw capture
+`ender_inventory_session_net_delta`; those rows are not imported GriefLogger
+actions. [CoreProtect API v13](https://docs.coreprotect.net/api/version/v13/)
+is a related implementation reference: its item lookup includes Ender
+transfers and its inventory lookup normalizes them to player inventory
+additions/removals. This is a design comparison only; no CoreProtect code was
+copied, and its transaction-level contract does not establish GriefLogger
+compatibility.
 
 Important semantics and limits:
 

@@ -95,6 +95,31 @@ def validate_static(fixture: dict[str, Any]) -> None:
         require(artifact.get("mixin_contract", {}).get("required") is True, f"{loader} mixins must remain required")
         require(artifact.get("mixin_contract", {}).get("default_require") == 1, f"{loader} mixin defaultRequire must remain 1")
 
+    ender_audit = fixture.get("ender_action_writer_audit")
+    require(isinstance(ender_audit, dict), "Ender action writer audit must be present")
+    require(ender_audit.get("result") == "unsupported-no-writer", "Ender action writer result changed")
+    require(ender_audit.get("enum_class") == "com/daqem/grieflogger/model/action/ItemAction.class",
+            "Ender action enum class changed")
+    require(ender_audit.get("actions") == {"ADD_ITEM_ENDER": 9, "REMOVE_ITEM_ENDER": 10},
+            "Ender action IDs changed")
+    require(ender_audit.get("expected_classfiles_containing_symbols") == [ender_audit["enum_class"]],
+            "Ender action symbol classfile expectation changed")
+    require(ender_audit.get("expected_classfiles_referencing_action_constants") == [ender_audit["enum_class"]],
+            "Ender action constant reference expectation changed")
+    require(ender_audit.get("expected_selector_callsites") == [
+                "com/daqem/grieflogger/model/action/Actions.class#<clinit>->values",
+                "com/daqem/grieflogger/model/action/ItemAction.class#fromId->values",
+            ],
+            "Ender action selector callsite expectation changed")
+    require(ender_audit.get("expected_id_factory_callsites") == [
+                "com/daqem/grieflogger/model/history/ItemHistory.class#<init>->fromId",
+            ],
+            "Ender action ID factory caller changed")
+    require(ender_audit.get("source_audit_commit") == "d315098b3f37317a5cddfbd75086f4f912f16a83",
+            "Ender action source audit commit changed")
+    require("no writer references outside the enum" in ender_audit.get("source_audit_note", ""),
+            "Ender no-writer source evidence is missing")
+
     actions = fixture.get("actions")
     require(isinstance(actions, dict), "actions must be an object")
     expected_actions = {
@@ -162,7 +187,160 @@ def validate_documentation_links(fixture: dict[str, Any]) -> None:
         require(link in documentation, f"documentation is missing authoritative link: {link}")
 
 
-def verify_jar(loader: str, artifact: dict[str, Any], path: Path) -> None:
+def classfile_action_references(
+        bytecode: bytes, ender_audit: dict[str, Any]) -> tuple[set[str], set[str], set[str]]:
+    """Return Ender constant field-reference classes and enum selector/factory callsites."""
+    if len(bytecode) < 10 or bytecode[:4] != b"\xca\xfe\xba\xbe":
+        return set(), set(), set()
+    constant_pool_count = int.from_bytes(bytecode[8:10], "big")
+    pool: list[tuple[int, Any] | None] = [None] * constant_pool_count
+    cursor = 10
+    index = 1
+    while index < constant_pool_count:
+        tag = bytecode[cursor]
+        cursor += 1
+        if tag == 1:
+            length = int.from_bytes(bytecode[cursor:cursor + 2], "big")
+            cursor += 2
+            value = bytecode[cursor:cursor + length].decode("utf-8", errors="replace")
+            cursor += length
+            pool[index] = (tag, value)
+        elif tag in (3, 4):
+            cursor += 4
+        elif tag in (5, 6):
+            cursor += 8
+            index += 1
+        elif tag in (7, 8, 16, 19, 20):
+            value = int.from_bytes(bytecode[cursor:cursor + 2], "big")
+            cursor += 2
+            pool[index] = (tag, value)
+        elif tag in (9, 10, 11, 12, 17, 18):
+            first = int.from_bytes(bytecode[cursor:cursor + 2], "big")
+            second = int.from_bytes(bytecode[cursor + 2:cursor + 4], "big")
+            cursor += 4
+            pool[index] = (tag, (first, second))
+        elif tag == 15:
+            cursor += 3
+        else:
+            raise FixtureError(f"unsupported classfile constant-pool tag: {tag}")
+        index += 1
+
+    def utf8(cp_index: int) -> str:
+        entry = pool[cp_index]
+        return entry[1] if entry is not None and entry[0] == 1 else ""
+
+    def class_name(cp_index: int) -> str:
+        entry = pool[cp_index]
+        return utf8(entry[1]) if entry is not None and entry[0] == 7 else ""
+
+    def name_and_type(cp_index: int) -> tuple[str, str]:
+        entry = pool[cp_index]
+        if entry is None or entry[0] != 12:
+            return "", ""
+        return utf8(entry[1][0]), utf8(entry[1][1])
+
+    def u2(offset: int) -> int:
+        return int.from_bytes(bytecode[offset:offset + 2], "big")
+
+    def u4(offset: int) -> int:
+        return int.from_bytes(bytecode[offset:offset + 4], "big")
+
+    enum_owner = ender_audit["enum_class"][:-6]
+    action_constants = set(ender_audit["actions"])
+    header_offset = cursor
+    this_class = class_name(u2(header_offset + 2))
+    cursor = header_offset + 6
+    interfaces_count = u2(cursor)
+    cursor += 2 + interfaces_count * 2
+
+    action_field_reference_classes: set[str] = set()
+    for entry in pool:
+        if entry is None or entry[0] != 9:
+            continue
+        owner_index, name_and_type_index = entry[1]
+        name, _descriptor = name_and_type(name_and_type_index)
+        if class_name(owner_index) == enum_owner and name in action_constants:
+            action_field_reference_classes.add(this_class + ".class")
+
+    def skip_attributes(offset: int, count: int) -> int:
+        for _ in range(count):
+            length = u4(offset + 2)
+            offset += 6 + length
+        return offset
+
+    def skip_members(offset: int, count: int) -> int:
+        for _ in range(count):
+            attribute_count = u2(offset + 6)
+            offset = skip_attributes(offset + 8, attribute_count)
+        return offset
+
+    fields_count = u2(cursor)
+    cursor = skip_members(cursor + 2, fields_count)
+    methods_count = u2(cursor)
+    cursor += 2
+    selector_callsites: set[str] = set()
+    id_factory_callsites: set[str] = set()
+    for _ in range(methods_count):
+        method_name = utf8(u2(cursor + 2))
+        attribute_count = u2(cursor + 6)
+        attribute_offset = cursor + 8
+        for _ in range(attribute_count):
+            attribute_name = utf8(u2(attribute_offset))
+            attribute_length = u4(attribute_offset + 2)
+            payload_offset = attribute_offset + 6
+            if attribute_name == "Code":
+                code_length = u4(payload_offset + 4)
+                code_start = payload_offset + 8
+                code = bytecode[code_start:code_start + code_length]
+                pc = 0
+                while pc < len(code):
+                    opcode = code[pc]
+                    if opcode == 0xB8 and pc + 2 < len(code):  # invokestatic
+                        reference_index = int.from_bytes(code[pc + 1:pc + 3], "big")
+                        reference = pool[reference_index]
+                        if reference is not None and reference[0] in (10, 11):
+                            owner_index, name_and_type_index = reference[1]
+                            called_name, _descriptor = name_and_type(name_and_type_index)
+                            if class_name(owner_index) == enum_owner and called_name in {"values", "valueOf"}:
+                                selector_callsites.add(
+                                    f"{this_class}.class#{method_name}->{called_name}"
+                                )
+                            elif class_name(owner_index) == enum_owner and called_name == "fromId":
+                                id_factory_callsites.add(f"{this_class}.class#{method_name}->fromId")
+                    if opcode == 0xAA:  # tableswitch
+                        padding = (4 - ((pc + 1) % 4)) % 4
+                        table = pc + 1 + padding
+                        low = int.from_bytes(code[table + 4:table + 8], "big", signed=True)
+                        high = int.from_bytes(code[table + 8:table + 12], "big", signed=True)
+                        pc = table + 12 + max(0, high - low + 1) * 4
+                    elif opcode == 0xAB:  # lookupswitch
+                        padding = (4 - ((pc + 1) % 4)) % 4
+                        table = pc + 1 + padding
+                        pairs = int.from_bytes(code[table + 4:table + 8], "big", signed=True)
+                        pc = table + 8 + max(0, pairs) * 8
+                    elif opcode == 0xC4:  # wide
+                        pc += 6 if code[pc + 1] == 0x84 else 4
+                    else:
+                        length = 1
+                        if opcode in (0x10, 0x12, 0x15, 0x16, 0x17, 0x18, 0x19,
+                                      0x36, 0x37, 0x38, 0x39, 0x3A, 0xA9, 0xBC):
+                            length = 2
+                        elif opcode in (0x11, 0x13, 0x14, 0x84,
+                                        *range(0x99, 0xA9), *range(0xB2, 0xB9),
+                                        0xBB, 0xBD, 0xC0, 0xC1, 0xC6, 0xC7):
+                            length = 3
+                        elif opcode in (0xB9, 0xBA, 0xC8, 0xC9):
+                            length = 5
+                        elif opcode == 0xC5:
+                            length = 4
+                        pc += length
+            attribute_offset = payload_offset + attribute_length
+        cursor = attribute_offset
+    return action_field_reference_classes, selector_callsites, id_factory_callsites
+
+
+def verify_jar(loader: str, artifact: dict[str, Any], path: Path,
+               ender_audit: dict[str, Any]) -> None:
     require(path.is_file(), f"{loader} jar does not exist: {path}")
     require(path.stat().st_size == artifact["size_bytes"], f"{loader} jar size does not match the release record")
     require(hashlib.sha1(path.read_bytes()).hexdigest() == artifact["sha1"], f"{loader} jar SHA-1 does not match the release record")
@@ -181,6 +359,31 @@ def verify_jar(loader: str, artifact: dict[str, Any], path: Path) -> None:
         names = set(jar.namelist())
         class_count = sum(name.endswith(".class") for name in names)
         require(class_count == artifact["class_count"], f"{loader} class count does not match the release fixture")
+        symbol_classes = set()
+        enum_constant_reference_classes = set()
+        dynamic_selector_callsites = set()
+        id_factory_callsites = set()
+        for name in names:
+            if not name.endswith(".class"):
+                continue
+            bytecode = jar.read(name)
+            field_references, dynamic_selectors, id_factory_callers = classfile_action_references(bytecode, ender_audit)
+            if field_references:
+                enum_constant_reference_classes.add(name)
+            dynamic_selector_callsites.update(dynamic_selectors)
+            id_factory_callsites.update(id_factory_callers)
+            if any(symbol.encode("ascii") in bytecode for symbol in ender_audit["actions"]):
+                symbol_classes.add(name)
+        require(
+            sorted(symbol_classes) == ender_audit["expected_classfiles_containing_symbols"],
+            f"{loader} Ender action symbol references are not limited to the enum: {sorted(symbol_classes)}",
+        )
+        require(sorted(enum_constant_reference_classes) == ender_audit["expected_classfiles_referencing_action_constants"],
+                f"{loader} Ender action field references are not limited to the enum: {sorted(enum_constant_reference_classes)}")
+        require(sorted(dynamic_selector_callsites) == ender_audit["expected_selector_callsites"],
+                f"{loader} ItemAction.values/valueOf callsites changed: {sorted(dynamic_selector_callsites)}")
+        require(sorted(id_factory_callsites) == ender_audit["expected_id_factory_callsites"],
+                f"{loader} ItemAction.fromId callers changed: {sorted(id_factory_callsites)}")
         require("com/daqem/grieflogger/model/action/BlockAction.class" in names, f"{loader} action classes are missing")
         require("com/daqem/grieflogger/database/Database.class" in names, f"{loader} database class is missing")
         require("com/mysql/cj/Constants.class" in names, f"{loader} embedded MySQL driver is missing")
@@ -222,7 +425,7 @@ def verify_remote(fixture: dict[str, Any]) -> None:
                     stream.write(response.read())
             except OSError as exc:
                 raise FixtureError(f"cannot download {loader} release fixture: {exc}") from exc
-            verify_jar(loader, artifact, destination)
+            verify_jar(loader, artifact, destination, fixture["ender_action_writer_audit"])
 
 
 def main() -> int:
@@ -238,7 +441,8 @@ def main() -> int:
         paths = {"fabric": args.fabric_jar, "neoforge": args.neoforge_jar}
         for loader, path in paths.items():
             if path is not None:
-                verify_jar(loader, fixture["artifacts"][loader], path)
+                verify_jar(loader, fixture["artifacts"][loader], path,
+                           fixture["ender_action_writer_audit"])
         if args.check_remote or os.environ.get("GRIEFLOGGER_RELEASE_FIXTURE_CHECK_REMOTE") == "1":
             verify_remote(fixture)
     except (FixtureError, OSError, zipfile.BadZipFile, json.JSONDecodeError) as exc:

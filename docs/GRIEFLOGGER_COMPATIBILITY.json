@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "compatibility_version": "m8.6.0",
+  "compatibility_version": "m8.7.0",
   "mod_id": "itemgraph",
   "supported_commands": ["/ig", "/itemgraph"],
   "unsupported_aliases": ["/gl", "/grieflogger"],
@@ -60,7 +60,7 @@
     "tables": ["blocks", "chats", "commands", "containers", "entities", "items", "levels", "materials", "sessions", "usernames", "users"],
     "sha256": "960291538000e9246ec2eb7c474441281cdf3b45ed7b3ac6be24e1fea4de3111"
   },
-  "statuses": ["compatible", "extended", "unsupported", "unresolved"],
+  "statuses": ["compatible", "extended", "unsupported", "unsupported-no-writer", "unresolved"],
   "evidence_classes": ["observed", "inferred", "ambiguous", "unresolved"],
   "versioning": {
     "compatibility_version_changes_when": [
@@ -98,8 +98,8 @@
     {"grieflogger": null, "itemgraph": "ANVIL_REPAIR", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "GriefLogger 26.2 has no ANVIL_REPAIR action; ItemGraph adds lineage for server-side anvil repair results."},
     {"grieflogger": null, "itemgraph": "HOPPER_INSERT", "status": "extended", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental automation evidence with unknown endpoints; GriefLogger does not publish an equivalent hopper action."},
     {"grieflogger": null, "itemgraph": "HOPPER_EXTRACT", "status": "extended", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental automation evidence with unknown endpoints; GriefLogger does not publish an equivalent hopper action."},
-    {"grieflogger": "ADD_ITEM_ENDER", "itemgraph": "ADD_ITEM_ENDER", "status": "unresolved", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "The 26.2 source defines Ender inventory action ID 9; native capture and endpoint semantics are not closed."},
-    {"grieflogger": "REMOVE_ITEM_ENDER", "itemgraph": "REMOVE_ITEM_ENDER", "status": "unresolved", "evidence_class": "observed", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "owner_issue": 27, "compatibility_note": "The 26.2 source defines Ender inventory action ID 10; native capture and endpoint semantics are not closed."}
+    {"grieflogger": "ADD_ITEM_ENDER", "itemgraph": "ADD_ITEM_ENDER", "status": "unsupported-no-writer", "evidence_class": "unresolved", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "evidence_issue": 76, "reason_code": "NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE", "itemgraph_extension": {"source_type": "ITEMGRAPH_INTERNAL", "capture": "ender_inventory_session_net_delta", "compatibility_mapping": false}, "compatibility_note": "The exact checksum-verified 1.2.10-1.21.1 Fabric and NeoForge jars contain ADD_ITEM_ENDER only in ItemAction.class; the pinned 26.2 source defines enum ID 9 but has no writer. ItemGraph separately emits player-owned Ender session net deltas under ITEMGRAPH_INTERNAL; those rows are an ItemGraph extension, not GriefLogger-compatible action evidence."},
+    {"grieflogger": "REMOVE_ITEM_ENDER", "itemgraph": "REMOVE_ITEM_ENDER", "status": "unsupported-no-writer", "evidence_class": "unresolved", "quantity": "signed_delta", "loaders": ["fabric", "neoforge"], "evidence_issue": 76, "reason_code": "NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE", "itemgraph_extension": {"source_type": "ITEMGRAPH_INTERNAL", "capture": "ender_inventory_session_net_delta", "compatibility_mapping": false}, "compatibility_note": "The exact checksum-verified 1.2.10-1.21.1 Fabric and NeoForge jars contain REMOVE_ITEM_ENDER only in ItemAction.class; the pinned 26.2 source defines enum ID 10 but has no writer. ItemGraph separately emits player-owned Ender session net deltas under ITEMGRAPH_INTERNAL; those rows are an ItemGraph extension, not GriefLogger-compatible action evidence."}
   ],
   "filters": {
     "names": ["action", "a", "user", "u", "include", "i", "exclude", "e", "time", "t", "radius", "r"],

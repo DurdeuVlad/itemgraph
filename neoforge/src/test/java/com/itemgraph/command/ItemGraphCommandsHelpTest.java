@@ -180,6 +180,9 @@ class ItemGraphCommandsHelpTest {
 
         assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("itemgraph", source));
         assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("itemgraph help", source));
+        assertThrows(CommandSyntaxException.class,
+                () -> dispatcher.execute("ig lookup add_item_ender", source),
+                "the Ender inventory lookup must remain behind the permission-level-2 root");
         verify(source, never()).sendSuccess(any(), anyBoolean());
     }
 
