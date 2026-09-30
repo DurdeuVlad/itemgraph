@@ -40,6 +40,7 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Changed
 
+- **Block interaction evidence parity (#74):** native block-interaction capture on Fabric and NeoForge now follows GriefLogger 1.2.10-1.21.1's main-hand gate and exact 28-class functional-block set. Rows remain `INTERACT_BLOCK_ATTEMPT` because the reference hook runs before use results; modded `Container` inspection remains separate from this action mapping.
 - **Long GriefLogger primary keys:** imported source keys over 191 Unicode
   codepoints now use a deterministic SHA-256 key over length-framed UTF-8 key
   values so MySQL/MariaDB composite indexes accept them without delimiter

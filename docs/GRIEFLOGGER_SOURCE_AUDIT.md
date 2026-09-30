@@ -54,6 +54,30 @@ remaining native-only differential-replay proof as unresolved under #31.
   `CrafterBlock`, `VaultBlock`, `DaylightDetectorBlock`, `SignBlock`,
   `LecternBlock`, and `BeaconBlock`. ItemGraph mirrors this vanilla list and
   also recognizes modded block entities implementing Minecraft `Container`.
+- The pinned `RightClickBlockEvent.rightClickBlock()` writer logs
+  `INTERACT_BLOCK` only for the main hand and only when the targeted block is in
+  that list. It calls `LogBlockEvent.logBlock()` from the right-click hook before
+  the block/item use result is known; its `ItemStack` parameter is not used by
+  the writer. This source therefore proves an observed interaction attempt, not
+  that the block accepted the use or that a state change completed. ItemGraph
+  keeps `INTERACT_BLOCK_ATTEMPT` as the directly observed row and must not
+  upgrade it to a completed interaction without an authoritative result.
+  ItemGraph's native action capture now uses the pinned main-hand gate and
+  functional-block predicate. Its broader modded `Container` support remains
+  available to inspection and inventory-flow features without being counted as
+  GriefLogger `INTERACT_BLOCK` parity.
+- The exact NeoForge 1.21.1 release artifact from #54,
+  `grieflogger-1.2.10-1.21.1-neoforge.jar` (SHA-256
+  `fd252bc5466bb94e38d2386bafb9926b798bc250b26e1a3aa80f878ebccbc4a5`), was
+  inspected as a ZIP/JVM class file without loading it. Its
+  `RightClickBlockEvent.rightClickBlock(Player, InteractionHand, BlockPos,
+  Direction)` bytecode gates on `MAIN_HAND`, checks `BlockHandler`, calls
+  `LogBlockEvent.logBlock(..., INTERACT_BLOCK)`, then returns `PASS`; no
+  interaction result or success check occurs in this writer. Its compiled
+  `BlockHandler.isBlockIntractable()` contains the same 28 vanilla block class
+  checks as the pinned source and `getIntractableBlocks()` returns an empty
+  list. This confirms the attempt-only contract and vanilla target set for the
+  exact NeoForge release. It does not prove that modded blocks are supported.
 - Chat and command rows are stored but excluded from GriefLogger's in-game lookup.
   ItemGraph intentionally exposes them through its own permission-checked audit lookup.
 
@@ -68,6 +92,7 @@ The user completion path is pinned in [`UserFilter.java`](https://github.com/DAQ
 [`UserService.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/database/service/UserService.java),
 and [`UserRepository.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/database/repository/UserRepository.java).
 The right-click target list is read from [`BlockHandler.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/block/BlockHandler.java).
+The pre-use interaction writer is pinned in [`RightClickBlockEvent.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RightClickBlockEvent.java).
 
 ## Event and storage coverage
 

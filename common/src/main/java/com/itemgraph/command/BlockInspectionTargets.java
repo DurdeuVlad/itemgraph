@@ -4,6 +4,7 @@ import com.itemgraph.query.AuditEventQueryService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.Container;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.AbstractChestBlock;
 import net.minecraft.world.level.block.AbstractFurnaceBlock;
@@ -62,6 +63,25 @@ public final class BlockInspectionTargets {
             return true;
         }
         BlockState state = level.getBlockState(pos);
+        return isGriefLoggerFunctionalBlock(state);
+    }
+
+    /**
+     * Matches the exact vanilla functional-block predicate used by the pinned
+     * GriefLogger release. Modded {@link Container} implementations remain
+     * inspectable through {@link #isInspectableRightClickTarget(Level, BlockPos)},
+     * but are not silently promoted into GriefLogger's native action set.
+     */
+    public static boolean isGriefLoggerFunctionalBlock(Level level, BlockPos pos) {
+        return level != null && pos != null && isGriefLoggerFunctionalBlock(level.getBlockState(pos));
+    }
+
+    /** GriefLogger's block-action hook records main-hand clicks only. */
+    public static boolean isGriefLoggerBlockInteraction(Level level, BlockPos pos, InteractionHand hand) {
+        return hand == InteractionHand.MAIN_HAND && isGriefLoggerFunctionalBlock(level, pos);
+    }
+
+    private static boolean isGriefLoggerFunctionalBlock(BlockState state) {
         if (state == null) {
             return false;
         }
