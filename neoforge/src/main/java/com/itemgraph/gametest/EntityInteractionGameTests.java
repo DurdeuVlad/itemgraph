@@ -40,7 +40,7 @@ public final class EntityInteractionGameTests {
         InternalObservationService observations = InternalObservationService.getInstance();
         long persistedBefore = observations.getTotalPersisted();
         long droppedBefore = observations.getTotalDropped();
-        long quantityObservationsBefore = EntityInteractionConformanceFixture.countQuantityObservations();
+        var quantityObservationsBefore = EntityInteractionConformanceFixture.snapshotQuantityObservations();
         ServerboundInteractPacket packet = ServerboundInteractPacket.createInteractionPacket(
                 target, player.isShiftKeyDown(), InteractionHand.MAIN_HAND, new Vec3(0.0, 1.0, 0.5));
         helper.assertTrue(packet.getTarget(helper.getLevel()) == target,
@@ -70,6 +70,11 @@ public final class EntityInteractionGameTests {
         player.connection.handleInteract(unequipPacket);
         helper.assertTrue(armorStand.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET).isEmpty(),
                 "armor stand interaction packet did not unequip the boots with an empty hand");
+
+        player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        helper.assertValueEqual(net.minecraft.world.InteractionResult.PASS,
+                armorStand.interact(player, InteractionHand.MAIN_HAND),
+                "inherited Entity.interact fallback must return PASS for an ordinary armor stand");
 
         observations.stop();
         helper.assertTrue(observations.getTotalPersisted() > persistedBefore,
@@ -133,6 +138,7 @@ public final class EntityInteractionGameTests {
                 int bootsAttempts = 0;
                 int emptyHandAttempts = 0;
                 int completed = 0;
+                int unresolvedFallbacks = 0;
                 try (var rows = statement.executeQuery()) {
                     while (rows.next()) {
                         String eventType = rows.getString("event_type");
@@ -154,19 +160,27 @@ public final class EntityInteractionGameTests {
                             completed++;
                             helper.assertTrue(detail.contains("method=interact_at"),
                                     "armor stand completion must identify the handled interaction method");
+                        } else if ("INTERACT_ENTITY_UNRESOLVED".equals(eventType)) {
+                            unresolvedFallbacks++;
+                            helper.assertTrue(detail.contains("method=interact"),
+                                    "fallback Entity.interact result must identify its method boundary");
+                            helper.assertTrue(detail.contains("reason=ENTITY_INTERACTION_METHOD_PASSED"),
+                                    "fallback PASS must remain explicitly unresolved");
                         } else {
                             helper.fail("armor stand interaction produced unexpected event type " + eventType);
                         }
                     }
                 }
                 helper.assertValueEqual(2, attempts,
-                        "equip and unequip must each produce one armor stand attempt");
+                        "equip and unequip packets must each produce one armor stand attempt");
                 helper.assertValueEqual(1, bootsAttempts,
                         "the equip attempt must retain the one diamond-boot stack held before interaction");
                 helper.assertValueEqual(1, emptyHandAttempts,
                         "the unequip attempt must retain the empty hand state");
                 helper.assertValueEqual(2, completed,
                         "equip and unequip must each produce one armor stand completion");
+                helper.assertValueEqual(1, unresolvedFallbacks,
+                        "the direct inherited Entity.interact call must produce one PASS result");
             } catch (SQLException e) {
                 throw new IllegalStateException("Could not read ItemGraph's armor stand evidence", e);
             }
