@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -93,6 +95,12 @@ class InternalObservationServiceTest {
         Method m = InternalObservationService.class.getDeclaredMethod("persistAuditEvents", List.class);
         m.setAccessible(true);
         m.invoke(service, List.of(events));
+    }
+
+    private void persistTransformation(InternalTransformation transformation) throws Exception {
+        Method m = InternalObservationService.class.getDeclaredMethod("persistTransformations", List.class);
+        m.setAccessible(true);
+        m.invoke(service, List.of(transformation));
     }
 
     @Test
@@ -464,6 +472,160 @@ class InternalObservationServiceTest {
              ResultSet rs = stmt.executeQuery("SELECT count(*) FROM ig_observations WHERE action_type = 'EQUIP_ARMOR_STAND'")) {
             assertTrue(rs.next());
             assertEquals(5, rs.getInt(1));
+        }
+    }
+
+    @Test
+    void workerPersistsConcurrentQueueLoadWithoutDuplicateOrLostRows(@TempDir Path testTempDir) throws Exception {
+        initializeTopologyDatabase();
+        service.configureOperations(10, 250, 30_000, true);
+        service.start();
+
+        int threadCount = 8;
+        int eventsPerThread = 250;
+        int expected = threadCount * eventsPerThread;
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+        java.util.concurrent.atomic.AtomicInteger accepted = new java.util.concurrent.atomic.AtomicInteger();
+        ExecutorService producers = Executors.newFixedThreadPool(threadCount);
+        try {
+            for (int thread = 0; thread < threadCount; thread++) {
+                int firstId = thread * eventsPerThread;
+                producers.submit(() -> {
+                    try {
+                        startLatch.await();
+                        for (int offset = 0; offset < eventsPerThread; offset++) {
+                            if (service.submit(createDummyObservation(firstId + offset))) {
+                                accepted.incrementAndGet();
+                            }
+                        }
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        doneLatch.countDown();
+                    }
+                });
+            }
+
+            startLatch.countDown();
+            assertTrue(doneLatch.await(10, TimeUnit.SECONDS),
+                    "concurrent event producers should finish without waiting on database writes");
+            assertEquals(expected, accepted.get(), "all events fit within the bounded queue");
+
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+            while (service.getTotalPersisted() < expected && System.nanoTime() < deadline) {
+                Thread.sleep(20);
+            }
+            assertEquals(expected, service.getTotalPersisted(),
+                    "the worker should drain the queued load into SQLite");
+            assertEquals(0, service.getQueueSize());
+
+            try (Statement statement = conn.createStatement();
+                 ResultSet result = statement.executeQuery("""
+                         SELECT COUNT(*), COUNT(DISTINCT ingest_event_uuid)
+                         FROM ig_observations
+                         WHERE action_type = 'EQUIP_ARMOR_STAND'
+                         """)) {
+                assertTrue(result.next());
+                assertEquals(expected, result.getInt(1));
+                assertEquals(expected, result.getInt(2), "every durable event must have one unique retry key");
+            }
+        } finally {
+            producers.shutdownNow();
+            service.stop();
+            service.configureOperations(250, 100, 30_000, true);
+        }
+    }
+
+    @Test
+    void replayAfterCommittedBatchLostAcknowledgementDoesNotDuplicateEvidence() throws Exception {
+        initializeTopologyDatabase();
+        InternalObservation observation = createDummyObservation(9100);
+        InternalTransformation transformation = createDummyTransformation(9100);
+        InternalAuditEvent auditEvent = new InternalAuditEvent(
+                9100L, "BREAK_BLOCK", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:stone", "test", null);
+
+        // Commit to SQLite, then simulate a lost network acknowledgement. The
+        // worker sees SQLException after the row is already durable and replays it.
+        Method persistBatch = InternalObservationService.class.getDeclaredMethod(
+                "persistBatchLocked", Connection.class, List.class);
+        persistBatch.setAccessible(true);
+        boolean[] loseAcknowledgement = {true};
+        Connection acknowledgementLossConnection = (Connection) Proxy.newProxyInstance(
+                Connection.class.getClassLoader(), new Class<?>[]{Connection.class}, (proxy, method, args) -> {
+                    try {
+                        Object result = method.invoke(conn, args);
+                        if (method.getName().equals("commit") && loseAcknowledgement[0]) {
+                            loseAcknowledgement[0] = false;
+                            throw new java.sql.SQLException("simulated lost commit acknowledgement");
+                        }
+                        return result;
+                    } catch (InvocationTargetException invocationFailure) {
+                        throw invocationFailure.getCause();
+                    }
+                });
+        InvocationTargetException commitAcknowledgementFailure = assertThrows(InvocationTargetException.class,
+                () -> persistBatch.invoke(service, acknowledgementLossConnection, List.of(observation)));
+        assertInstanceOf(java.sql.SQLException.class, commitAcknowledgementFailure.getCause());
+        assertTrue(loseAcknowledgement[0] == false, "the simulated exception must follow a successful commit");
+
+        // Replaying the same immutable queue record must be a no-op, despite the
+        // missing producer ID that made this vulnerable before schema V18.
+        persist(observation);
+        persistTransformation(transformation);
+        persistAudit(auditEvent);
+        persist(observation);
+        persistTransformation(transformation);
+        persistAudit(auditEvent);
+
+        try (Statement statement = conn.createStatement()) {
+            try (ResultSet result = statement.executeQuery(
+                    "SELECT COUNT(*) FROM ig_observations WHERE action_type = 'EQUIP_ARMOR_STAND'")) {
+                assertTrue(result.next());
+                assertEquals(1, result.getInt(1));
+            }
+            try (ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM ig_item_transformations")) {
+                assertTrue(result.next());
+                assertEquals(1, result.getInt(1));
+            }
+            try (ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM ig_audit_events")) {
+                assertTrue(result.next());
+                assertEquals(1, result.getInt(1));
+            }
+        }
+    }
+
+    @Test
+    void distinctEventsSharingLegacyDedupFieldsBothPersist() throws Exception {
+        initializeTopologyDatabase();
+        String itemEntityUuid = "123e4567-e89b-12d3-a456-426614174020";
+        InternalObservation first = new InternalObservation(
+                5000L, "PICKUP_ITEM", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 10, 64, -20,
+                "minecraft:overworld", 10.0, 64.0, -20.0,
+                "GROUND", DIAMOND, 1, itemEntityUuid);
+        InternalObservation second = new InternalObservation(
+                5000L, "PICKUP_ITEM", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 10, 64, -20,
+                "minecraft:overworld", 10.0, 64.0, -20.0,
+                "GROUND", DIAMOND, 1, itemEntityUuid);
+
+        assertNotEquals(first.ingestEventUuid(), second.ingestEventUuid());
+        persist(first, second);
+
+        try (PreparedStatement statement = conn.prepareStatement("""
+                SELECT COUNT(*), COUNT(DISTINCT ingest_event_uuid)
+                FROM ig_observations
+                WHERE action_type = 'PICKUP_ITEM' AND item_entity_uuid = ?
+                """)) {
+            statement.setString(1, itemEntityUuid);
+            try (ResultSet result = statement.executeQuery()) {
+                assertTrue(result.next());
+                assertEquals(2, result.getInt(1),
+                        "distinct events must survive even when every V11 dedup field is identical");
+                assertEquals(2, result.getInt(2));
+            }
         }
     }
 

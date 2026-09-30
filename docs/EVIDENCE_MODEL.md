@@ -30,6 +30,11 @@ fingerprint values, action, quantity, and `raw_data` bytes in
 `ig_observations`. The archive is immutable historical evidence and is not mixed into
 current graph queries because its endpoints may encode superseded semantics.
 
+Every newly queued observation, transformation, and audit event also has a distinct
+ItemGraph `ingest_event_uuid`, stored under a unique index in its ledger. This key is
+separate from producer `source_event_id`: it makes retrying the same queued record
+idempotent after an uncertain database commit, even when a producer supplied no ID.
+
 ### 2. Inferred
 
 A relationship constructed from two or more observations.

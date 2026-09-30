@@ -486,6 +486,13 @@ canonical capacity row and corroborating source rows, while a merely compatible 
 is marked ambiguous and contributes no independent capacity. If a legacy inferred edge
 used an alias or ambiguous row for allocation, it is marked superseded rather than deleted.
 
+Each immutable queued observation, transformation, and audit event carries an
+`ingest_event_uuid`. Schema V18 stores it in a unique column on its ledger. The worker
+reuses the same record on retry, so a commit that succeeded before its acknowledgement
+was lost becomes an ignored duplicate on replay rather than a second quantity or audit
+row. Producer `source_event_id` remains separate and continues to represent source-level
+identity.
+
 The native worker limits each transformation write and shutdown flush to the configured
 `ingestion.max_batch_size`. Failed transformation batches return to the same bounded queue
 with exponential backoff; the status queue count includes in-flight transformations. A

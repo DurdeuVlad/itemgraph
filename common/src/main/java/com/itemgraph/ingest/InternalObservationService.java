@@ -60,8 +60,25 @@ public class InternalObservationService {
             int amount,
             String itemEntityUuid,
             Long timestampEndMs,
-            Long sourceEventId
+            Long sourceEventId,
+            String ingestEventUuid
     ) {
+        public InternalObservation(
+                long timestampMs, String actionType, String playerUuid, String playerName,
+                String levelName, double x, double y, double z,
+                String targetLevelName, Double targetX, Double targetY, Double targetZ,
+                String targetType, String itemId, byte[] rawData, CanonicalItem item, int amount,
+                String itemEntityUuid, Long timestampEndMs, Long sourceEventId
+        ) {
+            this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
+                    targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData,
+                    item, amount, itemEntityUuid, timestampEndMs, sourceEventId, UUID.randomUUID().toString());
+        }
+
+        public InternalObservation {
+            ingestEventUuid = normalizeIngestEventUuid(ingestEventUuid);
+        }
+
         public InternalObservation(
                 long timestampMs, String actionType, String playerUuid, String playerName,
                 String levelName, double x, double y, double z,
@@ -222,8 +239,22 @@ public class InternalObservationService {
             CanonicalItem sourceItem,
             CanonicalItem resultItem,
             int quantity,
-            String details
-    ) {}
+            String details,
+            String ingestEventUuid
+    ) {
+        public InternalTransformation(
+                long timestampMs, String transformationType, String playerUuid, String playerName,
+                String levelName, double x, double y, double z,
+                CanonicalItem sourceItem, CanonicalItem resultItem, int quantity, String details
+        ) {
+            this(timestampMs, transformationType, playerUuid, playerName, levelName, x, y, z,
+                    sourceItem, resultItem, quantity, details, UUID.randomUUID().toString());
+        }
+
+        public InternalTransformation {
+            ingestEventUuid = normalizeIngestEventUuid(ingestEventUuid);
+        }
+    }
 
     /**
      * Native audit evidence outside the quantity-flow graph. The record is
@@ -242,7 +273,8 @@ public class InternalObservationService {
             String subjectId,
             String detail,
             byte[] rawData,
-            Long sourceEventId
+            Long sourceEventId,
+            String ingestEventUuid
     ) {
         public InternalAuditEvent(
                 long timestampMs,
@@ -258,17 +290,40 @@ public class InternalObservationService {
                 byte[] rawData
         ) {
             this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z,
-                    subjectId, detail, rawData, null);
+                    subjectId, detail, rawData, null, UUID.randomUUID().toString());
+        }
+
+        public InternalAuditEvent(
+                long timestampMs,
+                String eventType,
+                String playerUuid,
+                String playerName,
+                String levelName,
+                double x,
+                double y,
+                double z,
+                String subjectId,
+                String detail,
+                byte[] rawData,
+                Long sourceEventId
+        ) {
+            this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z,
+                    subjectId, detail, rawData, sourceEventId, UUID.randomUUID().toString());
         }
 
         public InternalAuditEvent {
             rawData = rawData == null ? null : rawData.clone();
+            ingestEventUuid = normalizeIngestEventUuid(ingestEventUuid);
         }
 
         @Override
         public byte[] rawData() {
             return rawData == null ? null : rawData.clone();
         }
+    }
+
+    private static String normalizeIngestEventUuid(String ingestEventUuid) {
+        return ingestEventUuid == null ? UUID.randomUUID().toString() : UUID.fromString(ingestEventUuid).toString();
     }
 
     private final BlockingQueue<InternalObservation> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
@@ -760,8 +815,9 @@ public class InternalObservationService {
                 String insertSql = """
                     INSERT OR IGNORE INTO ig_audit_events (
                         event_type, timestamp_ms, player_uuid, player_name,
-                        level_id, x, y, z, subject_id, detail, source_type, source_event_id, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ITEMGRAPH_INTERNAL', ?, ?)
+                        level_id, x, y, z, subject_id, detail, source_type, source_event_id,
+                        raw_data, ingest_event_uuid
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ITEMGRAPH_INTERNAL', ?, ?, ?)
                 """;
                 try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
                     for (InternalAuditEvent event : batch) {
@@ -786,6 +842,7 @@ public class InternalObservationService {
                         } else {
                             pstmt.setBytes(12, event.rawData());
                         }
+                        pstmt.setString(13, event.ingestEventUuid());
                         pstmt.executeUpdate();
                     }
                 }
@@ -828,10 +885,10 @@ public class InternalObservationService {
             conn.setAutoCommit(false);
 
             String insertSql = """
-                INSERT INTO ig_item_transformations (
+                INSERT OR IGNORE INTO ig_item_transformations (
                     transformation_type, player_node_id, source_fingerprint_id,
-                    result_fingerprint_id, quantity, timestamp_ms, details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    result_fingerprint_id, quantity, timestamp_ms, details, ingest_event_uuid
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
             try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
@@ -849,6 +906,7 @@ public class InternalObservationService {
                     pstmt.setInt(5, trans.quantity());
                     pstmt.setLong(6, trans.timestampMs());
                     pstmt.setString(7, trans.details());
+                    pstmt.setString(8, trans.ingestEventUuid());
                     pstmt.addBatch();
                 }
                 pstmt.executeBatch();
@@ -883,14 +941,15 @@ public class InternalObservationService {
         try {
             conn.setAutoCommit(false);
 
-            // INSERT OR IGNORE: source_event_id deduplicates durable producer
-            // identities; collisionSafeSourceEventId prevents the lossy numeric
-            // UUID projection from silently discarding a distinct payload.
+            // The source ID deduplicates producer identities. The separate queued
+            // identity also makes retries safe when a DB commit succeeds but the
+            // worker loses the acknowledgement and replays the same batch.
             String insertSql = """
                 INSERT OR IGNORE INTO ig_observations (
                     source_type, source_event_id, timestamp_ms, node_id, target_node_id,
-                    fingerprint_id, action_type, amount, raw_data, correlation_status, item_entity_uuid, timestamp_end_ms
-                ) VALUES ('ITEMGRAPH_INTERNAL', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+                    fingerprint_id, action_type, amount, raw_data, correlation_status,
+                    item_entity_uuid, timestamp_end_ms, ingest_event_uuid
+                ) VALUES ('ITEMGRAPH_INTERNAL', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
             """;
 
             try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
@@ -1027,6 +1086,7 @@ public class InternalObservationService {
                     } else {
                         pstmt.setNull(10, Types.BIGINT);
                     }
+                    pstmt.setString(11, obs.ingestEventUuid());
                     pstmt.executeUpdate();
                 }
             }

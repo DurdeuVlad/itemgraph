@@ -45,6 +45,9 @@ endpoint semantics from the active `ig_observations` projection. The archive is
 not included in current graph queries; it remains available for forensic review.
 The V17 migration creates the archive table for databases already at schema
 version 16. It cannot recover rows erased by V3–V5 before this preservation fix.
+V18 adds nullable, unique queue-event UUID columns to the observation,
+transformation, and audit ledgers. New queued records carry one UUID across
+retries; existing records remain readable with a null UUID.
 Keep database backups under the server operator's backup policy. ItemGraph does
 not delete raw rows after exporting or archiving them.
 

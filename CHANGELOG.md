@@ -14,13 +14,19 @@ The project follows a simple pre-1.0 development changelog model.
   the background worker. `/ig status` reports backend, schema, and effective queue controls
   while omitting database paths and raw exception details. GriefLogger queue
   cadence equivalence and network heartbeat behavior remain unverified against
-  a live staging database. See `docs/CONFIGURATION.md`.
+  a live network database. Local NeoForge-only startup, schema upgrade, and
+  2,000-record SQLite worker load passed. See `docs/CONFIGURATION.md` and
+  `docs/TEST_PLAN.md`.
 - **Evidence and queue failure handling:** legacy topology migrations now copy
   observations, referenced fingerprint values, and raw payloads into
   `ig_legacy_observation_evidence`
   before removing obsolete endpoint projections. Failed transformation batches
   are returned to the bounded retry queue, included in pending counts, and
   explicitly counted as evidence loss if shutdown cannot persist them.
+- **Idempotent ingestion retries:** schema V18 adds unique queue-event UUIDs to
+  observation, transformation, and audit ledgers. A retry after a database
+  commit whose acknowledgement was lost now resolves to the original row
+  instead of duplicating evidence or quantity.
 - **Configurable storage indexes (issue #29):** `storage.use_indexes` on NeoForge
   and `use_indexes` in Fabric's properties file now default to `true`. On every
   startup, ItemGraph creates any missing optional lookup
