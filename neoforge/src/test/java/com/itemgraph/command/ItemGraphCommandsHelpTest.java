@@ -1,5 +1,6 @@
 package com.itemgraph.command;
 
+import com.itemgraph.query.AuditLookupFilters;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.Suggestion;
@@ -212,7 +213,14 @@ class ItemGraphCommandsHelpTest {
 
         assertSuggestions(dispatcher, source, "itemgraph ", "help", "status", "audit", "lookup", "page", "trace", "gui", "inspect");
         assertSuggestions(dispatcher, source, "itemgraph lookup ", "all", "BREAK_BLOCK", "CHAT_MESSAGE", "INTERACT_ENTITY");
-        assertSuggestions(dispatcher, source, "itemgraph lookup action.", "action.break_block", "action.chat_message");
+        assertSuggestions(dispatcher, source, "itemgraph lookup action.", "break_block", "chat_message", "join");
+        assertSuggestions(dispatcher, source, "itemgraph lookup \"action.break_block,",
+                "place_block", "join");
+        assertSuggestions(dispatcher, source, "itemgraph lookup a.", "break_block", "join");
+        assertSuggestions(dispatcher, source, "itemgraph lookup user.", "Alex", "Steve");
+        assertSuggestions(dispatcher, source, "itemgraph lookup u.", "Alex", "Steve");
+        assertSuggestions(dispatcher, source, "itemgraph lookup include.", "minecraft:stone");
+        assertSuggestions(dispatcher, source, "itemgraph lookup exclude.", "minecraft:stone");
         assertSuggestions(dispatcher, source, "itemgraph lookup action.break_block ", "user.", "include.", "exclude.", "time.", "radius.");
         assertSuggestions(dispatcher, source, "itemgraph help ", "trace item", "gui container", "inspect");
         assertSuggestions(dispatcher, source, "itemgraph inspect ", "on", "off", "status");
@@ -278,6 +286,65 @@ class ItemGraphCommandsHelpTest {
                 "mixed-case native all-events lookup syntax");
         assertParsedCompletely(dispatcher.parse("itemgraph lookup bReAk_BloCk 5 60", source),
                 "mixed-case native block lookup syntax");
+    }
+
+    @Test
+    void allPublishedLookupExamplesParseForBothItemGraphRoots() {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        List<String> publishedExamples = List.of(
+                "action.break_block include.diamond_ore radius.50",
+                "user.Griefer42 time.1h radius.100",
+                "action.remove_item \"include.diamond,netherite_ingot\" radius.30 time.6h",
+                "\"action.break_block,place_block\" radius.15",
+                "\"action.join,quit\" time.10m radius.100",
+                "user.MinerJoe action.break_block \"exclude.stone,dirt,cobblestone,gravel\" radius.50",
+                "radius.20 action.remove_item exclude.cobblestone",
+                "include.diamond_block radius.100",
+                "action.remove_item \"include.netherite_sword,netherite_pickaxe,netherite_ingot\" time.1d radius.50",
+                "radius.5",
+                "include.tnt time.30m radius.25",
+                "\"action.add_item,remove_item\" time.90m radius.50",
+                "action.join time.3d radius.50",
+                "user.Notch radius.50",
+                "\"user.Player1,Player2\" action.break_block time.1d radius.50");
+
+        for (String example : publishedExamples) {
+            assertParsedCompletely(dispatcher.parse("ig lookup " + example, source),
+                    "published /ig lookup " + example);
+            assertParsedCompletely(dispatcher.parse("itemgraph lookup " + example, source),
+                    "published /itemgraph lookup " + example);
+        }
+    }
+
+    @Test
+    void lookupFiltersFollowPublishedAliasesRadiusAndConflictRules() {
+        AuditLookupFilters parsed = AuditLookupFilters.parse(
+                "a.break_block u.Alex i.diamond_ore t.1h r.50", 10_000_000L);
+        assertEquals(List.of("BREAK_BLOCK"), parsed.eventTypes());
+        assertEquals(List.of("Alex"), parsed.playerNames());
+        assertEquals(List.of("minecraft:diamond_ore"), parsed.includeSubjects());
+        assertEquals(50.0, parsed.radiusBlocks());
+        assertEquals(List.of("PROJECTILE_SPAWN_ACCEPTED"),
+                AuditLookupFilters.parse("action.projectile_spawn_accepted radius.10", 10_000_000L)
+                        .eventTypes());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> AuditLookupFilters.parse("action.break_block", 10_000_000L));
+        assertThrows(IllegalArgumentException.class,
+                () -> AuditLookupFilters.parse(
+                        "action.break_block user.Alex time.1h include.stone exclude.dirt radius.50",
+                        10_000_000L));
+        assertThrows(IllegalArgumentException.class,
+                () -> AuditLookupFilters.parse("include.stone exclude.dirt radius.50", 10_000_000L));
+    }
+
+    @Test
+    void lookupPageSessionHasABoundedThirtyMinuteLifetime() {
+        long createdAt = 1_000L;
+        assertFalse(ItemGraphCommands.pageSessionExpired(createdAt, createdAt + 1_799_999L));
+        assertFalse(ItemGraphCommands.pageSessionExpired(createdAt, createdAt + 1_800_000L));
+        assertTrue(ItemGraphCommands.pageSessionExpired(createdAt, createdAt + 1_800_001L));
     }
 
     @Test

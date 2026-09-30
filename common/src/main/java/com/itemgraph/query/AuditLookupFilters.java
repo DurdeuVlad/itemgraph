@@ -146,6 +146,7 @@ public record AuditLookupFilters(
                 case "kill_entity" -> "KILL_ENTITY";
                 case "throw_item" -> "THROW_ITEM";
                 case "shoot_item" -> "SHOOT_ITEM";
+                case "projectile_spawn_accepted" -> "PROJECTILE_SPAWN_ACCEPTED";
                 case "add_item", "add" -> "ADD_ITEM";
                 case "remove_item", "remove" -> "REMOVE_ITEM";
                 case "drop_item", "drop" -> "DROP_ITEM";

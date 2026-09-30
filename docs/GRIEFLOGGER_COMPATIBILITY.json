@@ -112,6 +112,15 @@
     "published_filter_names": ["action", "user", "include", "exclude", "time", "radius"],
     "lookup_sources": ["ig_audit_events", "ig_observations", "ig_item_transformations"],
     "imported_source_type": "GRIEFLOGGER",
+    "suggestions": {
+      "filter_names_and_aliases": true,
+      "only_unused_filters": true,
+      "action_values": "pinned GriefLogger 26.2 values plus ItemGraph-supported actions",
+      "item_values": "registered item identifiers",
+      "user_values": "online players only",
+      "offline_user_suggestions": "unresolved; GriefLogger suggests its cached historical usernames",
+      "maximum_filters_enforced": true
+    },
     "owner_issue": 25
   },
   "controls": {

@@ -48,6 +48,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -72,6 +73,11 @@ public final class ItemGraphCommands {
     private static final int MAX_PAGE_SESSIONS_PER_PLAYER = 8;
     private static final Map<UUID, Map<UUID, AuditPageSession>> AUDIT_PAGE_SESSIONS = new ConcurrentHashMap<>();
     private static final long PAGE_SESSION_TTL_MS = 30L * 60L * 1_000L;
+    private static final List<String> GRIEFLOGGER_ACTION_FILTER_VALUES = List.of(
+            "place_block", "break_block", "interact_block", "kill_entity", "interact_entity",
+            "join", "quit", "add_item", "remove_item", "drop_item", "pickup_item",
+            "craft_item", "break_item", "consume_item", "throw_item", "shoot_item",
+            "add_item_ender", "remove_item_ender");
     private static volatile RuntimeInformationPort runtimeInformation = new RuntimeInformationPort() {
         @Override public String modVersion() { return "unknown"; }
         @Override public boolean isModLoaded(String modId) { return false; }
@@ -551,27 +557,107 @@ public final class ItemGraphCommands {
             CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {
         String remaining = builder.getRemaining();
         int tokenStart = remaining.lastIndexOf(' ') + 1;
-        SuggestionsBuilder tokenBuilder = builder.createOffset(builder.getStart() + tokenStart);
-        String token = remaining.substring(tokenStart).toLowerCase(java.util.Locale.ROOT);
+        String rawToken = remaining.substring(tokenStart);
+        boolean quoted = rawToken.startsWith("\"");
+        SuggestionsBuilder tokenBuilder = builder.createOffset(
+                builder.getStart() + tokenStart + (quoted ? 1 : 0));
+        String token = (quoted ? rawToken.substring(1) : rawToken)
+                .toLowerCase(java.util.Locale.ROOT);
+        Set<String> usedFilters = usedLookupFilters(remaining.substring(0, tokenStart));
+        if (usedFilters.size() >= 5) {
+            return CompletableFuture.completedFuture(tokenBuilder.build());
+        }
         if (!token.contains(".")) {
-            return SharedSuggestionProvider.suggest(List.of(
-                    "action.", "user.", "include.", "exclude.", "time.", "radius."), tokenBuilder);
+            boolean hasItemFilter = usedFilters.contains("include") || usedFilters.contains("exclude");
+            List<String> suggestions = new java.util.ArrayList<>();
+            for (String filter : List.of("action", "user", "include", "exclude", "time", "radius")) {
+                if (usedFilters.contains(filter)
+                        || hasItemFilter && (filter.equals("include") || filter.equals("exclude"))) {
+                    continue;
+                }
+                suggestions.add(filter + ".");
+                suggestions.add(filter.substring(0, 1) + ".");
+            }
+            return SharedSuggestionProvider.suggest(suggestions, tokenBuilder);
         }
         String name = token.substring(0, token.indexOf('.'));
-        if (name.equals("action") || name.equals("a")) {
-            List<String> values = UnifiedEvidenceQueryService.ACTION_TYPES.stream()
-                    .filter(value -> !"all".equalsIgnoreCase(value))
-                    .map(value -> "action." + value.toLowerCase(java.util.Locale.ROOT))
+        String canonicalName = canonicalLookupFilter(name);
+        if (canonicalName == null || usedFilters.contains(canonicalName)
+                || (canonicalName.equals("include") && usedFilters.contains("exclude"))
+                || (canonicalName.equals("exclude") && usedFilters.contains("include"))) {
+            return CompletableFuture.completedFuture(tokenBuilder.build());
+        }
+
+        List<String> values = switch (canonicalName) {
+            case "action" -> lookupActionSuggestions();
+            case "user" -> List.copyOf(ctx.getSource().getOnlinePlayerNames());
+            case "include", "exclude" -> BuiltInRegistries.ITEM.keySet().stream()
+                    .map(ResourceLocation::toString)
                     .toList();
-            return SharedSuggestionProvider.suggest(values, tokenBuilder);
+            case "time" -> List.of("5m", "1h", "1d", "1y");
+            case "radius" -> List.of("5", "10", "50");
+            default -> List.of();
+        };
+        return suggestFilterValues(tokenBuilder, token, values);
+    }
+
+    private static List<String> lookupActionSuggestions() {
+        java.util.LinkedHashSet<String> values = new java.util.LinkedHashSet<>(GRIEFLOGGER_ACTION_FILTER_VALUES);
+        UnifiedEvidenceQueryService.ACTION_TYPES.stream()
+                .filter(value -> !"all".equalsIgnoreCase(value))
+                .map(value -> value.toLowerCase(java.util.Locale.ROOT))
+                .forEach(values::add);
+        return List.copyOf(values);
+    }
+
+    private static CompletableFuture<Suggestions> suggestFilterValues(
+            SuggestionsBuilder tokenBuilder, String token, List<String> values) {
+        int valueStart = token.indexOf('.') + 1;
+        String existing = token.substring(valueStart);
+        int lastComma = existing.lastIndexOf(',');
+        String previousValues = lastComma < 0 ? "" : existing.substring(0, lastComma + 1);
+        Set<String> alreadyEntered = java.util.Arrays.stream(previousValues.split(","))
+                .filter(value -> !value.isBlank())
+                .map(value -> value.toLowerCase(java.util.Locale.ROOT))
+                .collect(java.util.stream.Collectors.toSet());
+        int suggestionStart = tokenBuilder.getStart() + valueStart + previousValues.length();
+        SuggestionsBuilder valueBuilder = tokenBuilder.createOffset(suggestionStart);
+        List<String> candidates = values.stream()
+                .filter(value -> !alreadyEntered.contains(value.toLowerCase(java.util.Locale.ROOT)))
+                .toList();
+        return SharedSuggestionProvider.suggest(candidates, valueBuilder);
+    }
+
+    private static Set<String> usedLookupFilters(String completedTokens) {
+        Set<String> used = new java.util.HashSet<>();
+        for (String token : completedTokens.trim().split("\\s+")) {
+            if (token.isBlank()) {
+                continue;
+            }
+            if (token.length() >= 2 && token.startsWith("\"") && token.endsWith("\"")) {
+                token = token.substring(1, token.length() - 1);
+            }
+            int separator = token.indexOf('.');
+            if (separator > 0) {
+                String canonicalName = canonicalLookupFilter(token.substring(0, separator));
+                if (canonicalName != null) {
+                    used.add(canonicalName);
+                }
+            }
         }
-        if (name.equals("time") || name.equals("t")) {
-            return SharedSuggestionProvider.suggest(List.of("time.5m", "time.1h", "time.1d"), tokenBuilder);
-        }
-        if (name.equals("radius") || name.equals("r")) {
-            return SharedSuggestionProvider.suggest(List.of("radius.5", "radius.10", "radius.50"), tokenBuilder);
-        }
-        return CompletableFuture.completedFuture(tokenBuilder.build());
+        return used;
+    }
+
+    private static String canonicalLookupFilter(String name) {
+        return switch (name.toLowerCase(java.util.Locale.ROOT)) {
+            case "action", "a" -> "action";
+            case "user", "u" -> "user";
+            case "include", "i" -> "include";
+            case "exclude", "e" -> "exclude";
+            case "time", "t" -> "time";
+            case "radius", "r" -> "radius";
+            default -> null;
+        };
     }
 
     /** /ig event <observationId> - one raw observation, labelled OBSERVED. */
@@ -1003,7 +1089,7 @@ public final class ItemGraphCommands {
             return null;
         }
         long now = System.currentTimeMillis();
-        sessions.values().removeIf(session -> now - session.createdAtMs() > PAGE_SESSION_TTL_MS);
+        sessions.values().removeIf(session -> pageSessionExpired(session.createdAtMs(), now));
         AuditPageSession active = sessions.values().stream()
                 .max(java.util.Comparator.comparingLong(AuditPageSession::createdAtMs))
                 .orElse(null);
@@ -1029,11 +1115,15 @@ public final class ItemGraphCommands {
         if (session == null) {
             return null;
         }
-        if (System.currentTimeMillis() - session.createdAtMs() > PAGE_SESSION_TTL_MS) {
+        if (pageSessionExpired(session.createdAtMs(), System.currentTimeMillis())) {
             sessions.remove(sessionId, session);
             return null;
         }
         return session;
+    }
+
+    static boolean pageSessionExpired(long createdAtMs, long nowMs) {
+        return nowMs - createdAtMs > PAGE_SESSION_TTL_MS;
     }
 
     /** Clears a player's paging state when the server lifecycle removes them. */
