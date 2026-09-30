@@ -157,7 +157,7 @@ Chest A -> Player A -> Ground -> Player B -> Chest B
 
 `UNKNOWN` is a real, queryable sentinel node (one per dimension, carrying no coordinates), not a null. It marks an endpoint that genuinely cannot be determined from the source — the materials consumed by a craft, the destination of a consumed item — and keeps *"the item left the player, destination unevidenced"* distinct from *"this row makes no topological claim"*. It is an explicit unresolved, never a guess.
 
-`ARMOR_STAND` identities exist and are tested, but nothing produces them yet: GriefLogger has zero armor stand event coverage (Phase 0 recon), so wiring them needs the Phase 8 supplemental hooks.
+`ARMOR_STAND` identities exist and are tested. ItemGraph records a server-side armor-stand method result at `ArmorStand.interactAt` return: consuming results become `INTERACT_ENTITY_COMPLETED`, and `FAIL` becomes `INTERACT_ENTITY_DENIED`. This records the returned result; it does not claim that equipment or quantity changed.
 
 ### Inferred edges
 
@@ -490,7 +490,7 @@ Authoritative Minecraft `ItemEntity` UUIDs are tracked only after the entity is 
 - When a drop and pickup share an exact unique `ItemEntity` UUID, correlation boosts confidence to `0.9990` and documents direct entity continuity in the scoring explanation.
 
 ### Armor Stand Tracking
-- `ArmorStandEventListener` captures `PlayerInteractEvent.EntityInteractSpecific` to record `EQUIP_ARMOR_STAND` and `UNEQUIP_ARMOR_STAND` observations on armor stand container nodes.
+- NeoForge and Fabric retain entity interaction attempts with the target UUID. Their `ArmorStandInteractionMixin` hooks `ArmorStand.interactAt` at `RETURN`, storing consuming results as `INTERACT_ENTITY_COMPLETED` and `FAIL` as `INTERACT_ENTITY_DENIED`. The mixin is necessary because NeoForge's documented interaction pipeline calls `EntityInteractSpecific` before `Entity#interactAt`, and Fabric's `UseEntityCallback` is also pre-use; neither callback proves the method result. NeoForge also retains canceled specific callbacks as `outcome=canceled`. The earlier pre-use listener that projected armor-stand clicks into equip/unequip quantity observations was removed because the callback did not prove a transfer occurred. No quantity or equipment-slot transition is inferred from the returned result.
 
 ## Native Container & Ground Observation (M5, 0.2.0)
 
@@ -542,8 +542,11 @@ Groups and member roles live in `ig_observation_groups` and
 used a corroborating or ambiguous row for an allocation, it is retained with
 `edge_state=SUPERSEDED_SOURCE_DUPLICATE` or `edge_state=SUPERSEDED_SOURCE_AMBIGUITY`, excluded
 from active traces and capacity totals, and visible through `/ig explain <edgeId>` as a
-superseded inference. Correlation, GriefLogger ingestion, and internal observation writes
-serialize transactions on the shared ItemGraph JDBC connection.
+superseded inference. Migration V20 applies the same lifecycle to dependent edges built from
+legacy pre-use armor-stand callbacks, using `SUPERSEDED_UNVERIFIED_EVIDENCE`; its source rows
+remain inspectable as unresolved evidence but are omitted from current flow traces. Correlation,
+GriefLogger ingestion, and internal observation writes serialize transactions on the shared
+ItemGraph JDBC connection.
 
 ### Ground movement
 - `ItemTossEvent` and `LivingDropsEvent` create bounded pending-drop entries. The

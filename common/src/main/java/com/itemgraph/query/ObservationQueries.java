@@ -52,6 +52,7 @@ final class ObservationQueries {
                    canonical_member.observation_id AS o_canonical_observation_id,
                    og.match_basis AS o_source_match_basis,
                    og.explanation AS o_source_group_explanation,
+                   disposition.reason_code AS o_disposition_reason,
                    o.node_id AS origin_id,
                    origin.node_type AS origin_type,
                    origin.custom_label AS origin_label,
@@ -78,6 +79,7 @@ final class ObservationQueries {
             LEFT JOIN ig_observation_groups og ON og.id = ogm.group_id
             LEFT JOIN ig_observation_group_members canonical_member
                 ON canonical_member.group_id = ogm.group_id AND canonical_member.member_role = 'CANONICAL'
+            LEFT JOIN ig_observation_dispositions disposition ON disposition.observation_id = o.id
             """;
 
     static ObservationDetail map(ResultSet rs) throws SQLException {
@@ -134,7 +136,8 @@ final class ObservationQueries {
                 itemEntityUuid,
                 timestampEndMs,
                 captureType,
-                sourceGroup
+                sourceGroup,
+                rs.getString("o_disposition_reason")
         );
     }
 

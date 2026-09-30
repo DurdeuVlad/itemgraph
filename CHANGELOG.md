@@ -40,6 +40,7 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Changed
 
+- **Entity interaction outcomes (#75):** both loaders retain entity-use attempts with target UUIDs and explicit completion coverage. A narrow `ArmorStand.interactAt` return hook records `INTERACT_ENTITY_COMPLETED` only for consuming results and `INTERACT_ENTITY_DENIED` for `FAIL`; canceled NeoForge callbacks remain raw attempts with an explicit canceled outcome. Non-armor-stand callbacks remain attempt-only with an explicit unobserved completion reason. Removed the prior pre-use armor-stand equip/unequip quantity rows because they could claim item movement before the game accepted it. A handled return is not proof of equipment movement. The exact GriefLogger 1.2.10-1.21.1 artifact has no entity-interaction writer; this ItemGraph behavior is documented as an extension, with the newer 26.2 source behavior kept distinct.
 - **Block interaction evidence parity (#74):** native block-interaction capture on Fabric and NeoForge now follows GriefLogger 1.2.10-1.21.1's main-hand gate and exact 28-class functional-block set. Rows remain `INTERACT_BLOCK_ATTEMPT` because the reference hook runs before use results; modded `Container` inspection remains separate from this action mapping.
 - **Long GriefLogger primary keys:** imported source keys over 191 Unicode
   codepoints now use a deterministic SHA-256 key over length-framed UTF-8 key

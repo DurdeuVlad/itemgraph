@@ -78,6 +78,17 @@ remaining native-only differential-replay proof as unresolved under #31.
   checks as the pinned source and `getIntractableBlocks()` returns an empty
   list. This confirms the attempt-only contract and vanilla target set for the
   exact NeoForge release. It does not prove that modded blocks are supported.
+- The same exact NeoForge 1.21.1 jar was inspected for entity interactions.
+  `com.daqem.grieflogger.event.EntityEvents.registerEvents()` registers only
+  `LIVING_DEATH`; its entity writer records `KILL_ENTITY` for player-caused
+  living-entity deaths. The jar has no `MixinArmorStand` class and its mixin
+  configuration has no armor-stand interaction hook. Its fixture `block`
+  action list contains `BREAK_BLOCK`, `PLACE_BLOCK`, `INTERACT_BLOCK`, and
+  `KILL_ENTITY`, with no `INTERACT_ENTITY` action ID. Therefore the exact
+  GriefLogger 1.2.10-1.21.1 release does not write entity-interaction evidence.
+  This was confirmed by `jar tf`, read-only JSON extraction, and `javap -p -c`
+  on the checksum-verified jar (`fd252bc5466bb94e38d2386bafb9926b798bc250b26e1a3aa80f878ebccbc4a5`);
+  the jar was not loaded or executed.
 - Chat and command rows are stored but excluded from GriefLogger's in-game lookup.
   ItemGraph intentionally exposes them through its own permission-checked audit lookup.
 
@@ -128,7 +139,21 @@ Important semantics and limits:
   worker retries idempotent through the source/event unique index. Accepted
   spawn evidence is emitted from the `ServerLevel.addFreshEntity` return value,
   so a cancellable join event cannot be reported as accepted.
-- Entity interaction is implemented for armor stands only.
+- The separate pinned GriefLogger 26.2 source adds an armor-stand mixin that
+  writes `INTERACT_ENTITY` only when `ArmorStand.interact` returns `SUCCESS` or
+  `SUCCESS_SERVER`. This source behavior is not present in the exact 1.21.1
+  release artifact above and must not be represented as released-binary parity.
+  ItemGraph uses the corresponding 1.21.1 `ArmorStand.interactAt` return value
+  for its own completion extension. NeoForge documents that
+  `PlayerInteractEvent.EntityInteractSpecific` runs before
+  `Entity#interactAt` in the [1.21.1 interaction pipeline](https://docs.neoforged.net/docs/1.21.1/items/interactionpipeline/).
+  Fabric documents that `UseEntityCallback` is hooked before the spectator
+  check and that `PASS` falls through to later processing in the
+  [1.21.1 API docs](https://maven.fabricmc.net/docs/fabric-api-0.110.0%2B1.21.1/net/fabricmc/fabric/api/event/player/UseEntityCallback.html).
+  These pre-use APIs establish the attempt boundary; the method return hook
+  supplies the success evidence. GriefLogger uses the same established pattern
+  in its pinned source mixin at
+  [`ArmorStand.interact` RETURN](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/mixin/MixinArmorStand.java).
 - The interactable block list is hard-coded.
 - Interaction rows can be deleted when a block is broken, so the source is not an
   append-only forensic ledger.

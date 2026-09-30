@@ -16,6 +16,8 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.fml.loading.LoadingModList;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
@@ -33,6 +35,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doReturn;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.verify;
 
@@ -134,6 +137,94 @@ class NativeAuditEventListenerTest {
         assertEquals(4.0, captured.getValue().x());
         assertEquals(64.0, captured.getValue().y());
         assertEquals(9.0, captured.getValue().z());
+    }
+
+    @Test
+    void armorStandSpecificCallbackRecordsOnlyAnAttemptWithTargetUuid() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        ArmorStand target = mock(ArmorStand.class);
+        PlayerInteractEvent.EntityInteractSpecific event = mock(PlayerInteractEvent.EntityInteractSpecific.class);
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        when(event.isCanceled()).thenReturn(false);
+        when(event.getEntity()).thenReturn(player);
+        when(event.getLevel()).thenReturn(level);
+        when(event.getTarget()).thenReturn(target);
+        when(event.getHand()).thenReturn(InteractionHand.OFF_HAND);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.blockPosition()).thenReturn(new BlockPos(8, 65, -2));
+        when(target.getUUID()).thenReturn(targetUuid);
+        doReturn(EntityType.ARMOR_STAND).when(target).getType();
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onEntityInteractSpecific(event);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY", captured.getValue().eventType());
+        assertEquals("outcome=attempt hand=off_hand target_uuid=" + targetUuid
+                + " completion=armor_stand_return_hook", captured.getValue().detail());
+    }
+
+    @Test
+    void armorStandSpecificPathDoesNotDuplicateTheGenericEntityCallback() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        ArmorStand target = mock(ArmorStand.class);
+        PlayerInteractEvent.EntityInteract event = mock(PlayerInteractEvent.EntityInteract.class);
+        when(event.isCanceled()).thenReturn(false);
+        when(event.getEntity()).thenReturn(player);
+        when(event.getLevel()).thenReturn(level);
+        when(event.getTarget()).thenReturn(target);
+        doReturn(EntityType.ARMOR_STAND).when(target).getType();
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onEntityInteract(event);
+            verifyNoInteractions(service);
+        }
+    }
+
+    @Test
+    void canceledArmorStandSpecificCallbackIsRetainedAsCanceledAttempt() {
+        PlayerInteractEvent.EntityInteractSpecific event = mock(PlayerInteractEvent.EntityInteractSpecific.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        ArmorStand target = mock(ArmorStand.class);
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        when(event.isCanceled()).thenReturn(true);
+        when(event.getEntity()).thenReturn(player);
+        when(event.getLevel()).thenReturn(level);
+        when(event.getTarget()).thenReturn(target);
+        when(event.getHand()).thenReturn(InteractionHand.MAIN_HAND);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.getUUID()).thenReturn(targetUuid);
+        when(target.blockPosition()).thenReturn(new BlockPos(8, 65, -2));
+        doReturn(EntityType.ARMOR_STAND).when(target).getType();
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onEntityInteractSpecific(event);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY", captured.getValue().eventType());
+        assertEquals("outcome=canceled hand=main_hand target_uuid=" + targetUuid
+                + " completion=callback_canceled", captured.getValue().detail());
     }
 
     private static void assertNotRecorded(java.util.function.Consumer<NativeAuditEventListener> invocation) {

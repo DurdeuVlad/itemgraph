@@ -18,7 +18,7 @@ Examples:
 - `ADD_ITEM` to a chest
 - player pickup
 - player drop
-- armor stand equipment removal
+- an armor-stand interaction result observed at `ArmorStand.interactAt` return (without a quantity claim)
 - anvil rename
 
 Observed evidence should include the source and original source identifier whenever available.
@@ -110,8 +110,13 @@ rows may support an inferred edge. Raw observations and source IDs are never del
 
 If a legacy active edge allocated through a corroborating or ambiguous row, ItemGraph keeps
 the edge and allocations but changes `edge_state` to `SUPERSEDED_SOURCE_DUPLICATE` or
-`SUPERSEDED_SOURCE_AMBIGUITY`. Superseded edges are excluded from active traces and capacity
-audit totals; `/ig explain <edgeId>` labels them as superseded.
+`SUPERSEDED_SOURCE_AMBIGUITY`. Migration V20 also retains legacy pre-use armor-stand
+equipment callbacks, records `PRE_USE_ARMOR_STAND_TRANSFER_UNVERIFIED` in
+`ig_observation_dispositions`, marks the observation `CLOSED_UNRESOLVED`, and changes any
+dependent active edge to `SUPERSEDED_UNVERIFIED_EVIDENCE`. Disposed observations stay
+available through `/ig event <id>` as unresolved raw evidence, but are excluded from current
+item traces and unified evidence results. Superseded edges are excluded from active traces
+and capacity audit totals; `/ig explain <edgeId>` labels them as superseded.
 
 ## Preview API raw observations (V12)
 

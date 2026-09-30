@@ -45,7 +45,6 @@ public class ItemGraph {
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
 
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ItemEntityEventListener());
-        NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ArmorStandEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.TransformationEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.NativeAuditEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.NativeItemActionEventListener());

@@ -4,6 +4,7 @@
   "package": "com.itemgraph.neoforge.mixin",
   "compatibilityLevel": "JAVA_21",
   "server": [
+    "ArmorStandInteractionMixin",
     "ProjectileMixin",
     "ServerLevelMixin"
   ],

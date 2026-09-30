@@ -4,6 +4,7 @@
   "package": "com.itemgraph.fabric.mixin",
   "compatibilityLevel": "JAVA_21",
   "server": [
+    "ArmorStandInteractionMixin",
     "CommandsMixin",
     "ProjectileMixin",
     "ServerLevelMixin",

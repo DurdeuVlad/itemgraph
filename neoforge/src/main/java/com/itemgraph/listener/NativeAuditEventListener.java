@@ -118,9 +118,9 @@ public final class NativeAuditEventListener {
                 blockId(level.getBlockState(event.getPos())), "outcome=attempt");
     }
 
-    @SubscribeEvent(priority = EventPriority.LOWEST)
+    @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
-        if (event.isCanceled() || !(event.getEntity() instanceof ServerPlayer player)
+        if (!(event.getEntity() instanceof ServerPlayer player)
                 || !(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
@@ -133,19 +133,26 @@ public final class NativeAuditEventListener {
         }
         submit("INTERACT_ENTITY", player, level, target.blockPosition(),
                 BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(),
-                "outcome=attempt hand=" + event.getHand().name().toLowerCase(java.util.Locale.ROOT));
+                "outcome=" + (event.isCanceled() ? "canceled" : "attempt")
+                        + " hand=" + event.getHand().name().toLowerCase(java.util.Locale.ROOT)
+                        + " target_uuid=" + target.getUUID()
+                        + " completion=unobserved_non_armor_entity");
     }
 
-    @SubscribeEvent(priority = EventPriority.LOWEST)
+    @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void onEntityInteractSpecific(PlayerInteractEvent.EntityInteractSpecific event) {
-        if (event.isCanceled() || !(event.getEntity() instanceof ServerPlayer player)
+        if (!(event.getEntity() instanceof ServerPlayer player)
                 || !(event.getLevel() instanceof ServerLevel level)
                 || !(event.getTarget() instanceof ArmorStand target)) {
             return;
         }
         submit("INTERACT_ENTITY", player, level, target.blockPosition(),
                 BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(),
-                "outcome=attempt specific=true hand=" + event.getHand().name().toLowerCase(java.util.Locale.ROOT));
+                "outcome=" + (event.isCanceled() ? "canceled" : "attempt")
+                        + " hand=" + event.getHand().name().toLowerCase(java.util.Locale.ROOT)
+                        + " target_uuid=" + target.getUUID()
+                        + " completion=" + (event.isCanceled()
+                                ? "callback_canceled" : "armor_stand_return_hook"));
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)

@@ -120,8 +120,7 @@ Do not rely solely on online documentation if the installed version differs.
 | Player drop | Native (`items` table, action 2) | Canonical components | Ground row emitted only after the ItemEntity is confirmed in the level; canceled toss is `DROP_CANCELLED` to UNKNOWN |
 | Crafting | None | N/A | Implemented: `ItemCraftedEvent` |
 | Smelting | None | N/A | Implemented: `ItemSmeltedEvent` |
-| Armor stand equip | None | N/A | Implemented: `ArmorStandEventListener` |
-| Armor stand unequip | None | N/A | Implemented: `ArmorStandEventListener` |
+| Armor stand interaction | No writer in the exact 1.2.10-1.21.1 release; pinned 26.2 source writes a completed interaction | `INTERACT_ENTITY` | ItemGraph records consuming `ArmorStand.interactAt` results as `INTERACT_ENTITY_COMPLETED`, `FAIL` as `INTERACT_ENTITY_DENIED`, and canceled NeoForge callbacks as `INTERACT_ENTITY` with `outcome=canceled`. It does not infer an item transfer from a click. |
 | Anvil rename / repair | None | N/A | Implemented: `AnvilRepairEvent` |
 | Player ground bridge | Inferred across events | Canonical fingerprints | Implemented: `CorrelationEngine` (300s window) |
 
@@ -249,7 +248,7 @@ Only add ItemGraph hooks when they provide evidence GriefLogger does not already
 
 Examples of potentially valuable missing hooks:
 
-- armor stand equipment changes
+- armor stand method results from `ArmorStand.interactAt`, plus canceled NeoForge specific callbacks (interaction evidence only; equipment movement remains unobserved)
 - unusual modded inventory transitions
 - player-inventory-only events
 - custom coffer behavior

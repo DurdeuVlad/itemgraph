@@ -16,7 +16,8 @@ import java.util.Map;
 public final class TraceQueryService {
 
     private static final String OBSERVATIONS_BASE = ObservationQueries.SELECT_FROM
-            + " WHERE o.fingerprint_id = ?";
+            + " WHERE o.fingerprint_id = ? AND NOT EXISTS ("
+            + "SELECT 1 FROM ig_observation_dispositions d WHERE d.observation_id = o.id)";
 
     private record CursorSql(String clause, List<Long> parameters) {}
 
@@ -541,7 +542,8 @@ public final class TraceQueryService {
                                                 QueryWindow window, TraceCursor cursor,
                                                 TracePage.Direction direction) throws SQLException {
         StringBuilder sql = new StringBuilder(ObservationQueries.SELECT_FROM)
-                .append(" WHERE (o.node_id = ? OR o.target_node_id = ?)");
+                .append(" WHERE (o.node_id = ? OR o.target_node_id = ?)"
+                        + " AND NOT EXISTS (SELECT 1 FROM ig_observation_dispositions d WHERE d.observation_id = o.id)");
         if (window.sinceMs() != null) {
             sql.append(" AND COALESCE(o.timestamp_end_ms, o.timestamp_ms) >= ?");
         }
