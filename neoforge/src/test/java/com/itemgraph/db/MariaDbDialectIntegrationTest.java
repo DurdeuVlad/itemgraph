@@ -92,8 +92,14 @@ class MariaDbDialectIntegrationTest {
                         "the alternate foreign-key support index must remain");
             } finally {
                 if (createdAlternateForeignKeyIndex) {
-                    try (Statement statement = conn.createStatement()) {
-                        statement.execute("DROP INDEX " + alternateForeignKeyIndex + " ON ig_observations");
+                    try {
+                        // Restore a managed node_id-leading index before removing
+                        // the temporary index that currently supports the FK.
+                        StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, true);
+                    } finally {
+                        try (Statement statement = conn.createStatement()) {
+                            statement.execute("DROP INDEX " + alternateForeignKeyIndex + " ON ig_observations");
+                        }
                     }
                 }
             }
