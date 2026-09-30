@@ -590,7 +590,6 @@ public final class ItemGraphCommands {
 
         List<String> values = switch (canonicalName) {
             case "action" -> lookupActionSuggestions();
-            case "user" -> List.copyOf(ctx.getSource().getOnlinePlayerNames());
             case "include", "exclude" -> BuiltInRegistries.ITEM.keySet().stream()
                     .map(ResourceLocation::toString)
                     .toList();
@@ -598,6 +597,11 @@ public final class ItemGraphCommands {
             case "radius" -> List.of("5", "10", "50");
             default -> List.of();
         };
+        if (canonicalName.equals("user")) {
+            return HistoricalUsernameSuggestions.values(
+                            List.copyOf(ctx.getSource().getOnlinePlayerNames()))
+                    .thenCompose(names -> suggestFilterValues(tokenBuilder, token, names));
+        }
         return suggestFilterValues(tokenBuilder, token, values);
     }
 

@@ -117,8 +117,8 @@
       "only_unused_filters": true,
       "action_values": "pinned GriefLogger 26.2 values plus ItemGraph-supported actions",
       "item_values": "registered item identifiers",
-      "user_values": "online players only",
-      "offline_user_suggestions": "unresolved; GriefLogger suggests its cached historical usernames",
+      "user_values": "online players plus distinct names from imported GriefLogger users and usernames reference rows",
+      "historical_user_suggestions": "read-only asynchronous lookup through the bounded query worker; 30-second cache; malformed provenance payloads are skipped; includes the source users table and the retained username history table",
       "maximum_filters_enforced": true
     },
     "owner_issue": 25
