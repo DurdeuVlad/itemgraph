@@ -156,14 +156,16 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   bounded paging, source IDs, and canonical action filters. The generic eleven-table
   historical ledger remains the immutable source of truth and its normalized event
   projection is delivered by #28. The pinned 26.2 source/profile authority is recorded
-  in #43. Remaining: complete #24, #26, #27, #29, #30, and #31 for all inspector
-  targets, all 18 pinned actions, MySQL/MariaDB, operations controls,
-  and differential staging proof. The runtime
+  in #43. Remaining: complete #24, #26, #27, #30, and #31 for inspector
+  targets, all 18 pinned actions, configuration and operations controls, and
+  differential staging proof. The runtime
   matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact current boundary.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
-  #24–#31, #43, and #54. The current registry is `m8.4.0`; four action mappings
-  and four configuration mappings remain unresolved. Issue #27 is decomposed into #73 (projectile outcomes),
+  #24–#28, #30–#31, #43, and #54. Issue #29 is delivered in PR #79, including
+  SQLite/MariaDB/MySQL storage and configurable optional indexes. The current
+  registry is `m8.4.0`; four action mappings and four configuration mappings
+  remain unresolved. Issue #27 is decomposed into #73 (projectile outcomes),
   #74 (block interaction outcomes), #75 (entity interaction outcomes), and #76
   (Ender action writers and deltas). Compatibility artifacts remain supported
   until the M8 gate and the native-only cutover evidence pass.
