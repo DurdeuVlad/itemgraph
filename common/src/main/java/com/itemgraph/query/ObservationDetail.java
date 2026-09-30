@@ -3,12 +3,11 @@ package com.itemgraph.query;
 /**
  * One fully resolved {@code ig_observations} row.
  *
- * <p><b>This is OBSERVED evidence.</b> The event fields come from one raw source row;
+ * <p>The event fields come from one raw source row;
  * {@link #sourceGroup()} is derived metadata that relates cross-source copies without
  * merging or discarding either raw observation. Nothing in this record is reconstructed,
- * scored or guessed. That is why {@link #kindLabel()} is a constant: an observation can
- * never be anything other than observed, and the display layer must never relabel one as
- * an inference.
+ * scored or guessed. A disposition can mark retained raw evidence as unresolved and
+ * excluded from current flow claims; it does not change or erase the original observation.
  *
  * @param id              {@code ig_observations.id}, the value {@code /ig event} takes
  * @param sourceType      originating evidence source, e.g. {@code GRIEFLOGGER}
@@ -37,7 +36,8 @@ public record ObservationDetail(
         String itemEntityUuid,
         Long timestampEndMs,
         String captureType,
-        SourceGroup sourceGroup
+        SourceGroup sourceGroup,
+        String dispositionReason
 ) {
 
     public record SourceGroup(
@@ -64,7 +64,29 @@ public record ObservationDetail(
             String itemEntityUuid
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint, actionType,
-                amount, correlatedAtMs, correlationStatus, itemEntityUuid, null, null, null);
+                amount, correlatedAtMs, correlationStatus, itemEntityUuid, null, null, null, null);
+    }
+
+    public ObservationDetail(
+            long id,
+            String sourceType,
+            Long sourceEventId,
+            long timestampMs,
+            NodeRef origin,
+            NodeRef destination,
+            FingerprintRef fingerprint,
+            String actionType,
+            int amount,
+            Long correlatedAtMs,
+            String correlationStatus,
+            String itemEntityUuid,
+            Long timestampEndMs,
+            String captureType,
+            SourceGroup sourceGroup
+    ) {
+        this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
+                actionType, amount, correlatedAtMs, correlationStatus, itemEntityUuid,
+                timestampEndMs, captureType, sourceGroup, null);
     }
 
     public ObservationDetail(
@@ -81,7 +103,7 @@ public record ObservationDetail(
             String correlationStatus
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
-                actionType, amount, correlatedAtMs, correlationStatus, null, null, null, null);
+                actionType, amount, correlatedAtMs, correlationStatus, null, null, null, null, null);
     }
 
     public ObservationDetail(
@@ -97,11 +119,11 @@ public record ObservationDetail(
             Long correlatedAtMs
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
-                actionType, amount, correlatedAtMs, null, null, null, null, null);
+                actionType, amount, correlatedAtMs, null, null, null, null, null, null);
     }
 
-    /** Always {@code OBSERVED}. See the class javadoc. */
+    /** Retired pre-use quantity rows remain visible as unresolved evidence. */
     public String kindLabel() {
-        return "OBSERVED";
+        return dispositionReason == null ? "OBSERVED" : "UNRESOLVED";
     }
 }

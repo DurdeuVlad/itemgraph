@@ -174,7 +174,7 @@ public final class QueryFormatter {
     /** Full detail view for {@code /ig event}. */
     public static List<String> formatEvent(ObservationDetail obs) {
         List<String> lines = new ArrayList<>();
-        lines.add(PREFIX + "=== OBSERVATION #" + obs.id() + " [OBSERVED] ===");
+        lines.add(PREFIX + "=== OBSERVATION #" + obs.id() + " [" + obs.kindLabel() + "] ===");
         lines.addAll(observationBody(obs, "  "));
         lines.add("  This row is raw evidence derived from a single source event. It is never inferred.");
         return lines;
@@ -204,6 +204,10 @@ public final class QueryFormatter {
         lines.add(indent + "source:      " + obs.sourceType()
                 + (obs.sourceEventId() != null ? " event#" + obs.sourceEventId() : " (no source event id)"));
         lines.add(indent + "action:      " + obs.actionType() + "  amount: " + obs.amount() + "x");
+        if (obs.dispositionReason() != null) {
+            lines.add(indent + "evidence:    excluded from current item flow; " + obs.dispositionReason());
+            lines.add(indent + "quantity:    historical callback amount is not proof of a transfer");
+        }
         lines.add(indent + "item:        " + obs.fingerprint().describeFull());
         lines.add(indent + "origin:      " + node(obs.origin()));
         lines.add(indent + "destination: " + node(obs.destination()));

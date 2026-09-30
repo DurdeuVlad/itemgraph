@@ -106,6 +106,18 @@ EXPECTED_SOURCE_FILES = tuple(sorted(SOURCE_BASE_URL + path for path in EXPECTED
 # CHAT and COMMAND are published feature rows in the source database but are
 # not members of the three audited source action enums.
 EXPECTED_SOURCE_CAPABILITIES = set(EXPECTED_SOURCE_ACTIONS) | {"CHAT", "COMMAND"}
+EXPECTED_ENTITY_INTERACTION_OUTCOME_MODEL = {
+    "attempt_event": "INTERACT_ENTITY",
+    "handled_method_result_event": "INTERACT_ENTITY_COMPLETED",
+    "denied_event": "INTERACT_ENTITY_DENIED",
+    "unresolved_event": "INTERACT_ENTITY_UNRESOLVED",
+    "method_result_boundaries": ["ArmorStand.interactAt", "Entity.interact"],
+    "method_result_target_predicate": "target instanceof ArmorStand",
+    "unsupported_method_result_support": "callback_only",
+    "unsupported_method_result_reason_code": "ENTITY_CLASS_UNSUPPORTED_FOR_RESULT",
+    "callback_level_outcomes_remain_recordable": True,
+    "equipment_or_item_movement_claimed": False,
+}
 # The action rows are a compatibility contract, not merely a vocabulary list.
 # Keep the expected mapping here so a registry edit cannot silently change the
 # evidence or quantity semantics while retaining the same action names.
@@ -256,6 +268,11 @@ def validate_registry(registry: dict[str, Any]) -> None:
     require(
         extension_action_counts == Counter(EXPECTED_EXTENSION_ACTION_CONTRACT.keys()),
         "registry ItemGraph-only actions are incomplete, duplicated, or have an extra value",
+    )
+    entity_interaction = next(row for row in actions if row.get("grieflogger") == "INTERACT_ENTITY")
+    require(
+        entity_interaction.get("itemgraph_outcome_model") == EXPECTED_ENTITY_INTERACTION_OUTCOME_MODEL,
+        "INTERACT_ENTITY outcome model must distinguish attempts/results and retain the stable unsupported-target reason",
     )
     allowed_statuses = set(registry.get("statuses", []))
     require(allowed_statuses == {"compatible", "extended", "unsupported", "unresolved"}, "registry status vocabulary changed")

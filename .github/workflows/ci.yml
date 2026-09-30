@@ -85,4 +85,4 @@ jobs:
           ITEMGRAPH_TEST_MYSQL_URL: jdbc:mariadb://127.0.0.1:3307/itemgraph?allowPublicKeyRetrieval=true
           ITEMGRAPH_TEST_MYSQL_USER: itemgraph
           ITEMGRAPH_TEST_MYSQL_PASSWORD: itemgraph
-        run: ./gradlew :neoforge:test :fabric:test
+        run: ./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest

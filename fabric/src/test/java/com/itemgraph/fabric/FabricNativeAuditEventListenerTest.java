@@ -14,6 +14,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -40,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
@@ -52,6 +55,41 @@ class FabricNativeAuditEventListenerTest {
     @AfterEach
     void clearInspectionState() {
         inspections.clear();
+    }
+
+    @Test
+    void entityAttemptCarriesTargetUuidAndDoesNotClaimCompletion() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        ArmorStand target = mock(ArmorStand.class);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.blockPosition()).thenReturn(new BlockPos(1, 70, 2));
+        when(target.getUUID()).thenReturn(targetUuid);
+        doReturn(EntityType.ARMOR_STAND).when(target).getType();
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            FabricNativeAuditEventListener.recordEntityInteractionAttempt(
+                    player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        var event = captured.getValue();
+        assertEquals("INTERACT_ENTITY", event.eventType());
+        assertEquals("minecraft:armor_stand", event.subjectId());
+        assertEquals("outcome=attempt hand=main_hand target_uuid=" + targetUuid
+                + " target_support=armor_stand_method_result"
+                + " completion=armor_stand_return_hook", event.detail());
+        assertEquals("minecraft:overworld", event.levelName());
     }
 
     @Test

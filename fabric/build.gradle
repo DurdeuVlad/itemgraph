@@ -41,6 +41,20 @@ loom {
     }
 }
 
+fabricApi {
+    configureTests {
+        createSourceSet = true
+        modId = 'itemgraph-gametest'
+        enableGameTests = true
+        enableClientGameTests = false
+        eula = true
+    }
+}
+
+tasks.named('compileGametestJava') {
+    source project(':common').fileTree('src/gametest/java')
+}
+
 tasks.withType(JavaCompile).configureEach {
     source project(':common').sourceSets.main.allSource
 }
@@ -55,7 +69,8 @@ tasks.named('processResources', ProcessResources) {
             mod_license: rootProject.mod_license,
             minecraft_version: rootProject.minecraft_version,
             fabric_minecraft_version_range: rootProject.fabric_minecraft_version_range,
-            fabric_loader_version: rootProject.fabric_loader_version
+            fabric_loader_version: rootProject.fabric_loader_version,
+            fabric_api_version: rootProject.fabric_api_version
     ])
     filesMatching('fabric.mod.json') {
         expand(inputs.properties)

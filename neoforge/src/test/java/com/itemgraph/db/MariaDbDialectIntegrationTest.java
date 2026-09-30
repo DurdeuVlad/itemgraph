@@ -2,6 +2,7 @@ package com.itemgraph.db;
 
 import com.itemgraph.db.migration.MigrationRunner;
 import com.itemgraph.db.migration.V5__ContainerFlowTopology;
+import com.itemgraph.db.migration.V20__UnverifiedArmorStandInteractionEvidence;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.GriefLoggerAdapter;
 import com.itemgraph.ingest.GriefLoggerHistoricalImporter;
@@ -97,6 +98,10 @@ class MariaDbDialectIntegrationTest {
             assertEquals(DatabaseDialect.MYSQL_MARIADB, DatabaseDialect.fromConnection(conn));
             assertEquals(MigrationRunner.LATEST_VERSION,
                     MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
+            // The V5 archive check deletes active observations. Run it before inserting
+            // the V20 disposition fixture, which intentionally holds an FK to its row.
+            assertPopulatedLegacyObservationArchive(conn);
+            assertLegacyArmorStandDispositionIsPortable(conn);
             assertEquals("longtext", columnDataType(conn, "ig_grieflogger_row_supersessions", "source_key"),
                     "raw imported keys must not be truncated by the bounded supersession index");
             assertEquals(64L, columnCharacterLength(conn,
@@ -204,7 +209,99 @@ class MariaDbDialectIntegrationTest {
             }
 
             assertHistoricalImportAndLookup(endpoint, conn, tempDir);
-            assertPopulatedLegacyObservationArchive(conn);
+        }
+    }
+
+    private static void assertLegacyArmorStandDispositionIsPortable(Connection conn) throws Exception {
+        long stamp = System.currentTimeMillis();
+        long playerId;
+        long standId;
+        long fingerprintId;
+        try (PreparedStatement node = conn.prepareStatement(
+                "INSERT INTO ig_nodes (node_type, owner_uuid, level_id) VALUES ('PLAYER', ?, 'minecraft:overworld')",
+                Statement.RETURN_GENERATED_KEYS)) {
+            node.setString(1, "migration-audit-player-" + stamp);
+            node.executeUpdate();
+            playerId = generatedKey(node);
+        }
+        try (PreparedStatement node = conn.prepareStatement(
+                "INSERT INTO ig_nodes (node_type, level_id, x, y, z) "
+                        + "VALUES ('ARMOR_STAND', 'minecraft:overworld', ?, 64, 0)",
+                Statement.RETURN_GENERATED_KEYS)) {
+            node.setDouble(1, stamp % 100000);
+            node.executeUpdate();
+            standId = generatedKey(node);
+        }
+        try (PreparedStatement fingerprint = conn.prepareStatement(
+                "INSERT INTO ig_item_fingerprints (item_id, fingerprint_hash) VALUES (?, ?)",
+                Statement.RETURN_GENERATED_KEYS)) {
+            fingerprint.setString(1, "minecraft:iron_helmet");
+            fingerprint.setString(2, "v20-legacy-armor-stand-" + stamp);
+            fingerprint.executeUpdate();
+            fingerprintId = generatedKey(fingerprint);
+        }
+
+        long observationId;
+        try (PreparedStatement observation = conn.prepareStatement("""
+                INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id,
+                    fingerprint_id, action_type, amount, raw_data)
+                VALUES ('ITEMGRAPH_INTERNAL', ?, ?, ?, ?, 'EQUIP_ARMOR_STAND', 1, ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            observation.setLong(1, stamp);
+            observation.setLong(2, playerId);
+            observation.setLong(3, standId);
+            observation.setLong(4, fingerprintId);
+            observation.setBytes(5, new byte[]{1, 2, 3});
+            observation.executeUpdate();
+            observationId = generatedKey(observation);
+        }
+        long edgeId;
+        try (PreparedStatement edge = conn.prepareStatement("""
+                INSERT INTO ig_inferred_edges (from_node_id, to_node_id, fingerprint_id, amount,
+                    time_start, time_end, confidence, explanation, created_at)
+                VALUES (?, ?, ?, 1, ?, ?, 0.5, 'legacy unverified edge', ?)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            edge.setLong(1, playerId);
+            edge.setLong(2, standId);
+            edge.setLong(3, fingerprintId);
+            edge.setLong(4, stamp);
+            edge.setLong(5, stamp);
+            edge.setLong(6, stamp);
+            edge.executeUpdate();
+            edgeId = generatedKey(edge);
+        }
+        try (PreparedStatement allocation = conn.prepareStatement("""
+                INSERT INTO ig_edge_allocations (edge_id, observation_id, allocation_role, amount)
+                VALUES (?, ?, 'SOURCE', 1)
+                """)) {
+            allocation.setLong(1, edgeId);
+            allocation.setLong(2, observationId);
+            allocation.executeUpdate();
+        }
+
+        new V20__UnverifiedArmorStandInteractionEvidence().apply(conn, DatabaseDialect.MYSQL_MARIADB);
+        try (PreparedStatement check = conn.prepareStatement("""
+                SELECT o.correlation_status, disposition.reason_code, edge.edge_state
+                FROM ig_observations o
+                JOIN ig_observation_dispositions disposition ON disposition.observation_id = o.id
+                JOIN ig_inferred_edges edge ON edge.id = ?
+                WHERE o.id = ?
+                """)) {
+            check.setLong(1, edgeId);
+            check.setLong(2, observationId);
+            try (ResultSet row = check.executeQuery()) {
+                assertTrue(row.next(), "V20 should disposition legacy evidence on MySQL/MariaDB");
+                assertEquals("CLOSED_UNRESOLVED", row.getString(1));
+                assertEquals(V20__UnverifiedArmorStandInteractionEvidence.REASON_CODE, row.getString(2));
+                assertEquals("SUPERSEDED_UNVERIFIED_EVIDENCE", row.getString(3));
+            }
+        }
+    }
+
+    private static long generatedKey(PreparedStatement statement) throws Exception {
+        try (ResultSet keys = statement.getGeneratedKeys()) {
+            assertTrue(keys.next(), "insert must yield a generated key");
+            return keys.getLong(1);
         }
     }
 

@@ -33,7 +33,8 @@ public final class UnifiedEvidenceQueryService {
     public static final List<String> ACTION_TYPES = List.of(
             "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_ATTEMPT",
             "COMMAND_EXECUTED", "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK_ATTEMPT",
-            "INTERACT_ENTITY", "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "ADD_ITEM", "REMOVE_ITEM",
+            "INTERACT_ENTITY", "INTERACT_ENTITY_COMPLETED", "INTERACT_ENTITY_DENIED",
+            "INTERACT_ENTITY_UNRESOLVED", "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "ADD_ITEM", "REMOVE_ITEM",
             "DROP_ITEM", "PICKUP_ITEM", "CRAFT", "SMELT", "ANVIL_RENAME", "ANVIL_REPAIR", "BREAK_ITEM",
             "CONSUME_ITEM", "HOPPER_INSERT", "HOPPER_EXTRACT", "DEATH_DROP",
             "PROJECTILE_SPAWN_ACCEPTED",
@@ -335,6 +336,9 @@ public final class UnifiedEvidenceQueryService {
                 LEFT JOIN ig_nodes dest ON dest.id = o.target_node_id
                 LEFT JOIN ig_item_fingerprints f ON f.id = o.fingerprint_id
                 WHERE 1 = 1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ig_observation_dispositions d WHERE d.observation_id = o.id
+                  )
                 """);
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, OBSERVATION_ACTION, filters.eventTypes(), true);

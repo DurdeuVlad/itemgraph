@@ -210,7 +210,7 @@ Implemented:
 
 - Authoritative `ItemEntity` UUID tracking (`ItemEntityTracker`, `ItemEntityEventListener`, schema V8 `item_entity_uuid` column), with drops recorded only after `ItemEntity.isAddedToLevel()` confirms world insertion.
 - Unique `ItemEntity` UUID correlation boost: continuity matching assigns 0.9990 confidence only when one spatial/time candidate matches and records the entity-continuity explanation.
-- Armor stand equip/unequip supplemental tracking (`ArmorStandEventListener`).
+- Armor stand consuming, denied (`FAIL`), and method-boundary `PASS` results are captured as raw evidence at the `ArmorStand.interactAt` override and inherited `Entity.interact` fallback return boundaries; NeoForge canceled callbacks are retained as denied evidence. NeoForge records the `EntityInteractSpecific` attempt before either method, so the generic fallback callback does not duplicate it. No item-flow quantity is inferred from these outcomes.
 - User experience query extensions:
   - `/ig trace player <playerName>`
   - `/ig trace container <x> <y> <z>`
@@ -219,7 +219,7 @@ Implemented:
 Acceptance:
 
 - Item entity continuity verified on live staging server with 0.9990 confidence.
-- Armor stand equip/unequip events observed and traceable.
+- Handled, denied, unresolved generic-method-PASS, and NeoForge-canceled armor-stand interactions are recorded as raw audit events; no equip/unequip quantity or inventory transfer is claimed from the click.
 - Player and container timelines reconstructed cleanly.
 
 ## Phase 9 — Transformations [COMPLETED]

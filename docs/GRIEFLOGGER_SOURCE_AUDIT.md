@@ -78,6 +78,17 @@ remaining native-only differential-replay proof as unresolved under #31.
   checks as the pinned source and `getIntractableBlocks()` returns an empty
   list. This confirms the attempt-only contract and vanilla target set for the
   exact NeoForge release. It does not prove that modded blocks are supported.
+- The same exact NeoForge 1.21.1 jar was inspected for entity interactions.
+  `com.daqem.grieflogger.event.EntityEvents.registerEvents()` registers only
+  `LIVING_DEATH`; its entity writer records `KILL_ENTITY` for player-caused
+  living-entity deaths. The jar has no `MixinArmorStand` class and its mixin
+  configuration has no armor-stand interaction hook. Its fixture `block`
+  action list contains `BREAK_BLOCK`, `PLACE_BLOCK`, `INTERACT_BLOCK`, and
+  `KILL_ENTITY`, with no `INTERACT_ENTITY` action ID. Therefore the exact
+  GriefLogger 1.2.10-1.21.1 release does not write entity-interaction evidence.
+  This was confirmed by `jar tf`, read-only JSON extraction, and `javap -p -c`
+  on the checksum-verified jar (`fd252bc5466bb94e38d2386bafb9926b798bc250b26e1a3aa80f878ebccbc4a5`);
+  the jar was not loaded or executed.
 - Chat and command rows are stored but excluded from GriefLogger's in-game lookup.
   ItemGraph intentionally exposes them through its own permission-checked audit lookup.
 
@@ -128,7 +139,43 @@ Important semantics and limits:
   worker retries idempotent through the source/event unique index. Accepted
   spawn evidence is emitted from the `ServerLevel.addFreshEntity` return value,
   so a cancellable join event cannot be reported as accepted.
-- Entity interaction is implemented for armor stands only.
+- The separate pinned GriefLogger 26.2 source adds an armor-stand mixin that
+  writes `INTERACT_ENTITY` only when `ArmorStand.interact` returns `SUCCESS` or
+  `SUCCESS_SERVER`. This source behavior is not present in the exact 1.21.1
+  release artifact above and must not be represented as released-binary parity.
+  ItemGraph's mixins target the `ArmorStand.interactAt` override and inherited
+  `Entity.interact` fallback. `ArmorStand` overrides `interactAt`, so a hook on
+  `Entity.interactAt` would miss the override. NeoForge's 1.21.1 interaction
+  pipeline posts `EntityInteractSpecific` before `Entity#interactAt`; if that
+  result is nonterminal, it posts `EntityInteract` before fallback
+  `Entity#interact`. ItemGraph records one attempt at the specific event and
+  records a generic callback only when it is canceled. These callbacks provide
+  the attempt boundary; the two method return hooks provide terminal result
+  evidence. GriefLogger uses the same method-return pattern in its pinned source
+  mixin at [`ArmorStand.interact` RETURN](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/mixin/MixinArmorStand.java).
+  Fabric documents that `UseEntityCallback` is hooked before the spectator check
+  and that `PASS` falls through to later processing in the [1.21.1 API
+  docs](https://maven.fabricmc.net/docs/fabric-api-0.110.0%2B1.21.1/net/fabricmc/fabric/api/event/player/UseEntityCallback.html).
+- The project's resolved Fabric API is `0.116.12+1.21.1` (`fabric-events-interaction-v0`
+  `0.7.14+ba9dae0619`). Its [`UseEntityCallback` source](https://github.com/FabricMC/fabric-api/blob/0.116.12%2B1.21.1/fabric-events-interaction-v0/src/main/java/net/fabricmc/fabric/api/event/player/UseEntityCallback.java)
+  constructs an array-backed event; its [server network handler mixin](https://github.com/FabricMC/fabric-api/blob/0.116.12%2B1.21.1/fabric-events-interaction-v0/src/main/java/net/fabricmc/fabric/mixin/event/interaction/ServerPlayNetworkHandlerMixin.java)
+  calls the aggregate invoker and stops vanilla processing for a non-`PASS` result.
+  Because listeners short-circuit in registration order, a listener on the same event
+  cannot see an earlier listener's result if that listener prevents it from running.
+  ItemGraph decorates the aggregate invoker where the event is constructed, snapshots
+  actor, target, position, hand, and held-item fingerprint before listeners execute,
+  calls the original invoker once, stores its final non-`PASS` result, and returns it unchanged.
+  This preserves Fabric's ordering/short-circuit contract and avoids replaying callbacks.
+  Fabric API issue [#1870](https://github.com/FabricMC/fabric-api/issues/1870) documents
+  the callback duplication risk of handling the same interaction at multiple hooks;
+  ItemGraph uses one aggregate boundary for the final callback result. Tests cover
+  early and late short-circuits, including a listener mutating the held stack after the
+  pre-callback snapshot. `fabric.mod.json` requires the exact Fabric API version resolved
+  by this project build because the redirect targets that API initializer. Isolated
+  Fabric and NeoForge GameTests now dispatch server interaction packets through each
+  loader's handler and verify durable attempt/result rows; they also invoke the
+  inherited return hook directly. These mock-player tests do not cover live client
+  socket transport or packet-level denied/canceled/repeated interactions.
 - The interactable block list is hard-coded.
 - Interaction rows can be deleted when a block is broken, so the source is not an
   append-only forensic ledger.
@@ -163,6 +210,11 @@ GriefLogger classes or copying its implementation.
 6. Treat this pinned 26.2 source as a behavior research fixture. Verify the actual
    GriefLogger `1.2.10-1.21.1` release before claiming binary compatibility.
 
-For comparison, CoreProtect's typed asynchronous lookup/API model is a better design
-reference for stable integration boundaries than GriefLogger's internal services:
-[commands](https://docs.coreprotect.net/commands/), [API](https://docs.coreprotect.net/api/version/v13/).
+For comparison, CoreProtect API v13 provides a stable typed lookup surface with
+separate result types such as `EntityResult` and `BlockResult`, plus shared typed
+filters. Its database lookups are synchronous on the caller thread; the official
+documentation tells integrations to dispatch searches asynchronously and capture
+live world state on the server thread first. ItemGraph follows the same separation
+between typed query results and game-thread capture, while enforcing its own bounded
+asynchronous query worker rather than relying on every caller to schedule correctly:
+[CoreProtect API v13](https://docs.coreprotect.net/api/version/v13/).

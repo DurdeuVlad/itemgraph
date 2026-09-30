@@ -123,6 +123,41 @@ class AuditEventQueryServiceTest {
     }
 
     @Test
+    void completedArmorStandInteractionHasSeparateSelectableEventType() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement(
+                "INSERT INTO ig_audit_events (event_type, timestamp_ms, player_name, subject_id, detail) "
+                        + "VALUES ('INTERACT_ENTITY_COMPLETED', 2, 'Alex', 'minecraft:armor_stand', "
+                        + "'outcome=handled result=success hand=main_hand target_uuid=stand-1')")) {
+            insert.executeUpdate();
+        }
+
+        List<AuditEventDetail> interactions = service.find(
+                conn, "INTERACT_ENTITY_COMPLETED", "Alex", QueryWindow.unbounded(), 10);
+
+        assertEquals(1, interactions.size());
+        assertEquals("INTERACT_ENTITY_COMPLETED", interactions.get(0).eventType());
+        assertEquals("minecraft:armor_stand", interactions.get(0).subjectId());
+        assertEquals("outcome=handled result=success hand=main_hand target_uuid=stand-1",
+                interactions.get(0).detail());
+    }
+
+    @Test
+    void deniedArmorStandInteractionHasSeparateSelectableEventType() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement(
+                "INSERT INTO ig_audit_events (event_type, timestamp_ms, player_name, subject_id, detail) "
+                        + "VALUES ('INTERACT_ENTITY_DENIED', 3, 'Alex', 'minecraft:armor_stand', "
+                        + "'outcome=denied result=fail hand=main_hand target_uuid=stand-2')")) {
+            insert.executeUpdate();
+        }
+
+        List<AuditEventDetail> interactions = service.find(
+                conn, "INTERACT_ENTITY_DENIED", "Alex", QueryWindow.unbounded(), 10);
+        assertEquals(1, interactions.size());
+        assertEquals("INTERACT_ENTITY_DENIED", interactions.get(0).eventType());
+        assertTrue(interactions.get(0).detail().contains("outcome=denied"));
+    }
+
+    @Test
     void ordinaryLookupShowsWhyNativeAuditEventWasSuperseded() throws Exception {
         try (PreparedStatement insert = conn.prepareStatement(
                 "INSERT INTO ig_audit_events (event_type, timestamp_ms, detail) VALUES (?, ?, ?)")) {

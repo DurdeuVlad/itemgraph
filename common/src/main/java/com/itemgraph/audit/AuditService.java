@@ -127,7 +127,8 @@ public class AuditService {
         int invalidEdgeStates = (int) count(conn, """
             SELECT COUNT(*) FROM ig_inferred_edges
             WHERE edge_state IS NULL
-               OR edge_state NOT IN ('ACTIVE', 'SUPERSEDED_SOURCE_DUPLICATE', 'SUPERSEDED_SOURCE_AMBIGUITY')
+               OR edge_state NOT IN ('ACTIVE', 'SUPERSEDED_SOURCE_DUPLICATE', 'SUPERSEDED_SOURCE_AMBIGUITY',
+                                     'SUPERSEDED_UNVERIFIED_EVIDENCE')
         """);
         statusMismatches += invalidEdgeStates;
         if (invalidEdgeStates > 0) {

@@ -218,6 +218,48 @@ Expected:
 
 - armor-stand event captured if supported
 - path reconstructed
+
+## Entity interaction cross-loader query/output test (2026-10-01)
+
+NeoForge `EntityInteractionGameTests.serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome`
+and Fabric `EntityInteractionGameTests.serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome`
+send the same cow and armor-stand interaction packets through each loader's server
+handler. After the worker flushes, both tests read `ig_audit_events` through the
+shared `AuditEventQueryService` using a read-only connection and assert matching
+actor UUID/name, dimension, exact block position, entity subject, timestamp presence,
+target UUID, held-stack details, event counts, and `QueryFormatter` console output.
+The database is also inspected directly to ensure one cow attempt, two armor-stand
+packet attempts, two `interact_at` completions, and one direct inherited `Entity.interact`
+unresolved result persist without duplicate method-result rows. Each loader snapshots every
+`ig_observations` column in stable `id` order through a read-only connection before
+dispatch and asserts that the complete encoded row set is unchanged after the replay.
+
+This is isolated server GameTest evidence using a mock player and direct invocation
+of the server interaction handler. The shared conformance fixture checks the
+same event-type multiset and formatter contract in both loader runs; it invokes
+`QueryFormatter` directly rather than dispatching `/ig lookup`. It does not cover
+real client transport, a full Minecraft server restart, or live canceled/repeated
+interactions. The persistence restart fixture for an `INTERACT_ENTITY_DENIED` event is
+`InternalObservationServiceTest.entityInteractionOutcomeSurvivesDatabaseRestartWithoutQuantityObservation`.
+
+## Entity interaction differential and conservation oracle (2026-10-01)
+
+The differential baseline is intentionally split by source authority:
+
+| Baseline/replay | Expected and observed result | Comparison conclusion |
+| --- | --- | --- |
+| Exact GriefLogger `1.2.10-1.21.1` release fixture and checksum-verified NeoForge jar | No `INTERACT_ENTITY` action ID or entity-interaction writer exists in the published jar. | Published-binary parity for entity clicks is absent; ItemGraph must not claim it. |
+| Pinned GriefLogger `26.2` source at commit `d315098b3f37317a5cddfbd75086f4f912f16a83` | Its armor-stand return hook emits `INTERACT_ENTITY` only for `SUCCESS` or `SUCCESS_SERVER`. The source is inspected but is not loaded or executed as a test dependency. | This is a newer source reference, not the `1.2.10-1.21.1` release contract. |
+| ItemGraph `1.21.1` NeoForge and Fabric isolated GameTests | A cow produces one callback-only attempt. Armor-stand boot equip and empty-hand unequip packets each preserve one attempt and one handled `interact_at` result. Separately, each test invokes inherited `ArmorStand.interact` directly, asserts its `PASS` return, and expects one `INTERACT_ENTITY_UNRESOLVED` row with `method=interact`; that direct invocation is the method-hook check and is not counted as a packet replay. Both loader runs assert the same target support, held-stack identity/count, normalized query fields, and formatted output. | Attempts and method results are ItemGraph extensions; `EntityInteractionEvidence` does not claim the newer source has the same attempt/result schema. |
+| ItemGraph quantity-flow ledger before/after those clicks | Both loader tests snapshot every `ig_observations` column in stable `id` order through a read-only connection before packet dispatch and require the complete encoded row set to be identical after the audit worker flush. | The replay neither adds nor mutates quantity rows; result events describe method return values only. |
+
+This is a source-and-runtime differential report, not an executable GriefLogger
+side-by-side test: the published artifact has no entity-interaction writer, and
+the pinned 26.2 source was not loaded into either replay. The compatibility
+registry therefore keeps this mapping unresolved against the release and labels
+the richer behavior as an ItemGraph extension. The NeoForge and Fabric runs are
+local isolated server GameTests with mock players and direct server-handler
+dispatch, as directed by the operator; they are not live-client transport tests.
 - explanation available
 
 ## Coffer/modded inventory test
@@ -309,7 +351,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `AuditServiceTest` | active-edge conservation, non-positive quantities, orphaned allocations, invalid endpoints, correlation status, source-group consistency, and invalid edge-state detection (6 tests) |
 | `QuantityFlowTest` | stack splits/merges, partial transfers, windows, capacity limits, competing candidates, idempotency, restart continuity, and rollback atomicity (19 tests) |
 | `TransformationEventListenerTest` | anvil rename/repair, crafting matrix fallback, smelting, client guards, and empty-stack handling (12 tests) |
-| `ArmorStandEventListenerTest` | Phase 8B armor stand interactions: main-hand/off-hand equip, empty-hand unequip, empty stand handling, non-armor-stand and client-side guards (7 tests) |
+| `EntityInteractionEvidenceTest` | Armor stand method outcomes, target UUID, actor/position/dimension, and client-side suppression; interaction attempts are queried separately from completed results |
 | `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, 2,000-record worker persistence, shutdown flush and failure accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
 | `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
@@ -671,4 +713,17 @@ player interaction, queue saturation, conservation, or live supersession matrix.
 The implementation follows the observed GriefLogger cleanup behavior at the presentation boundary while keeping evidence immutable: GriefLogger removes old interaction rows after an interactable block/door break; ItemGraph records `BLOCK_REMOVED_AT_TARGET` links in its own schema V19 tables and retains the native row, imported projection, and immutable provenance. Source reference: [`RemoveBlockInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveBlockInteractionsEvent.java) and [`RemoveDoorInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveDoorInteractionsEvent.java).
 
 **Still required before closing #26:** run the isolated NeoForge + ItemGraph client interaction matrix for ordinary/function blocks, single/double chests, doors, empty/missing history, block removal, door removal, repeated clicks, and a deliberately saturated/rejected query queue. Confirm no ItemGraph SQL runs on the server thread; verify item and container contents do not change on accepted inspection; inspect raw and superseded rows read-only. The dedicated-server startup/migration smoke test above is complete; it did not exercise a connected player. No production or staging instance is involved.
+
+## M8 issue #75: entity interaction outcomes
+
+Automated tests cover these server-side boundaries:
+
+- `EntityInteractionEvidenceTest` verifies consuming results become `INTERACT_ENTITY_COMPLETED`, `FAIL` becomes `INTERACT_ENTITY_DENIED`, the fallback `Entity.interact` `PASS` becomes `INTERACT_ENTITY_UNRESOLVED` because later entity-use steps may still run; the intermediate `ArmorStand.interactAt` `PASS` does not create a second method-result row, missing target UUIDs are omitted, attempt metadata contains only held item ID/count/fingerprint, non-armor targets are rejected by the armor-stand result recorder, and client-side calls do not emit evidence.
+- `NativeAuditEventListenerTest` verifies the NeoForge armor-stand specific callback records one normalized attempt, canceled specific and generic callbacks are retained, canceled non-armor specifics are retained, missing target UUIDs are omitted, and the non-canceled generic armor-stand event path does not duplicate the attempt.
+- `FabricNativeAuditEventListenerTest` verifies Fabric attempt detail uses the target UUID when available, hand, target type, position, held item metadata, and completion coverage fields. `FabricUseEntityCallbackAuditTest` verifies aggregate callback order and one final non-`PASS` result when an earlier callback short-circuits before ItemGraph or a later callback returns a handled result after ItemGraph returns `PASS`.
+- NeoForge `:neoforge:runGameTestServer` and Fabric `:fabric:runGameTest` run equivalent isolated server GameTests with the ItemGraph loader integration enabled. Each creates a mock server player, records the full read-only `ig_observations` row snapshot, sends `ServerboundInteractPacket` instances through `ServerGamePacketListenerImpl.handleInteract` for an unsupported cow and an armor stand, equips diamond boots, then removes them with an empty hand. Each test separately calls inherited `ArmorStand.interact` directly and checks its `PASS` result to exercise the method return hook; that call is not attributed to a packet. Each test verifies the resulting armor-stand equipment state, stops and joins the ItemGraph worker to flush pending writes, opens ItemGraph's audit database read-only, and requires one cow attempt plus exactly two armor-stand packet attempts, two handled `interactAt` results, and one unresolved direct `interact` method result, with no duplicate rows. It requires every `ig_observations` row and column to remain identical before and after. The tests assert held-stack details and hand on attempts, `target_support=callback_only` plus `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT` for cow evidence, and `target_support=armor_stand_method_result` for armor-stand evidence. The shared fixture verifies the same normalized query rows and formatter output in both loader runs. NeoForge test classes and structure data are excluded from both NeoForge jar tasks; Fabric tests use Loom's separate `gametest` source set and test mod. CI runs both server GameTests beside both loader unit suites without packaging distributable mod jars. This validates both local packet-to-callback-to-durable-ledger paths and the direct return-hook boundary; it does not validate a live client's socket transport.
+- `InternalObservationServiceTest.entityInteractionOutcomeSurvivesDatabaseRestartWithoutQuantityObservation` submits the denied result through the bounded audit queue, calls `stop()` without starting a worker (covering its synchronous shutdown-flush path), closes and reopens the ItemGraph SQLite database, verifies the immutable row and held fingerprint remain queryable, and asserts that no `ig_observations` quantity row was written. This does not cover worker-thread interrupt/join or a server restart.
+- `V20UnverifiedArmorStandInteractionEvidenceTest` upgrades a simulated v19 database, retains raw legacy callbacks with a disposition, supersedes linked active edges, hides disposed evidence from current flow queries, keeps `/ig event` explicit, remains idempotent, and leaves `/ig audit` healthy. The MariaDB/MySQL contract seeds equivalent legacy evidence for hosted CI.
+
+**Runtime boundary:** the operator asked to skip visible-client clicks. Both local loader GameTests directly invoke the actual server packet handler with embedded mock players and verify armor-stand equip/unequip attempt and result rows. No real client connection, whole-server restart, or live denied/canceled/repeated interaction sequence was run. Denied/canceled handling, missing target UUID behavior, and restart persistence are covered by cross-loader unit/database tests, not by packet-level GameTests. MariaDB/MySQL integration cases passed in hosted CI; local endpoints remain unconfigured. The exact 1.21.1 GriefLogger release artifact has no entity-interaction writer; the pinned 26.2 source records a successful armor-stand interaction without held-item data. ItemGraph makes no item-transfer or equipment-slot claim from these method results.
 

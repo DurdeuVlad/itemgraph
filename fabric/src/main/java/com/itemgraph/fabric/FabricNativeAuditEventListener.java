@@ -1,6 +1,7 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.ingest.InternalObservationService;
+import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
@@ -109,6 +110,16 @@ public final class FabricNativeAuditEventListener {
                 "outcome=attempt");
     }
 
+    static void recordEntityInteractionAttempt(ServerPlayer player, ServerLevel level,
+                                               net.minecraft.world.InteractionHand hand, Entity entity) {
+        String completion = entity instanceof net.minecraft.world.entity.decoration.ArmorStand
+                ? "armor_stand_return_hook" : "unobserved_non_armor_entity";
+        submit("INTERACT_ENTITY", player, level, entity.blockPosition(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
+                EntityInteractionEvidence.attemptDetails(
+                        entity, hand, player.getItemInHand(hand), completion));
+    }
+
     static InteractionResult handleBlockUse(InspectionService inspections,
                                             BlockHistoryOpener blockHistoryOpener,
                                             ServerPlayer player, ServerLevel level,
@@ -174,9 +185,7 @@ public final class FabricNativeAuditEventListener {
         });
         UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
-                submit("INTERACT_ENTITY", serverPlayer, serverLevel, entity.blockPosition(),
-                        BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
-                        "outcome=attempt hand=" + hand.name().toLowerCase(java.util.Locale.ROOT));
+                recordEntityInteractionAttempt(serverPlayer, serverLevel, hand, entity);
             }
             return InteractionResult.PASS;
         });

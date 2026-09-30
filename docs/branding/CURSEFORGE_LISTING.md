@@ -93,7 +93,7 @@ Instead of assigning artificial, invasive UUIDs to every Minecraft item, ItemGra
 - **Ground Bridge Reconstruction**: Reconstructs player-to-player transfers across ground tosses and pickups within configurable correlation windows.
 - **Authoritative Entity Continuity**: Matches Minecraft `ItemEntity` UUIDs on drop and pickup, boosting transfer confidence to `0.9990`.
 - **Transformation Tracking**: Automatically links item identity shifts across **Anvil repairs & renames**, **Crafting tables**, and **Smelting furnaces**.
-- **Armor Stand & Container Integration**: Captures armor stand equipment swaps alongside standard chest, barrel, and hopper inventories.
+- **Armor Stand & Container Integration**: Records the server's completed armor-stand interaction result without claiming an item transfer; supports standard chest, barrel, and hopper inventories.
 - **Vanilla Flow Browser (`/ig gui`)**: Opens a six-row chest GUI for item, player, or container timelines on a vanilla client; menu interactions are display-only and cannot move items.
 - **Container Inspector (`/ig inspect`)**: Lets a moderator right-click supported containers to inspect the exact dimension/position without opening or mutating the normal inventory.
 - **Block interaction audit**: Records the same main-hand attempts on GriefLogger's supported vanilla functional blocks. These are attempt records; ItemGraph does not label a pre-use callback as a completed interaction.

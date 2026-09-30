@@ -132,6 +132,40 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void entityInteractionOutcomeSurvivesDatabaseRestartWithoutQuantityObservation() throws Exception {
+        initializeTopologyDatabase();
+        Path databasePath = tempDir.resolve("itemgraph.db");
+        assertTrue(service.submitAuditEvent(new InternalAuditEvent(
+                1234L, "INTERACT_ENTITY_DENIED", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:armor_stand",
+                "outcome=denied callback=fabric_use_entity callback_result=fail "
+                        + "reason=FABRIC_USE_ENTITY_CALLBACK_SHORT_CIRCUITED held_item=minecraft:diamond "
+                        + "held_count=1 held_fingerprint=fp-diamond", null)));
+        service.stop();
+
+        DatabaseManager.getInstance().close();
+        DatabaseManager.getInstance().initialize(databasePath);
+        conn = DatabaseManager.getInstance().getConnection();
+
+        try (PreparedStatement audit = conn.prepareStatement(
+                "SELECT event_type, player_name, subject_id, detail FROM ig_audit_events");
+             ResultSet rs = audit.executeQuery()) {
+            assertTrue(rs.next());
+            assertEquals("INTERACT_ENTITY_DENIED", rs.getString("event_type"));
+            assertEquals("Alex", rs.getString("player_name"));
+            assertEquals("minecraft:armor_stand", rs.getString("subject_id"));
+            assertTrue(rs.getString("detail").contains("callback_result=fail"));
+            assertTrue(rs.getString("detail").contains("held_fingerprint=fp-diamond"));
+            assertFalse(rs.next());
+        }
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_observations")) {
+            assertTrue(rs.next());
+            assertEquals(0, rs.getInt(1), "interaction outcomes are not item quantity transfers");
+        }
+    }
+
+    @Test
     void blockRemovalLinksEarlierInteractionsWithoutDeletingRawEvidence() throws Exception {
         initializeTopologyDatabase();
         InternalAuditEvent lowerHalfInteraction = new InternalAuditEvent(
