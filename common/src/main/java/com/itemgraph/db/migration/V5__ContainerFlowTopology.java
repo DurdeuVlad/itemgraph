@@ -23,7 +23,9 @@ import java.sql.Statement;
  * re-ingestion recomputes — so this migration clears ItemGraph's derived observation
  * layer and the per-source checkpoints, forcing the next ingestion cycle to re-read
  * every GriefLogger row through the corrected direction logic. This is the same reset
- * V4 performed for the items table, for the same reason.
+ * V4 performed for the items table, for the same reason. Before clearing those legacy
+ * rows, this migration copies them, including {@code raw_data}, into
+ * {@code ig_legacy_observation_evidence}.
  *
  * <p>Deliberately left alone, same rationale as V3 and V4:
  * <ul>
@@ -50,6 +52,7 @@ public class V5__ContainerFlowTopology implements SchemaMigration {
 
     @Override
     public void apply(Connection conn) throws SQLException {
+        LegacyObservationArchive.preserveBeforeReset(conn, getVersion());
         try (Statement stmt = conn.createStatement()) {
             stmt.execute("DELETE FROM ig_edge_evidence;");
             stmt.execute("DELETE FROM ig_inferred_edges;");

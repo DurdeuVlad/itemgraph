@@ -20,6 +20,13 @@ public class ItemGraphConfig {
     public static final ModConfigSpec.ConfigValue<String> GRIEFLOGGER_DATABASE_PATH;
     public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
     public static final ModConfigSpec.IntValue GROUND_BRIDGE_MAX_SECONDS;
+    public static final ModConfigSpec.ConfigValue<Integer> MAX_PAGE_SIZE;
+    public static final ModConfigSpec.BooleanValue SERVER_SIDE_ONLY;
+    public static final ModConfigSpec.ConfigValue<String> RAW_EVIDENCE_RETENTION;
+    public static final ModConfigSpec.ConfigValue<Integer> QUEUE_POLL_INTERVAL_MS;
+    public static final ModConfigSpec.ConfigValue<Integer> MAX_BATCH_SIZE;
+    public static final ModConfigSpec.ConfigValue<Integer> DATABASE_HEARTBEAT_INTERVAL_MS;
+    public static final ModConfigSpec.BooleanValue CAPTURE_ENABLED;
 
     /**
      * Fallback used when the NeoForge config spec is not loaded (unit tests, or a
@@ -67,6 +74,21 @@ public class ItemGraphConfig {
                 .define("debug_logging", false);
         BUILDER.pop();
 
+        BUILDER.push("ingestion");
+        QUEUE_POLL_INTERVAL_MS = BUILDER
+                .comment("Maximum idle wait between native queue polls in milliseconds; restart after changing")
+                .define("poll_interval_ms", ItemGraphOperationalSettings.DEFAULT_QUEUE_POLL_INTERVAL_MS);
+        MAX_BATCH_SIZE = BUILDER
+                .comment("Maximum native records drained from each queue in one worker batch; restart after changing")
+                .define("max_batch_size", ItemGraphOperationalSettings.DEFAULT_MAX_BATCH_SIZE);
+        BUILDER.pop();
+
+        BUILDER.push("capture");
+        CAPTURE_ENABLED = BUILDER
+                .comment("Capture new ItemGraph-native observations and audit events; restart after changing")
+                .define("enabled", true);
+        BUILDER.pop();
+
         BUILDER.push("storage");
         USE_INDEXES = BUILDER
                 .comment("Create optional non-unique ItemGraph storage indexes for faster lookups; restart after changing")
@@ -87,6 +109,28 @@ public class ItemGraphConfig {
                         "it does not make matches more certain.")
                 .defineInRange("ground_bridge_max_seconds", DEFAULT_GROUND_BRIDGE_MAX_SECONDS, 1, 86_400);
         BUILDER.pop();
+
+        BUILDER.push("query");
+        MAX_PAGE_SIZE = BUILDER
+                .comment("Maximum rows returned by any ItemGraph query; restart the server after changing")
+                .define("max_page_size", ItemGraphOperationalSettings.DEFAULT_MAX_PAGE_SIZE);
+        BUILDER.pop();
+
+        BUILDER.push("operations");
+        SERVER_SIDE_ONLY = BUILDER
+                .comment("ItemGraph only operates on the server; false is rejected at startup")
+                .define("server_side_only", true);
+        DATABASE_HEARTBEAT_INTERVAL_MS = BUILDER
+                .comment("Validate the network database connection at this interval on the ItemGraph worker; restart after changing")
+                .define("database_heartbeat_interval_ms",
+                        ItemGraphOperationalSettings.DEFAULT_DATABASE_HEARTBEAT_INTERVAL_MS);
+        BUILDER.pop();
+
+        BUILDER.push("retention");
+        RAW_EVIDENCE_RETENTION = BUILDER
+                .comment("Raw evidence retention policy. Only 'indefinite' is supported; ItemGraph never purges raw evidence")
+                .define("raw_evidence", "indefinite");
+        BUILDER.pop();
     }
 
     public static final ModConfigSpec SPEC = BUILDER.build();
@@ -103,5 +147,12 @@ public class ItemGraphConfig {
             default -> throw new IllegalArgumentException(
                     "database_backend must be sqlite or mysql_mariadb, got: " + DATABASE_BACKEND.get());
         };
+    }
+
+    /** Validates controls whose invalid values must fail startup rather than be clamped. */
+    public static ItemGraphOperationalSettings operationalSettings() {
+        return new ItemGraphOperationalSettings(MAX_PAGE_SIZE.get(), SERVER_SIDE_ONLY.get(),
+                QUEUE_POLL_INTERVAL_MS.get(), MAX_BATCH_SIZE.get(), DATABASE_HEARTBEAT_INTERVAL_MS.get(), CAPTURE_ENABLED.get(),
+                RAW_EVIDENCE_RETENTION.get());
     }
 }

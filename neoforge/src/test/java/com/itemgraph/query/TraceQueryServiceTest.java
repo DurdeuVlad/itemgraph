@@ -176,6 +176,28 @@ class TraceQueryServiceTest extends QueryTestBase {
         assertEquals(48, new java.util.HashSet<>(pagedKeys).size(), "every table row appears exactly once");
     }
 
+    @Test
+    void configuredPageCapConstrainsSqlBackedTracePages() throws Exception {
+        int originalCap = QueryLimits.getConfiguredMaxPageSize();
+        try {
+            QueryLimits.configureMaxPageSize(1);
+            long player = insertPlayerNode("AlphaA");
+            long ground = insertGroundNode(20, 64, 20);
+            long diamond = insertFingerprint("minecraft:diamond", "hash-diamond");
+            insertObservation(now - 2_000, player, ground, diamond, "DROP_ITEM", 1);
+            insertObservation(now - 1_000, player, ground, diamond, "DROP_ITEM", 1);
+
+            TracePage page = service.traceFingerprintPage(conn, diamond, 45,
+                    QueryWindow.unbounded(), null, TracePage.Direction.FORWARD);
+
+            assertEquals(1, page.pageSize());
+            assertEquals(1, page.hops().size());
+            assertTrue(page.hasNext(), "the second row must remain available on the next page");
+        } finally {
+            QueryLimits.configureMaxPageSize(originalCap);
+        }
+    }
+
     private static String stableKey(TraceHop hop) {
         return hop.kind() + ":" + hop.source() + ":" + hop.refId();
     }

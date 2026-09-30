@@ -30,6 +30,13 @@ class FabricItemGraphConfigTest {
                 use_indexes=false
                 grieflogger_database_path=database.db
                 ground_bridge_max_seconds=300
+                max_page_size=25
+                server_side_only=true
+                poll_interval_ms=100
+                max_batch_size=500
+                database_heartbeat_interval_ms=45000
+                capture_enabled=false
+                raw_evidence_retention=indefinite
                 """);
 
         FabricItemGraphConfig loaded = FabricItemGraphConfig.load(tempDir, config);
@@ -43,7 +50,49 @@ class FabricItemGraphConfigTest {
         assertEquals(7500, loaded.databaseSettings().connectionTimeoutMs());
         assertEquals("verify-full", loaded.databaseSettings().sslMode());
         assertFalse(loaded.databaseSettings().useIndexes());
+        assertEquals(25, loaded.operationalSettings().maxPageSize());
+        assertTrue(loaded.operationalSettings().serverSideOnly());
+        assertEquals(100, loaded.operationalSettings().queuePollIntervalMs());
+        assertEquals(500, loaded.operationalSettings().maxBatchSize());
+        assertEquals(45_000, loaded.operationalSettings().databaseHeartbeatIntervalMs());
+        assertFalse(loaded.operationalSettings().captureEnabled());
+        assertEquals("indefinite", loaded.operationalSettings().rawEvidenceRetention());
         assertTrue(Files.exists(config.resolve("itemgraph.properties")));
+    }
+
+    @Test
+    void defaultsOperationalControlsToTenRowsServerOnlyAndIndefiniteRetention(@TempDir Path tempDir) throws Exception {
+        Path config = tempDir.resolve("config");
+        FabricItemGraphConfig loaded = FabricItemGraphConfig.load(tempDir, config);
+
+        assertEquals(10, loaded.operationalSettings().maxPageSize());
+        assertTrue(loaded.operationalSettings().serverSideOnly());
+        assertEquals(250, loaded.operationalSettings().queuePollIntervalMs());
+        assertEquals(100, loaded.operationalSettings().maxBatchSize());
+        assertEquals(30_000, loaded.operationalSettings().databaseHeartbeatIntervalMs());
+        assertTrue(loaded.operationalSettings().captureEnabled());
+        assertEquals("indefinite", loaded.operationalSettings().rawEvidenceRetention());
+    }
+
+    @Test
+    void rejectsOutOfRangePageSizeUnsupportedClientModeAndFiniteRetention(@TempDir Path tempDir) throws Exception {
+        Path config = tempDir.resolve("config");
+        Files.createDirectories(config);
+
+        Files.writeString(config.resolve("itemgraph.properties"), "max_page_size=101\n");
+        IOException pageSizeError = assertThrows(IOException.class,
+                () -> FabricItemGraphConfig.load(tempDir, config));
+        assertTrue(pageSizeError.getMessage().contains("query.max_page_size must be in [1,100]"));
+
+        Files.writeString(config.resolve("itemgraph.properties"), "server_side_only=false\n");
+        IOException serverModeError = assertThrows(IOException.class,
+                () -> FabricItemGraphConfig.load(tempDir, config));
+        assertTrue(serverModeError.getMessage().contains("operations.server_side_only=false is unsupported"));
+
+        Files.writeString(config.resolve("itemgraph.properties"), "raw_evidence_retention=30d\n");
+        IOException retentionError = assertThrows(IOException.class,
+                () -> FabricItemGraphConfig.load(tempDir, config));
+        assertTrue(retentionError.getMessage().contains("retention.raw_evidence must be 'indefinite'"));
     }
 
     @Test

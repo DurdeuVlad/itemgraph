@@ -22,6 +22,12 @@ class ItemGraphConfigTest {
         assertEquals("database.db", ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getDefault());
         assertEquals(Boolean.FALSE, ItemGraphConfig.DEBUG_LOGGING.getDefault());
         assertEquals(300, ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getDefault());
+        assertEquals(10, ItemGraphConfig.MAX_PAGE_SIZE.getDefault());
+        assertEquals(Boolean.TRUE, ItemGraphConfig.SERVER_SIDE_ONLY.getDefault());
+        assertEquals("indefinite", ItemGraphConfig.RAW_EVIDENCE_RETENTION.getDefault());
+        assertEquals(250, ItemGraphConfig.QUEUE_POLL_INTERVAL_MS.getDefault());
+        assertEquals(100, ItemGraphConfig.MAX_BATCH_SIZE.getDefault());
+        assertEquals(Boolean.TRUE, ItemGraphConfig.CAPTURE_ENABLED.getDefault());
         assertEquals(300, ItemGraphConfig.DEFAULT_GROUND_BRIDGE_MAX_SECONDS);
     }
 
@@ -34,6 +40,12 @@ class ItemGraphConfigTest {
         assertEquals(List.of("general", "grieflogger_database_path"), ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getPath());
         assertEquals(List.of("general", "debug_logging"), ItemGraphConfig.DEBUG_LOGGING.getPath());
         assertEquals(List.of("correlation", "ground_bridge_max_seconds"), ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getPath());
+        assertEquals(List.of("query", "max_page_size"), ItemGraphConfig.MAX_PAGE_SIZE.getPath());
+        assertEquals(List.of("operations", "server_side_only"), ItemGraphConfig.SERVER_SIDE_ONLY.getPath());
+        assertEquals(List.of("retention", "raw_evidence"), ItemGraphConfig.RAW_EVIDENCE_RETENTION.getPath());
+        assertEquals(List.of("ingestion", "poll_interval_ms"), ItemGraphConfig.QUEUE_POLL_INTERVAL_MS.getPath());
+        assertEquals(List.of("ingestion", "max_batch_size"), ItemGraphConfig.MAX_BATCH_SIZE.getPath());
+        assertEquals(List.of("capture", "enabled"), ItemGraphConfig.CAPTURE_ENABLED.getPath());
     }
 
     @Test
@@ -71,6 +83,12 @@ class ItemGraphConfigTest {
         assertEquals("database.db", config.get(List.of("general", "grieflogger_database_path")));
         assertEquals(Boolean.FALSE, config.get(List.of("general", "debug_logging")));
         assertEquals(300, config.getInt(List.of("correlation", "ground_bridge_max_seconds")));
+        assertEquals(10, config.getInt(List.of("query", "max_page_size")));
+        assertEquals(Boolean.TRUE, config.get(List.of("operations", "server_side_only")));
+        assertEquals("indefinite", config.get(List.of("retention", "raw_evidence")));
+        assertEquals(250, config.getInt(List.of("ingestion", "poll_interval_ms")));
+        assertEquals(100, config.getInt(List.of("ingestion", "max_batch_size")));
+        assertEquals(Boolean.TRUE, config.get(List.of("capture", "enabled")));
 
         // Setting a valid custom value preserves correctness
         config.set(List.of("correlation", "ground_bridge_max_seconds"), 600);

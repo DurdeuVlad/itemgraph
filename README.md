@@ -44,7 +44,13 @@ that does not require RSA key retrieval and keeps database traffic plaintext. Us
 `verify-full` for production, or `verify-ca` with an explicitly trusted CA;
 ItemGraph warns when `disable` is used with a non-loopback host. NeoForge's
 database connection keys are under `general`; the index setting is under
-`storage` in its server TOML.
+`storage` in its server TOML. The full key, default, range, and restart matrix is in the
+[configuration reference](docs/CONFIGURATION.md). Query output defaults to ten
+rows and is capped by `query.max_page_size`/`max_page_size` (range 1–100).
+Raw evidence retention is fixed at `indefinite`; ItemGraph does not purge raw
+evidence. Legacy V3–V5 topology resets preserve old observation rows and their
+raw payloads in `ig_legacy_observation_evidence`; these superseded rows remain
+available for forensic review and are excluded from current graph queries.
 
 > Evidence first. Inference second. Confidence explicit. Every conclusion traceable.
 

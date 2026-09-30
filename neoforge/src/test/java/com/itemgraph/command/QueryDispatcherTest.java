@@ -33,6 +33,15 @@ import static org.mockito.Mockito.*;
 
 class QueryDispatcherTest {
 
+    @Test
+    void statusQueryFailuresHideRawJdbcMessagesFromCommandCallers() {
+        SQLException databaseFailure = new SQLException("jdbc:mariadb://private-host/db user=admin password=secret");
+
+        assertEquals("status query failed; inspect the server log for connection details",
+                QueryDispatcher.callerFailureMessage("status", databaseFailure));
+        assertEquals(databaseFailure.getMessage(), QueryDispatcher.callerFailureMessage("trace", databaseFailure));
+    }
+
     @BeforeAll
     static void initMinecraft() {
         if (LoadingModList.get() == null) {

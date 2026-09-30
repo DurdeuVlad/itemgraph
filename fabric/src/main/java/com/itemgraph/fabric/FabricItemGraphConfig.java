@@ -1,6 +1,7 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.db.DatabaseSettings;
+import com.itemgraph.config.ItemGraphOperationalSettings;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,7 +12,7 @@ import java.util.Properties;
 
 /** Simple editable properties file; Fabric does not provide a server config system. */
 record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLoggerDatabasePath,
-                             int groundBridgeMaxSeconds) {
+                             int groundBridgeMaxSeconds, ItemGraphOperationalSettings operationalSettings) {
     static FabricItemGraphConfig load(Path gameDirectory, Path configDirectory) throws IOException {
         Path configFile = configDirectory.resolve("itemgraph.properties");
         Properties properties = new Properties();
@@ -33,6 +34,14 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             properties.setProperty("use_indexes", "true");
             properties.setProperty("grieflogger_database_path", "database.db");
             properties.setProperty("ground_bridge_max_seconds", "300");
+            properties.setProperty("max_page_size", Integer.toString(ItemGraphOperationalSettings.DEFAULT_MAX_PAGE_SIZE));
+            properties.setProperty("server_side_only", "true");
+            properties.setProperty("poll_interval_ms", Integer.toString(ItemGraphOperationalSettings.DEFAULT_QUEUE_POLL_INTERVAL_MS));
+            properties.setProperty("max_batch_size", Integer.toString(ItemGraphOperationalSettings.DEFAULT_MAX_BATCH_SIZE));
+            properties.setProperty("database_heartbeat_interval_ms",
+                    Integer.toString(ItemGraphOperationalSettings.DEFAULT_DATABASE_HEARTBEAT_INTERVAL_MS));
+            properties.setProperty("capture_enabled", "true");
+            properties.setProperty("raw_evidence_retention", "indefinite");
             try (OutputStream output = Files.newOutputStream(configFile)) {
                 properties.store(output, "ItemGraph server configuration");
             }
@@ -46,6 +55,21 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         }
         if (groundBridgeMaxSeconds < 1 || groundBridgeMaxSeconds > 86_400) {
             throw new IOException("ground_bridge_max_seconds must be in [1, 86400] in " + configFile);
+        }
+
+        ItemGraphOperationalSettings operationalSettings;
+        try {
+            operationalSettings = new ItemGraphOperationalSettings(
+                    parseInt(properties, "max_page_size", ItemGraphOperationalSettings.DEFAULT_MAX_PAGE_SIZE, configFile),
+                    parseBoolean(properties, "server_side_only", true, configFile),
+                    parseInt(properties, "poll_interval_ms", ItemGraphOperationalSettings.DEFAULT_QUEUE_POLL_INTERVAL_MS, configFile),
+                    parseInt(properties, "max_batch_size", ItemGraphOperationalSettings.DEFAULT_MAX_BATCH_SIZE, configFile),
+                    parseInt(properties, "database_heartbeat_interval_ms",
+                            ItemGraphOperationalSettings.DEFAULT_DATABASE_HEARTBEAT_INTERVAL_MS, configFile),
+                    parseBoolean(properties, "capture_enabled", true, configFile),
+                    properties.getProperty("raw_evidence_retention", "indefinite"));
+        } catch (IllegalArgumentException e) {
+            throw new IOException("Invalid ItemGraph operations settings in " + configFile + ": " + e.getMessage(), e);
         }
 
         String backend = properties.getProperty("database_backend", "sqlite").trim()
@@ -76,7 +100,8 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         return new FabricItemGraphConfig(
                 databaseSettings,
                 resolve(gameDirectory, properties.getProperty("grieflogger_database_path", "database.db")),
-                groundBridgeMaxSeconds);
+                groundBridgeMaxSeconds,
+                operationalSettings);
     }
 
     private static int parseInt(Properties properties, String key, int defaultValue, Path configFile)

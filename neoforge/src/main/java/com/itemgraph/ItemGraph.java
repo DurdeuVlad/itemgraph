@@ -69,6 +69,7 @@ public class ItemGraph {
 
     private void onServerStarting(ServerStartingEvent event) {
         ItemCanonicalizer.setRegistryAccess(event.getServer().registryAccess());
+        ItemGraphConfig.operationalSettings().apply();
         CorrelationEngine.setDefaultWindowSeconds(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.get());
         DatabaseManager.getInstance().initialize(ItemGraphConfig.databaseSettings());
         com.itemgraph.ingest.InternalObservationService.getInstance().start();

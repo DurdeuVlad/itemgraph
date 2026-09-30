@@ -10,7 +10,7 @@ class DialectSqlTest {
     @Test
     void preservesTableIdempotencyAndRewritesSQLiteTypes() {
         String sql = "CREATE TABLE IF NOT EXISTS sample (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + "applied_at INTEGER NOT NULL, source_path TEXT NOT NULL, name TEXT NOT NULL, payload BLOB, ratio REAL, detail TEXT)";
+                + "applied_at INTEGER NOT NULL, source_path TEXT NOT NULL, name TEXT NOT NULL, payload BLOB, ratio REAL, detail TEXT, fingerprint_component_summary TEXT)";
 
         String translated = DialectSql.translate(sql, DatabaseDialect.MYSQL_MARIADB);
 
@@ -22,6 +22,7 @@ class DialectSqlTest {
         assertTrue(translated.contains("payload LONGBLOB"));
         assertTrue(translated.contains("ratio DOUBLE"));
         assertTrue(translated.contains("detail LONGTEXT"));
+        assertTrue(translated.contains("fingerprint_component_summary LONGTEXT"));
     }
 
     @Test

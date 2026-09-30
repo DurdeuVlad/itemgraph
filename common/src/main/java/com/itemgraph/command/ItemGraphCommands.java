@@ -1092,17 +1092,17 @@ public final class ItemGraphCommands {
 
         DatabaseManager db = DatabaseManager.getInstance();
         boolean dbConnected = db.isInitialized();
-        String dbPath = db.getDatabasePath() != null ? db.getDatabasePath().toString() : "not set";
-        String dbError = db.getLastError();
+        var dbSettings = db.getSettings();
+        String backend = dbSettings == null ? "not configured" : dbSettings.backend().name().toLowerCase(java.util.Locale.ROOT);
         source.sendSuccess(() -> Component.literal(
                 "[ItemGraph] version=" + modVersion +
                 " griefLogger=" + glStatus +
-                " db=" + (dbConnected ? "connected (schema v" + db.getCurrentSchemaVersion() + ")" : "NOT CONNECTED") +
-                " dbPath=" + dbPath +
-                (dbError != null ? " lastError=" + dbError : "")
+                " db=" + (dbConnected ? "connected" : "NOT CONNECTED") +
+                " backend=" + backend +
+                " schemaVersion=" + db.getCurrentSchemaVersion()
         ), false);
         if (!dbConnected) {
-            source.sendFailure(Component.literal("[ItemGraph] Database statistics unavailable; see the database error above."));
+            source.sendFailure(Component.literal("[ItemGraph] Database statistics unavailable; inspect the server log for connection details."));
             return 0;
         }
 
@@ -1151,7 +1151,7 @@ public final class ItemGraphCommands {
             return QueryDispatcher.QueryOutput.found(List.of(
                     "[ItemGraph] correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s"
                             + " lastPass=" + (lastCorrelation == null ? "never run yet"
-                            : (lastCorrelation.success() ? "OK" : "ERROR (" + lastCorrelation.errorMessage() + ")")
+                            : (lastCorrelation.success() ? "OK" : "ERROR")
                             + " (" + lastCorrelation.observationsFinalised() + " evaluated, "
                             + lastCorrelation.edgesCreated() + " bridges inferred, " + lastCorrelation.deferred()
                             + " deferred, " + lastCorrelation.durationMs() + "ms)"),
@@ -1161,11 +1161,18 @@ public final class ItemGraphCommands {
                             + " checkpoints=" + checkpoints
                             + " historicalImport=" + historicalImport
                             + " lastCycle=" + (lastResult == null ? "never run yet"
-                            : (lastResult.success() ? "OK" : "ERROR (" + lastResult.errorMessage() + ")")
+                            : (lastResult.success() ? "OK" : "ERROR")
                             + " (" + lastResult.itemsIngested() + " items, " + lastResult.containersIngested()
                             + " containers, " + lastResult.durationMs() + "ms)"),
                     "[ItemGraph] inference ledger: activeEdges=" + activeEdges + " supersededEdges=" + supersededEdges,
                     "[ItemGraph] internal queue: size=" + internalObs.getQueueSize()
+                            + " capacityPerQueue=10000"
+                            + " idlePollMs=" + internalObs.getQueuePollIntervalMs()
+                            + " maxBatchSize=" + internalObs.getMaxBatchSize()
+                            + " networkHeartbeatMs=" + internalObs.getDatabaseHeartbeatIntervalMs()
+                            + " networkHeartbeats=" + internalObs.getTotalDatabaseHeartbeats()
+                            + " networkHeartbeatFailures=" + internalObs.getTotalDatabaseHeartbeatFailures()
+                            + " captureEnabled=" + internalObs.isCaptureEnabled()
                             + " enqueued=" + internalObs.getTotalEnqueued()
                             + " persisted=" + internalObs.getTotalPersisted()
                             + " dropped=" + internalObs.getTotalDropped()

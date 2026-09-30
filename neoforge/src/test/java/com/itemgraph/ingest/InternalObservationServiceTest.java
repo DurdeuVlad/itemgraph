@@ -3,6 +3,7 @@ package com.itemgraph.ingest;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.db.DatabaseSettings;
 import com.itemgraph.ingest.InternalObservationService.InternalObservation;
 import com.itemgraph.ingest.InternalObservationService.InternalAuditEvent;
 import com.itemgraph.ingest.InternalObservationService.InternalTransformation;
@@ -53,6 +54,7 @@ class InternalObservationServiceTest {
     @BeforeEach
     void setUp() {
         service = InternalObservationService.getInstance();
+        service.configureOperations(250, 100, 30_000, true);
         service.clear();
         IngestionService.getInstance().getNodeManager().clearCaches();
     }
@@ -301,6 +303,47 @@ class InternalObservationServiceTest {
         assertFalse(overCapacity, "10,001st transformation must be rejected when queue is full");
         assertEquals(10_000, service.getQueueSize());
         assertEquals(10_000, service.getTotalEnqueued());
+        assertEquals(1, service.getTotalDropped(), "Rejected transformations must be reported as evidence loss");
+    }
+
+    @Test
+    void nativeCaptureCanBeDisabledWithoutTreatingSuppressionAsQueueLoss() {
+        service.configureOperations(125, 7, 30_000, false);
+        try {
+            assertEquals(125, service.getQueuePollIntervalMs());
+            assertEquals(7, service.getMaxBatchSize());
+            assertFalse(service.isCaptureEnabled());
+            assertTrue(service.submit(createDummyObservation(1)));
+            assertTrue(service.submitTransformation(createDummyTransformation(1)));
+            assertTrue(service.submitAuditEvent(new InternalAuditEvent(
+                    1L, "TEST", PLAYER_UUID, "Alex", "minecraft:overworld", 0, 0, 0,
+                    null, null, null)));
+            assertEquals(0, service.getQueueSize());
+            assertEquals(0, service.getTotalEnqueued());
+            assertEquals(0, service.getTotalDropped());
+        } finally {
+            service.configureOperations(250, 100, 30_000, true);
+        }
+    }
+
+    @Test
+    void failedNetworkDatabaseInitializationIsCountedAsAHeartbeatFailure() throws Exception {
+        DatabaseManager database = DatabaseManager.getInstance();
+        database.initialize(DatabaseSettings.mysqlMariaDb(
+                "127.0.0.1", 1, "itemgraph_test", "test", "test", 250, true));
+        assertFalse(database.isInitialized(), "the closed loopback port should not initialize a network database");
+
+        service.configureOperations(10, 100, 1_000, true);
+        service.start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getTotalDatabaseHeartbeatFailures() == 0 && System.nanoTime() < deadline) {
+            Thread.sleep(25);
+        }
+        service.stop();
+
+        assertEquals(0, service.getTotalDatabaseHeartbeats(),
+                "an unavailable network database cannot be reported as a successful keepalive");
+        assertTrue(service.getTotalDatabaseHeartbeatFailures() >= 1);
     }
 
     @Test
@@ -370,6 +413,28 @@ class InternalObservationServiceTest {
                 assertEquals(3, rs.getInt(1));
             }
         }
+    }
+
+    @Test
+    void failedTransformationBatchIsRetainedAndShutdownLossIsCounted() throws Exception {
+        service.configureOperations(10, 2, 30_000, true);
+        service.start();
+        for (int i = 0; i < 5; i++) {
+            assertTrue(service.submitTransformation(createDummyTransformation(i)));
+        }
+
+        Thread.sleep(100);
+        assertEquals(5, service.getQueueSize(),
+                "a failed in-flight batch remains part of the outstanding transformation count");
+        assertEquals(0, service.getTotalPersisted(),
+                "an unavailable database cannot be reported as a successful write");
+
+        service.stop();
+
+        assertEquals(0, service.getQueueSize());
+        assertEquals(0, service.getTotalPersisted());
+        assertEquals(5, service.getTotalDropped(),
+                "shutdown must count every transformation that could not be written");
     }
 
     @Test

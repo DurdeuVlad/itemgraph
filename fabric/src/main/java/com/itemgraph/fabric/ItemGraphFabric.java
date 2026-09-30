@@ -57,6 +57,7 @@ public final class ItemGraphFabric implements ModInitializer {
             throw new IllegalStateException("Could not load config/itemgraph.properties", e);
         }
         ItemCanonicalizer.setRegistryAccess(server.registryAccess());
+        config.operationalSettings().apply();
         CorrelationEngine.setDefaultWindowSeconds(config.groundBridgeMaxSeconds());
         DatabaseManager.getInstance().initialize(config.databaseSettings());
         InternalObservationService.getInstance().start();

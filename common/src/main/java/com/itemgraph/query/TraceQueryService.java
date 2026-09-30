@@ -58,7 +58,7 @@ public final class TraceQueryService {
     }
 
     private static int clampPageSize(int requestedPageSize) {
-        return Math.max(1, Math.min(QueryLimits.MAX_GUI_PAGE_SIZE, requestedPageSize));
+        return QueryLimits.clampGuiPageSize(requestedPageSize);
     }
 
     private static TracePage page(String title, FingerprintRef fingerprint, NodeRef targetNode,

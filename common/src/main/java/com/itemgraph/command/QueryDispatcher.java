@@ -163,10 +163,12 @@ public final class QueryDispatcher {
     public static int dispatch(CommandSourceStack source, String label, Query query) {
         DatabaseManager db = DatabaseManager.getInstance();
         if (!db.isInitialized()) {
-            source.sendFailure(Component.literal(QueryFormatter.queryFailed(
-                    "the ItemGraph database is not connected"
+            String unavailable = "status".equals(label)
+                    ? "the ItemGraph database is not connected; inspect the server log for connection details"
+                    : "the ItemGraph database is not connected"
                             + (db.getLastError() != null ? " (" + db.getLastError() + ")" : "")
-                            + ". See /ig status.")));
+                            + ". See /ig status.";
+            source.sendFailure(Component.literal(QueryFormatter.queryFailed(unavailable)));
             return 0;
         }
 
@@ -220,7 +222,7 @@ public final class QueryDispatcher {
             } catch (Exception e) {
                 Throwable cause = unwrap(e);
                 LOGGER.error("ItemGraph query '{}' failed on synchronous worker", label, cause);
-                source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
+                source.sendFailure(Component.literal(QueryFormatter.queryFailed(callerFailureMessage(label, cause))));
                 return 0;
             }
         }
@@ -381,7 +383,7 @@ public final class QueryDispatcher {
                 Throwable cause = unwrap(throwable);
                 LOGGER.error("ItemGraph query '{}' failed", label, cause);
                 if (!entityless) {
-                    source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
+                    source.sendFailure(Component.literal(QueryFormatter.queryFailed(callerFailureMessage(label, cause))));
                 }
                 return;
             }
@@ -405,6 +407,13 @@ public final class QueryDispatcher {
             output.lines().forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
             sendActions(source, output.actions());
         });
+    }
+
+    static String callerFailureMessage(String label, Throwable cause) {
+        if ("status".equals(label)) {
+            return "status query failed; inspect the server log for connection details";
+        }
+        return String.valueOf(cause.getMessage());
     }
 
     /** Sends bounded interactive controls after the textual query output. */

@@ -486,6 +486,22 @@ canonical capacity row and corroborating source rows, while a merely compatible 
 is marked ambiguous and contributes no independent capacity. If a legacy inferred edge
 used an alias or ambiguous row for allocation, it is marked superseded rather than deleted.
 
+The native worker limits each transformation write and shutdown flush to the configured
+`ingestion.max_batch_size`. Failed transformation batches return to the same bounded queue
+with exponential backoff; the status queue count includes in-flight transformations. A
+requeue overflow or shutdown write failure increments the evidence-loss counter and logs
+the number of dropped records. Legacy migrations V3–V5 copy the original observation
+fields, referenced fingerprint values, and raw payload into
+`ig_legacy_observation_evidence` before clearing endpoints written under obsolete
+topology rules. That archive is retained but excluded from live
+graph queries.
+
+For MySQL/MariaDB, the worker sends `Connection.isValid(5)` at the configured
+`operations.database_heartbeat_interval_ms` interval (default 30 seconds) so
+idle network connections receive a protocol keepalive. The call runs on the
+ItemGraph worker and is serialized with writes on the shared connection. SQLite
+does not send heartbeats.
+
 ### Cross-source equivalence (V11)
 
 `ObservationEquivalenceService` processes up to 500 unchecked ground observations per
