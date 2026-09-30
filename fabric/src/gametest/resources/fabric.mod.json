@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "itemgraph-gametest",
+  "version": "1.0.0",
+  "name": "ItemGraph Game Tests",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-gametest": [
+      "com.itemgraph.fabric.gametest.EntityInteractionGameTests"
+    ]
+  }
+}

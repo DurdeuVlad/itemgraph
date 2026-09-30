@@ -41,6 +41,16 @@ loom {
     }
 }
 
+fabricApi {
+    configureTests {
+        createSourceSet = true
+        modId = 'itemgraph-gametest'
+        enableGameTests = true
+        enableClientGameTests = false
+        eula = true
+    }
+}
+
 tasks.withType(JavaCompile).configureEach {
     source project(':common').sourceSets.main.allSource
 }

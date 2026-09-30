@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.animal.Cow;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
@@ -25,7 +26,7 @@ public final class EntityInteractionGameTests {
     private EntityInteractionGameTests() { }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 100)
-    public static void serverInteractPacketPersistsEntityAttempt(GameTestHelper helper) {
+    public static void serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         BlockPos targetPos = helper.absolutePos(new BlockPos(2, 1, 2));
         Cow target = new Cow(EntityType.COW, helper.getLevel());
@@ -45,6 +46,29 @@ public final class EntityInteractionGameTests {
         helper.assertTrue(player.canInteractWithEntity(target.getBoundingBox(), 1.0),
                 "mock player is outside the server interaction distance");
         player.connection.handleInteract(packet);
+
+        ArmorStand armorStand = EntityType.ARMOR_STAND.create(helper.getLevel());
+        helper.assertTrue(armorStand != null, "could not create armor stand in the GameTest level");
+        BlockPos armorStandPos = helper.absolutePos(new BlockPos(4, 1, 2));
+        armorStand.moveTo(armorStandPos.getX() + 0.5, armorStandPos.getY(), armorStandPos.getZ() + 0.5,
+                0.0F, 0.0F);
+        helper.getLevel().addFreshEntity(armorStand);
+        player.teleportTo(armorStandPos.getX() + 1.0, armorStandPos.getY(), armorStandPos.getZ() + 0.5);
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.DIAMOND_BOOTS));
+        ServerboundInteractPacket equipPacket = ServerboundInteractPacket.createInteractionPacket(
+                armorStand, player.isShiftKeyDown(), InteractionHand.MAIN_HAND, new Vec3(0.0, 0.1, 0.0));
+        player.connection.handleInteract(equipPacket);
+        helper.assertTrue(ItemStack.isSameItem(armorStand.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET),
+                        new ItemStack(Items.DIAMOND_BOOTS)),
+                "armor stand interaction packet did not equip the held boots");
+
+        player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        ServerboundInteractPacket unequipPacket = ServerboundInteractPacket.createInteractionPacket(
+                armorStand, player.isShiftKeyDown(), InteractionHand.MAIN_HAND, new Vec3(0.0, 0.1, 0.0));
+        player.connection.handleInteract(unequipPacket);
+        helper.assertTrue(armorStand.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET).isEmpty(),
+                "armor stand interaction packet did not unequip the boots with an empty hand");
+
         observations.stop();
         helper.assertTrue(observations.getTotalPersisted() > persistedBefore,
                 "server interaction packet did not persist an audit event");
@@ -55,6 +79,7 @@ public final class EntityInteractionGameTests {
 
         String playerUuid = player.getUUID().toString();
         String targetUuid = target.getUUID().toString();
+        String armorStandUuid = armorStand.getUUID().toString();
         helper.succeedWhen(() -> {
             try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
                  var statement = connection.prepareStatement("""
@@ -81,6 +106,57 @@ public final class EntityInteractionGameTests {
                 }
             } catch (SQLException e) {
                 throw new IllegalStateException("Could not read ItemGraph's audit ledger", e);
+            }
+
+            try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+                 var statement = connection.prepareStatement("""
+                         SELECT event_type, detail
+                         FROM ig_audit_events
+                         WHERE player_uuid = ?
+                           AND subject_id = 'minecraft:armor_stand'
+                           AND detail LIKE ?
+                         ORDER BY event_type
+                         """)) {
+                statement.setString(1, playerUuid);
+                statement.setString(2, "%target_uuid=" + armorStandUuid + "%");
+                int attempts = 0;
+                int bootsAttempts = 0;
+                int emptyHandAttempts = 0;
+                int completed = 0;
+                try (var rows = statement.executeQuery()) {
+                    while (rows.next()) {
+                        String eventType = rows.getString("event_type");
+                        String detail = rows.getString("detail");
+                        if ("INTERACT_ENTITY".equals(eventType)) {
+                            attempts++;
+                            helper.assertTrue(detail.contains("hand=main_hand"),
+                                    "armor stand attempt must retain the interaction hand");
+                            if (detail.contains("held_item=minecraft:diamond_boots held_count=1")) {
+                                bootsAttempts++;
+                            } else if (detail.contains("held_item=minecraft:air held_count=0")) {
+                                emptyHandAttempts++;
+                            } else {
+                                helper.fail("armor stand attempt has unexpected held-stack evidence: " + detail);
+                            }
+                        } else if ("INTERACT_ENTITY_COMPLETED".equals(eventType)) {
+                            completed++;
+                            helper.assertTrue(detail.contains("method=interact_at"),
+                                    "armor stand completion must identify the handled interaction method");
+                        } else {
+                            helper.fail("armor stand interaction produced unexpected event type " + eventType);
+                        }
+                    }
+                }
+                helper.assertValueEqual(2, attempts,
+                        "equip and unequip must each produce one armor stand attempt");
+                helper.assertValueEqual(1, bootsAttempts,
+                        "the equip attempt must retain the one diamond-boot stack held before interaction");
+                helper.assertValueEqual(1, emptyHandAttempts,
+                        "the unequip attempt must retain the empty hand state");
+                helper.assertValueEqual(2, completed,
+                        "equip and unequip must each produce one armor stand completion");
+            } catch (SQLException e) {
+                throw new IllegalStateException("Could not read ItemGraph's armor stand evidence", e);
             }
         });
     }
