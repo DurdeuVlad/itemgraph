@@ -17,6 +17,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.fml.loading.LoadingModList;
@@ -113,6 +114,7 @@ class NativeAuditEventListenerTest {
         when(player.level()).thenReturn(level);
         when(player.getUUID()).thenReturn(playerUuid);
         when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+
         when(level.dimension()).thenReturn(Level.OVERWORLD);
         when(level.getBlockState(pos)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
 
@@ -154,6 +156,7 @@ class NativeAuditEventListenerTest {
         when(event.getHand()).thenReturn(InteractionHand.OFF_HAND);
         when(player.getUUID()).thenReturn(playerUuid);
         when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(player.level()).thenReturn(level);
         when(level.dimension()).thenReturn(Level.OVERWORLD);
         when(target.blockPosition()).thenReturn(new BlockPos(8, 65, -2));
         when(target.getUUID()).thenReturn(targetUuid);
@@ -174,25 +177,124 @@ class NativeAuditEventListenerTest {
     }
 
     @Test
-    void armorStandSpecificPathDoesNotDuplicateTheGenericEntityCallback() {
+    void armorStandSpecificThenGenericCallbacksRecordOneAttempt() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        ArmorStand target = mock(ArmorStand.class);
+        PlayerInteractEvent.EntityInteractSpecific specific = mock(PlayerInteractEvent.EntityInteractSpecific.class);
+        PlayerInteractEvent.EntityInteract generic = mock(PlayerInteractEvent.EntityInteract.class);
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        when(specific.isCanceled()).thenReturn(false);
+        when(specific.getEntity()).thenReturn(player);
+        when(specific.getLevel()).thenReturn(level);
+        when(specific.getTarget()).thenReturn(target);
+        when(specific.getHand()).thenReturn(InteractionHand.MAIN_HAND);
+        when(generic.isCanceled()).thenReturn(false);
+        when(generic.getEntity()).thenReturn(player);
+        when(generic.getLevel()).thenReturn(level);
+        when(generic.getTarget()).thenReturn(target);
+        when(generic.getHand()).thenReturn(InteractionHand.MAIN_HAND);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.getUUID()).thenReturn(targetUuid);
+        when(target.blockPosition()).thenReturn(new BlockPos(8, 65, -2));
+        doReturn(EntityType.ARMOR_STAND).when(target).getType();
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            NativeAuditEventListener listener = new NativeAuditEventListener();
+            listener.onEntityInteractSpecific(specific);
+            listener.onEntityInteract(generic);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY", captured.getValue().eventType());
+        assertEquals("outcome=attempt hand=main_hand target_uuid=" + targetUuid
+                + " completion=armor_stand_return_hook", captured.getValue().detail());
+    }
+    @Test
+    void canceledArmorStandGenericCallbackRecordsItsTerminalOutcome() {
         ServerPlayer player = mock(ServerPlayer.class);
         ServerLevel level = mock(ServerLevel.class);
         ArmorStand target = mock(ArmorStand.class);
         PlayerInteractEvent.EntityInteract event = mock(PlayerInteractEvent.EntityInteract.class);
-        when(event.isCanceled()).thenReturn(false);
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        when(event.isCanceled()).thenReturn(true);
         when(event.getEntity()).thenReturn(player);
         when(event.getLevel()).thenReturn(level);
         when(event.getTarget()).thenReturn(target);
+        when(event.getHand()).thenReturn(InteractionHand.OFF_HAND);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(player.level()).thenReturn(level);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.level()).thenReturn(level);
+        when(target.getUUID()).thenReturn(targetUuid);
+        when(target.blockPosition()).thenReturn(new BlockPos(8, 65, -2));
         doReturn(EntityType.ARMOR_STAND).when(target).getType();
 
         InternalObservationService service = mock(InternalObservationService.class);
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             new NativeAuditEventListener().onEntityInteract(event);
-            verifyNoInteractions(service);
         }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY_DENIED", captured.getValue().eventType());
+        org.junit.jupiter.api.Assertions.assertTrue(captured.getValue().detail()
+                .contains("outcome=canceled callback=entity_interact"));
+        org.junit.jupiter.api.Assertions.assertTrue(captured.getValue().detail()
+                .contains("target_uuid=" + targetUuid));
     }
 
+    @Test
+    void nonArmorSpecificCallbackRecordsAttemptWhenItsMethodHandlesTheInteraction() {
+        PlayerInteractEvent.EntityInteractSpecific specific = mock(PlayerInteractEvent.EntityInteractSpecific.class);
+        PlayerInteractEvent.EntityInteract generic = mock(PlayerInteractEvent.EntityInteract.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        Entity target = mock(Entity.class);
+        UUID playerUuid = UUID.randomUUID();
+        when(specific.isCanceled()).thenReturn(false);
+        when(specific.getEntity()).thenReturn(player);
+        when(specific.getLevel()).thenReturn(level);
+        when(specific.getTarget()).thenReturn(target);
+        when(specific.getHand()).thenReturn(InteractionHand.MAIN_HAND);
+        when(generic.isCanceled()).thenReturn(false);
+        when(generic.getEntity()).thenReturn(player);
+        when(generic.getLevel()).thenReturn(level);
+        when(generic.getTarget()).thenReturn(target);
+        when(generic.getHand()).thenReturn(InteractionHand.MAIN_HAND);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.getUUID()).thenReturn(UUID.randomUUID());
+        when(target.blockPosition()).thenReturn(new BlockPos(2, 64, 3));
+        doReturn(EntityType.ZOMBIE).when(target).getType();
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            NativeAuditEventListener listener = new NativeAuditEventListener();
+            listener.onEntityInteractSpecific(specific);
+            listener.onEntityInteract(generic);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY", captured.getValue().eventType());
+        org.junit.jupiter.api.Assertions.assertTrue(captured.getValue().detail()
+                .contains("completion=specific_result_unobserved"));
+    }
     @Test
     void canceledArmorStandSpecificCallbackIsRetainedAsCanceledAttempt() {
         PlayerInteractEvent.EntityInteractSpecific event = mock(PlayerInteractEvent.EntityInteractSpecific.class);
@@ -222,9 +324,44 @@ class NativeAuditEventListenerTest {
         ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
                 ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
         verify(service).submitAuditEvent(captured.capture());
-        assertEquals("INTERACT_ENTITY", captured.getValue().eventType());
+        assertEquals("INTERACT_ENTITY_DENIED", captured.getValue().eventType());
         assertEquals("outcome=canceled hand=main_hand target_uuid=" + targetUuid
                 + " completion=callback_canceled", captured.getValue().detail());
+    }
+
+    @Test
+    void canceledNonArmorSpecificCallbackIsRetainedWithoutNullUuidPlaceholder() {
+        PlayerInteractEvent.EntityInteractSpecific event = mock(PlayerInteractEvent.EntityInteractSpecific.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        Entity target = mock(Entity.class);
+        UUID playerUuid = UUID.randomUUID();
+        when(event.isCanceled()).thenReturn(true);
+        when(event.getEntity()).thenReturn(player);
+        when(event.getLevel()).thenReturn(level);
+        when(event.getTarget()).thenReturn(target);
+        when(event.getHand()).thenReturn(InteractionHand.MAIN_HAND);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.getUUID()).thenReturn(null);
+        when(target.blockPosition()).thenReturn(new BlockPos(2, 64, 3));
+        doReturn(EntityType.ZOMBIE).when(target).getType();
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onEntityInteractSpecific(event);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY_DENIED", captured.getValue().eventType());
+        org.junit.jupiter.api.Assertions.assertTrue(captured.getValue().detail().contains("outcome=canceled"));
+        org.junit.jupiter.api.Assertions.assertFalse(captured.getValue().detail().contains("target_uuid"));
+        org.junit.jupiter.api.Assertions.assertTrue(captured.getValue().detail()
+                .contains("completion=callback_canceled"));
     }
 
     private static void assertNotRecorded(java.util.function.Consumer<NativeAuditEventListener> invocation) {

@@ -1,6 +1,7 @@
 package com.itemgraph.listener;
 
 import com.itemgraph.ingest.InternalObservationService;
+import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.query.AuditEventQueryService;
@@ -121,40 +122,45 @@ public final class NativeAuditEventListener {
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
         if (!(event.getEntity() instanceof ServerPlayer player)
-                || !(event.getLevel() instanceof ServerLevel level)) {
+                || !(event.getLevel() instanceof ServerLevel level)
+                || !event.isCanceled()) {
+            // EntityInteractSpecific is posted first for every right-clicked
+            // entity; its attempt row covers both handled and fallback paths.
             return;
         }
         Entity target = event.getTarget();
         if (target instanceof ArmorStand) {
-            // Armor stands use EntityInteractSpecific when the local hit is
-            // handled by the stand; the dedicated handler below records that
-            // path so a failed specific attempt is not double-counted here.
+            EntityInteractionEvidence.recordArmorStandCallbackCanceled(
+                    player, (ArmorStand) target, event.getHand(),
+                    player.getItemInHand(event.getHand()), "entity_interact");
             return;
         }
-        submit("INTERACT_ENTITY", player, level, target.blockPosition(),
+        submit("INTERACT_ENTITY_DENIED", player, level, target.blockPosition(),
                 BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(),
-                "outcome=" + (event.isCanceled() ? "canceled" : "attempt")
-                        + " hand=" + event.getHand().name().toLowerCase(java.util.Locale.ROOT)
-                        + " target_uuid=" + target.getUUID()
-                        + " completion=unobserved_non_armor_entity");
+                EntityInteractionEvidence.canceledAttemptDetails(
+                        target, event.getHand(), player.getItemInHand(event.getHand()),
+                        "callback=entity_interact reason=LOADER_CALLBACK_CANCELED"));
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void onEntityInteractSpecific(PlayerInteractEvent.EntityInteractSpecific event) {
         if (!(event.getEntity() instanceof ServerPlayer player)
-                || !(event.getLevel() instanceof ServerLevel level)
-                || !(event.getTarget() instanceof ArmorStand target)) {
+                || !(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
-        submit("INTERACT_ENTITY", player, level, target.blockPosition(),
-                BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(),
-                "outcome=" + (event.isCanceled() ? "canceled" : "attempt")
-                        + " hand=" + event.getHand().name().toLowerCase(java.util.Locale.ROOT)
-                        + " target_uuid=" + target.getUUID()
-                        + " completion=" + (event.isCanceled()
-                                ? "callback_canceled" : "armor_stand_return_hook"));
+        Entity target = event.getTarget();
+        boolean canceled = event.isCanceled();
+        String completion = target instanceof ArmorStand
+                ? (canceled ? "callback_canceled" : "armor_stand_return_hook")
+                : (canceled ? "callback_canceled" : "specific_result_unobserved");
+        String detail = canceled
+                ? EntityInteractionEvidence.canceledAttemptDetails(
+                        target, event.getHand(), player.getItemInHand(event.getHand()), completion)
+                : EntityInteractionEvidence.attemptDetails(
+                        target, event.getHand(), player.getItemInHand(event.getHand()), completion);
+        submit(canceled ? "INTERACT_ENTITY_DENIED" : "INTERACT_ENTITY", player, level,
+                target.blockPosition(), BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(), detail);
     }
-
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onLivingDeath(LivingDeathEvent event) {
         if (event.isCanceled()

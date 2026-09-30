@@ -16,6 +16,7 @@ public final class AuditEventQueryService {
             "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_ATTEMPT", "COMMAND_EXECUTED",
             "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK", "INTERACT_BLOCK_ATTEMPT", "INTERACT_ENTITY",
             "INTERACT_ENTITY_COMPLETED", "INTERACT_ENTITY_DENIED",
+            "INTERACT_ENTITY_UNRESOLVED",
             "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "PROJECTILE_SPAWN_ACCEPTED");
 
     public List<AuditEventDetail> find(Connection conn, String eventType, String playerName,

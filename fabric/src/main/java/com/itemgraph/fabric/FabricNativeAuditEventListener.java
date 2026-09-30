@@ -1,6 +1,7 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.ingest.InternalObservationService;
+import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
@@ -115,8 +116,8 @@ public final class FabricNativeAuditEventListener {
                 ? "armor_stand_return_hook" : "unobserved_non_armor_entity";
         submit("INTERACT_ENTITY", player, level, entity.blockPosition(),
                 BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
-                "outcome=attempt hand=" + hand.name().toLowerCase(java.util.Locale.ROOT)
-                        + " target_uuid=" + entity.getUUID() + " completion=" + completion);
+                EntityInteractionEvidence.attemptDetails(
+                        entity, hand, player.getItemInHand(hand), completion));
     }
 
     static InteractionResult handleBlockUse(InspectionService inspections,

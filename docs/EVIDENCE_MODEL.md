@@ -18,7 +18,7 @@ Examples:
 - `ADD_ITEM` to a chest
 - player pickup
 - player drop
-- an armor-stand interaction result observed at `ArmorStand.interactAt` return (without a quantity claim)
+- an armor-stand interaction result observed at `ArmorStand.interactAt` override or inherited `Entity.interact` fallback return (without a quantity claim)
 - anvil rename
 
 Observed evidence should include the source and original source identifier whenever available.

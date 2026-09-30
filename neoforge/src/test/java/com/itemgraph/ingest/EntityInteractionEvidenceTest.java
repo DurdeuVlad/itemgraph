@@ -11,6 +11,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.neoforged.fml.loading.LoadingModList;
 import org.junit.jupiter.api.BeforeAll;
@@ -60,7 +62,7 @@ class EntityInteractionEvidenceTest {
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             EntityInteractionEvidence.recordArmorStandHandledResult(
-                    player, stand, InteractionHand.MAIN_HAND, InteractionResult.SUCCESS);
+                    player, stand, InteractionHand.MAIN_HAND, InteractionResult.SUCCESS, "interact_at", false);
         }
 
         ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
@@ -80,7 +82,7 @@ class EntityInteractionEvidenceTest {
     }
 
     @Test
-    void doesNotRecordPassAsACompletedInteraction() {
+    void recordsFallbackPassAsUnresolvedWithoutClaimingPipelineCompletion() {
         ServerLevel level = mock(ServerLevel.class);
         ServerPlayer player = mock(ServerPlayer.class);
         ArmorStand stand = mock(ArmorStand.class);
@@ -99,9 +101,21 @@ class EntityInteractionEvidenceTest {
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             EntityInteractionEvidence.recordArmorStandHandledResult(
-                    player, stand, InteractionHand.OFF_HAND, InteractionResult.PASS);
+                    player, stand, InteractionHand.OFF_HAND, InteractionResult.PASS, "interact_at", false);
         }
         verifyNoInteractions(service);
+
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            EntityInteractionEvidence.recordArmorStandHandledResult(
+                    player, stand, InteractionHand.OFF_HAND, InteractionResult.PASS, "interact", true);
+        }
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY_UNRESOLVED", captured.getValue().eventType());
+        org.junit.jupiter.api.Assertions.assertTrue(captured.getValue().detail()
+                .contains("reason=ENTITY_INTERACTION_METHOD_PASSED"));
     }
 
     @Test
@@ -123,7 +137,7 @@ class EntityInteractionEvidenceTest {
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             EntityInteractionEvidence.recordArmorStandHandledResult(
-                    player, stand, InteractionHand.MAIN_HAND, InteractionResult.FAIL);
+                    player, stand, InteractionHand.MAIN_HAND, InteractionResult.FAIL, "interact_at", false);
         }
 
         ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
@@ -153,7 +167,7 @@ class EntityInteractionEvidenceTest {
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             EntityInteractionEvidence.recordArmorStandHandledResult(
-                    player, stand, InteractionHand.MAIN_HAND, InteractionResult.SUCCESS);
+                    player, stand, InteractionHand.MAIN_HAND, InteractionResult.SUCCESS, "interact_at", false);
         }
 
         ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
@@ -170,7 +184,7 @@ class EntityInteractionEvidenceTest {
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             EntityInteractionEvidence.recordArmorStandHandledResult(
-                    player, target, InteractionHand.MAIN_HAND, InteractionResult.SUCCESS);
+                    player, target, InteractionHand.MAIN_HAND, InteractionResult.SUCCESS, "interact_at", false);
         }
         verifyNoInteractions(service);
     }
@@ -187,8 +201,37 @@ class EntityInteractionEvidenceTest {
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             EntityInteractionEvidence.recordArmorStandHandledResult(
-                    player, stand, InteractionHand.MAIN_HAND, InteractionResult.SUCCESS);
+                    player, stand, InteractionHand.MAIN_HAND, InteractionResult.SUCCESS, "interact_at", false);
         }
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void attemptDetailsCaptureOnlyHeldStackIdentityAndHash() {
+        ArmorStand target = mock(ArmorStand.class);
+        UUID targetId = UUID.randomUUID();
+        when(target.getUUID()).thenReturn(targetId);
+        String detail = EntityInteractionEvidence.attemptDetails(
+                target, InteractionHand.MAIN_HAND, new ItemStack(Items.DIAMOND_SWORD),
+                "armor_stand_return_hook");
+
+        org.junit.jupiter.api.Assertions.assertTrue(detail.contains("target_uuid=" + targetId));
+        org.junit.jupiter.api.Assertions.assertTrue(detail.contains("held_item=minecraft:diamond_sword"));
+        org.junit.jupiter.api.Assertions.assertTrue(detail.contains("held_count=1"));
+        org.junit.jupiter.api.Assertions.assertTrue(detail.matches(".*held_fingerprint=[0-9a-f]{64}.*"));
+        org.junit.jupiter.api.Assertions.assertFalse(detail.contains("component_summary"));
+    }
+
+    @Test
+    void attemptDetailsOmitUnavailableTargetUuid() {
+        ArmorStand target = mock(ArmorStand.class);
+        when(target.getUUID()).thenReturn(null);
+
+        String detail = EntityInteractionEvidence.attemptDetails(
+                target, InteractionHand.MAIN_HAND, ItemStack.EMPTY, "armor_stand_return_hook");
+
+        org.junit.jupiter.api.Assertions.assertFalse(detail.contains("target_uuid"));
+        org.junit.jupiter.api.Assertions.assertTrue(detail.contains("held_item=minecraft:air"));
+        org.junit.jupiter.api.Assertions.assertTrue(detail.contains("held_count=0"));
     }
 }
