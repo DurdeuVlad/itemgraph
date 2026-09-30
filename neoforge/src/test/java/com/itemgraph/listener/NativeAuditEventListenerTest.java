@@ -10,10 +10,15 @@ import net.neoforged.neoforge.event.ServerChatEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.fml.loading.LoadingModList;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import com.mojang.authlib.GameProfile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
@@ -96,6 +101,39 @@ class NativeAuditEventListenerTest {
         assertNotRecorded(listener -> listener.onLivingDeath(event));
     }
 
+    @Test
+    void blockInteractionRecordsOnlyMainHandPinnedFunctionalAttempts() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos pos = new BlockPos(4, 64, 9);
+        UUID playerUuid = UUID.randomUUID();
+        when(player.level()).thenReturn(level);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(level.getBlockState(pos)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            NativeAuditEventListener listener = new NativeAuditEventListener();
+            listener.onBlockInteract(rightClick(player, pos, InteractionHand.MAIN_HAND));
+            listener.onBlockInteract(rightClick(player, pos, InteractionHand.OFF_HAND));
+            listener.onBlockInteract(rightClick(player, pos, InteractionHand.MAIN_HAND, true));
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_BLOCK_ATTEMPT", captured.getValue().eventType());
+        assertEquals("outcome=attempt", captured.getValue().detail());
+        assertEquals("minecraft:crafting_table", captured.getValue().subjectId());
+        assertEquals("minecraft:overworld", captured.getValue().levelName());
+        assertEquals(4.0, captured.getValue().x());
+        assertEquals(64.0, captured.getValue().y());
+        assertEquals(9.0, captured.getValue().z());
+    }
+
     private static void assertNotRecorded(java.util.function.Consumer<NativeAuditEventListener> invocation) {
         InternalObservationService service = mock(InternalObservationService.class);
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
@@ -103,5 +141,18 @@ class NativeAuditEventListenerTest {
             invocation.accept(new NativeAuditEventListener());
             verifyNoInteractions(service);
         }
+    }
+
+    private PlayerInteractEvent.RightClickBlock rightClick(ServerPlayer player, BlockPos pos,
+                                                            InteractionHand hand) {
+        return rightClick(player, pos, hand, false);
+    }
+
+    private PlayerInteractEvent.RightClickBlock rightClick(ServerPlayer player, BlockPos pos,
+                                                            InteractionHand hand, boolean canceled) {
+        PlayerInteractEvent.RightClickBlock event = new PlayerInteractEvent.RightClickBlock(
+                player, hand, pos, mock(BlockHitResult.class));
+        event.setCanceled(canceled);
+        return event;
     }
 }

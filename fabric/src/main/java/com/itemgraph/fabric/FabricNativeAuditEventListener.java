@@ -99,6 +99,32 @@ public final class FabricNativeAuditEventListener {
     private FabricNativeAuditEventListener() {
     }
 
+    static void recordBlockInteractionAttempt(ServerPlayer player, ServerLevel level,
+                                              BlockPos pos, net.minecraft.world.InteractionHand hand) {
+        if (!BlockInspectionTargets.isGriefLoggerBlockInteraction(level, pos, hand)) {
+            return;
+        }
+        submit("INTERACT_BLOCK_ATTEMPT", player, level, pos,
+                BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString(),
+                "outcome=attempt");
+    }
+
+    static InteractionResult handleBlockUse(InspectionService inspections,
+                                            BlockHistoryOpener blockHistoryOpener,
+                                            ServerPlayer player, ServerLevel level,
+                                            net.minecraft.world.InteractionHand hand, BlockPos pos) {
+        InteractionResult inspectionResult = tryOpenInspection(
+                inspections, blockHistoryOpener, player, level, pos);
+        if (inspectionResult != null) {
+            return inspectionResult;
+        }
+        if (BlockInspectionTargets.isInspectableRightClickTarget(level, pos)) {
+            FabricContainerSessionListener.rememberClick(player, level, pos);
+        }
+        recordBlockInteractionAttempt(player, level, pos, hand);
+        return InteractionResult.PASS;
+    }
+
     static void register() {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayer player = handler.getPlayer();
@@ -126,19 +152,9 @@ public final class FabricNativeAuditEventListener {
         });
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
-                InteractionResult inspectionResult = tryOpenInspection(
-                        InspectionService.getInstance(),
+                return handleBlockUse(InspectionService.getInstance(),
                         FabricNativeAuditEventListener::openBlockHistory,
-                        serverPlayer, serverLevel, hit.getBlockPos());
-                if (inspectionResult != null) {
-                    return inspectionResult;
-                }
-                if (!BlockInspectionTargets.isInspectableRightClickTarget(serverLevel, hit.getBlockPos())) {
-                    return InteractionResult.PASS;
-                }
-                FabricContainerSessionListener.rememberClick(serverPlayer, serverLevel, hit.getBlockPos());
-                submit("INTERACT_BLOCK_ATTEMPT", serverPlayer, serverLevel, hit.getBlockPos(),
-                        BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit.getBlockPos()).getBlock()).toString(), null);
+                        serverPlayer, serverLevel, hand, hit.getBlockPos());
             }
             return InteractionResult.PASS;
         });

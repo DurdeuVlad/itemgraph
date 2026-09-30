@@ -111,11 +111,11 @@ public final class NativeAuditEventListener {
                 || !(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
-        if (!BlockInspectionTargets.isInspectableRightClickTarget(level, event.getPos())) {
+        if (!BlockInspectionTargets.isGriefLoggerBlockInteraction(level, event.getPos(), event.getHand())) {
             return;
         }
         submit("INTERACT_BLOCK_ATTEMPT", player, level, event.getPos(),
-                blockId(level.getBlockState(event.getPos())), null);
+                blockId(level.getBlockState(event.getPos())), "outcome=attempt");
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)

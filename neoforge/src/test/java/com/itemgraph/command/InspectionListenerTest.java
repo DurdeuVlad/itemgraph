@@ -1,6 +1,8 @@
 package com.itemgraph.command;
 
 import com.itemgraph.listener.ContainerSessionListener;
+import com.itemgraph.listener.NativeAuditEventListener;
+import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -164,6 +166,29 @@ class InspectionListenerTest {
         assertTrue(event.isCanceled());
         assertEquals(InteractionResult.SUCCESS, event.getCancellationResult());
         assertEquals(1, opens.get());
+    }
+
+    @Test
+    void inspectionCancellationDoesNotEmitGameplayInteractionEvidence() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        net.minecraft.server.level.ServerLevel level = mock(net.minecraft.server.level.ServerLevel.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockState(CONTAINER_POS)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+        InspectionListener inspector = listener(service, (p, l, pos) -> 1);
+        InternalObservationService observations = mock(InternalObservationService.class);
+
+        try (org.mockito.MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(observations);
+            inspector.onRightClickBlock(event);
+            assertTrue(event.isCanceled());
+            new NativeAuditEventListener().onBlockInteract(event);
+        }
+
+        verifyNoInteractions(observations);
     }
 
     @Test

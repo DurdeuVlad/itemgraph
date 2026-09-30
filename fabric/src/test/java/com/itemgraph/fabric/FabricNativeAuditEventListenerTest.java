@@ -3,6 +3,7 @@ package com.itemgraph.fabric;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
+import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
@@ -13,6 +14,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -77,6 +79,62 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
+    void nativeBlockInteractionTargetMatchesPinnedFunctionalBlocksAndMainHand() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos pos = BlockPos.ZERO;
+        when(level.getBlockState(pos)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        List<Block> pinnedTargets = List.of(
+                Blocks.OAK_FENCE_GATE, Blocks.DISPENSER, Blocks.NOTE_BLOCK, Blocks.CHEST,
+                Blocks.FURNACE, Blocks.LEVER, Blocks.OAK_TRAPDOOR, Blocks.OAK_DOOR,
+                Blocks.BREWING_STAND, Blocks.REPEATER, Blocks.HOPPER, Blocks.DROPPER,
+                Blocks.SHULKER_BOX, Blocks.BARREL, Blocks.GRINDSTONE, Blocks.STONE_BUTTON,
+                Blocks.LOOM, Blocks.CRAFTING_TABLE, Blocks.CARTOGRAPHY_TABLE, Blocks.ENCHANTING_TABLE,
+                Blocks.SMITHING_TABLE, Blocks.STONECUTTER, Blocks.CRAFTER, Blocks.VAULT,
+                Blocks.DAYLIGHT_DETECTOR, Blocks.OAK_SIGN, Blocks.LECTERN, Blocks.BEACON);
+        for (Block block : pinnedTargets) {
+            when(level.getBlockState(pos)).thenReturn(block.defaultBlockState());
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    BlockInspectionTargets.isGriefLoggerFunctionalBlock(level, pos),
+                    block + " must remain in the exact pinned GriefLogger target set");
+        }
+        when(level.getBlockState(pos)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        ServerPlayer player = mock(ServerPlayer.class);
+        UUID playerUuid = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        InternalObservationService service = mock(InternalObservationService.class);
+
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            FabricNativeAuditEventListener.recordBlockInteractionAttempt(
+                    player, level, pos, InteractionHand.MAIN_HAND);
+            FabricNativeAuditEventListener.recordBlockInteractionAttempt(
+                    player, level, pos, InteractionHand.OFF_HAND);
+
+            when(level.getBlockState(pos)).thenReturn(Blocks.STONE.defaultBlockState());
+            FabricNativeAuditEventListener.recordBlockInteractionAttempt(
+                    player, level, pos, InteractionHand.MAIN_HAND);
+
+            when(level.getBlockEntity(pos)).thenReturn(mock(BlockEntity.class,
+                    org.mockito.Mockito.withSettings().extraInterfaces(Container.class)));
+            org.junit.jupiter.api.Assertions.assertTrue(BlockInspectionTargets.isInspectableRightClickTarget(level, pos));
+            FabricNativeAuditEventListener.recordBlockInteractionAttempt(
+                    player, level, pos, InteractionHand.MAIN_HAND);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_BLOCK_ATTEMPT", captured.getValue().eventType());
+        assertEquals("outcome=attempt", captured.getValue().detail());
+        assertEquals("minecraft:crafting_table", captured.getValue().subjectId());
+        assertEquals("minecraft:overworld", captured.getValue().levelName());
+    }
+
+    @Test
     void inactiveUnsupportedAndRejectedFabricInspectionPreserveVanillaBehavior() {
         UUID playerUuid = UUID.randomUUID();
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -118,6 +176,27 @@ class FabricNativeAuditEventListenerTest {
 
         assertEquals(InteractionResult.SUCCESS, result);
         assertEquals(1, opens.get());
+    }
+
+    @Test
+    void acceptedBlockInspectionDoesNotEmitGameplayInteractionEvidence() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos pos = BlockPos.ZERO;
+        when(level.getBlockState(pos)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        InternalObservationService service = mock(InternalObservationService.class);
+
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleBlockUse(
+                    inspections, (p, l, target) -> 1, player, level, InteractionHand.MAIN_HAND, pos);
+        }
+
+        assertEquals(InteractionResult.SUCCESS, result);
+        verifyNoInteractions(service);
     }
 
     @Test

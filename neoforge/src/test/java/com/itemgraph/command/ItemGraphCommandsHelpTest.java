@@ -434,14 +434,39 @@ class ItemGraphCommandsHelpTest {
                 BlockInspectionTargets.resolve(level, door));
 
         BlockPos target = new BlockPos(30, 64, 30);
+        List<net.minecraft.world.level.block.Block> pinnedTargets = List.of(
+                Blocks.OAK_FENCE_GATE, Blocks.DISPENSER, Blocks.NOTE_BLOCK, Blocks.CHEST,
+                Blocks.FURNACE, Blocks.LEVER, Blocks.OAK_TRAPDOOR, Blocks.OAK_DOOR,
+                Blocks.BREWING_STAND, Blocks.REPEATER, Blocks.HOPPER, Blocks.DROPPER,
+                Blocks.SHULKER_BOX, Blocks.BARREL, Blocks.GRINDSTONE, Blocks.STONE_BUTTON,
+                Blocks.LOOM, Blocks.CRAFTING_TABLE, Blocks.CARTOGRAPHY_TABLE, Blocks.ENCHANTING_TABLE,
+                Blocks.SMITHING_TABLE, Blocks.STONECUTTER, Blocks.CRAFTER, Blocks.VAULT,
+                Blocks.DAYLIGHT_DETECTOR, Blocks.OAK_SIGN, Blocks.LECTERN, Blocks.BEACON);
+        for (net.minecraft.world.level.block.Block block : pinnedTargets) {
+            when(level.getBlockState(target)).thenReturn(block.defaultBlockState());
+            assertTrue(BlockInspectionTargets.isGriefLoggerFunctionalBlock(level, target),
+                    block + " must remain in the exact pinned GriefLogger target set");
+        }
         when(level.getBlockState(target)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
         assertTrue(BlockInspectionTargets.isInspectableRightClickTarget(level, target));
+        assertTrue(BlockInspectionTargets.isGriefLoggerBlockInteraction(
+                        level, target, net.minecraft.world.InteractionHand.MAIN_HAND),
+                "pinned GriefLogger functional blocks are recorded for the main hand");
+        assertFalse(BlockInspectionTargets.isGriefLoggerBlockInteraction(
+                        level, target, net.minecraft.world.InteractionHand.OFF_HAND),
+                "the pinned GriefLogger hook ignores off-hand callbacks");
         when(level.getBlockState(target)).thenReturn(Blocks.STONE.defaultBlockState());
         assertFalse(BlockInspectionTargets.isInspectableRightClickTarget(level, target));
+        assertFalse(BlockInspectionTargets.isGriefLoggerBlockInteraction(
+                        level, target, net.minecraft.world.InteractionHand.MAIN_HAND),
+                "ordinary blocks are not in the pinned functional-block set");
         when(level.getBlockEntity(target)).thenReturn(mock(net.minecraft.world.level.block.entity.BlockEntity.class,
                 org.mockito.Mockito.withSettings().extraInterfaces(net.minecraft.world.Container.class)));
         assertTrue(BlockInspectionTargets.isInspectableRightClickTarget(level, target),
                 "modded block entities implementing Container remain inspectable");
+        assertFalse(BlockInspectionTargets.isGriefLoggerBlockInteraction(
+                        level, target, net.minecraft.world.InteractionHand.MAIN_HAND),
+                "ItemGraph's modded-container inspection extension is not mislabeled as GriefLogger action parity");
     }
 
     private void assertParsedCompletely(com.mojang.brigadier.ParseResults<CommandSourceStack> parsed,
