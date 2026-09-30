@@ -149,6 +149,51 @@ class EntityInteractionEvidenceTest {
     }
 
     @Test
+    void recordsFabricAggregateCallbackOutcomesWithoutClaimingHandledEffects() {
+        ServerLevel level = mock(ServerLevel.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ArmorStand stand = mock(ArmorStand.class);
+        UUID playerId = UUID.randomUUID();
+        when(player.level()).thenReturn(level);
+        when(player.getUUID()).thenReturn(playerId);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerId, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(stand.level()).thenReturn(level);
+        when(stand.getUUID()).thenReturn(UUID.randomUUID());
+        doReturn(EntityType.ARMOR_STAND).when(stand).getType();
+        when(stand.blockPosition()).thenReturn(BlockPos.ZERO);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            EntityInteractionEvidence.recordFabricCallbackResult(
+                    EntityInteractionEvidence.captureFabricCallbackContext(
+                            player, stand, InteractionHand.MAIN_HAND, new ItemStack(Items.DIAMOND)),
+                    InteractionResult.FAIL);
+            EntityInteractionEvidence.recordFabricCallbackResult(
+                    EntityInteractionEvidence.captureFabricCallbackContext(
+                            player, stand, InteractionHand.OFF_HAND, ItemStack.EMPTY),
+                    InteractionResult.SUCCESS);
+            EntityInteractionEvidence.recordFabricCallbackResult(
+                    EntityInteractionEvidence.captureFabricCallbackContext(
+                            player, stand, InteractionHand.OFF_HAND, ItemStack.EMPTY),
+                    InteractionResult.PASS);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service, org.mockito.Mockito.times(2)).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY_DENIED", captured.getAllValues().get(0).eventType());
+        org.junit.jupiter.api.Assertions.assertTrue(captured.getAllValues().get(0).detail()
+                .contains("callback=fabric_use_entity callback_result=fail"));
+        org.junit.jupiter.api.Assertions.assertTrue(captured.getAllValues().get(0).detail()
+                .contains("held_item=minecraft:diamond"));
+        assertEquals("INTERACT_ENTITY_UNRESOLVED", captured.getAllValues().get(1).eventType());
+        org.junit.jupiter.api.Assertions.assertTrue(captured.getAllValues().get(1).detail()
+                .contains("callback_result=success reason=FABRIC_USE_ENTITY_CALLBACK_SHORT_CIRCUITED"));
+    }
+
+    @Test
     void missingTargetUuidDoesNotProduceAMisleadingPlaceholder() {
         ServerLevel level = mock(ServerLevel.class);
         ServerPlayer player = mock(ServerPlayer.class);

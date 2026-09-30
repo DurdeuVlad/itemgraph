@@ -3,9 +3,11 @@
   "minVersion": "0.8",
   "package": "com.itemgraph.fabric.mixin",
   "compatibilityLevel": "JAVA_21",
+  "refmap": "itemgraph-refmap.json",
   "server": [
     "ArmorStandInteractionMixin",
     "EntityInteractionMixin",
+    "UseEntityCallbackInvokerMixin",
     "CommandsMixin",
     "ProjectileMixin",
     "ServerLevelMixin",

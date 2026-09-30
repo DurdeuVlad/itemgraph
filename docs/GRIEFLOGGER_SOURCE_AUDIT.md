@@ -156,6 +156,23 @@ Important semantics and limits:
   Fabric documents that `UseEntityCallback` is hooked before the spectator check
   and that `PASS` falls through to later processing in the [1.21.1 API
   docs](https://maven.fabricmc.net/docs/fabric-api-0.110.0%2B1.21.1/net/fabricmc/fabric/api/event/player/UseEntityCallback.html).
+- The project's resolved Fabric API is `0.116.12+1.21.1` (`fabric-events-interaction-v0`
+  `0.7.14+ba9dae0619`). Its [`UseEntityCallback` source](https://github.com/FabricMC/fabric-api/blob/0.116.12%2B1.21.1/fabric-events-interaction-v0/src/main/java/net/fabricmc/fabric/api/event/player/UseEntityCallback.java)
+  constructs an array-backed event; its [server network handler mixin](https://github.com/FabricMC/fabric-api/blob/0.116.12%2B1.21.1/fabric-events-interaction-v0/src/main/java/net/fabricmc/fabric/mixin/event/interaction/ServerPlayNetworkHandlerMixin.java)
+  calls the aggregate invoker and stops vanilla processing for a non-`PASS` result.
+  Because listeners short-circuit in registration order, a listener on the same event
+  cannot see an earlier listener's result if that listener prevents it from running.
+  ItemGraph decorates the aggregate invoker where the event is constructed, snapshots
+  actor, target, position, hand, and held-item fingerprint before listeners execute,
+  calls the original invoker once, stores its final non-`PASS` result, and returns it unchanged.
+  This preserves Fabric's ordering/short-circuit contract and avoids replaying callbacks.
+  Fabric API issue [#1870](https://github.com/FabricMC/fabric-api/issues/1870) documents
+  the callback duplication risk of handling the same interaction at multiple hooks;
+  ItemGraph uses one aggregate boundary for the final callback result. Tests cover
+  early and late short-circuits, including a listener mutating the held stack after the
+  pre-callback snapshot. `fabric.mod.json` requires the exact Fabric API version resolved
+  by this project build because the redirect targets that API initializer. A dev-server startup confirmed mixin application,
+  but runtime player interaction replay is still open under issue #75.
 - The interactable block list is hard-coded.
 - Interaction rows can be deleted when a block is broken, so the source is not an
   append-only forensic ledger.

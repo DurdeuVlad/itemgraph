@@ -52,6 +52,53 @@ public final class EntityInteractionEvidence {
         record(player, target, hand, "INTERACT_ENTITY_DENIED", detail.toString());
     }
 
+    /** Captures mutable interaction context before Fabric's callback listeners execute. */
+    public static FabricCallbackContext captureFabricCallbackContext(ServerPlayer player, Entity target,
+                                                                      InteractionHand hand, ItemStack heldStack) {
+        if (player == null || target == null || hand == null || player.level().isClientSide()) {
+            return null;
+        }
+        Level level = target.level();
+        if (level.isClientSide() || player.level() != level) {
+            return null;
+        }
+
+        StringBuilder fields = new StringBuilder();
+        appendTargetAndHand(fields, target, hand);
+        appendHeldStack(fields, heldStack == null ? null : heldStack.copy());
+        return new FabricCallbackContext(System.currentTimeMillis(), player.getUUID().toString(),
+                player.getGameProfile().getName(), level.dimension().location().toString(),
+                target.blockPosition().getX(), target.blockPosition().getY(), target.blockPosition().getZ(),
+                net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(),
+                fields.toString());
+    }
+
+    /** Records the aggregate Fabric callback result using the pre-callback context snapshot. */
+    public static void recordFabricCallbackResult(FabricCallbackContext context,
+                                                  InteractionResult callbackResult) {
+        if (context == null || callbackResult == null
+                || callbackResult == InteractionResult.PASS) {
+            return;
+        }
+
+        boolean denied = callbackResult == InteractionResult.FAIL;
+        String eventType = denied ? "INTERACT_ENTITY_DENIED" : "INTERACT_ENTITY_UNRESOLVED";
+        StringBuilder detail = new StringBuilder("outcome=")
+                .append(denied ? "denied" : "unresolved")
+                .append(" callback=fabric_use_entity callback_result=")
+                .append(callbackResult.name().toLowerCase(java.util.Locale.ROOT))
+                .append(" reason=FABRIC_USE_ENTITY_CALLBACK_SHORT_CIRCUITED")
+                .append(context.detailFields());
+        InternalObservationService.getInstance().submitAuditEvent(
+                new InternalObservationService.InternalAuditEvent(context.timestampMs(), eventType,
+                        context.playerUuid(), context.playerName(), context.dimension(),
+                        context.x(), context.y(), context.z(), context.subjectId(), detail.toString(), null));
+    }
+
+    public record FabricCallbackContext(long timestampMs, String playerUuid, String playerName,
+                                        String dimension, int x, int y, int z, String subjectId,
+                                        String detailFields) { }
+
     public static void recordArmorStandHandledResult(ServerPlayer player, Entity target,
                                                       InteractionHand hand, InteractionResult result,
                                                       String method, boolean recordPass) {
