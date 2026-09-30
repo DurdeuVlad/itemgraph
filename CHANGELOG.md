@@ -8,6 +8,7 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #26 block inspector evidence timeline:** `/ig inspect` now opens one exact-position, globally paginated timeline for block audit events, container item deltas, transformations, and imported GriefLogger event rows. Double chests and doors resolve to their physical target cells without duplicate rows; a container observation matches either endpoint, so a transfer is found even when the player endpoint is stored first. Schema V19 records block-removal supersession links for native and imported interaction evidence while keeping every source row immutable. Imported row links use a SHA-256 key and retain the full source key. Ordinary lookup still returns superseded rows with the replacement evidence ID and reason. Both loaders consume an inspection click only after the bounded asynchronous query is accepted; queue rejection preserves normal gameplay. Live client/server matrix verification remains pending.
 - **Issue #30 configuration baseline:** added cross-loader page-cap, bounded
   queue idle-poll/batch, native-capture, server-only, and indefinite-retention
   settings and a configurable 30-second MySQL/MariaDB connection keepalive on
@@ -38,6 +39,12 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Changed
 
+- **Long GriefLogger primary keys:** imported source keys over 191 Unicode
+  codepoints now use a deterministic SHA-256 key over length-framed UTF-8 key
+  values so MySQL/MariaDB composite indexes accept them without delimiter
+  ambiguity; the immutable payload preserves all original key fields.
+  The historical ledger and normalized lookup projection use the same key,
+  while pre-change SQLite checkpoints resume using their original key format.
 - **Loader runtime hardening:** Fabric pickup capture no longer exposes a
   non-private mixin helper or nested record that Mixin remaps as a Minecraft
   inner class. Native lookup event types now use vanilla literal command nodes,

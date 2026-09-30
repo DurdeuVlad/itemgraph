@@ -2,6 +2,8 @@ package com.itemgraph.listener;
 
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.command.ItemGraphCommands;
+import com.itemgraph.command.BlockInspectionTargets;
+import com.itemgraph.query.AuditEventQueryService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
@@ -19,6 +21,8 @@ import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
+
+import java.util.List;
 
 /**
  * Native replacement coverage for GriefLogger's non-item audit categories.
@@ -77,7 +81,12 @@ public final class NativeAuditEventListener {
                 || !(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
-        submit("BREAK_BLOCK", player, level, event.getPos(), blockId(event.getState()), null);
+        List<AuditEventQueryService.ExactPosition> supersessionPositions = BlockInspectionTargets
+                .resolveBlockPositions(level, event.getPos(), event.getState()).stream()
+                .map(pos -> new AuditEventQueryService.ExactPosition(pos.getX(), pos.getY(), pos.getZ()))
+                .toList();
+        submit("BREAK_BLOCK", player, level, event.getPos(), blockId(event.getState()), null,
+                supersessionPositions);
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
@@ -100,6 +109,9 @@ public final class NativeAuditEventListener {
     public void onBlockInteract(PlayerInteractEvent.RightClickBlock event) {
         if (event.isCanceled() || !(event.getEntity() instanceof ServerPlayer player)
                 || !(event.getLevel() instanceof ServerLevel level)) {
+            return;
+        }
+        if (!BlockInspectionTargets.isInspectableRightClickTarget(level, event.getPos())) {
             return;
         }
         submit("INTERACT_BLOCK_ATTEMPT", player, level, event.getPos(),
@@ -155,6 +167,17 @@ public final class NativeAuditEventListener {
                         player.getUUID().toString(), player.getGameProfile().getName(),
                         level.dimension().location().toString(),
                         pos.getX(), pos.getY(), pos.getZ(), subjectId, detail, null));
+    }
+
+    private static void submit(String eventType, ServerPlayer player, Level level, BlockPos pos,
+                               String subjectId, String detail,
+                               List<AuditEventQueryService.ExactPosition> supersessionPositions) {
+        InternalObservationService.getInstance().submitAuditEvent(
+                new InternalObservationService.InternalAuditEvent(
+                        System.currentTimeMillis(), eventType,
+                        player.getUUID().toString(), player.getGameProfile().getName(),
+                        level.dimension().location().toString(),
+                        pos.getX(), pos.getY(), pos.getZ(), subjectId, detail, null, supersessionPositions));
     }
 
     private static String blockId(BlockState state) {

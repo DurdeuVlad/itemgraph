@@ -38,6 +38,16 @@ remaining native-only differential-replay proof as unresolved under #31.
   cube radius, a default page size of 10, and clickable page navigation.
 - Inspect mode consumes normal block interaction while active. Left-click shows
   block history; right-click shows interaction, container, double-chest, or door history.
+- In the pinned `BlockHandler.isBlockIntractable` implementation, right-click
+  targets are exactly `FenceGateBlock`, `DispenserBlock`, `NoteBlock`,
+  `AbstractChestBlock`, `AbstractFurnaceBlock`, `LeverBlock`, `TrapDoorBlock`,
+  `DoorBlock`, `BrewingStandBlock`, `DiodeBlock`, `HopperBlock`, `DropperBlock`,
+  `ShulkerBoxBlock`, `BarrelBlock`, `GrindstoneBlock`, `ButtonBlock`,
+  `LoomBlock`, `CraftingTableBlock`, `CartographyTableBlock`,
+  `EnchantingTableBlock`, `SmithingTableBlock`, `StonecutterBlock`,
+  `CrafterBlock`, `VaultBlock`, `DaylightDetectorBlock`, `SignBlock`,
+  `LecternBlock`, and `BeaconBlock`. ItemGraph mirrors this vanilla list and
+  also recognizes modded block entities implementing Minecraft `Container`.
 - Chat and command rows are stored but excluded from GriefLogger's in-game lookup.
   ItemGraph intentionally exposes them through its own permission-checked audit lookup.
 
@@ -47,6 +57,7 @@ Primary sources: [lookup](https://daqem.com/projects/grieflogger/wiki/inspecting
 [inspect](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/inspect-command),
 [`LookupCommand.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/command/LookupCommand.java),
 [`InspectCommand.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/command/InspectCommand.java).
+The right-click target list is read from [`BlockHandler.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/block/BlockHandler.java).
 
 ## Event and storage coverage
 

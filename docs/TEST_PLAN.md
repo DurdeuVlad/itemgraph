@@ -651,3 +651,24 @@ spawn audit row for each, non-null source event IDs on all four rows, and zero
 duplicate source-event groups. Fabric passed the identical replay and query on
 port 27993; NeoForge used port 27994. These replays are staging evidence only.
 
+## M8 issue #26: exact block/container inspector and immutable supersession
+
+Automated checks currently cover the shared query and both loader adapters:
+
+- `UnifiedEvidenceQueryServiceTest.exactInspectorTimelineMergesSourcesAndPagesWithoutAdjacentPositionBleed` verifies global page order across audit, observation, and transformation tables; duplicate multi-cell targets; exact dimension/position filtering; and container-endpoint selection when the player endpoint is stored elsewhere.
+- `InternalObservationServiceTest.blockRemovalLinksEarlierInteractionsWithoutDeletingRawEvidence` verifies native interaction retention, two-cell door supersession, imported GriefLogger row supersession, retry idempotency, reason/evidence IDs in ordinary lookup, and active inspector filtering.
+- The same internal observation test uses a 616-code-point imported source key, including non-BMP characters, to prove supersession stores the full key and uses a code-point-safe indexed prefix. It also checks that a case-variant key recorded after a break stays active. `MariaDbDialectIntegrationTest` checks the V19 MySQL/MariaDB columns use `LONGTEXT` for the source key and a fixed 64-character digest for the primary key.
+- NeoForge `InspectionListenerTest` and Fabric `FabricNativeAuditEventListenerTest` verify per-player and permission behavior, accepted-query cancellation, queue-rejection gameplay fallback, and shared unified-history dispatch.
+
+On 2026-09-30, the development server started in a fresh temporary directory with
+`eula=true`, bound only to `127.0.0.1:25575`, and loaded only ItemGraph 0.3.2,
+Minecraft 1.21.1, and NeoForge 21.1.248. Startup reached `Done`; ItemGraph opened
+its isolated SQLite database and reported schema version 19. A read-only database
+check confirmed both V19 supersession tables and zero audit/supersession rows.
+This verifies dedicated-server loading and migration only. It does not satisfy the
+player interaction, queue saturation, conservation, or live supersession matrix.
+
+The implementation follows the observed GriefLogger cleanup behavior at the presentation boundary while keeping evidence immutable: GriefLogger removes old interaction rows after an interactable block/door break; ItemGraph records `BLOCK_REMOVED_AT_TARGET` links in its own schema V19 tables and retains the native row, imported projection, and immutable provenance. Source reference: [`RemoveBlockInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveBlockInteractionsEvent.java) and [`RemoveDoorInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveDoorInteractionsEvent.java).
+
+**Still required before closing #26:** run the isolated NeoForge + ItemGraph client interaction matrix for ordinary/function blocks, single/double chests, doors, empty/missing history, block removal, door removal, repeated clicks, and a deliberately saturated/rejected query queue. Confirm no ItemGraph SQL runs on the server thread; verify item and container contents do not change on accepted inspection; inspect raw and superseded rows read-only. The dedicated-server startup/migration smoke test above is complete; it did not exercise a connected player. No production or staging instance is involved.
+

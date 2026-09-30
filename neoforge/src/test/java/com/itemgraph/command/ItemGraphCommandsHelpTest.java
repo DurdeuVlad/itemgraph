@@ -432,6 +432,16 @@ class ItemGraphCommandsHelpTest {
                         new com.itemgraph.query.AuditEventQueryService.ExactPosition(20, 64, 20),
                         new com.itemgraph.query.AuditEventQueryService.ExactPosition(20, 65, 20)),
                 BlockInspectionTargets.resolve(level, door));
+
+        BlockPos target = new BlockPos(30, 64, 30);
+        when(level.getBlockState(target)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        assertTrue(BlockInspectionTargets.isInspectableRightClickTarget(level, target));
+        when(level.getBlockState(target)).thenReturn(Blocks.STONE.defaultBlockState());
+        assertFalse(BlockInspectionTargets.isInspectableRightClickTarget(level, target));
+        when(level.getBlockEntity(target)).thenReturn(mock(net.minecraft.world.level.block.entity.BlockEntity.class,
+                org.mockito.Mockito.withSettings().extraInterfaces(net.minecraft.world.Container.class)));
+        assertTrue(BlockInspectionTargets.isInspectableRightClickTarget(level, target),
+                "modded block entities implementing Container remain inspectable");
     }
 
     private void assertParsedCompletely(com.mojang.brigadier.ParseResults<CommandSourceStack> parsed,

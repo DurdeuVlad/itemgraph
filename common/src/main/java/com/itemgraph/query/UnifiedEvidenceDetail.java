@@ -21,7 +21,17 @@ public record UnifiedEvidenceDetail(
         int quantity,
         String subjectId,
         String detail,
-        String evidenceClass) {
+        String evidenceClass,
+        String orderingTableName,
+        String orderingSourceKey) {
+
+    public UnifiedEvidenceDetail(String source, String evidenceId, long timestampMs,
+                                 String levelName, Double x, Double y, Double z,
+                                 String playerName, String actionType, int quantity,
+                                 String subjectId, String detail, String evidenceClass) {
+        this(source, evidenceId, timestampMs, levelName, x, y, z, playerName,
+                actionType, quantity, subjectId, detail, evidenceClass, null, null);
+    }
 
     public UnifiedEvidenceDetail {
         if (source == null || source.isBlank()) {

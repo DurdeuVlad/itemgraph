@@ -123,6 +123,36 @@ class AuditEventQueryServiceTest {
     }
 
     @Test
+    void ordinaryLookupShowsWhyNativeAuditEventWasSuperseded() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement(
+                "INSERT INTO ig_audit_events (event_type, timestamp_ms, detail) VALUES (?, ?, ?)")) {
+            insert.setString(1, "INTERACT_BLOCK_ATTEMPT");
+            insert.setLong(2, 1_000L);
+            insert.setString(3, "outcome=attempt");
+            insert.executeUpdate();
+            insert.setString(1, "BREAK_BLOCK");
+            insert.setLong(2, 2_000L);
+            insert.setString(3, "outcome=broken");
+            insert.executeUpdate();
+        }
+        try (PreparedStatement insert = conn.prepareStatement("""
+                INSERT INTO ig_audit_event_supersessions
+                    (superseded_event_id, superseding_event_id, reason_code, created_at_ms)
+                VALUES (1, 2, 'BLOCK_BROKEN_AFTER_INTERACTION', 2_000)
+                """)) {
+            insert.executeUpdate();
+        }
+
+        AuditEventDetail event = service.find(
+                conn, "INTERACT_BLOCK_ATTEMPT", null, QueryWindow.unbounded(), 10).get(0);
+        String formatted = String.join("\n", QueryFormatter.formatAuditEvents(List.of(event), "all"));
+
+        assertEquals(2L, event.supersedingEventId());
+        assertEquals("BLOCK_BROKEN_AFTER_INTERACTION", event.supersessionReason());
+        assertTrue(formatted.contains("superseded_by=audit#2 reason=BLOCK_BROKEN_AFTER_INTERACTION"));
+    }
+
+    @Test
     void exactLogicalTargetLookupMergesPositionsWithGlobalOrderingAndPagination() throws Exception {
         try (PreparedStatement insert = conn.prepareStatement(
                 "INSERT INTO ig_audit_events (event_type, timestamp_ms, level_id, x, y, z, detail) VALUES ('INTERACT_BLOCK', ?, 'minecraft:overworld', ?, 64, 0, ?)")) {

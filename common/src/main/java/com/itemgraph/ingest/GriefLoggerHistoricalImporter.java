@@ -42,6 +42,8 @@ public final class GriefLoggerHistoricalImporter {
     private static final int BATCH_SIZE = 500;
     private static final int KNOWN_ACTION_MIN = 0;
     private static final int KNOWN_ACTION_MAX = 17;
+    /** Portable source-key width for MySQL/MariaDB composite primary keys. */
+    static final int MAX_SOURCE_KEY_CODE_POINTS = 191;
 
     private final GriefLoggerAdapter source;
     private final DatabaseManager target;
@@ -182,7 +184,7 @@ public final class GriefLoggerHistoricalImporter {
                             RowData row = rowData(rows, columns, ordinal, true);
                             if (!checkpointFound) {
                                 ensureProjection(targetConn, sourceHash, schemaFingerprint, table, row, references);
-                                if (row.sourceKey().equals(checkpoint)) {
+                                if (matchesCheckpoint(row, checkpoint)) {
                                     checkpointFound = true;
                                 }
                                 continue;
@@ -221,7 +223,7 @@ public final class GriefLoggerHistoricalImporter {
                         RowData row = rowData(rows, columns, ordinal, false);
                         if (!checkpointFound) {
                             ensureProjection(targetConn, sourceHash, schemaFingerprint, table, row, references);
-                            if (row.sourceKey().equals(checkpoint)) {
+                            if (matchesCheckpoint(row, checkpoint)) {
                                 checkpointFound = true;
                             }
                             continue;
@@ -261,7 +263,7 @@ public final class GriefLoggerHistoricalImporter {
         return new TableReport(table, true, seen, imported, opaque, "COMPLETE", detail);
     }
 
-    private record RowData(String sourceKey, Long sourceRowid, long ordinal,
+    private record RowData(String sourceKey, String legacySourceKey, Long sourceRowid, long ordinal,
                            String payloadJson, byte[] payloadBlob, Integer actionId,
                            String unresolvedReason, Map<String, Object> values) {}
 
@@ -290,13 +292,17 @@ public final class GriefLoggerHistoricalImporter {
         String payloadJson = mapJson(values);
         Long sourceRowid = null;
         String sourceKey;
+        String legacySourceKey;
         if (!primaryValues.isEmpty()) {
-            sourceKey = "pk:" + String.join("|", primaryValues);
+            legacySourceKey = "pk:" + String.join("|", primaryValues);
+            sourceKey = sourceKeyForPrimaryValues(primaryValues);
         } else if (hasRowid) {
             sourceRowid = rows.getLong("__itemgraph_rowid__");
             sourceKey = "hash:" + sha256(payloadJson.getBytes(StandardCharsets.UTF_8)) + ":" + ordinal;
+            legacySourceKey = sourceKey;
         } else {
             sourceKey = "hash:" + sha256(payloadJson.getBytes(StandardCharsets.UTF_8)) + ":" + ordinal;
+            legacySourceKey = sourceKey;
         }
         String unresolved = null;
         if (actionId != null && (actionId < KNOWN_ACTION_MIN || actionId > KNOWN_ACTION_MAX)) {
@@ -304,8 +310,27 @@ public final class GriefLoggerHistoricalImporter {
         } else if (opaqueBlob != null) {
             unresolved = "opaque_binary_field";
         }
-        return new RowData(sourceKey, sourceRowid, ordinal, payloadJson, opaqueBlob,
+        return new RowData(sourceKey, legacySourceKey, sourceRowid, ordinal, payloadJson, opaqueBlob,
                 actionId, unresolved, Collections.unmodifiableMap(new LinkedHashMap<>(values)));
+    }
+
+    static String sourceKeyForPrimaryValues(List<String> primaryValues) {
+        String sourceKey = "pk:" + String.join("|", primaryValues);
+        if (sourceKey.codePointCount(0, sourceKey.length()) <= MAX_SOURCE_KEY_CODE_POINTS) {
+            return sourceKey;
+        }
+        // Keep imported keys within the portable MySQL/MariaDB composite-index
+        // limit. The immutable payload_json still contains every original PK
+        // column/value, so the full source identity remains auditable.
+        StringBuilder framedValues = new StringBuilder().append(primaryValues.size()).append(':');
+        for (String value : primaryValues) {
+            framedValues.append(value.getBytes(StandardCharsets.UTF_8).length).append(':').append(value);
+        }
+        return "pksha256:" + sha256(framedValues.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static boolean matchesCheckpoint(RowData row, String checkpoint) {
+        return row.sourceKey().equals(checkpoint) || row.legacySourceKey().equals(checkpoint);
     }
 
     private boolean insertRow(Connection conn, String sourceHash, String schemaFingerprint,
@@ -330,6 +355,9 @@ public final class GriefLoggerHistoricalImporter {
             stmt.setLong(10, System.currentTimeMillis());
             if (row.unresolvedReason() == null) stmt.setNull(11, Types.VARCHAR); else stmt.setString(11, row.unresolvedReason());
             boolean inserted = stmt.executeUpdate() > 0;
+            if (!inserted && row.sourceKey().startsWith("pksha256:")) {
+                verifyHashedPrimaryKeyRetry(conn, sourceHash, table, row);
+            }
             if (inserted || GriefLoggerHistoricalProjection.isEventTable(table)) {
                 GriefLoggerHistoricalProjection.insert(conn, sourceHash, table,
                         new GriefLoggerHistoricalProjection.Row(row.sourceKey(), row.sourceRowid(),
@@ -340,16 +368,52 @@ public final class GriefLoggerHistoricalImporter {
         }
     }
 
+    private static void verifyHashedPrimaryKeyRetry(Connection conn, String sourceHash,
+                                                     String table, RowData row) throws SQLException {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                SELECT payload_json FROM ig_grieflogger_rows
+                WHERE source_sha256 = ? AND table_name = ? AND source_key = ?
+                """)) {
+            statement.setString(1, sourceHash);
+            statement.setString(2, table);
+            statement.setString(3, row.sourceKey());
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next() || !row.payloadJson().equals(result.getString(1))) {
+                    throw new SQLException("Hashed GriefLogger primary-key collision or conflicting retry for table "
+                            + table + " and source key " + row.sourceKey());
+                }
+            }
+        }
+    }
+
     private void ensureProjection(Connection conn, String sourceHash, String schemaFingerprint,
                                   String table, RowData row,
                                   GriefLoggerHistoricalProjection.SourceReferences references) throws SQLException {
         if (!GriefLoggerHistoricalProjection.isEventTable(table)) {
             return;
         }
+        String storedSourceKey = existingLedgerSourceKey(conn, sourceHash, table, row);
         GriefLoggerHistoricalProjection.insert(conn, sourceHash, table,
-                new GriefLoggerHistoricalProjection.Row(row.sourceKey(), row.sourceRowid(),
+                new GriefLoggerHistoricalProjection.Row(storedSourceKey, row.sourceRowid(),
                         row.values(), row.payloadBlob() == null ? null : sha256(row.payloadBlob()),
                         row.unresolvedReason()), references);
+    }
+
+    private static String existingLedgerSourceKey(Connection conn, String sourceHash,
+                                                   String table, RowData row) throws SQLException {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                SELECT source_key FROM ig_grieflogger_rows
+                WHERE source_sha256 = ? AND table_name = ?
+                  AND (HEX(source_key) = HEX(?) OR HEX(source_key) = HEX(?))
+                """)) {
+            statement.setString(1, sourceHash);
+            statement.setString(2, table);
+            statement.setString(3, row.legacySourceKey());
+            statement.setString(4, row.sourceKey());
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? result.getString(1) : row.sourceKey();
+            }
+        }
     }
 
     private static String readCheckpoint(Connection conn, String hash, String table) throws SQLException {

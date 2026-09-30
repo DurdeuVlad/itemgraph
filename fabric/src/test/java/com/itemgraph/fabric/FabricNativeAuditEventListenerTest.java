@@ -18,6 +18,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -53,7 +53,7 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void activeSupportedFabricInspectionConsumesClickAfterBrowserAccepts() {
+    void activeContainerInspectionConsumesClickAfterUnifiedHistoryAccepts() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -96,17 +96,17 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void activeNonContainerFabricInspectionUsesBlockHistoryOpener() {
+    void activeBlockInspectionUsesTheUnifiedHistoryOpener() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
         ServerLevel level = org.mockito.Mockito.mock(ServerLevel.class);
         when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(mock(BlockEntity.class));
+        when(level.getBlockState(BlockPos.ZERO)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
         AtomicInteger opens = new AtomicInteger();
 
         InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
                 inspections,
-                (openingPlayer, openingLevel, clickedPos) -> fail("non-container must not open the flow browser"),
                 (openingPlayer, openingLevel, clickedPos) -> {
                     assertSame(player, openingPlayer);
                     assertSame(level, openingLevel);
@@ -121,18 +121,48 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void rejectedNonContainerFabricInspectionStillConsumesClick() {
+    void rejectedBlockInspectionPreservesGameplay() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
         ServerLevel level = org.mockito.Mockito.mock(ServerLevel.class);
         when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(mock(BlockEntity.class));
+        when(level.getBlockState(BlockPos.ZERO)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
 
         InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
                 inspections,
                 (openingPlayer, openingLevel, clickedPos) -> 0,
-                (openingPlayer, openingLevel, clickedPos) -> 0,
                 player, level, BlockPos.ZERO);
+
+        assertNull(result);
+    }
+
+    @Test
+    void rejectedLeftClickInspectionPreservesBlockBreaking() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = org.mockito.Mockito.mock(ServerLevel.class);
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenLeftClickInspection(
+                inspections,
+                (openingPlayer, openingLevel, pos) -> { opens.incrementAndGet(); return 0; },
+                player, level, BlockPos.ZERO);
+
+        assertNull(result, "queue rejection must allow vanilla block breaking");
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void acceptedLeftClickInspectionConsumesBlockBreaking() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenLeftClickInspection(
+                inspections, (openingPlayer, openingLevel, pos) -> 1,
+                player, org.mockito.Mockito.mock(ServerLevel.class), BlockPos.ZERO);
 
         assertEquals(InteractionResult.SUCCESS, result);
     }
