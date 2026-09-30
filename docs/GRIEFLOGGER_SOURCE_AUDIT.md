@@ -207,6 +207,11 @@ GriefLogger classes or copying its implementation.
 6. Treat this pinned 26.2 source as a behavior research fixture. Verify the actual
    GriefLogger `1.2.10-1.21.1` release before claiming binary compatibility.
 
-For comparison, CoreProtect's typed asynchronous lookup/API model is a better design
-reference for stable integration boundaries than GriefLogger's internal services:
-[commands](https://docs.coreprotect.net/commands/), [API](https://docs.coreprotect.net/api/version/v13/).
+For comparison, CoreProtect API v13 provides a stable typed lookup surface with
+separate result types such as `EntityResult` and `BlockResult`, plus shared typed
+filters. Its database lookups are synchronous on the caller thread; the official
+documentation tells integrations to dispatch searches asynchronously and capture
+live world state on the server thread first. ItemGraph follows the same separation
+between typed query results and game-thread capture, while enforcing its own bounded
+asynchronous query worker rather than relying on every caller to schedule correctly:
+[CoreProtect API v13](https://docs.coreprotect.net/api/version/v13/).
