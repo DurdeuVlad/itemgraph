@@ -18,6 +18,9 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Asynchronous, bounded worker for recording internal/supplemental observations (Phase 8/9/10).
@@ -33,6 +36,8 @@ public class InternalObservationService {
     private static final long AUDIT_RETRY_INITIAL_BACKOFF_MS = 25L;
     private static final long AUDIT_RETRY_MAX_BACKOFF_MS = 5_000L;
     private static final long AUDIT_RETRY_LOG_INTERVAL_MS = 10_000L;
+    private static final Pattern SOURCE_EVENT_UUID = Pattern.compile(
+            "\\\"event_id\\\"\\s*:\\s*\\\"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\\\"");
 
     public static InternalObservationService getInstance() {
         return INSTANCE;
@@ -53,7 +58,8 @@ public class InternalObservationService {
             CanonicalItem item,
             int amount,
             String itemEntityUuid,
-            Long timestampEndMs
+            Long timestampEndMs,
+            Long sourceEventId
     ) {
         public InternalObservation(
                 long timestampMs, String actionType, String playerUuid, String playerName,
@@ -62,7 +68,7 @@ public class InternalObservationService {
                 String targetType, String itemId, byte[] rawData, int amount, String itemEntityUuid
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
-                 targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, null, amount, itemEntityUuid, null);
+                 targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, null, amount, itemEntityUuid, null, null);
         }
 
         public InternalObservation(
@@ -72,7 +78,7 @@ public class InternalObservationService {
                 String targetType, String itemId, byte[] rawData, CanonicalItem item, int amount, String itemEntityUuid
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
-                    targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, item, amount, itemEntityUuid, null);
+                    targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData, item, amount, itemEntityUuid, null, null);
         }
 
         public InternalObservation(
@@ -83,7 +89,7 @@ public class InternalObservationService {
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
                  targetLevelName, targetX, targetY, targetZ, targetType,
-                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, null);
+                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, null, null);
         }
 
         public InternalObservation(
@@ -94,8 +100,115 @@ public class InternalObservationService {
         ) {
             this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
                  targetLevelName, targetX, targetY, targetZ, targetType,
-                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, timestampEndMs);
+                 item != null ? item.itemId() : "minecraft:air", null, item, amount, itemEntityUuid, timestampEndMs, null);
         }
+
+        public InternalObservation(
+                long timestampMs, String actionType, String playerUuid, String playerName,
+                String levelName, double x, double y, double z,
+                String targetLevelName, Double targetX, Double targetY, Double targetZ,
+                String targetType, String itemId, byte[] rawData, CanonicalItem item, int amount,
+                String itemEntityUuid, Long timestampEndMs
+        ) {
+            this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
+                    targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData,
+                    item, amount, itemEntityUuid, timestampEndMs, null);
+        }
+
+    }
+
+    /**
+     * Maps a UUID event identity to the INTEGER source_event_id column used by
+     * both SQLite and MySQL/MariaDB. The full UUID remains in raw_data; this
+     * stable positive projection makes queued retries idempotent through the
+     * existing (source_type, source_event_id) unique index. Persistence compares
+     * raw payloads and probes deterministic salted projections if a distinct
+     * payload ever collides with the preferred value.
+     */
+    public static long sourceEventIdForUuid(String eventId) {
+        return sourceEventIdForUuid(eventId, 0);
+    }
+
+    private static long sourceEventIdForUuid(String eventId, int salt) {
+        UUID uuid = UUID.fromString(eventId);
+        long value = uuid.getMostSignificantBits() ^ Long.rotateLeft(uuid.getLeastSignificantBits(), 29);
+        value ^= 0x9E3779B97F4A7C15L * salt;
+        value ^= value >>> 33;
+        value *= 0xff51afd7ed558ccdL;
+        value ^= value >>> 33;
+        value *= 0xc4ceb9fe1a85ec53L;
+        value ^= value >>> 33;
+        if (value == Long.MIN_VALUE) {
+            return Long.MAX_VALUE;
+        }
+        value = Math.abs(value);
+        return value == 0 ? 1 : value;
+    }
+
+    private record ExistingSourceEvent(boolean present, boolean sameEvent) {}
+
+    /**
+     * Resolves the numeric compatibility key without allowing a hash collision
+     * to discard a distinct event. The producer UUID is the shared identity;
+     * payloads may differ between the audit and quantity ledgers. A colliding
+     * producer receives a deterministic salted key in both ledgers.
+     */
+    private static long collisionSafeSourceEventId(Connection conn, String table,
+                                                    long preferredId, byte[] rawData) throws SQLException {
+        if (rawData == null) {
+            throw new SQLException("source_event_id requires raw_data for collision-safe persistence");
+        }
+        String eventUuid = sourceEventUuid(rawData);
+        if (eventUuid == null) {
+            throw new SQLException("source_event_id raw_data must contain a UUID event_id");
+        }
+        for (int salt = 0; salt < 64; salt++) {
+            long candidate = salt == 0
+                    ? preferredId
+                    : sourceEventIdForUuid(eventUuid, salt);
+            ExistingSourceEvent existing = findSourceEvent(conn, candidate, eventUuid);
+            if (!existing.present() || existing.sameEvent()) {
+                return candidate;
+            }
+        }
+        throw new SQLException("Unable to allocate a collision-free source event ID for " + table);
+    }
+
+    private static String sourceEventUuid(byte[] rawData) {
+        Matcher matcher = SOURCE_EVENT_UUID.matcher(new String(rawData, java.nio.charset.StandardCharsets.UTF_8));
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(matcher.group(1)).toString();
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    private static ExistingSourceEvent findSourceEvent(Connection conn, long sourceEventId, String eventUuid)
+            throws SQLException {
+        // Probe both ledgers: a shared producer event must resolve to the same
+        // salted ID regardless of which table is persisted first. Inspect all
+        // matches before accepting so a conflicting row in either ledger cannot
+        // be hidden by an earlier match in the other ledger.
+        boolean found = false;
+        for (String candidateTable : List.of("ig_observations", "ig_audit_events")) {
+            String sql = "SELECT raw_data FROM " + candidateTable
+                    + " WHERE source_type = 'ITEMGRAPH_INTERNAL' AND source_event_id = ?";
+            try (PreparedStatement statement = conn.prepareStatement(sql)) {
+                statement.setLong(1, sourceEventId);
+                try (ResultSet result = statement.executeQuery()) {
+                    while (result.next()) {
+                        found = true;
+                        if (!eventUuid.equals(sourceEventUuid(result.getBytes("raw_data")))) {
+                            return new ExistingSourceEvent(true, false);
+                        }
+                    }
+                }
+            }
+        }
+        return new ExistingSourceEvent(found, found);
     }
 
     public record InternalTransformation(
@@ -127,8 +240,26 @@ public class InternalObservationService {
             double z,
             String subjectId,
             String detail,
-            byte[] rawData
+            byte[] rawData,
+            Long sourceEventId
     ) {
+        public InternalAuditEvent(
+                long timestampMs,
+                String eventType,
+                String playerUuid,
+                String playerName,
+                String levelName,
+                double x,
+                double y,
+                double z,
+                String subjectId,
+                String detail,
+                byte[] rawData
+        ) {
+            this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z,
+                    subjectId, detail, rawData, null);
+        }
+
         public InternalAuditEvent {
             rawData = rawData == null ? null : rawData.clone();
         }
@@ -451,10 +582,10 @@ public class InternalObservationService {
             try {
                 conn.setAutoCommit(false);
                 String insertSql = """
-                    INSERT INTO ig_audit_events (
+                    INSERT OR IGNORE INTO ig_audit_events (
                         event_type, timestamp_ms, player_uuid, player_name,
                         level_id, x, y, z, subject_id, detail, source_type, source_event_id, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ITEMGRAPH_INTERNAL', NULL, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ITEMGRAPH_INTERNAL', ?, ?)
                 """;
                 try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
                     for (InternalAuditEvent event : batch) {
@@ -468,14 +599,19 @@ public class InternalObservationService {
                         pstmt.setDouble(8, event.z());
                         setNullableString(pstmt, 9, event.subjectId());
                         setNullableString(pstmt, 10, event.detail());
-                        if (event.rawData() == null) {
-                            pstmt.setNull(11, Types.BLOB);
+                        if (event.sourceEventId() == null) {
+                            pstmt.setNull(11, Types.BIGINT);
                         } else {
-                            pstmt.setBytes(11, event.rawData());
+                            pstmt.setLong(11, collisionSafeSourceEventId(conn, "ig_audit_events",
+                                    event.sourceEventId(), event.rawData()));
                         }
-                        pstmt.addBatch();
+                        if (event.rawData() == null) {
+                            pstmt.setNull(12, Types.BLOB);
+                        } else {
+                            pstmt.setBytes(12, event.rawData());
+                        }
+                        pstmt.executeUpdate();
                     }
-                    pstmt.executeBatch();
                 }
                 conn.commit();
             } catch (SQLException e) {
@@ -569,12 +705,14 @@ public class InternalObservationService {
         try {
             conn.setAutoCommit(false);
 
-            // INSERT OR IGNORE: the V11 partial unique index protects internal event submissions.
+            // INSERT OR IGNORE: source_event_id deduplicates durable producer
+            // identities; collisionSafeSourceEventId prevents the lossy numeric
+            // UUID projection from silently discarding a distinct payload.
             String insertSql = """
                 INSERT OR IGNORE INTO ig_observations (
                     source_type, source_event_id, timestamp_ms, node_id, target_node_id,
                     fingerprint_id, action_type, amount, raw_data, correlation_status, item_entity_uuid, timestamp_end_ms
-                ) VALUES ('ITEMGRAPH_INTERNAL', NULL, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+                ) VALUES ('ITEMGRAPH_INTERNAL', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
             """;
 
             try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
@@ -680,34 +818,39 @@ public class InternalObservationService {
                         }
                     }
 
-                    pstmt.setLong(1, obs.timestampMs());
-                    pstmt.setLong(2, originNodeId);
-                    if (targetNodeId != null) {
-                        pstmt.setLong(3, targetNodeId);
+                    if (obs.sourceEventId() != null) {
+                        pstmt.setLong(1, collisionSafeSourceEventId(conn, "ig_observations",
+                                obs.sourceEventId(), obs.rawData()));
                     } else {
-                        pstmt.setNull(3, Types.INTEGER);
+                        pstmt.setNull(1, Types.BIGINT);
                     }
-                    pstmt.setLong(4, fingerprintId);
-                    pstmt.setString(5, obs.actionType());
-                    pstmt.setInt(6, obs.amount());
-                    if (obs.rawData() != null) {
-                        pstmt.setBytes(7, obs.rawData());
+                    pstmt.setLong(2, obs.timestampMs());
+                    pstmt.setLong(3, originNodeId);
+                    if (targetNodeId != null) {
+                        pstmt.setLong(4, targetNodeId);
                     } else {
-                        pstmt.setNull(7, Types.BLOB);
+                        pstmt.setNull(4, Types.INTEGER);
+                    }
+                    pstmt.setLong(5, fingerprintId);
+                    pstmt.setString(6, obs.actionType());
+                    pstmt.setInt(7, obs.amount());
+                    if (obs.rawData() != null) {
+                        pstmt.setBytes(8, obs.rawData());
+                    } else {
+                        pstmt.setNull(8, Types.BLOB);
                     }
                     if (obs.itemEntityUuid() != null) {
-                        pstmt.setString(8, obs.itemEntityUuid());
+                        pstmt.setString(9, obs.itemEntityUuid());
                     } else {
-                        pstmt.setNull(8, Types.VARCHAR);
+                        pstmt.setNull(9, Types.VARCHAR);
                     }
                     if (obs.timestampEndMs() != null) {
-                        pstmt.setLong(9, obs.timestampEndMs());
+                        pstmt.setLong(10, obs.timestampEndMs());
                     } else {
-                        pstmt.setNull(9, Types.BIGINT);
+                        pstmt.setNull(10, Types.BIGINT);
                     }
-                    pstmt.addBatch();
+                    pstmt.executeUpdate();
                 }
-                pstmt.executeBatch();
             }
 
             conn.commit();

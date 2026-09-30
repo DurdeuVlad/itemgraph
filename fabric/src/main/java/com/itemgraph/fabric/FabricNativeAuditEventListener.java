@@ -246,10 +246,33 @@ public final class FabricNativeAuditEventListener {
                         levelName, pos.getX(), pos.getY(), pos.getZ(), null, bounded(command), null));
     }
 
+    /** Records the same attempt boundary as GriefLogger's ProjectileMixin. */
+    public static void onProjectileShootAttempt(Projectile projectile, Entity source) {
+        if (!(source instanceof ServerPlayer player) || projectile == null
+                || player.level().isClientSide()) {
+            return;
+        }
+        ItemStack stack = projectile instanceof ThrowableItemProjectile throwable
+                ? throwable.getItem()
+                : projectile instanceof AbstractArrow arrow
+                ? arrow.getPickupItemStackOrigin()
+                : ItemStack.EMPTY;
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+        String actionType = projectile instanceof ThrowableItemProjectile
+                ? "THROW_ITEM" : "SHOOT_ITEM";
+        String level = player.level().dimension().location().toString();
+        recordProjectileObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
+                level, player.getX(), player.getY(), player.getZ(), projectile.getX(), projectile.getY(),
+                projectile.getZ(), ItemCanonicalizer.canonicalizeStack(stack.copy()), stack.getCount(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString());
+    }
+
     /**
-     * Records a newly added server projectile as a quantity observation.
-     * GriefLogger's THROW_ITEM and SHOOT_ITEM rows carry the source item and
-     * stack count, so native ItemGraph capture preserves both values.
+     * Records a newly added server projectile as raw accepted-spawn evidence.
+     * The GriefLogger-compatible quantity row is emitted by the attempt hook;
+     * this outcome must not create a second quantity-flow observation.
      */
     public static void onProjectileSpawn(Entity entity) {
         if (!(entity instanceof Projectile projectile)
@@ -267,10 +290,9 @@ public final class FabricNativeAuditEventListener {
         // thrown trident, as SHOOT_ITEM; only ThrowableItemProjectile is THROW_ITEM.
         String actionType = projectile instanceof ThrowableItemProjectile
                 ? "THROW_ITEM" : "SHOOT_ITEM";
-        recordProjectileObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
-                player.level().dimension().location().toString(), player.getX(), player.getY(), player.getZ(),
-                projectile.getX(), projectile.getY(), projectile.getZ(),
-                ItemCanonicalizer.canonicalizeStack(stack.copy()), stack.getCount(),
+        recordProjectileSpawnAccepted(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
+                player.level().dimension().location().toString(), projectile.getX(), projectile.getY(),
+                projectile.getZ(), ItemCanonicalizer.canonicalizeStack(stack.copy()), stack.getCount(),
                 BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString());
     }
 
@@ -292,17 +314,18 @@ public final class FabricNativeAuditEventListener {
             return;
         }
         String eventId = java.util.UUID.randomUUID().toString();
-        byte[] rawData = ("{\"capture\":\"projectile_spawn\",\"event_id\":\""
+        byte[] rawData = ("{\"capture\":\"projectile_shoot_attempt\",\"event_id\":\""
                 + eventId + "\",\"projectile\":\"" + projectileId + "\",\"spawn_x\":" + projectileX
                 + ",\"spawn_y\":" + projectileY + ",\"spawn_z\":" + projectileZ
-                + ",\"evidence\":\"spawned_by_player\"}")
+                + ",\"outcome\":\"attempt\",\"evidence\":\"shoot_from_rotation\"}")
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8);
         InternalObservationService service = InternalObservationService.getInstance();
         InternalObservationService.InternalObservation observation = new InternalObservationService.InternalObservation(
                 System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
                 playerX, playerY, playerZ, levelName,
                 null, null, null, "UNKNOWN", item.itemId(), rawData,
-                item, amount, null, null);
+                item, amount, null, null,
+                InternalObservationService.sourceEventIdForUuid(eventId));
         if (service.submit(observation)) {
             // Keep the legacy native-audit lookup path readable while the
             // quantity observation remains the single unified source.
@@ -310,8 +333,31 @@ public final class FabricNativeAuditEventListener {
                     System.currentTimeMillis(), actionType, playerUuid, playerName, levelName,
                     projectileX, projectileY, projectileZ, item.itemId(),
                     "projectile=" + projectileId + " event_id=" + eventId
-                            + " evidence=spawned_by_player quantity=" + amount, rawData));
+                            + " outcome=attempt evidence=shoot_from_rotation quantity=" + amount,
+                    rawData, InternalObservationService.sourceEventIdForUuid(eventId)));
         }
+    }
+
+    static void recordProjectileSpawnAccepted(String actionType, String playerUuid, String playerName,
+                                               String levelName, double projectileX, double projectileY,
+                                               double projectileZ, CanonicalItem item, int amount,
+                                               String projectileId) {
+        if (item == null || amount <= 0) {
+            return;
+        }
+        String eventId = java.util.UUID.randomUUID().toString();
+        byte[] rawData = ("{\"capture\":\"projectile_spawn\",\"event_id\":\""
+                + eventId + "\",\"projectile\":\"" + projectileId + "\",\"spawn_x\":" + projectileX
+                + ",\"spawn_y\":" + projectileY + ",\"spawn_z\":" + projectileZ
+                + ",\"outcome\":\"accepted\",\"evidence\":\"spawned_by_player\"}")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        InternalObservationService.getInstance().submitAuditEvent(
+                new InternalObservationService.InternalAuditEvent(
+                        System.currentTimeMillis(), "PROJECTILE_SPAWN_ACCEPTED", playerUuid, playerName,
+                        levelName, projectileX, projectileY, projectileZ, item.itemId(),
+                        "action=" + actionType + " projectile=" + projectileId + " event_id=" + eventId
+                                + " outcome=accepted evidence=spawned_by_player",
+                        rawData, InternalObservationService.sourceEventIdForUuid(eventId)));
     }
 
     /** Starts a nested-safe drop capture until the addFreshEntity result is known. */

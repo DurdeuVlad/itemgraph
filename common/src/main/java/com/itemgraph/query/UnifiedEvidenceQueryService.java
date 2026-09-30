@@ -30,6 +30,7 @@ public final class UnifiedEvidenceQueryService {
             "INTERACT_ENTITY", "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "ADD_ITEM", "REMOVE_ITEM",
             "DROP_ITEM", "PICKUP_ITEM", "CRAFT", "SMELT", "ANVIL_RENAME", "ANVIL_REPAIR", "BREAK_ITEM",
             "CONSUME_ITEM", "HOPPER_INSERT", "HOPPER_EXTRACT", "DEATH_DROP",
+            "PROJECTILE_SPAWN_ACCEPTED",
             "ADD_ITEM_ENDER", "REMOVE_ITEM_ENDER");
 
     private static final String OBSERVATION_ACTION = "CASE WHEN UPPER(o.action_type) = 'CRAFT_ITEM' THEN 'CRAFT' ELSE UPPER(o.action_type) END";
@@ -165,7 +166,7 @@ public final class UnifiedEvidenceQueryService {
                 }
             }
         } catch (SQLException failure) {
-            // Databases created before migration 15 remain readable while the
+            // Databases created before migration 16 remain readable while the
             // migration is pending; their native sources still produce results.
             if (failure.getMessage() != null && failure.getMessage().contains("no such table")) {
                 return List.of();

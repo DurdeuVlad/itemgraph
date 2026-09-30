@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.itemgraph.neoforge.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "server": [
+    "ProjectileMixin",
+    "ServerLevelMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -109,6 +109,7 @@ tasks.register('verifyFabricJar') {
                         || !names.contains('itemgraph.mixins.json')
                         || names.contains('META-INF/neoforge.mods.toml')
                         || !names.contains('com/itemgraph/fabric/ItemGraphFabric.class')
+                        || !names.contains('com/itemgraph/fabric/mixin/ProjectileMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/CommandsMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/ServerLevelMixin.class')
                         || !names.contains('com/itemgraph/fabric/mixin/BlockItemMixin.class')

@@ -8,6 +8,13 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Changed
 
+- **Loader runtime hardening:** Fabric pickup capture no longer exposes a
+  non-private mixin helper or nested record that Mixin remaps as a Minecraft
+  inner class. Native lookup event types now use vanilla literal command nodes,
+  preserving direct GriefLogger filter syntax while allowing NeoForge and Fabric
+  operators to receive the command tree without a disconnect. Connected-player
+  staging replays verified one durable throw and shoot row plus one accepted
+  spawn audit row for each loader; no release artifact or version bump was made.
 - **One storage contract for SQLite and MySQL/MariaDB:** ItemGraph now exposes
   validated backend settings on NeoForge and Fabric, runs the shared migrations
   and JDBC queries through one dialect layer, preserves SQLite partial-dedup
@@ -32,7 +39,10 @@ The project follows a simple pre-1.0 development changelog model.
 - **Audit reliability:** NeoForge block use is labeled `INTERACT_BLOCK_ATTEMPT` until a completion event exists, capped audit pages report the effective page after offset limits, and transient audit database failures retry with bounded exponential backoff and rate-limited error logs.
 - **Command evidence labeling:** NeoForge command hooks now store `COMMAND_ATTEMPT`; the underlying `CommandEvent` is a pre-execution callback, so ItemGraph no longer presents it as completed execution.
 - **Fabric command coverage:** the Fabric adapter now records `COMMAND_ATTEMPT` at Minecraft's `Commands.performCommand` boundary through a narrowly scoped server mixin, matching NeoForge's pre-execution semantics without claiming command success.
-- **Projectile quantity evidence:** NeoForge and Fabric now record accepted player-owned projectile spawns as canonical `THROW_ITEM`/`SHOOT_ITEM` observations with the observed source stack count and explicit `UNKNOWN` destinations. Projectile type and spawn coordinates remain raw evidence without claiming a landing location or fabricating a projectile UUID; attempt-vs-outcome timing parity with GriefLogger's `shootFromRotation` hook remains tracked by #27.
+- **Projectile evidence boundary:** the canonical `THROW_ITEM`/`SHOOT_ITEM` quantity row is emitted at the GriefLogger-compatible `shootFromRotation` attempt boundary; accepted player-owned spawns remain separate raw evidence with no landing or projectile-UUID claim.
+- **Projectile retry and acceptance integrity:** projectile attempt rows now persist a durable source event identity for idempotent worker retries, and both loaders emit accepted-spawn evidence only after `addFreshEntity` returns true; accepted audit details do not claim a quantity.
+- **Audit retry identity:** migration v16 adds source-event deduplication for native audit rows, and projectile attempt/accepted evidence now persists that identity in `ig_audit_events` as well as the quantity ledger.
+- **NeoForge staging run:** the ModDev server now includes the shared `common` and `core` source sets, allowing a GriefLogger-absent `runServer` smoke to load ItemGraph and its mixins before a release build.
 - **Fabric placement coverage:** the Fabric adapter now records completed `BlockItem.place` actions as `PLACE_BLOCK` audit evidence through a server-only return hook; failed and non-block interactions remain excluded.
 - **Fabric ground-flow coverage:** the Fabric adapter now records normal player drops, vanilla player-death inventory drops, and full or partial pickups through server-only hooks. It requires the `addFreshEntity` acceptance result, preserves the returned `ItemEntity` UUID, labels death-time rows `DEATH_DROP`, captures custom item entities accepted during `ServerPlayer.die`, uses the returned entity stack count for drops, and uses the before/after count delta for pickups.
 - **Fabric container sessions and automation:** server menu initialization and close hooks reuse the shared interval tracker for block containers and double chests, orderly server shutdown flushes active session deltas before database close, and `HopperBlockEntity` transfers emit bounded net `HOPPER_INSERT`/`HOPPER_EXTRACT` observations with unknown endpoints. Modded automation remains a tracked adapter gap.
@@ -51,6 +61,15 @@ The project follows a simple pre-1.0 development changelog model.
 - **Modrinth publication gate**: tagged releases and the Modrinth-only retry workflow now check both project API endpoints before publishing. A non-2xx response disables Modrinth steps cleanly while GitHub and CurseForge publication continue; a later release or manual retry becomes eligible after both endpoints return successful responses.
 - **GriefLogger component decode handling**: undecodable historical `DataComponentPatch` rows no longer emit a per-row WARN or repeat the same codec failure for every duplicate row while its entry remains in the bounded cache. ItemGraph keeps the raw BLOB, records an opaque SHA-256 fingerprint so distinct payloads do not collapse into one item-ID fingerprint, and emits one DEBUG diagnostic per payload and registry context. Replacing the server registry context clears the cache and permits a retry.
 - **Unsupported GriefLogger database guard:** a readable SQLite file is now checked for the complete supported `items`, `containers`, `users`, `levels`, and `materials` schema before ingestion. Unrelated or empty SQLite files are skipped with one informational message instead of repeated missing-table warnings.
+- **Projectile action parity:** both loaders now record `THROW_ITEM` and `SHOOT_ITEM` at the same `Projectile.shootFromRotation` HEAD attempt boundary used by GriefLogger, while accepted player-owned spawns are retained as `PROJECTILE_SPAWN_ACCEPTED` evidence without duplicating quantity flow. Compatibility artifacts remain gated by the other unresolved action families.
+- **Lookup case compatibility:** native `/ig lookup` preserves GriefLogger's
+  case-insensitive event parsing without a custom command-tree serializer;
+  literal aliases cover suggestions and the greedy fallback handles mixed-case
+  root, player, paged, and near queries, including legacy `ALL` spellings.
+- **Source-event collision handling:** native UUID-derived numeric source IDs now
+  compare the producer UUID across both evidence tables and probe deterministic
+  salted IDs when a distinct event collides, preserving paired observation and
+  audit rows even when their raw payload details differ.
 
 ## [0.3.2] — 2026-09-28
 

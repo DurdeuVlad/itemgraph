@@ -25,7 +25,7 @@ canonical action names, accepted GriefLogger spellings, compatibility status,
 evidence and quantity semantics, loader/storage support, lookup filters,
 permission and paging controls, inspector behavior, configuration controls, and
 the GitHub issue responsible for incomplete mappings.
-The current registry compatibility version is `m8.3.0`.
+The current registry compatibility version is `m8.3.1`.
 
 The registry version changes when a mapping, status, evidence or quantity
 meaning, loader, or backend contract changes. Documentation-only clarifications
@@ -124,7 +124,7 @@ claiming that the two are identical.
 | Player-killed entities | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted a `KILL_ENTITY` row for a player-killed zombie |
 | Entity interaction and Ender inventory actions | NeoForge `NativeAuditEventListener`/`ArmorStandEventListener`, Fabric `UseEntityCallback`; shared `EnderChestInteractionTracker` bound by both menu adapters | `ig_audit_events` for `INTERACT_ENTITY`; `ig_observations` for Ender deltas | `/ig lookup INTERACT_ENTITY`, `/ig lookup filters`, and `/ig trace` | Both loaders retain server-side entity interaction attempts, and native audit lookup now exposes `INTERACT_ENTITY` as a selectable event type. Both loaders emit signed `ADD_ITEM_ENDER`/`REMOVE_ITEM_ENDER` session deltas to a durable player-owned `EXTERNAL_INVENTORY` endpoint. Successful-outcome parity for entity interaction remains unresolved in [#27](https://github.com/DurdeuVlad/itemgraph/issues/27). |
 | Armor stand equip/unequip | `ArmorStandEventListener` | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested |
-| Consume, break, throw, shoot item actions | NeoForge `NativeItemActionEventListener`, `ItemEntityEventListener`; Fabric `LivingEntityMixin`, `ItemStackMixin`, `ServerLevelMixin` | `ig_observations` plus a legacy direct-lookup projection in `ig_audit_events` for projectile rows | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record completed eat/drink consumption at the return boundary, durability breaks at the `ItemStack.hurtAndBreak` shrink boundary, and accepted player-owned projectile spawns as `THROW_ITEM`/`SHOOT_ITEM` observations carrying the canonical source stack and observed count to an explicit `UNKNOWN` endpoint. Projectile type and spawn coordinates are retained as raw evidence; unified filtered lookup suppresses the paired projection only when its shared raw event identity has a durable observation match, so a surviving audit row remains visible if observation persistence is lost. GriefLogger's shootFromRotation attempt boundary and ItemGraph's accepted-spawn outcome are not yet fully equivalent, and no projectile UUID or landing location is claimed. |
+| Consume, break, throw, shoot item actions | NeoForge `NativeItemActionEventListener`, NeoForge `ProjectileMixin`, NeoForge `ServerLevelMixin`, `ItemEntityEventListener`; Fabric `LivingEntityMixin`, `ItemStackMixin`, `ProjectileMixin`, `ServerLevelMixin` | `ig_observations` for the GriefLogger-compatible attempt row; `ig_audit_events` for the accepted-spawn extension | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record completed eat/drink consumption at the return boundary, durability breaks at the `ItemStack.hurtAndBreak` shrink boundary, and `THROW_ITEM`/`SHOOT_ITEM` at the exact `Projectile.shootFromRotation` HEAD attempt boundary with the canonical source stack and observed count. Projectile attempt rows carry a durable `source_event_id` derived from their UUID event identity, so worker retries cannot manufacture a second quantity row. Accepted player-owned spawns are retained as `PROJECTILE_SPAWN_ACCEPTED` raw evidence only after `ServerLevel.addFreshEntity` returns true, without a second quantity row or quantity claim in the audit detail. Projectile type and coordinates remain raw evidence; no projectile UUID or landing location is claimed. |
 | Location/action filtered lookup | `AuditLookupFilters`, `UnifiedEvidenceQueryService`, `AuditEventQueryService` | `ig_audit_events`, `ig_observations`, `ig_item_transformations`, `ig_grieflogger_lookup` | `/ig lookup`, `/ig lookup near`, direct `/ig lookup <filter...>`, and `/ig lookup filters` | GriefLogger-style action/user/include/exclude/time/radius filters use one bounded asynchronous merge across native audit, item-flow, transformation, and normalized historical GriefLogger events. The published direct filter spelling now has token-aware suggestions and the ten-row default; the explicit `filters` literal remains an ItemGraph extension. Five-filter cap, required cube radius, AND semantics, global timestamp ordering, source/evidence IDs, and unresolved historical rows are tested; the Fabric replay returned rows from both `/ig lookup CHAT_MESSAGE 10 60` and `/ig lookup filters action.chat_message time.1h radius.50` |
 | Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `BlockInspectionTargets`, `FlowBrowserService`, `TraceQueryService`, and native audit query path | `ig_audit_events`, `ig_observations` | `/ig inspect`, `/ig page`, `/ig trace container` | Block inspection now resolves a valid double chest or door into both physical positions and queries them in one globally ordered page on both loaders. New double-chest sessions use one deterministic container anchor with the partner as an alias; reopening a former partner position after a topology split retires the stale alias before creating a new watch, while overlapping watches close against their recorded keys and share capability credits. Historical container-flow node merging and interaction supersession remain part of [#26](https://github.com/DurdeuVlad/itemgraph/issues/26). |
 | Paginated generic audit results | `AuditEventQueryService` offset paging | `ig_audit_events` | `/ig lookup page <page> ...` | Bounded 1-based page offsets and server-generated Previous/Next chat controls implemented |
@@ -184,6 +184,24 @@ checksummed historical database when an operator explicitly configures it.
 
 ## Verification notes
 
+- **2026-09-30, NeoForge native-only startup:** the staging `:neoforge:runServer`
+  launch now includes the shared `common` and `core` source sets in the ModDev
+  run. The dedicated server loaded `itemgraph-neoforge.mixins.json`, initialized
+  Mixin 0.8.7, reached `Done`, applied schema migration v16, and reported
+  GriefLogger disabled without a mod-loading or mixin error. This proves the
+  NeoForge runtime can load the mixin configuration.
+- **2026-09-30, connected-player projectile parity:** GriefLogger-absent
+  Mineflayer replays ran against Fabric on `127.0.0.1:27993` and NeoForge on
+  `127.0.0.1:27994`, each with a fresh world and ItemGraph schema v16. Each
+  replay performed one snowball throw and one bow shot. Read-only SQLite checks
+  found one `THROW_ITEM` and one `SHOOT_ITEM` row in `ig_observations`, each with
+  a non-null `source_event_id`, and exactly one matching
+  `PROJECTILE_SPAWN_ACCEPTED` audit row per projectile in `ig_audit_events`.
+  Duplicate `(source_type, source_event_id)` queries returned zero rows for both
+  tables. The operator connected successfully after the command tree was changed
+  to vanilla literal event-type nodes; the previous unserializable custom
+  argument no longer disconnects clients. Compatibility artifacts remain gated
+  by the unresolved action and operations mappings listed in the registry.
 - **2026-09-29, Fabric native-only smoke:** the dedicated loopback staging server
   started with no GriefLogger JAR, applied the ItemGraph schema 13 migrations,
   loaded the Fabric mixins, and reached `Done` on port 27992. The ingestion worker

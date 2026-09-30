@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -211,14 +212,19 @@ class FabricNativeAuditEventListenerTest {
         assertEquals("minecraft:arrow", captured.getValue().item().itemId());
         assertEquals(3, captured.getValue().amount());
         assertEquals("UNKNOWN", captured.getValue().targetType());
+        assertNotNull(captured.getValue().sourceEventId());
         org.junit.jupiter.api.Assertions.assertNull(captured.getValue().targetX());
         assertEquals("player-uuid", captured.getValue().playerUuid());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                        .contains("projectile_shoot_attempt"));
 
         ArgumentCaptor<InternalObservationService.InternalAuditEvent> audit =
                 ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
         verify(service).submitAuditEvent(audit.capture());
         assertEquals("SHOOT_ITEM", audit.getValue().eventType());
         assertEquals("minecraft:arrow", audit.getValue().subjectId());
+        assertNotNull(audit.getValue().sourceEventId());
         org.junit.jupiter.api.Assertions.assertTrue(audit.getValue().detail().contains("quantity=3"));
     }
 
@@ -235,6 +241,29 @@ class FabricNativeAuditEventListenerTest {
                     "minecraft:arrow");
         }
         org.mockito.Mockito.verify(service, org.mockito.Mockito.never()).submitAuditEvent(any());
+    }
+
+    @Test
+    void acceptedProjectileSpawnIsRawEvidenceWithoutSecondQuantityRow() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            FabricNativeAuditEventListener.recordProjectileSpawnAccepted(
+                    "THROW_ITEM", "player-uuid", "Alex", "minecraft:overworld",
+                    11.5, 65.0, -2.5,
+                    new CanonicalItem("minecraft:ender_pearl", "fingerprint", null, null, null), 2,
+                    "minecraft:ender_pearl");
+        }
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("PROJECTILE_SPAWN_ACCEPTED", captured.getValue().eventType());
+        assertNotNull(captured.getValue().sourceEventId());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                        .contains("\"outcome\":\"accepted\""));
+        org.mockito.Mockito.verify(service, org.mockito.Mockito.never())
+                .submit(any(InternalObservationService.InternalObservation.class));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.itemgraph.db;
 
+import com.itemgraph.db.migration.MigrationRunner;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -52,7 +53,7 @@ class DatabaseManagerTest {
 
         assertTrue(dbManager.isInitialized());
         assertTrue(dbManager.isConnected());
-        assertEquals(15, dbManager.getCurrentSchemaVersion());
+        assertEquals(MigrationRunner.LATEST_VERSION, dbManager.getCurrentSchemaVersion());
         assertTrue(Files.exists(dbPath));
 
         Connection conn = dbManager.getConnection();
@@ -141,7 +142,7 @@ class DatabaseManagerTest {
         // Verify re-initializing does not fail and migrations are idempotent
         dbManager.close();
         dbManager.initialize(dbPath);
-        assertEquals(15, dbManager.getCurrentSchemaVersion());
+        assertEquals(MigrationRunner.LATEST_VERSION, dbManager.getCurrentSchemaVersion());
     }
 
     /**

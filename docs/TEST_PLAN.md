@@ -290,7 +290,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `QuantityFlowTest` | stack splits/merges, partial transfers, windows, capacity limits, competing candidates, idempotency, restart continuity, and rollback atomicity (19 tests) |
 | `TransformationEventListenerTest` | anvil rename/repair, crafting matrix fallback, smelting, client guards, and empty-stack handling (12 tests) |
 | `ArmorStandEventListenerTest` | Phase 8B armor stand interactions: main-hand/off-hand equip, empty-hand unequip, empty stand handling, non-armor-stand and client-side guards (7 tests) |
-| `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, shutdown flush, persistence, endpoint mapping, canceled-drop provenance, and fingerprint dedup (14 tests) |
+| `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, shutdown flush, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, and retry idempotency |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
 | `ItemGraphConfigTest` | default values, config paths, range constraints, and NightConfig correction/clamping (5 tests) |
 | `QueryFormatterTest` | forensic labels, confidence/time formatting, session and queue-recovery intervals, source-group labels, trace limits, audit reports, and errors (16 tests) |
@@ -615,4 +615,14 @@ The same staging checkout persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows,
 and `/ig inspect on` opened a read-only `minecraft:generic_9x6` flow browser for
 the populated chest. The remaining cutover work is the documented migration and
 retention procedure; no production change is authorized by this test.
+
+The 2026-09-30 NeoForge staging startup additionally ran `:neoforge:runServer`
+with the shared `common` and `core` source sets attached to the ModDev run. It
+loaded the NeoForge mixin configuration, applied migration v16, reached `Done`,
+and shut down without a mod-loading or mixin error. A connected-player replay
+then performed one snowball throw and one bow shot. Read-only SQLite inspection
+found one durable `THROW_ITEM` and one `SHOOT_ITEM` observation, one accepted
+spawn audit row for each, non-null source event IDs on all four rows, and zero
+duplicate source-event groups. Fabric passed the identical replay and query on
+port 27993; NeoForge used port 27994. These replays are staging evidence only.
 

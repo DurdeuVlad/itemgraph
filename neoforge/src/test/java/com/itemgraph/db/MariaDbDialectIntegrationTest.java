@@ -39,8 +39,10 @@ class MariaDbDialectIntegrationTest {
         try (Connection raw = DriverManager.getConnection(endpoint.url(), endpoint.user(), endpoint.password());
              Connection conn = DialectConnection.wrap(raw, DatabaseDialect.MYSQL_MARIADB)) {
             assertEquals(DatabaseDialect.MYSQL_MARIADB, DatabaseDialect.fromConnection(conn));
-            assertEquals(15, MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
-            assertEquals(15, MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
+            assertEquals(MigrationRunner.LATEST_VERSION,
+                    MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
+            assertEquals(MigrationRunner.LATEST_VERSION,
+                    MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
 
             try (Statement stmt = conn.createStatement();
                  ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM information_schema.tables "
