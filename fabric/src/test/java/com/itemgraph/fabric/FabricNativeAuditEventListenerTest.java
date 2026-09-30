@@ -87,6 +87,7 @@ class FabricNativeAuditEventListenerTest {
         assertEquals("INTERACT_ENTITY", event.eventType());
         assertEquals("minecraft:armor_stand", event.subjectId());
         assertEquals("outcome=attempt hand=main_hand target_uuid=" + targetUuid
+                + " target_support=armor_stand_method_result"
                 + " completion=armor_stand_return_hook", event.detail());
         assertEquals("minecraft:overworld", event.levelName());
     }

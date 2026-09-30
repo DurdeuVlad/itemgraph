@@ -101,6 +101,11 @@ public final class EntityInteractionGameTests {
                             "persisted interaction must retain the hand used");
                     helper.assertTrue(detail.contains("held_item=minecraft:stick held_count=1"),
                             "persisted interaction must retain the held item snapshot");
+                    helper.assertTrue(detail.contains("target_support=callback_only"),
+                            "unsupported cow interactions must not claim a method result");
+                    helper.assertTrue(detail.contains(
+                                    "target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT"),
+                            "unsupported cow result capture must use a stable reason code");
                     helper.assertFalse(rows.next(),
                             "one server interaction must not produce duplicate or terminal entity rows");
                 }
@@ -127,6 +132,8 @@ public final class EntityInteractionGameTests {
                     while (rows.next()) {
                         String eventType = rows.getString("event_type");
                         String detail = rows.getString("detail");
+                        helper.assertTrue(detail.contains("target_support=armor_stand_method_result"),
+                                "armor stand rows must identify the supported result class");
                         if ("INTERACT_ENTITY".equals(eventType)) {
                             attempts++;
                             helper.assertTrue(detail.contains("hand=main_hand"),

@@ -87,6 +87,11 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                 helper.assertTrue(detail.contains("hand=main_hand"), "attempt must retain the hand used");
                 helper.assertTrue(detail.contains("held_item=minecraft:stick held_count=1"),
                         "attempt must retain the held item snapshot");
+                helper.assertTrue(detail.contains("target_support=callback_only"),
+                        "unsupported cow interactions must not claim a method result");
+                helper.assertTrue(detail.contains(
+                                "target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT"),
+                        "unsupported cow result capture must use a stable reason code");
                 helper.assertFalse(rows.next(), "one cow packet must not create duplicate evidence rows");
             }
         } catch (SQLException e) {
@@ -112,6 +117,8 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                 while (rows.next()) {
                     String eventType = rows.getString("event_type");
                     String detail = rows.getString("detail");
+                    helper.assertTrue(detail.contains("target_support=armor_stand_method_result"),
+                            "armor stand rows must identify the supported result class");
                     if ("INTERACT_ENTITY".equals(eventType)) {
                         attempts++;
                         helper.assertTrue(detail.contains("hand=main_hand"),

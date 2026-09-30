@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -265,6 +266,22 @@ class EntityInteractionEvidenceTest {
         org.junit.jupiter.api.Assertions.assertTrue(detail.contains("held_count=1"));
         org.junit.jupiter.api.Assertions.assertTrue(detail.matches(".*held_fingerprint=[0-9a-f]{64}.*"));
         org.junit.jupiter.api.Assertions.assertFalse(detail.contains("component_summary"));
+        org.junit.jupiter.api.Assertions.assertTrue(detail.contains(
+                "target_support=armor_stand_method_result"));
+    }
+
+    @Test
+    void nonArmorTargetUsesStableCallbackOnlySupportReason() {
+        Entity target = mock(Entity.class);
+        when(target.getUUID()).thenReturn(UUID.randomUUID());
+        doReturn(EntityType.COW).when(target).getType();
+
+        String detail = EntityInteractionEvidence.attemptDetails(
+                target, InteractionHand.MAIN_HAND, ItemStack.EMPTY, "unobserved_non_armor_entity");
+
+        org.junit.jupiter.api.Assertions.assertTrue(detail.contains("target_support=callback_only"));
+        org.junit.jupiter.api.Assertions.assertTrue(detail.contains("target_support_reason="
+                + EntityInteractionEvidence.UNSUPPORTED_ENTITY_RESULT_REASON));
     }
 
     @Test
@@ -276,6 +293,8 @@ class EntityInteractionEvidenceTest {
                 target, InteractionHand.MAIN_HAND, ItemStack.EMPTY, "armor_stand_return_hook");
 
         org.junit.jupiter.api.Assertions.assertFalse(detail.contains("target_uuid"));
+        org.junit.jupiter.api.Assertions.assertTrue(detail.contains(
+                "target_support=armor_stand_method_result"));
         org.junit.jupiter.api.Assertions.assertTrue(detail.contains("held_item=minecraft:air"));
         org.junit.jupiter.api.Assertions.assertTrue(detail.contains("held_count=0"));
     }

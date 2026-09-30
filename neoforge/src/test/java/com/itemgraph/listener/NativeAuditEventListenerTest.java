@@ -173,6 +173,7 @@ class NativeAuditEventListenerTest {
         verify(service).submitAuditEvent(captured.capture());
         assertEquals("INTERACT_ENTITY", captured.getValue().eventType());
         assertEquals("outcome=attempt hand=off_hand target_uuid=" + targetUuid
+                + " target_support=armor_stand_method_result"
                 + " completion=armor_stand_return_hook", captured.getValue().detail());
     }
 
@@ -215,6 +216,7 @@ class NativeAuditEventListenerTest {
         verify(service).submitAuditEvent(captured.capture());
         assertEquals("INTERACT_ENTITY", captured.getValue().eventType());
         assertEquals("outcome=attempt hand=main_hand target_uuid=" + targetUuid
+                + " target_support=armor_stand_method_result"
                 + " completion=armor_stand_return_hook", captured.getValue().detail());
     }
     @Test
@@ -326,6 +328,7 @@ class NativeAuditEventListenerTest {
         verify(service).submitAuditEvent(captured.capture());
         assertEquals("INTERACT_ENTITY_DENIED", captured.getValue().eventType());
         assertEquals("outcome=canceled hand=main_hand target_uuid=" + targetUuid
+                + " target_support=armor_stand_method_result"
                 + " completion=callback_canceled", captured.getValue().detail());
     }
 

@@ -14,6 +14,10 @@ import net.minecraft.world.level.Level;
 
 /** Records the authoritative return value of the armor stand interaction method. */
 public final class EntityInteractionEvidence {
+    public static final String UNSUPPORTED_ENTITY_RESULT_REASON = "ENTITY_CLASS_UNSUPPORTED_FOR_RESULT";
+    private static final String ARMOR_STAND_METHOD_RESULT_SUPPORT = "armor_stand_method_result";
+    private static final String CALLBACK_ONLY_SUPPORT = "callback_only";
+
     private EntityInteractionEvidence() { }
 
     /**
@@ -102,7 +106,7 @@ public final class EntityInteractionEvidence {
     public static void recordArmorStandHandledResult(ServerPlayer player, Entity target,
                                                       InteractionHand hand, InteractionResult result,
                                                       String method, boolean recordPass) {
-        if (player == null || !(target instanceof ArmorStand) || hand == null || result == null
+        if (player == null || !supportsEntityMethodResult(target) || hand == null || result == null
                 || (!result.consumesAction() && result != InteractionResult.FAIL
                     && !(recordPass && result == InteractionResult.PASS))
                 || player.level().isClientSide()) {
@@ -162,5 +166,18 @@ public final class EntityInteractionEvidence {
         if (target != null && target.getUUID() != null) {
             detail.append(" target_uuid=").append(target.getUUID());
         }
+        if (target != null) {
+            if (supportsEntityMethodResult(target)) {
+                detail.append(" target_support=").append(ARMOR_STAND_METHOD_RESULT_SUPPORT);
+            } else {
+                detail.append(" target_support=").append(CALLBACK_ONLY_SUPPORT)
+                        .append(" target_support_reason=").append(UNSUPPORTED_ENTITY_RESULT_REASON);
+            }
+        }
+    }
+
+    /** The armor stand is the only target with an ItemGraph entity-method result hook. */
+    private static boolean supportsEntityMethodResult(Entity target) {
+        return target instanceof ArmorStand;
     }
 }
