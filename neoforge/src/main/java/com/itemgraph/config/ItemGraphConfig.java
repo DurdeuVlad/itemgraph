@@ -16,6 +16,7 @@ public class ItemGraphConfig {
     public static final ModConfigSpec.ConfigValue<String> DATABASE_PASSWORD;
     public static final ModConfigSpec.ConfigValue<String> DATABASE_SSL_MODE;
     public static final ModConfigSpec.IntValue DATABASE_CONNECTION_TIMEOUT_MS;
+    public static final ModConfigSpec.BooleanValue USE_INDEXES;
     public static final ModConfigSpec.ConfigValue<String> GRIEFLOGGER_DATABASE_PATH;
     public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
     public static final ModConfigSpec.IntValue GROUND_BRIDGE_MAX_SECONDS;
@@ -66,6 +67,12 @@ public class ItemGraphConfig {
                 .define("debug_logging", false);
         BUILDER.pop();
 
+        BUILDER.push("storage");
+        USE_INDEXES = BUILDER
+                .comment("Create optional non-unique ItemGraph storage indexes for faster lookups; restart after changing")
+                .define("use_indexes", true);
+        BUILDER.pop();
+
         BUILDER.push("correlation");
         GROUND_BRIDGE_MAX_SECONDS = BUILDER
                 .comment(
@@ -88,11 +95,11 @@ public class ItemGraphConfig {
     public static DatabaseSettings databaseSettings() {
         String backend = DATABASE_BACKEND.get().trim().toLowerCase(java.util.Locale.ROOT);
         return switch (backend) {
-            case "sqlite" -> DatabaseSettings.sqlite(DatabaseManager.resolvePath(DATABASE_PATH.get()));
+            case "sqlite" -> DatabaseSettings.sqlite(DatabaseManager.resolvePath(DATABASE_PATH.get()), USE_INDEXES.get());
             case "mysql", "mariadb", "mysql_mariadb" -> DatabaseSettings.mysqlMariaDb(
                     DATABASE_HOST.get(), DATABASE_PORT.get(), DATABASE_NAME.get(),
                     DATABASE_USERNAME.get(), DATABASE_PASSWORD.get(),
-                    DATABASE_CONNECTION_TIMEOUT_MS.get(), true, DATABASE_SSL_MODE.get());
+                    DATABASE_CONNECTION_TIMEOUT_MS.get(), USE_INDEXES.get(), DATABASE_SSL_MODE.get());
             default -> throw new IllegalArgumentException(
                     "database_backend must be sqlite or mysql_mariadb, got: " + DATABASE_BACKEND.get());
         };

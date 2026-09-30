@@ -6,6 +6,16 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Added
+
+- **Configurable storage indexes (issue #29):** `storage.use_indexes` on NeoForge
+  and `use_indexes` in Fabric's properties file now default to `true`. On every
+  startup, ItemGraph creates any missing optional lookup
+  indexes or drops only those optional non-unique indexes when disabled. Existing
+  databases support either toggle direction after restart; required unique
+  deduplication indexes remain active. Invalid Fabric boolean values fail config
+  loading with the offending key named.
+
 ### Changed
 
 - **Loader runtime hardening:** Fabric pickup capture no longer exposes a

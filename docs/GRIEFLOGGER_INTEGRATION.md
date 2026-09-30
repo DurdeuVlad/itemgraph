@@ -33,10 +33,17 @@ file with matching dependency metadata.
 ItemGraph-owned storage can use SQLite (the default) or MySQL/MariaDB through the
 same migration and query contract. NeoForge exposes `general.database_backend`,
 `database_host`, `database_port`, `database_name`, `database_username`,
-`database_password`, `database_ssl_mode`, and `database_connection_timeout_ms`;
-Fabric exposes the same keys in `config/itemgraph.properties`. The SSL mode accepts
+`database_password`, `database_ssl_mode`, and `database_connection_timeout_ms`, plus
+`storage.use_indexes`. Fabric exposes the storage key as `use_indexes` and the
+other keys in `config/itemgraph.properties`. `use_indexes=true` is the default
+and manages ItemGraph's optional non-unique lookup indexes on startup. Set it
+to `false` and restart to remove
+those performance indexes; setting it back to `true` and restarting recreates
+them. Migration-owned unique indexes remain enabled. This setting applies only to
+ItemGraph's database and never changes GriefLogger's read-only database.
+The SSL mode accepts
 `disable`, `trust`, `verify-ca`, or `verify-full`. Use `mysql_mariadb` for the network
-backend. The supported CI floor is MySQL 8.0.29+ and MariaDB 10.6+; the bundled
+backend. The supported CI floor is MySQL 8.0+ and MariaDB 10.11+; the bundled
 MariaDB Connector/J 3.5.7 driver is used for both server families. GriefLogger's
 source database remains SQLite and read-only regardless of ItemGraph's own backend.
 Application connections do not enable RSA public-key retrieval. MySQL deployments

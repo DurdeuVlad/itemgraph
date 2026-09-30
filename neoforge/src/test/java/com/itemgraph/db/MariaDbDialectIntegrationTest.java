@@ -1,15 +1,28 @@
 package com.itemgraph.db;
 
 import com.itemgraph.db.migration.MigrationRunner;
+import com.itemgraph.ingest.GriefLoggerAdapter;
+import com.itemgraph.ingest.GriefLoggerHistoricalImporter;
+import com.itemgraph.query.AuditLookupFilters;
+import com.itemgraph.query.UnifiedEvidenceQueryService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -19,28 +32,62 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class MariaDbDialectIntegrationTest {
     @Test
-    void mariaDbMigrationAndEvidenceContract() throws Exception {
-        runConfigured("ITEMGRAPH_TEST_MARIADB_URL", "ITEMGRAPH_TEST_MARIADB_USER", "ITEMGRAPH_TEST_MARIADB_PASSWORD");
+    void mariaDbMigrationAndEvidenceContract(@TempDir Path tempDir) throws Exception {
+        runConfigured("ITEMGRAPH_TEST_MARIADB_URL", "ITEMGRAPH_TEST_MARIADB_USER", "ITEMGRAPH_TEST_MARIADB_PASSWORD", tempDir);
     }
 
     @Test
-    void mysqlMigrationAndEvidenceContract() throws Exception {
-        runConfigured("ITEMGRAPH_TEST_MYSQL_URL", "ITEMGRAPH_TEST_MYSQL_USER", "ITEMGRAPH_TEST_MYSQL_PASSWORD");
+    void mysqlMigrationAndEvidenceContract(@TempDir Path tempDir) throws Exception {
+        runConfigured("ITEMGRAPH_TEST_MYSQL_URL", "ITEMGRAPH_TEST_MYSQL_USER", "ITEMGRAPH_TEST_MYSQL_PASSWORD", tempDir);
     }
 
-    private static void runConfigured(String urlKey, String userKey, String passwordKey) throws Exception {
+    private static void runConfigured(String urlKey, String userKey, String passwordKey, Path tempDir) throws Exception {
         String url = System.getenv(urlKey);
         assumeTrue(url != null && !url.isBlank(), "No endpoint configured for " + urlKey);
         runContract(new Endpoint(url, System.getenv().getOrDefault(userKey, "itemgraph"),
-                System.getenv().getOrDefault(passwordKey, "itemgraph")));
+                System.getenv().getOrDefault(passwordKey, "itemgraph")), tempDir);
     }
 
-    private static void runContract(Endpoint endpoint) throws Exception {
+    private static void runContract(Endpoint endpoint, Path tempDir) throws Exception {
         try (Connection raw = DriverManager.getConnection(endpoint.url(), endpoint.user(), endpoint.password());
              Connection conn = DialectConnection.wrap(raw, DatabaseDialect.MYSQL_MARIADB)) {
             assertEquals(DatabaseDialect.MYSQL_MARIADB, DatabaseDialect.fromConnection(conn));
             assertEquals(MigrationRunner.LATEST_VERSION,
                     MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
+            if (hasIndex(conn, "ig_observations", "idx_obs_time_fp")) {
+                try (Statement statement = conn.createStatement()) {
+                    statement.execute("DROP INDEX idx_obs_time_fp ON ig_observations");
+                }
+            }
+            boolean createdDuplicateName = false;
+            if (!hasIndex(conn, "ig_audit_events", "idx_obs_time_fp")) {
+                try (Statement statement = conn.createStatement()) {
+                    statement.execute("CREATE INDEX idx_obs_time_fp ON ig_audit_events(event_type)");
+                }
+                createdDuplicateName = true;
+            }
+            StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, false);
+            assertFalse(hasIndex(conn, "ig_observations", "idx_obs_time_fp"));
+            assertTrue(hasIndex(conn, "ig_audit_events", "idx_obs_time_fp"),
+                    "same-named index on another table must not be dropped by policy");
+            assertTrue(hasIndex(conn, "ig_observations", "idx_obs_source_unique"));
+            assertTrue(hasIndex(conn, "ig_observations", "idx_obs_internal_dedup"));
+            assertTrue(hasIndex(conn, "ig_nodes", "idx_nodes_external_key"));
+            assertTrue(hasIndex(conn, "ig_audit_events", "idx_audit_events_source_unique"));
+            StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, true);
+            assertTrue(hasIndex(conn, "ig_observations", "idx_obs_time_fp"));
+            assertTrue(hasIndex(conn, "ig_grieflogger_lookup", "idx_gl_lookup_subject"));
+            StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, false);
+            assertFalse(hasIndex(conn, "ig_grieflogger_lookup", "idx_gl_lookup_subject"));
+            assertTrue(hasIndex(conn, "ig_observations", "idx_obs_source_unique"));
+            assertTrue(hasIndex(conn, "ig_observations", "idx_obs_internal_dedup"));
+            assertTrue(hasIndex(conn, "ig_nodes", "idx_nodes_external_key"));
+            assertTrue(hasIndex(conn, "ig_audit_events", "idx_audit_events_source_unique"));
+            if (createdDuplicateName) {
+                try (Statement statement = conn.createStatement()) {
+                    statement.execute("DROP INDEX idx_obs_time_fp ON ig_audit_events");
+                }
+            }
             assertEquals(MigrationRunner.LATEST_VERSION,
                     MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
 
@@ -70,7 +117,78 @@ class MariaDbDialectIntegrationTest {
                 stmt.setLong(4, 4);
                 stmt.executeUpdate();
             }
+
+            assertHistoricalImportAndLookup(endpoint, conn, tempDir);
         }
+    }
+
+    private static void assertHistoricalImportAndLookup(Endpoint endpoint, Connection queryConnection,
+                                                         Path tempDir) throws Exception {
+        Path sourcePath = tempDir.resolve("grieflogger.db");
+        int testX = 1_000_000 + ThreadLocalRandom.current().nextInt(1_000_000);
+        createLookupFixture(sourcePath, testX);
+        byte[] originalSource = Files.readAllBytes(sourcePath);
+
+        DatabaseManager target = mock(DatabaseManager.class);
+        when(target.isInitialized()).thenReturn(true);
+        when(target.openWriteConnection()).thenAnswer(ignored -> DialectConnection.wrap(
+                DriverManager.getConnection(endpoint.url(), endpoint.user(), endpoint.password()),
+                DatabaseDialect.MYSQL_MARIADB));
+
+        GriefLoggerHistoricalImporter.ImportReport report = new GriefLoggerHistoricalImporter(
+                new GriefLoggerAdapter(sourcePath), target).importAll();
+        assertEquals("COMPLETE", report.status());
+        assertEquals(11, report.tables().stream().filter(GriefLoggerHistoricalImporter.TableReport::present).count());
+        assertTrue(report.rowsImported() > 0);
+        assertArrayEquals(originalSource, Files.readAllBytes(sourcePath),
+                "the historical importer must leave the GriefLogger source byte-for-byte unchanged");
+
+        GriefLoggerHistoricalImporter.ImportReport repeated = new GriefLoggerHistoricalImporter(
+                new GriefLoggerAdapter(sourcePath), target).importAll();
+        assertEquals("COMPLETE", repeated.status());
+        assertEquals(0, repeated.rowsImported(), "restarting the importer must remain idempotent");
+
+        var rows = new UnifiedEvidenceQueryService().findFiltered(
+                queryConnection,
+                AuditLookupFilters.parse("action.break_block radius.100", 1_000L),
+                "minecraft:overworld", testX, 64, 10, 10, 0);
+        assertEquals(List.of("BREAK_BLOCK", "BREAK_BLOCK"), rows.stream().map(row -> row.actionType()).toList());
+        assertEquals(List.of(130L, 120L), rows.stream().map(row -> row.timestampMs()).toList());
+    }
+
+    private static void createLookupFixture(Path path, int x) throws Exception {
+        Class.forName("org.sqlite.JDBC");
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
+             Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, data BLOB, amount INTEGER, action INTEGER)");
+            statement.execute("CREATE TABLE containers (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, data BLOB, amount INTEGER, action INTEGER)");
+            statement.execute("CREATE TABLE blocks (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, action INTEGER)");
+            statement.execute("CREATE TABLE sessions (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, action INTEGER)");
+            statement.execute("CREATE TABLE chats (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, message TEXT)");
+            statement.execute("CREATE TABLE commands (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, command TEXT)");
+            statement.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, uuid TEXT)");
+            statement.execute("CREATE TABLE usernames (id INTEGER PRIMARY KEY, time INTEGER, uuid TEXT, name TEXT)");
+            statement.execute("CREATE TABLE levels (id INTEGER PRIMARY KEY, name TEXT)");
+            statement.execute("CREATE TABLE materials (id INTEGER PRIMARY KEY, name TEXT)");
+            statement.execute("CREATE TABLE entities (id INTEGER PRIMARY KEY, name TEXT)");
+            statement.execute("INSERT INTO users VALUES (1, 'Alice', 'uuid-a')");
+            statement.execute("INSERT INTO usernames VALUES (1, 50, 'uuid-a', 'Alice')");
+            statement.execute("INSERT INTO levels VALUES (1, 'minecraft:overworld')");
+            statement.execute("INSERT INTO materials VALUES (1, 'minecraft:diamond_sword')");
+            statement.execute("INSERT INTO entities VALUES (1, 'minecraft:zombie')");
+            statement.execute("INSERT INTO blocks VALUES (1, 120, 1, 1, " + x + ", 64, 10, 1, 0)");
+            statement.execute("INSERT INTO blocks VALUES (2, 130, 1, 1, " + x + ", 64, 10, 1, 0)");
+        }
+    }
+
+    private static boolean hasIndex(Connection connection, String table, String indexName) throws Exception {
+        try (ResultSet indexes = connection.getMetaData().getIndexInfo(connection.getCatalog(), null,
+                table, false, false)) {
+            while (indexes.next()) {
+                if (indexName.equalsIgnoreCase(indexes.getString("INDEX_NAME"))) return true;
+            }
+        }
+        return false;
     }
 
     private record Endpoint(String url, String user, String password) {

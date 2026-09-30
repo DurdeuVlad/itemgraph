@@ -4,11 +4,14 @@ import com.itemgraph.db.DatabaseSettings;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class FabricItemGraphConfigTest {
     @Test
@@ -24,6 +27,7 @@ class FabricItemGraphConfigTest {
                 database_password=secret-value
                 database_ssl_mode=verify-full
                 database_connection_timeout_ms=7500
+                use_indexes=false
                 grieflogger_database_path=database.db
                 ground_bridge_max_seconds=300
                 """);
@@ -38,6 +42,17 @@ class FabricItemGraphConfigTest {
         assertEquals("secret-value", loaded.databaseSettings().password());
         assertEquals(7500, loaded.databaseSettings().connectionTimeoutMs());
         assertEquals("verify-full", loaded.databaseSettings().sslMode());
+        assertFalse(loaded.databaseSettings().useIndexes());
         assertTrue(Files.exists(config.resolve("itemgraph.properties")));
+    }
+
+    @Test
+    void rejectsMalformedIndexPolicyInsteadOfSilentlyTreatingItAsFalse(@TempDir Path tempDir) throws Exception {
+        Path config = tempDir.resolve("config");
+        Files.createDirectories(config);
+        Files.writeString(config.resolve("itemgraph.properties"), "use_indexes=enabled\n");
+
+        IOException error = assertThrows(IOException.class, () -> FabricItemGraphConfig.load(tempDir, config));
+        assertTrue(error.getMessage().contains("use_indexes must be true or false"));
     }
 }
