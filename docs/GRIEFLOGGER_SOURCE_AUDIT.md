@@ -171,8 +171,11 @@ Important semantics and limits:
   ItemGraph uses one aggregate boundary for the final callback result. Tests cover
   early and late short-circuits, including a listener mutating the held stack after the
   pre-callback snapshot. `fabric.mod.json` requires the exact Fabric API version resolved
-  by this project build because the redirect targets that API initializer. A dev-server startup confirmed mixin application,
-  but runtime player interaction replay is still open under issue #75.
+  by this project build because the redirect targets that API initializer. Isolated
+  Fabric and NeoForge GameTests now dispatch server interaction packets through each
+  loader's handler and verify durable attempt/result rows; they also invoke the
+  inherited return hook directly. These mock-player tests do not cover live client
+  socket transport or packet-level denied/canceled/repeated interactions.
 - The interactable block list is hard-coded.
 - Interaction rows can be deleted when a block is broken, so the source is not an
   append-only forensic ledger.
