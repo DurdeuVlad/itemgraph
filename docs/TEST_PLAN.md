@@ -14,6 +14,26 @@ Testing should focus on correctness, explainability, quantity conservation, temp
 
 Never use production as the primary test environment.
 
+## Local NeoForge operations check (2026-09-30)
+
+- Runtime: Minecraft 1.21.1, NeoForge 21.1.248, ItemGraph 0.3.2, Java 21;
+  no other mods and no GriefLogger.
+- A fresh local server on loopback port 25688 started with a separate temporary
+  game directory and SQLite database. Startup upgraded that database from schema
+  V17 to V18 and logged the GriefLogger integration as disabled. The server was
+  stopped and the listener was verified closed.
+- `InternalObservationServiceTest.workerPersistsConcurrentQueueLoadWithoutDuplicateOrLostRows`
+  submits 2,000 observations from eight producer threads to the bounded worker,
+  then checks that SQLite contains exactly 2,000 rows and 2,000 distinct durable
+  `ingest_event_uuid` values.
+- `./gradlew.bat :neoforge:test :fabric:test --no-daemon --max-workers=1 --rerun-tasks`
+  passed: NeoForge 394 tests (0 failures, 3 skipped) and Fabric 29 tests
+  (0 failures, 0 skipped). The skipped cases require local MySQL/MariaDB service
+  variables; CI provisions both database services.
+- This validates local SQLite queue persistence and worker startup. It does not
+  measure tick-time impact from real player events, compare GriefLogger's queue
+  scheduler, or validate a live MySQL/MariaDB endpoint.
+
 ## Compatibility profile gate
 
 Run `python tools/validate_grieflogger_profile.py` from the repository root.
@@ -290,9 +310,13 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `QuantityFlowTest` | stack splits/merges, partial transfers, windows, capacity limits, competing candidates, idempotency, restart continuity, and rollback atomicity (19 tests) |
 | `TransformationEventListenerTest` | anvil rename/repair, crafting matrix fallback, smelting, client guards, and empty-stack handling (12 tests) |
 | `ArmorStandEventListenerTest` | Phase 8B armor stand interactions: main-hand/off-hand equip, empty-hand unequip, empty stand handling, non-armor-stand and client-side guards (7 tests) |
-| `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, shutdown flush, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, and retry idempotency |
+| `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, 2,000-record worker persistence, shutdown flush and failure accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
+| `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
 | `ItemGraphConfigTest` | default values, config paths, range constraints, and NightConfig correction/clamping (5 tests) |
+| `ItemGraphOperationalSettingsTest`, `FabricItemGraphConfigTest`, `QueryLimitsTest`, `TraceQueryServiceTest.configuredPageCapConstrainsSqlBackedTracePages` | fail-closed operational bounds and policies, both-loader defaults/custom values, capture controls, query cap on command and SQL-backed GUI pages, queue poll/batch/heartbeat settings, and retention invariants |
+| `LegacyObservationArchiveTest`, `InternalObservationServiceTest.failedTransformationBatchIsRetainedAndShutdownLossIsCounted` | V3–V5 preserve legacy raw observation payloads before active-projection resets; transformation retries remain bounded and shutdown loss is counted |
+| `ItemGraphStatusSecurityTest` | `/ig status` reports backend/schema while redacting database paths and raw driver errors |
 | `QueryFormatterTest` | forensic labels, confidence/time formatting, session and queue-recovery intervals, source-group labels, trace limits, audit reports, and errors (16 tests) |
 | `ItemEntityEventListenerTest` | successful-spawn-only ground drops, canceled toss/death evidence, pickup quantity, partial-pickup handling, empty/null guards (10 tests) |
 | `CorrelationEngineTest` | ground bridging/scoring, cross-source confirmed/ambiguous groups, canceled-source conflicts, legacy edge supersession, temporal ordering, and MVP chain (24 tests) |

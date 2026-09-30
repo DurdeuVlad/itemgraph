@@ -35,7 +35,9 @@ import java.util.Map;
 /** Shared read-only flow-browser entry points used by both loader adapters. */
 public final class FlowBrowserService {
 
-    private static final int PAGE_SIZE = QueryLimits.MAX_GUI_PAGE_SIZE;
+    private static int pageSize() {
+        return QueryLimits.clampGuiPageSize(QueryLimits.MAX_GUI_PAGE_SIZE);
+    }
     private static final int PREVIOUS_SLOT = 45;
     private static final int PAGE_LABEL_SLOT = 49;
     private static final int BACK_OR_CLOSE_SLOT = 52;
@@ -56,14 +58,14 @@ public final class FlowBrowserService {
                        TracePage.Direction direction) throws SQLException {
             return switch (kind) {
                 case ITEM -> resolvedId == null
-                        ? TRACE_QUERIES.traceItemPage(conn, query, PAGE_SIZE, window, cursor, direction)
-                        : TRACE_QUERIES.traceFingerprintPage(conn, resolvedId, PAGE_SIZE, window, cursor, direction);
+                        ? TRACE_QUERIES.traceItemPage(conn, query, pageSize(), window, cursor, direction)
+                        : TRACE_QUERIES.traceFingerprintPage(conn, resolvedId, pageSize(), window, cursor, direction);
                 case PLAYER -> resolvedId == null
-                        ? TRACE_QUERIES.tracePlayerPage(conn, query, PAGE_SIZE, window, cursor, direction)
-                        : TRACE_QUERIES.tracePlayerNodePage(conn, resolvedId, PAGE_SIZE, window, cursor, direction);
+                        ? TRACE_QUERIES.tracePlayerPage(conn, query, pageSize(), window, cursor, direction)
+                        : TRACE_QUERIES.tracePlayerNodePage(conn, resolvedId, pageSize(), window, cursor, direction);
                 case CONTAINER -> resolvedId == null
-                        ? TRACE_QUERIES.traceContainerPage(conn, dimension, x, y, z, PAGE_SIZE, window, cursor, direction)
-                        : TRACE_QUERIES.traceContainerNodePage(conn, resolvedId, PAGE_SIZE, window, cursor, direction);
+                        ? TRACE_QUERIES.traceContainerPage(conn, dimension, x, y, z, pageSize(), window, cursor, direction)
+                        : TRACE_QUERIES.traceContainerNodePage(conn, resolvedId, pageSize(), window, cursor, direction);
             };
         }
 
@@ -217,7 +219,7 @@ public final class FlowBrowserService {
                 "Window: " + page.window().describe()));
         pageLore.add(page.resolution() == TracePage.Resolution.AMBIGUOUS
                 ? "Candidate list capped at 10 matches."
-                : "Up to " + PAGE_SIZE + " timeline entries per page.");
+                : "Up to " + pageSize() + " timeline entries per page.");
         items.set(PAGE_LABEL_SLOT, display(Items.PAPER,
                 "Page " + (session.pageIndex + 1) + (session.loading ? " (loading)" : ""), pageLore));
         control(items, actions, BACK_OR_CLOSE_SLOT, Items.BARRIER, "Close flow browser",

@@ -33,6 +33,7 @@ public class InternalObservationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(InternalObservationService.class);
     private static final InternalObservationService INSTANCE = new InternalObservationService();
     private static final int QUEUE_CAPACITY = 10_000;
+    private static final int DEFAULT_MAX_BATCH_SIZE = 100;
     private static final long AUDIT_RETRY_INITIAL_BACKOFF_MS = 25L;
     private static final long AUDIT_RETRY_MAX_BACKOFF_MS = 5_000L;
     private static final long AUDIT_RETRY_LOG_INTERVAL_MS = 10_000L;
@@ -59,8 +60,25 @@ public class InternalObservationService {
             int amount,
             String itemEntityUuid,
             Long timestampEndMs,
-            Long sourceEventId
+            Long sourceEventId,
+            String ingestEventUuid
     ) {
+        public InternalObservation(
+                long timestampMs, String actionType, String playerUuid, String playerName,
+                String levelName, double x, double y, double z,
+                String targetLevelName, Double targetX, Double targetY, Double targetZ,
+                String targetType, String itemId, byte[] rawData, CanonicalItem item, int amount,
+                String itemEntityUuid, Long timestampEndMs, Long sourceEventId
+        ) {
+            this(timestampMs, actionType, playerUuid, playerName, levelName, x, y, z,
+                    targetLevelName, targetX, targetY, targetZ, targetType, itemId, rawData,
+                    item, amount, itemEntityUuid, timestampEndMs, sourceEventId, UUID.randomUUID().toString());
+        }
+
+        public InternalObservation {
+            ingestEventUuid = normalizeIngestEventUuid(ingestEventUuid);
+        }
+
         public InternalObservation(
                 long timestampMs, String actionType, String playerUuid, String playerName,
                 String levelName, double x, double y, double z,
@@ -221,8 +239,22 @@ public class InternalObservationService {
             CanonicalItem sourceItem,
             CanonicalItem resultItem,
             int quantity,
-            String details
-    ) {}
+            String details,
+            String ingestEventUuid
+    ) {
+        public InternalTransformation(
+                long timestampMs, String transformationType, String playerUuid, String playerName,
+                String levelName, double x, double y, double z,
+                CanonicalItem sourceItem, CanonicalItem resultItem, int quantity, String details
+        ) {
+            this(timestampMs, transformationType, playerUuid, playerName, levelName, x, y, z,
+                    sourceItem, resultItem, quantity, details, UUID.randomUUID().toString());
+        }
+
+        public InternalTransformation {
+            ingestEventUuid = normalizeIngestEventUuid(ingestEventUuid);
+        }
+    }
 
     /**
      * Native audit evidence outside the quantity-flow graph. The record is
@@ -241,7 +273,8 @@ public class InternalObservationService {
             String subjectId,
             String detail,
             byte[] rawData,
-            Long sourceEventId
+            Long sourceEventId,
+            String ingestEventUuid
     ) {
         public InternalAuditEvent(
                 long timestampMs,
@@ -257,17 +290,40 @@ public class InternalObservationService {
                 byte[] rawData
         ) {
             this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z,
-                    subjectId, detail, rawData, null);
+                    subjectId, detail, rawData, null, UUID.randomUUID().toString());
+        }
+
+        public InternalAuditEvent(
+                long timestampMs,
+                String eventType,
+                String playerUuid,
+                String playerName,
+                String levelName,
+                double x,
+                double y,
+                double z,
+                String subjectId,
+                String detail,
+                byte[] rawData,
+                Long sourceEventId
+        ) {
+            this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z,
+                    subjectId, detail, rawData, sourceEventId, UUID.randomUUID().toString());
         }
 
         public InternalAuditEvent {
             rawData = rawData == null ? null : rawData.clone();
+            ingestEventUuid = normalizeIngestEventUuid(ingestEventUuid);
         }
 
         @Override
         public byte[] rawData() {
             return rawData == null ? null : rawData.clone();
         }
+    }
+
+    private static String normalizeIngestEventUuid(String ingestEventUuid) {
+        return ingestEventUuid == null ? UUID.randomUUID().toString() : UUID.fromString(ingestEventUuid).toString();
     }
 
     private final BlockingQueue<InternalObservation> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
@@ -279,13 +335,68 @@ public class InternalObservationService {
     private final java.util.concurrent.atomic.AtomicLong totalDropped = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalTransformations = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalAuditEvents = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong totalDatabaseHeartbeats = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong totalDatabaseHeartbeatFailures = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicInteger pendingTransformations = new java.util.concurrent.atomic.AtomicInteger(0);
     private volatile long auditRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
     private volatile long lastAuditRetryLogMs;
+    private volatile long transformationRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
+    private volatile long lastTransformationRetryLogMs;
     private volatile long observationRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
     private volatile long lastObservationRetryLogMs;
+    private volatile int queuePollIntervalMs = 250;
+    private volatile int maxBatchSize = DEFAULT_MAX_BATCH_SIZE;
+    private volatile int databaseHeartbeatIntervalMs = 30_000;
+    private volatile boolean captureEnabled = true;
     private Thread workerThread;
 
     private InternalObservationService() {}
+
+    /** Applies validated startup settings before the worker begins. */
+    public synchronized void configureOperations(int pollIntervalMs, int configuredMaxBatchSize,
+                                                 int configuredDatabaseHeartbeatIntervalMs,
+                                                 boolean configuredCaptureEnabled) {
+        if (running.get()) {
+            throw new IllegalStateException("Cannot change ItemGraph operations settings while the worker is running; restart the server");
+        }
+        if (pollIntervalMs < 10 || pollIntervalMs > 5_000) {
+            throw new IllegalArgumentException("ingestion.poll_interval_ms must be in [10,5000]");
+        }
+        if (configuredMaxBatchSize < 1 || configuredMaxBatchSize > 1_000) {
+            throw new IllegalArgumentException("ingestion.max_batch_size must be in [1,1000]");
+        }
+        if (configuredDatabaseHeartbeatIntervalMs < 1_000 || configuredDatabaseHeartbeatIntervalMs > 3_600_000) {
+            throw new IllegalArgumentException("operations.database_heartbeat_interval_ms must be in [1000,3600000]");
+        }
+        queuePollIntervalMs = pollIntervalMs;
+        maxBatchSize = configuredMaxBatchSize;
+        databaseHeartbeatIntervalMs = configuredDatabaseHeartbeatIntervalMs;
+        captureEnabled = configuredCaptureEnabled;
+    }
+
+    public int getQueuePollIntervalMs() {
+        return queuePollIntervalMs;
+    }
+
+    public int getMaxBatchSize() {
+        return maxBatchSize;
+    }
+
+    public int getDatabaseHeartbeatIntervalMs() {
+        return databaseHeartbeatIntervalMs;
+    }
+
+    public long getTotalDatabaseHeartbeats() {
+        return totalDatabaseHeartbeats.get();
+    }
+
+    public long getTotalDatabaseHeartbeatFailures() {
+        return totalDatabaseHeartbeatFailures.get();
+    }
+
+    public boolean isCaptureEnabled() {
+        return captureEnabled;
+    }
 
     public synchronized void start() {
         if (running.get()) {
@@ -302,18 +413,31 @@ public class InternalObservationService {
         running.set(false);
         if (workerThread != null) {
             workerThread.interrupt();
-            try {
-                workerThread.join(2000);
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
+            boolean interrupted = false;
+            while (workerThread.isAlive()) {
+                try {
+                    workerThread.join();
+                } catch (InterruptedException ignored) {
+                    interrupted = true;
+                    workerThread.interrupt();
+                }
             }
             workerThread = null;
+            // Do not flush or let the database close while a worker still owns a batch.
+            flushQueues();
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            return;
         }
         // Flush remaining queues synchronously on shutdown
         flushQueues();
     }
 
     public boolean submit(InternalObservation obs) {
+        if (!captureEnabled) {
+            return true;
+        }
         boolean ok = queue.offer(obs);
         if (ok) {
             totalEnqueued.incrementAndGet();
@@ -328,9 +452,20 @@ public class InternalObservationService {
     }
 
     public boolean submitTransformation(InternalTransformation trans) {
+        if (!captureEnabled) {
+            return true;
+        }
+        pendingTransformations.incrementAndGet();
         boolean ok = transformationQueue.offer(trans);
         if (ok) {
             totalEnqueued.incrementAndGet();
+        } else {
+            pendingTransformations.decrementAndGet();
+            long dropped = totalDropped.incrementAndGet();
+            if (dropped == 1 || dropped % 1000 == 0) {
+                LOGGER.warn("Transformation queue is full — dropped {} ({} dropped total; evidence loss)",
+                        trans.transformationType(), dropped);
+            }
         }
         return ok;
     }
@@ -338,6 +473,9 @@ public class InternalObservationService {
     public boolean submitAuditEvent(InternalAuditEvent event) {
         if (event == null) {
             return false;
+        }
+        if (!captureEnabled) {
+            return true;
         }
         boolean ok = auditEventQueue.offer(event);
         if (ok) {
@@ -353,7 +491,7 @@ public class InternalObservationService {
     }
 
     public int getQueueSize() {
-        return queue.size() + transformationQueue.size() + auditEventQueue.size();
+        return queue.size() + pendingTransformations.get() + auditEventQueue.size();
     }
 
     public long getTotalEnqueued() {
@@ -380,25 +518,33 @@ public class InternalObservationService {
         queue.clear();
         transformationQueue.clear();
         auditEventQueue.clear();
+        pendingTransformations.set(0);
         totalEnqueued.set(0);
         totalPersisted.set(0);
         totalDropped.set(0);
         totalTransformations.set(0);
         totalAuditEvents.set(0);
+        totalDatabaseHeartbeats.set(0);
+        totalDatabaseHeartbeatFailures.set(0);
         resetAuditRetryState();
         resetObservationRetryState();
     }
 
     private void drainQueueSafely() {
-        List<InternalObservation> obsBatch = new ArrayList<>(100);
-        List<InternalTransformation> transBatch = new ArrayList<>(100);
+        List<InternalObservation> obsBatch = new ArrayList<>(maxBatchSize);
+        List<InternalTransformation> transBatch = new ArrayList<>(maxBatchSize);
+        long nextDatabaseHeartbeatNanos = System.nanoTime()
+                + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(databaseHeartbeatIntervalMs);
 
         while (running.get()) {
             try {
-                InternalObservation firstObs = queue.poll(250, java.util.concurrent.TimeUnit.MILLISECONDS);
+                long nanosUntilHeartbeat = nextDatabaseHeartbeatNanos - System.nanoTime();
+                long pollWaitMs = Math.min(queuePollIntervalMs,
+                        java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(Math.max(0L, nanosUntilHeartbeat)));
+                InternalObservation firstObs = queue.poll(pollWaitMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                 if (firstObs != null) {
                     obsBatch.add(firstObs);
-                    queue.drainTo(obsBatch, 99);
+                    queue.drainTo(obsBatch, maxBatchSize - 1);
                     try {
                         persistBatch(obsBatch);
                         resetObservationRetryState();
@@ -412,18 +558,25 @@ public class InternalObservationService {
                 InternalTransformation firstTrans = transformationQueue.poll();
                 if (firstTrans != null) {
                     transBatch.add(firstTrans);
-                    transformationQueue.drainTo(transBatch, 99);
-                    persistTransformations(transBatch);
-                    totalTransformations.addAndGet(transBatch.size());
-                    totalPersisted.addAndGet(transBatch.size());
-                    transBatch.clear();
+                    transformationQueue.drainTo(transBatch, maxBatchSize - 1);
+                    try {
+                        persistTransformations(transBatch);
+                        resetTransformationRetryState();
+                        totalTransformations.addAndGet(transBatch.size());
+                        totalPersisted.addAndGet(transBatch.size());
+                        pendingTransformations.addAndGet(-transBatch.size());
+                    } catch (Exception failure) {
+                        requeueTransformationBatch(transBatch, failure);
+                    } finally {
+                        transBatch.clear();
+                    }
                 }
 
                 InternalAuditEvent firstAudit = auditEventQueue.poll();
                 if (firstAudit != null) {
-                    List<InternalAuditEvent> auditBatch = new ArrayList<>(100);
+                    List<InternalAuditEvent> auditBatch = new ArrayList<>(maxBatchSize);
                     auditBatch.add(firstAudit);
-                    auditEventQueue.drainTo(auditBatch, 99);
+                    auditEventQueue.drainTo(auditBatch, maxBatchSize - 1);
                     try {
                         persistAuditEvents(auditBatch);
                         resetAuditRetryState();
@@ -433,11 +586,38 @@ public class InternalObservationService {
                         requeueAuditBatch(auditBatch, e);
                     }
                 }
+
+                long nowNanos = System.nanoTime();
+                if (nowNanos >= nextDatabaseHeartbeatNanos) {
+                    runDatabaseHeartbeat();
+                    nextDatabaseHeartbeatNanos = System.nanoTime()
+                            + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(databaseHeartbeatIntervalMs);
+                }
             } catch (InterruptedException e) {
                 break;
             } catch (Exception e) {
                 LOGGER.error("Error persisting internal observations/transformations batch", e);
             }
+        }
+    }
+
+    private void runDatabaseHeartbeat() {
+        DatabaseManager database = DatabaseManager.getInstance();
+        com.itemgraph.db.DatabaseSettings settings = database.getSettings();
+        if (settings == null || !settings.isNetworkBackend()) {
+            return;
+        }
+        try {
+            if (database.validateNetworkConnection(5)) {
+                totalDatabaseHeartbeats.incrementAndGet();
+            } else {
+                totalDatabaseHeartbeatFailures.incrementAndGet();
+                LOGGER.warn("ItemGraph network database keepalive reported an invalid connection; the next heartbeat will retry");
+            }
+        } catch (SQLException heartbeatFailure) {
+            totalDatabaseHeartbeatFailures.incrementAndGet();
+            LOGGER.warn("ItemGraph network database keepalive failed; the next heartbeat will retry",
+                    heartbeatFailure);
         }
     }
 
@@ -455,15 +635,18 @@ public class InternalObservationService {
             }
         }
 
-        List<InternalTransformation> remainingTrans = new ArrayList<>();
-        transformationQueue.drainTo(remainingTrans);
-        if (!remainingTrans.isEmpty()) {
+        List<InternalTransformation> remainingTrans = new ArrayList<>(maxBatchSize);
+        while (transformationQueue.drainTo(remainingTrans, maxBatchSize) > 0) {
             try {
                 persistTransformations(remainingTrans);
+                resetTransformationRetryState();
                 totalTransformations.addAndGet(remainingTrans.size());
                 totalPersisted.addAndGet(remainingTrans.size());
             } catch (Exception e) {
-                LOGGER.error("Error flushing transformations on shutdown", e);
+                reportTransformationBatchLoss(remainingTrans, e);
+            } finally {
+                pendingTransformations.addAndGet(-remainingTrans.size());
+                remainingTrans.clear();
             }
         }
 
@@ -519,6 +702,54 @@ public class InternalObservationService {
     private void resetAuditRetryState() {
         auditRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
         lastAuditRetryLogMs = 0L;
+    }
+
+    /**
+     * Returns a failed transformation batch to its bounded queue. Events that cannot
+     * fit are counted as evidence loss; the in-flight batch is never retained only in
+     * worker-local memory across another pass or shutdown.
+     */
+    private void requeueTransformationBatch(List<InternalTransformation> batch, Exception failure) {
+        if (batch.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long lastLog = lastTransformationRetryLogMs;
+        if (lastLog == 0L || now - lastLog >= AUDIT_RETRY_LOG_INTERVAL_MS) {
+            lastTransformationRetryLogMs = now;
+            LOGGER.error("Could not persist {} transformations; retaining them for retry (backoff={} ms)",
+                    batch.size(), transformationRetryBackoffMs, failure);
+        }
+        for (InternalTransformation transformation : batch) {
+            if (!transformationQueue.offer(transformation)) {
+                pendingTransformations.decrementAndGet();
+                long dropped = totalDropped.incrementAndGet();
+                if (dropped == 1 || dropped % 1000 == 0) {
+                    LOGGER.warn("Transformation queue remained full while retrying; dropped {} ({} dropped total; evidence loss)",
+                            transformation.transformationType(), dropped);
+                }
+            }
+        }
+        if (running.get()) {
+            long backoff = transformationRetryBackoffMs;
+            transformationRetryBackoffMs = Math.min(AUDIT_RETRY_MAX_BACKOFF_MS, backoff * 2L);
+            try {
+                Thread.sleep(backoff);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void resetTransformationRetryState() {
+        transformationRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
+        lastTransformationRetryLogMs = 0L;
+    }
+
+    private void reportTransformationBatchLoss(List<InternalTransformation> batch, Exception failure) {
+        long dropped = totalDropped.addAndGet(batch.size());
+        LOGGER.error("Could not persist {} transformations during shutdown; {} events were dropped",
+                batch.size(), dropped, failure);
     }
 
     private void reportAuditBatchLoss(List<InternalAuditEvent> batch, Exception failure) {
@@ -584,8 +815,9 @@ public class InternalObservationService {
                 String insertSql = """
                     INSERT OR IGNORE INTO ig_audit_events (
                         event_type, timestamp_ms, player_uuid, player_name,
-                        level_id, x, y, z, subject_id, detail, source_type, source_event_id, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ITEMGRAPH_INTERNAL', ?, ?)
+                        level_id, x, y, z, subject_id, detail, source_type, source_event_id,
+                        raw_data, ingest_event_uuid
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ITEMGRAPH_INTERNAL', ?, ?, ?)
                 """;
                 try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
                     for (InternalAuditEvent event : batch) {
@@ -610,6 +842,7 @@ public class InternalObservationService {
                         } else {
                             pstmt.setBytes(12, event.rawData());
                         }
+                        pstmt.setString(13, event.ingestEventUuid());
                         pstmt.executeUpdate();
                     }
                 }
@@ -634,7 +867,9 @@ public class InternalObservationService {
     private void persistTransformations(List<InternalTransformation> batch) throws SQLException {
         if (batch.isEmpty()) return;
         DatabaseManager db = DatabaseManager.getInstance();
-        if (!db.isInitialized()) return;
+        if (!db.isInitialized()) {
+            throw new SQLException("ItemGraph database is not initialized");
+        }
 
         Connection conn = db.getConnection();
         synchronized (conn) {
@@ -650,10 +885,10 @@ public class InternalObservationService {
             conn.setAutoCommit(false);
 
             String insertSql = """
-                INSERT INTO ig_item_transformations (
+                INSERT OR IGNORE INTO ig_item_transformations (
                     transformation_type, player_node_id, source_fingerprint_id,
-                    result_fingerprint_id, quantity, timestamp_ms, details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    result_fingerprint_id, quantity, timestamp_ms, details, ingest_event_uuid
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
             try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
@@ -671,6 +906,7 @@ public class InternalObservationService {
                     pstmt.setInt(5, trans.quantity());
                     pstmt.setLong(6, trans.timestampMs());
                     pstmt.setString(7, trans.details());
+                    pstmt.setString(8, trans.ingestEventUuid());
                     pstmt.addBatch();
                 }
                 pstmt.executeBatch();
@@ -705,14 +941,15 @@ public class InternalObservationService {
         try {
             conn.setAutoCommit(false);
 
-            // INSERT OR IGNORE: source_event_id deduplicates durable producer
-            // identities; collisionSafeSourceEventId prevents the lossy numeric
-            // UUID projection from silently discarding a distinct payload.
+            // The source ID deduplicates producer identities. The separate queued
+            // identity also makes retries safe when a DB commit succeeds but the
+            // worker loses the acknowledgement and replays the same batch.
             String insertSql = """
                 INSERT OR IGNORE INTO ig_observations (
                     source_type, source_event_id, timestamp_ms, node_id, target_node_id,
-                    fingerprint_id, action_type, amount, raw_data, correlation_status, item_entity_uuid, timestamp_end_ms
-                ) VALUES ('ITEMGRAPH_INTERNAL', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+                    fingerprint_id, action_type, amount, raw_data, correlation_status,
+                    item_entity_uuid, timestamp_end_ms, ingest_event_uuid
+                ) VALUES ('ITEMGRAPH_INTERNAL', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
             """;
 
             try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
@@ -849,6 +1086,7 @@ public class InternalObservationService {
                     } else {
                         pstmt.setNull(10, Types.BIGINT);
                     }
+                    pstmt.setString(11, obs.ingestEventUuid());
                     pstmt.executeUpdate();
                 }
             }

@@ -48,6 +48,7 @@ public class DatabaseManager {
         this.settings = requestedSettings;
         this.dialect = DatabaseDialect.fromSettings(requestedSettings);
         this.databasePath = requestedSettings.sqlitePath();
+        this.currentSchemaVersion = 0;
         this.lastError = null;
         try {
             Connection raw;
@@ -115,6 +116,49 @@ public class DatabaseManager {
             return connection != null && !connection.isClosed();
         } catch (SQLException e) {
             return false;
+        }
+    }
+
+    /** Performs a JDBC protocol keepalive for the shared network database connection. */
+    public boolean validateNetworkConnection(int timeoutSeconds) throws SQLException {
+        Connection current;
+        synchronized (this) {
+            if (settings == null || !settings.isNetworkBackend()) {
+                return true;
+            }
+            boolean needsInitialization = !initialized || connection == null;
+            if (!needsInitialization) {
+                try {
+                    needsInitialization = connection.isClosed();
+                } catch (SQLException ignored) {
+                    needsInitialization = true;
+                }
+            }
+            if (needsInitialization) {
+                initialize(settings);
+            }
+            if (!initialized || connection == null) {
+                throw new SQLException("ItemGraph network database is not initialized"
+                        + (lastError == null ? "" : ": " + lastError));
+            }
+            current = connection;
+        }
+        synchronized (current) {
+            boolean valid;
+            try {
+                valid = current.isValid(timeoutSeconds);
+            } catch (SQLException failure) {
+                invalidateIfCurrent(current);
+                throw failure;
+            }
+            if (!valid) invalidateIfCurrent(current);
+            return valid;
+        }
+    }
+
+    private synchronized void invalidateIfCurrent(Connection expected) {
+        if (connection == expected) {
+            close();
         }
     }
 

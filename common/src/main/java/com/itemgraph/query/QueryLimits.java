@@ -14,10 +14,12 @@ package com.itemgraph.query;
 public final class QueryLimits {
 
     /** Rows returned when the caller does not specify a limit. Fits a chat window. */
-    public static final int DEFAULT_LIMIT = 20;
+    public static final int DEFAULT_LIMIT = 10;
 
     /** Absolute ceiling, applied even if the caller explicitly asks for more. */
     public static final int MAX_LIMIT = 100;
+
+    private static volatile int configuredMaxLimit = MAX_LIMIT;
 
     /** Maximum page offset accepted by a bounded historical lookup. */
     public static final int MAX_OFFSET = 10_000;
@@ -35,12 +37,29 @@ public final class QueryLimits {
 
     private QueryLimits() {}
 
-    /** Clamps a requested limit into {@code [1, MAX_LIMIT]}. */
+    /** Applies the startup-loaded operator page cap to every query surface. */
+    public static void configureMaxPageSize(int maxPageSize) {
+        if (maxPageSize < 1 || maxPageSize > MAX_LIMIT) {
+            throw new IllegalArgumentException("query.max_page_size must be in [1,100]");
+        }
+        configuredMaxLimit = maxPageSize;
+    }
+
+    public static int getConfiguredMaxPageSize() {
+        return configuredMaxLimit;
+    }
+
+    /** Clamps a requested limit into {@code [1, configuredMaxLimit]}. */
     public static int clampLimit(int requested) {
         if (requested < 1) {
             return 1;
         }
-        return Math.min(requested, MAX_LIMIT);
+        return Math.min(requested, configuredMaxLimit);
+    }
+
+    /** Clamps trace/browser pages by both the configured operator cap and menu limit. */
+    public static int clampGuiPageSize(int requested) {
+        return Math.max(1, Math.min(Math.min(MAX_GUI_PAGE_SIZE, configuredMaxLimit), requested));
     }
 
     public static int clampOffset(int requested) {

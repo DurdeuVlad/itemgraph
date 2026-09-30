@@ -21,7 +21,9 @@ import java.sql.Statement;
  * the source action and coordinates, which is exactly what re-ingestion recomputes —
  * so this migration clears ItemGraph's derived observation layer and the per-source
  * checkpoints, forcing the next ingestion cycle to re-read every GriefLogger row
- * through the corrected direction logic.
+ * through the corrected direction logic. Before clearing those legacy rows, this
+ * migration copies them, including {@code raw_data}, into
+ * {@code ig_legacy_observation_evidence}.
  *
  * <p>Deliberately left alone:
  * <ul>
@@ -48,6 +50,7 @@ public class V4__ItemFlowTopology implements SchemaMigration {
 
     @Override
     public void apply(Connection conn) throws SQLException {
+        LegacyObservationArchive.preserveBeforeReset(conn, getVersion());
         try (Statement stmt = conn.createStatement()) {
             stmt.execute("DELETE FROM ig_edge_evidence;");
             stmt.execute("DELETE FROM ig_inferred_edges;");

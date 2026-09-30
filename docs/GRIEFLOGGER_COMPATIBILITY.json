@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "compatibility_version": "m8.4.0",
+  "compatibility_version": "m8.5.0",
   "mod_id": "itemgraph",
   "supported_commands": ["/ig", "/itemgraph"],
   "unsupported_aliases": ["/gl", "/grieflogger"],
@@ -145,10 +145,12 @@
     {"grieflogger": null, "itemgraph": "general.database_ssl_mode", "status": "extended", "implementation_state": "implemented", "owner_issue": 29, "compatibility_note": "disable, trust, verify-ca, and verify-full are accepted; verify-ca/full provide server-authenticated TLS for MySQL caching_sha2_password."},
     {"grieflogger": "mysqlTimeout", "itemgraph": "general.database_connection_timeout_ms", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29},
     {"grieflogger": "useIndexes", "itemgraph": "storage.use_indexes", "status": "compatible", "implementation_state": "implemented", "owner_issue": 29, "compatibility_note": "Defaults to true; NeoForge uses storage.use_indexes and Fabric uses use_indexes. Startup idempotently creates or drops optional non-unique ItemGraph indexes. Required unique constraints remain enabled; MySQL/MariaDB also retain an index when it is the only index supporting a foreign key. Restart after changing the config."},
-    {"grieflogger": "maxPageSize", "itemgraph": "query.max_page_size", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30},
-    {"grieflogger": "serverSideOnlyMode", "itemgraph": "server_side_only", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30},
-    {"grieflogger": "queueFrequency", "itemgraph": "ingestion.queue_frequency", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30},
-    {"grieflogger": "helloFrequency", "itemgraph": "operations.hello_frequency", "status": "unresolved", "implementation_state": "planned", "owner_issue": 30}
+    {"grieflogger": "maxPageSize", "itemgraph": "query.max_page_size", "status": "compatible", "implementation_state": "implemented", "owner_issue": 30, "compatibility_note": "Defaults to 10 and clamps command query rows plus trace/browser pages to [1,100], retaining the 45-row GUI ceiling; stricter internal candidate/evidence bounds are independent. Restart required."},
+    {"grieflogger": "serverSideOnlyMode", "itemgraph": "operations.server_side_only", "status": "unresolved", "implementation_state": "server_only_invariant", "owner_issue": 30, "compatibility_note": "ItemGraph is server-side only and accepts true; false is rejected because client operation is not implemented."},
+    {"grieflogger": "queueFrequency", "itemgraph": "ingestion.poll_interval_ms + ingestion.max_batch_size", "status": "unresolved", "implementation_state": "itemgraph_specific_controls", "owner_issue": 30, "compatibility_note": "Three native queues remain bounded to 10000 entries; their idle poll interval and maximum batch size are configurable. These are not yet claimed equivalent to GriefLogger queue scheduling; differential staging load evidence is required."},
+    {"grieflogger": "helloFrequency", "itemgraph": "operations.database_heartbeat_interval_ms", "status": "unresolved", "implementation_state": "implemented_needs_network_integration_validation", "owner_issue": 30, "compatibility_note": "Defaults to 30000 ms, matching GriefLogger's 600 ticks; ItemGraph calls JDBC Connection.isValid(5) from its background worker for MySQL/MariaDB. SQLite is excluded. A live network database integration check is still required before compatibility is claimed."},
+    {"grieflogger": null, "itemgraph": "capture.enabled", "status": "extended", "implementation_state": "implemented", "owner_issue": 30, "compatibility_note": "Defaults to true. When false, new ItemGraph-native observations, transformations, and audit events are suppressed; GriefLogger read-only ingestion continues."},
+    {"grieflogger": null, "itemgraph": "retention.raw_evidence", "status": "extended", "implementation_state": "immutable_indefinite", "owner_issue": 30, "compatibility_note": "Raw evidence is retained indefinitely; unsupported values fail startup. No automatic purge or archive is implemented."}
   ],
   "inspector_behavior": [
     {"grieflogger": "left_click_block_history", "itemgraph": "block_left_click_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},

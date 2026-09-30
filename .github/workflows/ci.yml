@@ -66,14 +66,6 @@ jobs:
           sed -i 's/\r$//' ./gradlew
           chmod +x ./gradlew
 
-      - name: Read project version
-        id: version_data
-        shell: bash
-        run: |
-          VERSION="$(awk -F= '$1 == "mod_version" {print $2; exit}' gradle.properties | tr -d '\r')"
-          test -n "${VERSION}"
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-
       - name: Validate GriefLogger compatibility profile
         env:
           GRIEFLOGGER_PROFILE_CHECK_REMOTE: '1'
@@ -85,7 +77,7 @@ jobs:
           GRIEFLOGGER_RELEASE_FIXTURE_CHECK_REMOTE: '1'
         run: python3 tools/validate_grieflogger_release_fixture.py
 
-      - name: Test and build all loader artifacts
+      - name: Test all loaders without packaging distributable mod jars
         env:
           ITEMGRAPH_TEST_MARIADB_URL: jdbc:mariadb://127.0.0.1:3306/itemgraph
           ITEMGRAPH_TEST_MARIADB_USER: itemgraph
@@ -93,15 +85,4 @@ jobs:
           ITEMGRAPH_TEST_MYSQL_URL: jdbc:mariadb://127.0.0.1:3307/itemgraph?allowPublicKeyRetrieval=true
           ITEMGRAPH_TEST_MYSQL_USER: itemgraph
           ITEMGRAPH_TEST_MYSQL_PASSWORD: itemgraph
-        run: ./gradlew clean build
-
-      - name: Upload all server artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: itemgraph-server-artifacts
-          path: |
-            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
-            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
-            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
-            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
-          if-no-files-found: error
+        run: ./gradlew :neoforge:test :fabric:test

@@ -164,8 +164,10 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
   #24–#28, #30–#31, #43, and #54. Issue #29 is delivered in PR #79, including
   SQLite/MariaDB/MySQL storage and configurable optional indexes. The current
-  registry is `m8.4.0`; four action mappings and four configuration mappings
-  remain unresolved. Issue #27 is decomposed into #73 (projectile outcomes),
+  registry is `m8.5.0`; four action mappings and three configuration mappings
+  remain unresolved. Query page size is now configurable; server-side mode is a
+  true-only invariant, raw evidence retention is indefinite, and queue/hello
+  cadence still needs staging evidence. Issue #27 is decomposed into #73 (projectile outcomes),
   #74 (block interaction outcomes), #75 (entity interaction outcomes), and #76
   (Ender action writers and deltas). Compatibility artifacts remain supported
   until the M8 gate and the native-only cutover evidence pass.

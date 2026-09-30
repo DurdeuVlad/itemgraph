@@ -1,6 +1,8 @@
 package com.itemgraph.db;
 
 import com.itemgraph.db.migration.MigrationRunner;
+import com.itemgraph.db.migration.V5__ContainerFlowTopology;
+import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.GriefLoggerAdapter;
 import com.itemgraph.ingest.GriefLoggerHistoricalImporter;
 import com.itemgraph.query.AuditLookupFilters;
@@ -10,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -31,6 +34,46 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * runs unless an endpoint environment variable is present.
  */
 class MariaDbDialectIntegrationTest {
+    @Test
+    void mariaDbNetworkHeartbeatRunsOnTheBackgroundWorker() throws Exception {
+        String url = System.getenv("ITEMGRAPH_TEST_MARIADB_URL");
+        assumeTrue(url != null && !url.isBlank(), "No endpoint configured for ITEMGRAPH_TEST_MARIADB_URL");
+        URI endpoint = URI.create(url.substring("jdbc:".length()));
+        String databaseName = endpoint.getPath().replaceFirst("^/", "");
+        DatabaseManager database = DatabaseManager.getInstance();
+        InternalObservationService service = InternalObservationService.getInstance();
+        try {
+            database.initialize(DatabaseSettings.mysqlMariaDb(endpoint.getHost(), endpoint.getPort(), databaseName,
+                    System.getenv().getOrDefault("ITEMGRAPH_TEST_MARIADB_USER", "itemgraph"),
+                    System.getenv().getOrDefault("ITEMGRAPH_TEST_MARIADB_PASSWORD", "itemgraph"),
+                    5_000, true));
+            assertTrue(database.isInitialized(), "the CI MariaDB endpoint should initialize ItemGraph storage");
+            assertTrue(database.validateNetworkConnection(5), "the JDBC protocol ping should report a valid connection");
+            database.getConnection().close();
+            assertTrue(database.validateNetworkConnection(5),
+                    "the heartbeat should reinitialize a closed network connection");
+
+            service.stop();
+            service.clear();
+            service.configureOperations(10, 100, 1_000, true);
+            service.start();
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (service.getTotalDatabaseHeartbeats() == 0 && System.nanoTime() < deadline) {
+                Thread.sleep(25);
+            }
+            service.stop();
+
+            assertTrue(service.getTotalDatabaseHeartbeats() >= 1,
+                    "the worker should send a successful idle network heartbeat");
+            assertEquals(0, service.getTotalDatabaseHeartbeatFailures());
+        } finally {
+            service.stop();
+            service.clear();
+            service.configureOperations(250, 100, 30_000, true);
+            database.close();
+        }
+    }
+
     @Test
     void mariaDbMigrationAndEvidenceContract(@TempDir Path tempDir) throws Exception {
         runConfigured("ITEMGRAPH_TEST_MARIADB_URL", "ITEMGRAPH_TEST_MARIADB_USER", "ITEMGRAPH_TEST_MARIADB_PASSWORD", tempDir);
@@ -150,6 +193,66 @@ class MariaDbDialectIntegrationTest {
             }
 
             assertHistoricalImportAndLookup(endpoint, conn, tempDir);
+            assertPopulatedLegacyObservationArchive(conn);
+        }
+    }
+
+    private static void assertPopulatedLegacyObservationArchive(Connection conn) throws Exception {
+        int id = 900_002 + ThreadLocalRandom.current().nextInt(100_000);
+        byte[] rawData = ("dialect-legacy-evidence-" + id).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String componentSummary = "component-" + "x".repeat(1_024);
+        try (Statement statement = conn.createStatement()) {
+            statement.execute("DROP TABLE IF EXISTS ig_legacy_observation_evidence");
+        }
+        try (PreparedStatement node = conn.prepareStatement(
+                "INSERT INTO ig_nodes (id, node_type, level_id) VALUES (?, 'PLAYER', 'minecraft:overworld')");
+             PreparedStatement fingerprint = conn.prepareStatement("""
+                     INSERT INTO ig_item_fingerprints (id, item_id, fingerprint_hash, component_summary)
+                     VALUES (?, 'minecraft:diamond', ?, ?)
+                     """);
+             PreparedStatement observation = conn.prepareStatement("""
+                     INSERT INTO ig_observations (id, source_type, source_event_id, timestamp_ms,
+                         node_id, target_node_id, fingerprint_id, action_type, amount, raw_data)
+                     VALUES (?, 'MYSQL_DIALECT_TEST', ?, 1200, ?, NULL, ?, 'DROP_ITEM', 2, ?)
+                     """)) {
+            node.setInt(1, id);
+            node.executeUpdate();
+            fingerprint.setInt(1, id);
+            fingerprint.setString(2, "dialect-legacy-hash-" + id);
+            fingerprint.setString(3, componentSummary);
+            fingerprint.executeUpdate();
+            observation.setInt(1, id);
+            observation.setInt(2, id);
+            observation.setInt(3, id);
+            observation.setInt(4, id);
+            observation.setBytes(5, rawData);
+            observation.executeUpdate();
+        }
+
+        new V5__ContainerFlowTopology().apply(conn, DatabaseDialect.MYSQL_MARIADB);
+
+        try (PreparedStatement query = conn.prepareStatement("""
+                SELECT fingerprint_item_id, fingerprint_hash, fingerprint_component_summary, raw_data
+                FROM ig_legacy_observation_evidence
+                WHERE archive_migration_version = 5 AND original_observation_id = ?
+                """)) {
+            query.setInt(1, id);
+            try (ResultSet rows = query.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals("minecraft:diamond", rows.getString("fingerprint_item_id"));
+                assertEquals("dialect-legacy-hash-" + id, rows.getString("fingerprint_hash"));
+                assertEquals(componentSummary, rows.getString("fingerprint_component_summary"));
+                assertArrayEquals(rawData, rows.getBytes("raw_data"));
+                assertFalse(rows.next());
+            }
+        }
+        try (PreparedStatement query = conn.prepareStatement(
+                "SELECT COUNT(*) FROM ig_observations WHERE id = ?")) {
+            query.setInt(1, id);
+            try (ResultSet rows = query.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals(0, rows.getInt(1), "archived obsolete rows must not remain in current graph queries");
+            }
         }
     }
 

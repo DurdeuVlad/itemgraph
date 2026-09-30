@@ -57,7 +57,7 @@ final class DialectSql {
         // MySQL/MariaDB require VARCHAR-like key columns; SQLite permits TEXT
         // keys.  Keep large forensic fields as LONGTEXT after the key rewrite.
         translated = translated.replaceAll("(?i)\\bTEXT\\b", "VARCHAR(191)");
-        translated = translated.replaceAll("(?i)\\b(source_path|detail|details|explanation|component_summary|payload_json|unresolved_reason|message|report_json)\\s+VARCHAR\\(191\\)",
+        translated = translated.replaceAll("(?i)\\b(source_path|detail|details|explanation|component_summary|fingerprint_component_summary|payload_json|unresolved_reason|message|report_json)\\s+VARCHAR\\(191\\)",
                 "$1 LONGTEXT");
         translated = translated.replaceAll("(?i)\\b(BLOB)\\b", "LONGBLOB");
 

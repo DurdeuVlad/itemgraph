@@ -11,10 +11,11 @@ import java.sql.Statement;
  * custom names) with real DataComponentPatch decoding via ItemCanonicalizer.
  *
  * Existing ig_item_fingerprints rows were computed with the old, coarser
- * formula and are now stale. This migration clears ItemGraph's OWN derived
- * data (fingerprints, observations, and the per-source ingestion checkpoints)
- * so the next ingestion cycle re-processes every GriefLogger row through the
- * new canonicalizer from scratch.
+ * formula and are now stale. Before clearing the active observation projection
+ * and checkpoints, this migration copies every observation field and raw payload
+ * into {@code ig_legacy_observation_evidence}. The next ingestion cycle can then
+ * re-process every GriefLogger row through the new canonicalizer without deleting
+ * the earlier evidence.
  *
  * This ONLY touches ItemGraph's own SQLite database. GriefLogger's database
  * is a separate, read-only data source and is never written to by ItemGraph -
@@ -36,6 +37,7 @@ public class V3__ResetForCanonicalization implements SchemaMigration {
 
     @Override
     public void apply(Connection conn) throws SQLException {
+        LegacyObservationArchive.preserveBeforeReset(conn, getVersion());
         try (Statement stmt = conn.createStatement()) {
             stmt.execute("DELETE FROM ig_edge_evidence;");
             stmt.execute("DELETE FROM ig_inferred_edges;");

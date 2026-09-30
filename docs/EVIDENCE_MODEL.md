@@ -23,6 +23,18 @@ Examples:
 
 Observed evidence should include the source and original source identifier whenever available.
 
+Raw observations and audit events are retained indefinitely. Legacy migrations V3, V4,
+and V5 preserve every pre-reset observation's source identifiers, timestamp, endpoints,
+fingerprint values, action, quantity, and `raw_data` bytes in
+`ig_legacy_observation_evidence` before removing obsolete endpoint projections from
+`ig_observations`. The archive is immutable historical evidence and is not mixed into
+current graph queries because its endpoints may encode superseded semantics.
+
+Every newly queued observation, transformation, and audit event also has a distinct
+ItemGraph `ingest_event_uuid`, stored under a unique index in its ledger. This key is
+separate from producer `source_event_id`: it makes retrying the same queued record
+idempotent after an uncertain database commit, even when a producer supplied no ID.
+
 ### 2. Inferred
 
 A relationship constructed from two or more observations.

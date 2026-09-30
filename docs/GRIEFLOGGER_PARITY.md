@@ -25,7 +25,7 @@ canonical action names, accepted GriefLogger spellings, compatibility status,
 evidence and quantity semantics, loader/storage support, lookup filters,
 permission and paging controls, inspector behavior, configuration controls, and
 the GitHub issue responsible for incomplete mappings.
-The current registry compatibility version is `m8.4.0`.
+The current registry compatibility version is `m8.5.0`.
 
 The registry version changes when a mapping, status, evidence or quantity
 meaning, loader, or backend contract changes. Documentation-only clarifications
@@ -152,6 +152,15 @@ the supporting observation.
 The hopper/mechanical-automation row is supplemental ItemGraph coverage. It is
 not required to replace a GriefLogger capability because GriefLogger does not
 record those transfers.
+
+ItemGraph's query page cap defaults to ten rows and is operator-configurable in
+the range 1–100. Raw evidence is retained indefinitely and is never automatically
+purged. The [configuration reference](CONFIGURATION.md) records restart behavior
+and ItemGraph-specific queue idle-poll/batch limits; GriefLogger's queue and hello
+queue cadence mapping remains unresolved until staging load evidence establishes
+equivalent behavior. GriefLogger's 600-tick hello is a database keepalive; ItemGraph now
+maps that behavior to a configurable background JDBC ping for MySQL/MariaDB, but
+the mapping remains unresolved until a live network database check passes.
 
 ## Native-only cutover and retention plan
 
