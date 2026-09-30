@@ -51,6 +51,10 @@ fabricApi {
     }
 }
 
+tasks.named('compileGametestJava') {
+    source project(':common').fileTree('src/gametest/java')
+}
+
 tasks.withType(JavaCompile).configureEach {
     source project(':common').sourceSets.main.allSource
 }

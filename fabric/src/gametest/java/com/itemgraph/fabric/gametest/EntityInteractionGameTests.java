@@ -1,6 +1,7 @@
 package com.itemgraph.fabric.gametest;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.gametest.EntityInteractionConformanceFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.core.BlockPos;
@@ -26,6 +27,7 @@ public final class EntityInteractionGameTests implements FabricGameTest {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         InternalObservationService observations = InternalObservationService.getInstance();
         long droppedBefore = observations.getTotalDropped();
+        long quantityObservationsBefore = EntityInteractionConformanceFixture.countQuantityObservations();
         BlockPos cowPos = helper.absolutePos(new BlockPos(2, 1, 2));
         Cow cow = new Cow(EntityType.COW, helper.getLevel());
         cow.moveTo(cowPos.getX() + 0.5, cowPos.getY(), cowPos.getZ() + 0.5, 0.0F, 0.0F);
@@ -62,11 +64,17 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                 "the interactions must not lose evidence to a full or failed queue");
 
         String playerUuid = player.getUUID().toString();
+        String playerName = player.getGameProfile().getName();
         String cowUuid = cow.getUUID().toString();
         String armorStandUuid = armorStand.getUUID().toString();
         helper.succeedWhen(() -> {
+            EntityInteractionConformanceFixture.assertQuantityObservationsUnchanged(
+                    helper, quantityObservationsBefore);
             assertAttempt(helper, playerUuid, cowUuid);
             assertArmorStandOutcomes(helper, playerUuid, armorStandUuid);
+            EntityInteractionConformanceFixture.assertCow(helper, playerUuid, playerName, cowPos, cowUuid);
+            EntityInteractionConformanceFixture.assertArmorStand(
+                    helper, playerUuid, playerName, armorStandPos, armorStandUuid);
         });
     }
 

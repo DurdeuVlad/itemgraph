@@ -1,6 +1,7 @@
 package com.itemgraph.gametest;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.gametest.EntityInteractionConformanceFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
@@ -39,6 +40,7 @@ public final class EntityInteractionGameTests {
         InternalObservationService observations = InternalObservationService.getInstance();
         long persistedBefore = observations.getTotalPersisted();
         long droppedBefore = observations.getTotalDropped();
+        long quantityObservationsBefore = EntityInteractionConformanceFixture.countQuantityObservations();
         ServerboundInteractPacket packet = ServerboundInteractPacket.createInteractionPacket(
                 target, player.isShiftKeyDown(), InteractionHand.MAIN_HAND, new Vec3(0.0, 1.0, 0.5));
         helper.assertTrue(packet.getTarget(helper.getLevel()) == target,
@@ -80,7 +82,10 @@ public final class EntityInteractionGameTests {
         String playerUuid = player.getUUID().toString();
         String targetUuid = target.getUUID().toString();
         String armorStandUuid = armorStand.getUUID().toString();
+        String playerName = player.getGameProfile().getName();
         helper.succeedWhen(() -> {
+            EntityInteractionConformanceFixture.assertQuantityObservationsUnchanged(
+                    helper, quantityObservationsBefore);
             try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
                  var statement = connection.prepareStatement("""
                          SELECT event_type, detail
@@ -165,6 +170,10 @@ public final class EntityInteractionGameTests {
             } catch (SQLException e) {
                 throw new IllegalStateException("Could not read ItemGraph's armor stand evidence", e);
             }
+
+            EntityInteractionConformanceFixture.assertCow(helper, playerUuid, playerName, targetPos, targetUuid);
+            EntityInteractionConformanceFixture.assertArmorStand(
+                    helper, playerUuid, playerName, armorStandPos, armorStandUuid);
         });
     }
 }

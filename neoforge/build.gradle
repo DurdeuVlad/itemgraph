@@ -38,6 +38,8 @@ neoForge {
     }
 }
 
+sourceSets.main.java.srcDir project(':common').file('src/gametest/java')
+
 repositories {
     mavenLocal()
     mavenCentral()
