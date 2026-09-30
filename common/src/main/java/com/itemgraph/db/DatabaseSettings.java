@@ -51,7 +51,11 @@ public record DatabaseSettings(
     }
 
     public static DatabaseSettings sqlite(Path path) {
-        return new DatabaseSettings(Backend.SQLITE, path, "", 0, "", "", "", 5_000, true, "disable");
+        return sqlite(path, true);
+    }
+
+    public static DatabaseSettings sqlite(Path path, boolean useIndexes) {
+        return new DatabaseSettings(Backend.SQLITE, path, "", 0, "", "", "", 5_000, useIndexes, "disable");
     }
 
     public static DatabaseSettings mysqlMariaDb(String host, int port, String database,

@@ -30,6 +30,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             properties.setProperty("database_password", "");
             properties.setProperty("database_ssl_mode", "disable");
             properties.setProperty("database_connection_timeout_ms", "5000");
+            properties.setProperty("use_indexes", "true");
             properties.setProperty("grieflogger_database_path", "database.db");
             properties.setProperty("ground_bridge_max_seconds", "300");
             try (OutputStream output = Files.newOutputStream(configFile)) {
@@ -53,7 +54,8 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         try {
             if (backend.equals("sqlite")) {
                 databaseSettings = DatabaseSettings.sqlite(
-                        resolve(gameDirectory, properties.getProperty("database_path", "itemgraph/itemgraph.db")));
+                        resolve(gameDirectory, properties.getProperty("database_path", "itemgraph/itemgraph.db")),
+                        parseBoolean(properties, "use_indexes", true, configFile));
             } else if (backend.equals("mysql") || backend.equals("mariadb") || backend.equals("mysql_mariadb")) {
                 databaseSettings = DatabaseSettings.mysqlMariaDb(
                         properties.getProperty("database_host", "127.0.0.1"),
@@ -62,7 +64,8 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
                         properties.getProperty("database_username", "itemgraph"),
                         properties.getProperty("database_password", ""),
                         parseInt(properties, "database_connection_timeout_ms", 5_000, configFile),
-                        true, properties.getProperty("database_ssl_mode", "disable"));
+                        parseBoolean(properties, "use_indexes", true, configFile),
+                        properties.getProperty("database_ssl_mode", "disable"));
             } else {
                 throw new IOException("database_backend must be sqlite or mysql_mariadb in " + configFile);
             }
@@ -83,6 +86,14 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         } catch (NumberFormatException e) {
             throw new IOException("Invalid integer in " + configFile + ": " + key, e);
         }
+    }
+
+    private static boolean parseBoolean(Properties properties, String key, boolean defaultValue, Path configFile)
+            throws IOException {
+        String value = properties.getProperty(key, Boolean.toString(defaultValue)).trim();
+        if (value.equalsIgnoreCase("true")) return true;
+        if (value.equalsIgnoreCase("false")) return false;
+        throw new IOException(key + " must be true or false in " + configFile);
     }
 
     private static Path resolve(Path gameDirectory, String value) throws IOException {

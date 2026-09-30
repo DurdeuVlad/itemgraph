@@ -162,8 +162,8 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact current boundary.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
-  #24–#31, #43, and #54. The current registry is `m8.3.1`; four action mappings
-  remain unresolved. Issue #27 is decomposed into #73 (projectile outcomes),
+  #24–#31, #43, and #54. The current registry is `m8.4.0`; four action mappings
+  and four configuration mappings remain unresolved. Issue #27 is decomposed into #73 (projectile outcomes),
   #74 (block interaction outcomes), #75 (entity interaction outcomes), and #76
   (Ender action writers and deltas). Compatibility artifacts remain supported
   until the M8 gate and the native-only cutover evidence pass.

@@ -90,6 +90,7 @@ public class DatabaseManager {
             }
             this.connection = DialectConnection.wrap(raw, this.dialect);
             this.currentSchemaVersion = MigrationRunner.runMigrations(this.connection, this.dialect);
+            StorageIndexManager.apply(this.connection, this.dialect, requestedSettings.useIndexes());
             this.initialized = true;
             LOGGER.info("ItemGraph database initialized successfully (schema version: {}).", this.currentSchemaVersion);
         } catch (ClassNotFoundException e) {

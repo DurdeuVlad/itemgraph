@@ -182,6 +182,17 @@ def validate_registry(registry: dict[str, Any]) -> None:
     require(registry.get("schema_version") == 1, "registry schema_version must be 1")
     require(registry.get("mod_id") == "itemgraph", "registry mod_id must be itemgraph")
 
+    index_policy = next((row for row in registry.get("configuration_controls", [])
+                         if isinstance(row, dict) and row.get("grieflogger") == "useIndexes"), None)
+    require(
+        isinstance(index_policy, dict)
+        and index_policy.get("itemgraph") == "storage.use_indexes"
+        and index_policy.get("status") == "compatible"
+        and index_policy.get("implementation_state") == "implemented"
+        and index_policy.get("owner_issue") == 29,
+        "useIndexes must map to the implemented storage.use_indexes policy owned by issue #29",
+    )
+
     release_fixture = registry.get("release_fixture")
     require(isinstance(release_fixture, dict), "registry release_fixture must be an object")
     require(

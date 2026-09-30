@@ -187,4 +187,44 @@ class DatabaseManagerTest {
             stmt.execute("INSERT INTO ig_nodes (id, node_type, level_id) VALUES (9, 'PLAYER', 'minecraft:overworld')");
         }
     }
+
+    @Test
+    void optionalIndexPolicyCanBeToggledAcrossRestartsWithoutRemovingUniqueConstraints(@TempDir Path tempDir)
+            throws Exception {
+        DatabaseManager db = DatabaseManager.getInstance();
+        Path path = tempDir.resolve("itemgraph.db");
+
+        db.initialize(DatabaseSettings.sqlite(path, false));
+        assertFalse(hasIndex(db.getConnection(), "ig_observations", "idx_obs_time_fp"));
+        assertTrue(hasIndex(db.getConnection(), "ig_observations", "idx_obs_source_unique"));
+        assertTrue(hasIndex(db.getConnection(), "ig_observations", "idx_obs_internal_dedup"));
+        assertTrue(hasIndex(db.getConnection(), "ig_nodes", "idx_nodes_external_key"));
+        assertTrue(hasIndex(db.getConnection(), "ig_audit_events", "idx_audit_events_source_unique"));
+
+        db.close();
+        db.initialize(DatabaseSettings.sqlite(path, true));
+        assertTrue(hasIndex(db.getConnection(), "ig_observations", "idx_obs_time_fp"));
+        assertTrue(hasIndex(db.getConnection(), "ig_grieflogger_lookup", "idx_gl_lookup_subject"));
+
+        db.close();
+        db.initialize(DatabaseSettings.sqlite(path, false));
+        assertFalse(hasIndex(db.getConnection(), "ig_observations", "idx_obs_time_fp"));
+        assertFalse(hasIndex(db.getConnection(), "ig_grieflogger_lookup", "idx_gl_lookup_subject"));
+        assertTrue(hasIndex(db.getConnection(), "ig_observations", "idx_obs_source_unique"));
+        assertTrue(hasIndex(db.getConnection(), "ig_observations", "idx_obs_internal_dedup"));
+        assertTrue(hasIndex(db.getConnection(), "ig_nodes", "idx_nodes_external_key"));
+        assertTrue(hasIndex(db.getConnection(), "ig_audit_events", "idx_audit_events_source_unique"));
+    }
+
+    private static boolean hasIndex(Connection connection, String table, String expectedName) throws SQLException {
+        for (String tableName : List.of(table, table.toUpperCase(java.util.Locale.ROOT))) {
+            try (ResultSet indexes = connection.getMetaData().getIndexInfo(connection.getCatalog(), null,
+                    tableName, false, false)) {
+                while (indexes.next()) {
+                    if (expectedName.equalsIgnoreCase(indexes.getString("INDEX_NAME"))) return true;
+                }
+            }
+        }
+        return false;
+    }
 }

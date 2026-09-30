@@ -33,13 +33,18 @@ to point at GriefLogger's database file. The database remains read-only from
 ItemGraph. ItemGraph-owned storage defaults to SQLite; set `database_backend=mysql_mariadb`
 plus `database_host`, `database_port`, `database_name`, `database_username`,
 `database_password`, `database_ssl_mode`, and `database_connection_timeout_ms` to
-use the shared MySQL/MariaDB storage contract. Set `database_ssl_mode=verify-full`
-or `verify-ca` for MySQL `caching_sha2_password`; `disable` is intended for a
-server authentication method that does not require RSA key retrieval and keeps
-database traffic plaintext. Use `verify-full` for production, or `verify-ca` with
-an explicitly trusted CA; ItemGraph warns when `disable` is used with a
-non-loopback host. NeoForge exposes the same keys under `general` in its server
-TOML.
+use the shared MySQL/MariaDB storage contract. Optional non-unique lookup
+indexes default to enabled. Set NeoForge `storage.use_indexes=false` or Fabric
+`use_indexes=false` and restart to drop optional indexes from ItemGraph's database;
+set either key to `true` and restart to recreate them. Required unique indexes
+stay enabled for deduplication. MySQL/MariaDB also retain an index when it is the
+only index supporting a foreign key. Set `database_ssl_mode=verify-full` or `verify-ca` for MySQL
+`caching_sha2_password`; `disable` is intended for a server authentication method
+that does not require RSA key retrieval and keeps database traffic plaintext. Use
+`verify-full` for production, or `verify-ca` with an explicitly trusted CA;
+ItemGraph warns when `disable` is used with a non-loopback host. NeoForge's
+database connection keys are under `general`; the index setting is under
+`storage` in its server TOML.
 
 > Evidence first. Inference second. Confidence explicit. Every conclusion traceable.
 
