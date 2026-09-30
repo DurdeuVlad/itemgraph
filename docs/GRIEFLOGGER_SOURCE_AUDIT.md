@@ -36,6 +36,12 @@ remaining native-only differential-replay proof as unresolved under #31.
 - Lookup filters use `action`, `include`, `exclude`, `radius`, `time`, and `user`
   `name.value` tokens. Official docs describe a five-filter AND query, a player-centered
   cube radius, a default page size of 10, and clickable page navigation.
+- `UserFilter.getOptions()` reads `Caches.USER.getAllUsernames()`. In the pinned
+  source, `UserCache` refreshes that cache every 300 seconds through
+  `UserService.getAllUsernames()`, which selects `id,name` from the `users` table.
+  `UserService.insertOrUpdateName()` also writes each observed name to the separate
+  `usernames` history table. ItemGraph completion includes both imported reference
+  tables so offline current identities and retained past names are discoverable.
 - Inspect mode consumes normal block interaction while active. Left-click shows
   block history; right-click shows interaction, container, double-chest, or door history.
 - In the pinned `BlockHandler.isBlockIntractable` implementation, right-click
@@ -57,6 +63,10 @@ Primary sources: [lookup](https://daqem.com/projects/grieflogger/wiki/inspecting
 [inspect](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/inspect-command),
 [`LookupCommand.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/command/LookupCommand.java),
 [`InspectCommand.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/command/InspectCommand.java).
+The user completion path is pinned in [`UserFilter.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/command/filter/UserFilter.java),
+[`UserCache.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/database/cache/UserCache.java),
+[`UserService.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/database/service/UserService.java),
+and [`UserRepository.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/database/repository/UserRepository.java).
 The right-click target list is read from [`BlockHandler.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/block/BlockHandler.java).
 
 ## Event and storage coverage

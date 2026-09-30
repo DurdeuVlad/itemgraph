@@ -146,11 +146,14 @@ that surface; the extension remains labeled by source and evidence class.
 
 The lookup filter parser accepts the published aliases and value forms, and
 completion offers unused filters, pinned GriefLogger action names, ItemGraph
-actions, registered item identifiers, and online player names. GriefLogger's
-`UserFilter` suggests cached historical usernames; ItemGraph currently suggests
-online players only. Offline usernames remain valid lookup filter values when
-known, but are not discoverable through completion. This suggestion gap remains
-part of [#24](https://github.com/DurdeuVlad/itemgraph/issues/24).
+actions, registered item identifiers, online player names, current names from
+imported GriefLogger `users` rows, and historical names from `usernames` rows.
+GriefLogger's pinned `UserFilter` reads its cached options from the `users` table;
+ItemGraph also offers the retained historical `usernames` values. Name reads run through the
+bounded asynchronous query worker, use ItemGraph's read-only database connection,
+and are cached for 30 seconds; malformed provenance payloads are skipped without
+breaking completion. Completion includes reference rows even when a username has
+no corresponding event row.
 
 GriefLogger removes interaction rows when a block or door is removed. ItemGraph's
 raw evidence is immutable, so parity work must use an explicit supersession or

@@ -17,7 +17,11 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.PreparedStatement;
+import java.sql.CallableStatement;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -70,7 +74,9 @@ import java.util.function.BiConsumer;
  * incident query that answers a minute later, or not until the current cycle finishes.
  * A separate single-threaded executor keeps command latency independent of the
  * background pipeline. Its bounded queue serializes admin queries without opening an
- * unbounded number of SQLite readers or accumulating unbounded pending work.
+ * unbounded number of JDBC readers or accumulating unbounded pending work. Each statement
+ * receives the five-second timeout and is registered for cancellation; SQLite additionally
+ * uses its progress handler and cross-thread interrupt support.
  */
 public final class QueryDispatcher {
 
@@ -240,8 +246,18 @@ public final class QueryDispatcher {
      * exposing the JDBC {@link Connection} outside {@code com.itemgraph.command}.
      */
     static <T> CompletableFuture<T> submitData(DataQuery<T> query) {
-        return CompletableFuture.supplyAsync(
-                () -> executeData(query, new QueryCancellation()), queryExecutor());
+        QueryCancellation cancellation = new QueryCancellation();
+        ScheduledFuture<?> timeout = schedulePlayerTimeout(cancellation);
+        CompletableFuture<T> future;
+        try {
+            future = CompletableFuture.supplyAsync(
+                    () -> executeData(query, cancellation), queryExecutor());
+        } catch (RejectedExecutionException rejected) {
+            cancelTimeout(timeout);
+            throw rejected;
+        }
+        future.whenComplete((result, failure) -> cancelTimeout(timeout));
+        return future;
     }
 
     static <T> int dispatchData(CommandSourceStack source, String label, DataQuery<T> query,
@@ -332,22 +348,29 @@ public final class QueryDispatcher {
 
     private static <T> T executeReadOnly(ConnectionQuery<T> query, QueryCancellation cancellation) {
         try (Connection conn = DatabaseManager.getInstance().openReadOnlyConnection()) {
-            if (!cancellation.attach(conn)) {
+            SQLiteConnection sqliteConnection = cancellation.attach(conn);
+            if (cancellation.isCancelled()) {
                 throw new SQLException("query cancelled before execution began");
             }
             boolean progressHandlerSet = false;
             try {
-                ProgressHandler.setHandler(conn, 10_000, new ProgressHandler() {
-                    @Override
-                    protected int progress() {
-                        return cancellation.isCancelled() ? 1 : 0;
-                    }
-                });
-                progressHandlerSet = true;
+                if (sqliteConnection != null) {
+                    ProgressHandler.setHandler(sqliteConnection, 10_000, new ProgressHandler() {
+                        @Override
+                        protected int progress() {
+                            return cancellation.isCancelled() ? 1 : 0;
+                        }
+                    });
+                    progressHandlerSet = true;
+                }
                 if (cancellation.isCancelled()) {
                     throw new SQLException("query cancelled before execution began");
                 }
-                return query.run(conn);
+                T result = query.run(cancellation.instrument(conn));
+                if (!cancellation.finish()) {
+                    throw new SQLException("query cancelled before completion");
+                }
+                return result;
             } finally {
                 try {
                     if (progressHandlerSet) {
@@ -543,33 +566,110 @@ public final class QueryDispatcher {
         return cause;
     }
 
-    private static final class QueryCancellation {
+    static final class QueryCancellation {
         private SQLiteConnection activeConnection;
         private volatile boolean cancelled;
+        private boolean finished;
+        private final Set<Statement> activeStatements = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
         boolean isCancelled() {
             return cancelled;
         }
 
-        synchronized boolean attach(Connection connection) throws SQLException {
-            if (!(connection instanceof SQLiteConnection sqliteConnection)) {
-                throw new SQLException("The read-only query connection is not SQLite-backed");
-            }
+        synchronized boolean finish() {
             if (cancelled) {
                 return false;
             }
-            activeConnection = sqliteConnection;
+            finished = true;
             return true;
+        }
+
+        synchronized SQLiteConnection attach(Connection connection) {
+            if (cancelled) {
+                return null;
+            }
+            if (connection instanceof SQLiteConnection sqliteConnection) {
+                activeConnection = sqliteConnection;
+                return sqliteConnection;
+            }
+            // Non-SQLite JDBC drivers enforce statement timeouts at the JDBC layer.
+            return null;
+        }
+
+        Connection instrument(Connection connection) {
+            return (Connection) java.lang.reflect.Proxy.newProxyInstance(
+                    Connection.class.getClassLoader(), new Class<?>[]{Connection.class},
+                    (proxy, method, args) -> {
+                        if (cancelled && (method.getName().equals("createStatement")
+                                || method.getName().equals("prepareStatement")
+                                || method.getName().equals("prepareCall"))) {
+                            throw new SQLException("query cancelled before statement creation");
+                        }
+                        try {
+                            Object result = method.invoke(connection, args);
+                            if (result instanceof Statement statement) {
+                                return instrument(statement);
+                            }
+                            return result;
+                        } catch (java.lang.reflect.InvocationTargetException e) {
+                            throw e.getCause();
+                        }
+                    });
+        }
+
+        private Statement instrument(Statement statement) {
+            try {
+                statement.setQueryTimeout((int) TimeUnit.MILLISECONDS.toSeconds(PLAYER_QUERY_TIMEOUT_MS));
+            } catch (SQLException | AbstractMethodError unsupported) {
+                LOGGER.debug("JDBC driver {} does not support statement timeouts",
+                        statement.getClass().getName());
+            }
+            activeStatements.add(statement);
+            Class<?> statementType = statement instanceof CallableStatement ? CallableStatement.class
+                    : statement instanceof PreparedStatement ? PreparedStatement.class : Statement.class;
+            return (Statement) java.lang.reflect.Proxy.newProxyInstance(
+                    Statement.class.getClassLoader(), new Class<?>[]{statementType},
+                    (proxy, method, args) -> {
+                        if (cancelled && isStatementExecution(method.getName())) {
+                            throw new SQLException("query cancelled before statement execution");
+                        }
+                        try {
+                            return method.invoke(statement, args);
+                        } catch (java.lang.reflect.InvocationTargetException e) {
+                            throw e.getCause();
+                        } finally {
+                            if (method.getName().equals("close")) {
+                                activeStatements.remove(statement);
+                            }
+                        }
+                    });
+        }
+
+        private static boolean isStatementExecution(String methodName) {
+            return methodName.equals("execute") || methodName.equals("executeQuery")
+                    || methodName.equals("executeUpdate") || methodName.equals("executeLargeUpdate")
+                    || methodName.equals("executeBatch") || methodName.equals("executeLargeBatch");
         }
 
         synchronized void detach(Connection connection) {
             if (activeConnection == connection) {
                 activeConnection = null;
             }
+            activeStatements.clear();
         }
 
         synchronized void cancel() {
+            if (finished) {
+                return;
+            }
             cancelled = true;
+            for (Statement statement : List.copyOf(activeStatements)) {
+                try {
+                    statement.cancel();
+                } catch (SQLException | RuntimeException e) {
+                    LOGGER.debug("Unable to cancel an ItemGraph JDBC statement", e);
+                }
+            }
             if (activeConnection != null) {
                 try {
                     activeConnection.getDatabase().interrupt();
