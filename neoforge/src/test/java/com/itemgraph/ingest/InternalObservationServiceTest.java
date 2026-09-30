@@ -9,6 +9,11 @@ import com.itemgraph.ingest.InternalObservationService.InternalAuditEvent;
 import com.itemgraph.ingest.InternalObservationService.InternalTransformation;
 import com.itemgraph.listener.ContainerCapabilityWrapper;
 import com.itemgraph.listener.ContainerInteractionTracker;
+import com.itemgraph.query.AuditEventQueryService;
+import com.itemgraph.query.AuditLookupFilters;
+import com.itemgraph.query.QueryWindow;
+import com.itemgraph.query.UnifiedEvidenceQueryService;
+import com.itemgraph.query.UnifiedEvidenceDetail;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -124,6 +129,111 @@ class InternalObservationServiceTest {
             assertTrue(rs.next());
             assertEquals(0, rs.getInt(1), "non-quantity audit events must not become item transfers");
         }
+    }
+
+    @Test
+    void blockRemovalLinksEarlierInteractionsWithoutDeletingRawEvidence() throws Exception {
+        initializeTopologyDatabase();
+        InternalAuditEvent lowerHalfInteraction = new InternalAuditEvent(
+                1_000L, "INTERACT_BLOCK_ATTEMPT", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:oak_door", null, null);
+        InternalAuditEvent upperHalfInteraction = new InternalAuditEvent(
+                1_100L, "INTERACT_BLOCK_ATTEMPT", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 65, -20, "minecraft:oak_door", null, null);
+        List<AuditEventQueryService.ExactPosition> doorPositions = List.of(
+                new AuditEventQueryService.ExactPosition(10, 64, -20),
+                new AuditEventQueryService.ExactPosition(10, 65, -20));
+        InternalAuditEvent breakDoor = new InternalAuditEvent(
+                2_000L, "BREAK_BLOCK", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:oak_door", null, null, doorPositions);
+        String longImportedSourceKey = "interaction-row-" + "𐐀".repeat(600);
+        String caseVariantAfterBreak = "Interaction-row-" + "𐐀".repeat(600);
+        InternalAuditEvent laterInteraction = new InternalAuditEvent(
+                3_000L, "INTERACT_BLOCK_ATTEMPT", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:air", null, null);
+        try (PreparedStatement imported = conn.prepareStatement("""
+                INSERT INTO ig_grieflogger_lookup
+                    (source_sha256, table_name, source_key, timestamp_ms, level_name, x, y, z,
+                     player_name, action_type, quantity, evidence_class)
+                VALUES ('fixture-source-hash', 'blocks', ?, 900,
+                        'minecraft:overworld', 10, 64, -20, 'Alex', 'INTERACT_BLOCK_ATTEMPT', 0, 'OBSERVED')
+                """)) {
+            imported.setString(1, longImportedSourceKey);
+            imported.executeUpdate();
+        }
+        try (PreparedStatement imported = conn.prepareStatement("""
+                INSERT INTO ig_grieflogger_lookup
+                    (source_sha256, table_name, source_key, timestamp_ms, level_name, x, y, z,
+                     player_name, action_type, quantity, evidence_class)
+                VALUES ('fixture-source-hash', 'blocks', ?, 2_500,
+                        'minecraft:overworld', 10, 64, -20, 'Alex', 'INTERACT_BLOCK_ATTEMPT', 0, 'OBSERVED')
+                """)) {
+            imported.setString(1, caseVariantAfterBreak);
+            imported.executeUpdate();
+        }
+
+        persistAudit(lowerHalfInteraction, upperHalfInteraction, breakDoor, laterInteraction);
+        persistAudit(breakDoor);
+
+        try (Statement statement = conn.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT superseded_event_id, superseding_event_id, reason_code
+                     FROM ig_audit_event_supersessions ORDER BY superseded_event_id
+                     """)) {
+            assertTrue(rows.next());
+            assertEquals("BLOCK_REMOVED_AT_TARGET", rows.getString("reason_code"));
+            long firstInteractionId = rows.getLong("superseded_event_id");
+            long breakId = rows.getLong("superseding_event_id");
+            assertTrue(rows.next());
+            assertNotEquals(firstInteractionId, rows.getLong("superseded_event_id"));
+            assertEquals(breakId, rows.getLong("superseding_event_id"));
+            assertFalse(rows.next());
+        }
+        try (Statement statement = conn.createStatement();
+             ResultSet rows = statement.executeQuery("SELECT COUNT(*) FROM ig_audit_events")) {
+            assertTrue(rows.next());
+            assertEquals(4, rows.getInt(1), "supersession must not delete or rewrite raw event rows");
+        }
+        try (PreparedStatement statement = conn.prepareStatement("""
+                     SELECT superseding_event_id, reason_code
+                     FROM ig_grieflogger_row_supersessions
+                     WHERE source_sha256 = 'fixture-source-hash' AND source_key = ?
+                     """)) {
+            statement.setString(1, longImportedSourceKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next(), "imported immutable history gets its own supersession link");
+                assertTrue(rows.getLong("superseding_event_id") > 0);
+                assertEquals("BLOCK_REMOVED_AT_TARGET", rows.getString("reason_code"));
+                assertFalse(rows.next());
+            }
+        }
+
+        AuditLookupFilters attempts = new AuditLookupFilters(List.of("INTERACT_BLOCK_ATTEMPT"),
+                List.of(), List.of(), List.of(), 1.0, QueryWindow.unbounded());
+        List<UnifiedEvidenceDetail> raw = new UnifiedEvidenceQueryService().findFiltered(
+                conn, attempts, "minecraft:overworld", 10, 64, -20, 10, 0);
+        assertEquals(5, raw.size());
+        assertTrue(raw.stream().filter(row -> row.timestampMs() < 2_000L)
+                .allMatch(row -> row.detail().contains("superseded_by=audit#")
+                        && row.detail().contains("reason=BLOCK_REMOVED_AT_TARGET")));
+        UnifiedEvidenceDetail postBreak = raw.stream()
+                .filter(row -> row.timestampMs() == 3_000L).findFirst().orElseThrow();
+        assertFalse(postBreak.detail() != null && postBreak.detail().contains("superseded_by="),
+                "the post-break interaction remains active raw evidence");
+
+        List<UnifiedEvidenceDetail> activeInspector = new UnifiedEvidenceQueryService().findExact(
+                conn, "minecraft:overworld", doorPositions, 10, 0);
+        assertTrue(activeInspector.stream().noneMatch(row -> "INTERACT_BLOCK_ATTEMPT".equals(row.actionType())
+                && row.timestampMs() < 2_000L));
+        assertEquals(2, activeInspector.stream()
+                .filter(row -> "INTERACT_BLOCK_ATTEMPT".equals(row.actionType())).count());
+        assertTrue(activeInspector.stream().noneMatch(row -> row.evidenceId()
+                .equals("historical#blocks#" + longImportedSourceKey)));
+        UnifiedEvidenceDetail activeCaseVariant = activeInspector.stream()
+                .filter(row -> row.evidenceId().equals("historical#blocks#" + caseVariantAfterBreak))
+                .findFirst().orElseThrow();
+        assertTrue(activeCaseVariant.detail() == null || !activeCaseVariant.detail().contains("superseded_by="),
+                "binary source-key comparison must not hide a case-variant post-break row");
     }
 
     @Test

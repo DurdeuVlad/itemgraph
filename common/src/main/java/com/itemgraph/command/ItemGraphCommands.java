@@ -872,7 +872,11 @@ public final class ItemGraphCommands {
                 "inspect block=" + dimension + " [" + x + "," + y + "," + z + "]",
                 System.currentTimeMillis());
         rememberPageSession(source, session);
-        return dispatchAuditPage(source, "inspect block", session, 1, true);
+        int accepted = dispatchAuditPage(source, "inspect block", session, 1, true);
+        if (accepted == 0) {
+            forgetPageSession(source, session.sessionId());
+        }
+        return accepted;
     }
 
     /** Executes the GriefLogger-compatible name.value filter form around the issuing player. */
@@ -1029,12 +1033,14 @@ public final class ItemGraphCommands {
                         session.centerX(), session.centerY(), session.centerZ(), clampedLimit, offset);
                 lines = QueryFormatter.formatUnifiedEvidence(evidence, filter);
                 returnedRows = evidence.size();
+            } else if (session.exactPositions() != null && !session.exactPositions().isEmpty()) {
+                List<UnifiedEvidenceDetail> evidence = UNIFIED_EVIDENCE_QUERIES.findExact(
+                        conn, session.levelId(), session.exactPositions(), clampedLimit, offset);
+                lines = QueryFormatter.formatUnifiedEvidence(evidence, filter);
+                returnedRows = evidence.size();
             } else {
-                List<AuditEventDetail> events = session.exactPositions() != null
-                        && !session.exactPositions().isEmpty()
-                        ? AUDIT_EVENT_QUERIES.findExact(conn, session.eventType(), session.playerName(),
-                                session.window(), session.levelId(), session.exactPositions(), clampedLimit, offset)
-                        : AUDIT_EVENT_QUERIES.find(conn, session.eventType(), session.playerName(),
+                List<AuditEventDetail> events = AUDIT_EVENT_QUERIES.find(
+                                conn, session.eventType(), session.playerName(),
                                 session.window(), session.levelId(), session.centerX(), session.centerY(),
                                 session.centerZ(), session.radius(), clampedLimit, offset);
                 lines = QueryFormatter.formatAuditEvents(events, filter);
@@ -1071,6 +1077,18 @@ public final class ItemGraphCommands {
                         break;
                     }
                     sessions.remove(oldestId);
+                }
+            }
+        }
+    }
+
+    private static void forgetPageSession(CommandSourceStack source, UUID sessionId) {
+        if (source.getEntity() instanceof ServerPlayer player) {
+            Map<UUID, AuditPageSession> sessions = AUDIT_PAGE_SESSIONS.get(player.getUUID());
+            if (sessions != null) {
+                sessions.remove(sessionId);
+                if (sessions.isEmpty()) {
+                    AUDIT_PAGE_SESSIONS.remove(player.getUUID(), sessions);
                 }
             }
         }

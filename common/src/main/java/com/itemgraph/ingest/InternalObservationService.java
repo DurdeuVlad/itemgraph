@@ -4,6 +4,7 @@ import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.graph.NodeManager;
+import com.itemgraph.query.AuditEventQueryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,6 +14,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
@@ -274,7 +278,8 @@ public class InternalObservationService {
             String detail,
             byte[] rawData,
             Long sourceEventId,
-            String ingestEventUuid
+            String ingestEventUuid,
+            List<AuditEventQueryService.ExactPosition> supersessionPositions
     ) {
         public InternalAuditEvent(
                 long timestampMs,
@@ -290,7 +295,7 @@ public class InternalObservationService {
                 byte[] rawData
         ) {
             this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z,
-                    subjectId, detail, rawData, null, UUID.randomUUID().toString());
+                    subjectId, detail, rawData, null, UUID.randomUUID().toString(), List.of());
         }
 
         public InternalAuditEvent(
@@ -308,12 +313,31 @@ public class InternalObservationService {
                 Long sourceEventId
         ) {
             this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z,
-                    subjectId, detail, rawData, sourceEventId, UUID.randomUUID().toString());
+                    subjectId, detail, rawData, sourceEventId, UUID.randomUUID().toString(), List.of());
+        }
+
+        public InternalAuditEvent(
+                long timestampMs,
+                String eventType,
+                String playerUuid,
+                String playerName,
+                String levelName,
+                double x,
+                double y,
+                double z,
+                String subjectId,
+                String detail,
+                byte[] rawData,
+                List<AuditEventQueryService.ExactPosition> supersessionPositions
+        ) {
+            this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z,
+                    subjectId, detail, rawData, null, UUID.randomUUID().toString(), supersessionPositions);
         }
 
         public InternalAuditEvent {
             rawData = rawData == null ? null : rawData.clone();
             ingestEventUuid = normalizeIngestEventUuid(ingestEventUuid);
+            supersessionPositions = List.copyOf(supersessionPositions == null ? List.of() : supersessionPositions);
         }
 
         @Override
@@ -844,6 +868,11 @@ public class InternalObservationService {
                         }
                         pstmt.setString(13, event.ingestEventUuid());
                         pstmt.executeUpdate();
+                        if ("BREAK_BLOCK".equalsIgnoreCase(event.eventType())) {
+                            long removalId = findPersistedAuditEventId(conn, event.ingestEventUuid());
+                            supersedeEarlierBlockInteractions(conn, event, removalId);
+                            supersedeImportedBlockInteractions(conn, event, removalId);
+                        }
                     }
                 }
                 conn.commit();
@@ -852,6 +881,161 @@ public class InternalObservationService {
                 throw e;
             } finally {
                 conn.setAutoCommit(originalAutoCommit);
+            }
+        }
+    }
+
+    /**
+     * Adds durable visibility tombstones after the break event is inserted. Raw
+     * interaction rows remain untouched and ordinary lookup can still explain
+     * which break superseded each one.
+     */
+    private static long findPersistedAuditEventId(Connection connection, String ingestEventUuid)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT id FROM ig_audit_events WHERE ingest_event_uuid = ?")) {
+            statement.setString(1, ingestEventUuid);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    throw new SQLException("persisted BREAK_BLOCK event was not found by ingest UUID");
+                }
+                return result.getLong(1);
+            }
+        }
+    }
+
+    private static void supersedeEarlierBlockInteractions(Connection connection,
+                                                           InternalAuditEvent event,
+                                                           long removalId) throws SQLException {
+        List<AuditEventQueryService.ExactPosition> targets = event.supersessionPositions().isEmpty()
+                ? List.of(new AuditEventQueryService.ExactPosition(event.x(), event.y(), event.z()))
+                : event.supersessionPositions();
+        String selectSql = """
+                SELECT interaction.id
+                FROM ig_audit_events interaction
+                WHERE interaction.event_type IN ('INTERACT_BLOCK', 'INTERACT_BLOCK_ATTEMPT')
+                  AND interaction.level_id = ?
+                  AND interaction.x = ? AND interaction.y = ? AND interaction.z = ?
+                  AND interaction.timestamp_ms <= ? AND interaction.id < ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ig_audit_event_supersessions prior
+                      WHERE prior.superseded_event_id = interaction.id
+                  )
+                ORDER BY interaction.id
+                """;
+        String insertSql = """
+                INSERT OR IGNORE INTO ig_audit_event_supersessions
+                    (superseded_event_id, superseding_event_id, reason_code, created_at_ms)
+                VALUES (?, ?, 'BLOCK_REMOVED_AT_TARGET', ?)
+                """;
+        try (PreparedStatement select = connection.prepareStatement(selectSql);
+             PreparedStatement insert = connection.prepareStatement(insertSql)) {
+            for (AuditEventQueryService.ExactPosition position : targets.stream().distinct().toList()) {
+                select.setString(1, event.levelName());
+                select.setDouble(2, position.x());
+                select.setDouble(3, position.y());
+                select.setDouble(4, position.z());
+                select.setLong(5, event.timestampMs());
+                select.setLong(6, removalId);
+                try (ResultSet interactions = select.executeQuery()) {
+                    while (interactions.next()) {
+                        insert.setLong(1, interactions.getLong(1));
+                        insert.setLong(2, removalId);
+                        insert.setLong(3, event.timestampMs());
+                        insert.executeUpdate();
+                    }
+                }
+            }
+        }
+    }
+
+    private static void supersedeImportedBlockInteractions(Connection connection,
+                                                            InternalAuditEvent event,
+                                                            long removalId) throws SQLException {
+        String selectSql = """
+                SELECT source_sha256, table_name, source_key
+                FROM ig_grieflogger_lookup historical
+                WHERE historical.table_name = 'blocks'
+                  AND UPPER(historical.action_type) IN ('INTERACT_BLOCK', 'INTERACT_BLOCK_ATTEMPT')
+                  AND historical.level_name = ?
+                  AND historical.x = ? AND historical.y = ? AND historical.z = ?
+                  AND historical.timestamp_ms <= ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ig_grieflogger_row_supersessions prior
+                      WHERE prior.source_sha256 = historical.source_sha256
+                        AND prior.table_name = historical.table_name
+                        AND prior.source_key_prefix = SUBSTR(historical.source_key, 1, 191)
+                        AND HEX(prior.source_key) = HEX(historical.source_key)
+                  )
+                ORDER BY historical.source_sha256, historical.source_key
+                """;
+        String insertSql = """
+                INSERT OR IGNORE INTO ig_grieflogger_row_supersessions
+                    (source_sha256, table_name, source_key_hash, source_key, source_key_prefix,
+                     superseding_event_id, reason_code, created_at_ms)
+                VALUES (?, ?, ?, ?, ?, ?, 'BLOCK_REMOVED_AT_TARGET', ?)
+                """;
+        List<AuditEventQueryService.ExactPosition> targets = event.supersessionPositions().isEmpty()
+                ? List.of(new AuditEventQueryService.ExactPosition(event.x(), event.y(), event.z()))
+                : event.supersessionPositions();
+        try (PreparedStatement select = connection.prepareStatement(selectSql);
+             PreparedStatement insert = connection.prepareStatement(insertSql)) {
+            for (AuditEventQueryService.ExactPosition position : targets.stream().distinct().toList()) {
+                select.setString(1, event.levelName());
+                select.setDouble(2, position.x());
+                select.setDouble(3, position.y());
+                select.setDouble(4, position.z());
+                select.setLong(5, event.timestampMs());
+                try (ResultSet historicalRows = select.executeQuery()) {
+                    while (historicalRows.next()) {
+                        insert.setString(1, historicalRows.getString("source_sha256"));
+                        insert.setString(2, historicalRows.getString("table_name"));
+                        String sourceKey = historicalRows.getString("source_key");
+                        String sourceKeyHash = sha256(sourceKey);
+                        insert.setString(3, sourceKeyHash);
+                        insert.setString(4, sourceKey);
+                        insert.setString(5, sourceKeyPrefix(sourceKey));
+                        insert.setLong(6, removalId);
+                        insert.setLong(7, event.timestampMs());
+                        boolean inserted = insert.executeUpdate() > 0;
+                        if (!inserted && !supersessionKeyMatches(connection,
+                                historicalRows.getString("source_sha256"),
+                                historicalRows.getString("table_name"),
+                                sourceKeyHash, sourceKey)) {
+                            throw new SQLException("source-key digest collision while recording GriefLogger supersession");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static String sha256(String value) {
+        try {
+            return java.util.HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required", e);
+        }
+    }
+
+    private static String sourceKeyPrefix(String sourceKey) {
+        int prefixCodePoints = Math.min(sourceKey.codePointCount(0, sourceKey.length()), 191);
+        return sourceKey.substring(0, sourceKey.offsetByCodePoints(0, prefixCodePoints));
+    }
+
+    private static boolean supersessionKeyMatches(Connection connection, String sourceHash,
+                                                    String tableName, String sourceKeyHash,
+                                                    String sourceKey) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT source_key FROM ig_grieflogger_row_supersessions
+                WHERE source_sha256 = ? AND table_name = ? AND source_key_hash = ?
+                """)) {
+            statement.setString(1, sourceHash);
+            statement.setString(2, tableName);
+            statement.setString(3, sourceKeyHash);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() && sourceKey.equals(result.getString(1));
             }
         }
     }

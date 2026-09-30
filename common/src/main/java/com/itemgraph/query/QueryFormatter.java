@@ -91,11 +91,14 @@ public final class QueryFormatter {
             String actor = event.playerName() == null ? "(unknown player)" : event.playerName();
             String subject = event.subjectId() == null ? "" : " subject=" + event.subjectId();
             String detail = event.detail() == null ? "" : " detail=" + escapeDetail(event.detail());
+            String supersession = event.supersedingEventId() == null ? ""
+                    : " superseded_by=audit#" + event.supersedingEventId()
+                    + " reason=" + event.supersessionReason();
             lines.add(PREFIX + "[OBSERVED] audit#" + event.id() + " " + event.eventType()
                     + " actor=" + actor + " at " + event.levelName()
                     + " [" + formatCoordinate(event.x()) + ", "
                     + formatCoordinate(event.y()) + ", " + formatCoordinate(event.z()) + "]"
-                    + " time=" + formatTime(event.timestampMs()) + subject + detail);
+                    + " time=" + formatTime(event.timestampMs()) + subject + detail + supersession);
         }
         return lines;
     }

@@ -80,6 +80,128 @@ class UnifiedEvidenceQueryServiceTest {
     }
 
     @Test
+    void exactInspectorTimelineMergesSourcesAndPagesWithoutAdjacentPositionBleed() throws Exception {
+        long container = node("CONTAINER", 50, 64, 50, "container", null);
+        long adjacent = node("CONTAINER", 51, 64, 50, "adjacent", null);
+        long inspectorActor = node("PLAYER", 50, 64, 50, "Morgan", "uuid-morgan");
+        auditAt("minecraft:overworld", 1_000L, 50, 64, 50, "block-history");
+        insertObservation("ITEMGRAPH_INTERNAL", 2_000L, "DROP_ITEM", stoneFingerprint, 3,
+                container, playerNode, null);
+        transformation("CRAFT", 3_000L, inspectorActor);
+        insertObservation("ITEMGRAPH_INTERNAL", 4_000L, "PICKUP_ITEM", stoneFingerprint, 1,
+                adjacent, playerNode, null);
+        long unrelatedContainer = node("CONTAINER", 52, 64, 50, "outside", null);
+        insertObservation("ITEMGRAPH_INTERNAL", 5_000L, "PICKUP_ITEM", stoneFingerprint, 1,
+                unrelatedContainer, playerNode, null);
+        auditAt("minecraft:the_nether", 6_000L, 50, 64, 50, "wrong-dimension");
+
+        List<AuditEventQueryService.ExactPosition> target = List.of(
+                new AuditEventQueryService.ExactPosition(50, 64, 50),
+                new AuditEventQueryService.ExactPosition(51, 64, 50),
+                new AuditEventQueryService.ExactPosition(50, 64, 50));
+        List<UnifiedEvidenceDetail> firstPage = service.findExact(conn, "minecraft:overworld", target, 2, 0);
+        List<UnifiedEvidenceDetail> secondPage = service.findExact(conn, "minecraft:overworld", target, 2, 2);
+
+        assertEquals(List.of("observation#2", "transformation#1"),
+                firstPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertEquals(List.of("observation#1", "audit#1"),
+                secondPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertFalse(java.util.stream.Stream.concat(firstPage.stream(), secondPage.stream())
+                .anyMatch(row -> "minecraft:the_nether".equals(row.levelName())));
+        UnifiedEvidenceDetail containerDelta = secondPage.get(0);
+        assertEquals(50.0, containerDelta.x(),
+                "the inspected container endpoint supplies the displayed position even when the player endpoint is elsewhere");
+        assertTrue(java.util.stream.Stream.concat(firstPage.stream(), secondPage.stream())
+                .noneMatch(row -> "observation#3".equals(row.evidenceId())),
+                "an observation is selected by either endpoint, but unrelated container positions stay out");
+        assertThrows(IllegalArgumentException.class, () -> service.findExact(conn, "minecraft:overworld",
+                java.util.stream.IntStream.range(0, 9)
+                        .mapToObj(i -> new AuditEventQueryService.ExactPosition(i, 64, 0)).toList(), 10, 0));
+    }
+
+    @Test
+    void exactInspectorPagesTiedAuditTimestampsWithoutDuplicatesOrOmissions() throws Exception {
+        auditAt("minecraft:overworld", 1_000L, 50, 64, 50, "older-id");
+        auditAt("minecraft:overworld", 1_000L, 50, 64, 50, "newer-id");
+        List<AuditEventQueryService.ExactPosition> target =
+                List.of(new AuditEventQueryService.ExactPosition(50, 64, 50));
+
+        List<UnifiedEvidenceDetail> firstPage = service.findExact(
+                conn, "minecraft:overworld", target, 1, 0);
+        List<UnifiedEvidenceDetail> secondPage = service.findExact(
+                conn, "minecraft:overworld", target, 1, 1);
+
+        assertEquals(List.of("audit#2"), firstPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertEquals(List.of("audit#1"), secondPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertEquals(2, java.util.stream.Stream.concat(firstPage.stream(), secondPage.stream())
+                .map(UnifiedEvidenceDetail::evidenceId).distinct().count());
+    }
+
+    @Test
+    void exactInspectorKeepsHistoricalKeyOrderingAcrossTiedTimestampPages() throws Exception {
+        insertHistoricalLookup("items", "pk#1", 1_000L);
+        insertHistoricalLookup("items", "pk#2", 1_000L);
+        List<AuditEventQueryService.ExactPosition> target =
+                List.of(new AuditEventQueryService.ExactPosition(50, 64, 50));
+
+        List<UnifiedEvidenceDetail> firstPage = service.findExact(
+                conn, "minecraft:overworld", target, 1, 0);
+        List<UnifiedEvidenceDetail> secondPage = service.findExact(
+                conn, "minecraft:overworld", target, 1, 1);
+
+        assertEquals(List.of("historical#items#pk#1"),
+                firstPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertEquals(List.of("historical#items#pk#2"),
+                secondPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertEquals(2, java.util.stream.Stream.concat(firstPage.stream(), secondPage.stream())
+                .map(UnifiedEvidenceDetail::evidenceId).distinct().count());
+    }
+
+    @Test
+    void exactInspectorUsesDatabaseByteOrderingForUnicodeHistoricalKeys() throws Exception {
+        String supplementaryCharacter = new String(Character.toChars(0x10000));
+        String highBmpCharacter = new String(Character.toChars(0xE000));
+        String firstKey = "pk:" + highBmpCharacter;
+        String secondKey = "pk:" + supplementaryCharacter;
+        insertHistoricalLookup("items", secondKey, 1_000L);
+        insertHistoricalLookup("items", firstKey, 1_000L);
+        List<AuditEventQueryService.ExactPosition> target =
+                List.of(new AuditEventQueryService.ExactPosition(50, 64, 50));
+
+        List<UnifiedEvidenceDetail> firstPage = service.findExact(
+                conn, "minecraft:overworld", target, 1, 0);
+        List<UnifiedEvidenceDetail> secondPage = service.findExact(
+                conn, "minecraft:overworld", target, 1, 1);
+
+        assertEquals(List.of("historical#items#" + firstKey),
+                firstPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertEquals(List.of("historical#items#" + secondKey),
+                secondPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertEquals(2, java.util.stream.Stream.concat(firstPage.stream(), secondPage.stream())
+                .map(UnifiedEvidenceDetail::evidenceId).distinct().count());
+    }
+
+    @Test
+    void exactInspectorUsesTupleOrderingForHistoricalTablePrefixes() throws Exception {
+        insertHistoricalLookup("a!", "key", 1_000L);
+        insertHistoricalLookup("a", "key", 1_000L);
+        List<AuditEventQueryService.ExactPosition> target =
+                List.of(new AuditEventQueryService.ExactPosition(50, 64, 50));
+
+        List<UnifiedEvidenceDetail> firstPage = service.findExact(
+                conn, "minecraft:overworld", target, 1, 0);
+        List<UnifiedEvidenceDetail> secondPage = service.findExact(
+                conn, "minecraft:overworld", target, 1, 1);
+
+        assertEquals(List.of("historical#a#key"),
+                firstPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertEquals(List.of("historical#a!#key"),
+                secondPage.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+        assertEquals(2, java.util.stream.Stream.concat(firstPage.stream(), secondPage.stream())
+                .map(UnifiedEvidenceDetail::evidenceId).distinct().count());
+    }
+
+    @Test
     void suppressesNewProjectileAuditProjectionButKeepsOlderAuditOnlyRows() throws Exception {
         byte[] projectionIdentity = "{\"capture\":\"projectile_spawn\",\"event_id\":\"test-event\"}"
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -315,6 +437,38 @@ class UnifiedEvidenceQueryServiceTest {
         }
     }
 
+    private void auditAt(String dimension, long timestamp, double x, double y, double z, String detail)
+            throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_audit_events
+                    (event_type, timestamp_ms, level_id, x, y, z, detail)
+                VALUES ('BREAK_BLOCK', ?, ?, ?, ?, ?, ?)
+                """)) {
+            statement.setLong(1, timestamp);
+            statement.setString(2, dimension);
+            statement.setDouble(3, x);
+            statement.setDouble(4, y);
+            statement.setDouble(5, z);
+            statement.setString(6, detail);
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertHistoricalLookup(String table, String sourceKey, long timestamp) throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_grieflogger_lookup
+                    (source_sha256, table_name, source_key, timestamp_ms, level_name,
+                     x, y, z, action_type, quantity, detail, evidence_class)
+                VALUES ('source-hash', ?, ?, ?, 'minecraft:overworld', 50, 64, 50,
+                        'INTERACT_BLOCK_ATTEMPT', 0, 'historical fixture', 'OBSERVED')
+                """)) {
+            statement.setString(1, table);
+            statement.setString(2, sourceKey);
+            statement.setLong(3, timestamp);
+            statement.executeUpdate();
+        }
+    }
+
     private void observation(String source, long timestamp, String action, long fingerprint, int amount)
             throws Exception {
         observationWithRaw(source, timestamp, action, fingerprint, amount, null);
@@ -356,6 +510,10 @@ class UnifiedEvidenceQueryServiceTest {
     }
 
     private void transformation(String type, long timestamp) throws Exception {
+        transformation(type, timestamp, playerNode);
+    }
+
+    private void transformation(String type, long timestamp, long actorNode) throws Exception {
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_item_transformations
                     (transformation_type, player_node_id, source_fingerprint_id,
@@ -363,7 +521,7 @@ class UnifiedEvidenceQueryServiceTest {
                 VALUES (?, ?, ?, ?, 1, ?, 'fixture')
                 """)) {
             statement.setString(1, type);
-            statement.setLong(2, playerNode);
+            statement.setLong(2, actorNode);
             statement.setLong(3, stoneFingerprint);
             statement.setLong(4, resultFingerprint);
             statement.setLong(5, timestamp);

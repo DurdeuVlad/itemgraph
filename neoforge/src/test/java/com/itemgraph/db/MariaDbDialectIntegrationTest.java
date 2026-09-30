@@ -97,6 +97,17 @@ class MariaDbDialectIntegrationTest {
             assertEquals(DatabaseDialect.MYSQL_MARIADB, DatabaseDialect.fromConnection(conn));
             assertEquals(MigrationRunner.LATEST_VERSION,
                     MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
+            assertEquals("longtext", columnDataType(conn, "ig_grieflogger_row_supersessions", "source_key"),
+                    "raw imported keys must not be truncated by the bounded supersession index");
+            assertEquals(64L, columnCharacterLength(conn,
+                            "ig_grieflogger_row_supersessions", "source_key_hash"),
+                    "the primary key must use the fixed-length digest");
+            try (Statement statement = conn.createStatement();
+                 ResultSet rows = statement.executeQuery("SELECT HEX('Source-Key') = HEX('source-key')")) {
+                assertTrue(rows.next());
+                assertFalse(rows.getBoolean(1),
+                        "HEX key equality must remain case-sensitive under the server collation");
+            }
             if (hasIndex(conn, "ig_observations", "idx_obs_time_fp")) {
                 try (Statement statement = conn.createStatement()) {
                     statement.execute("DROP INDEX idx_obs_time_fp ON ig_observations");
@@ -323,6 +334,34 @@ class MariaDbDialectIntegrationTest {
             }
         }
         return false;
+    }
+
+    private static String columnDataType(Connection connection, String table, String column) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT data_type FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+                """)) {
+            statement.setString(1, table);
+            statement.setString(2, column);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next(), "missing expected column " + table + "." + column);
+                return rows.getString(1).toLowerCase(java.util.Locale.ROOT);
+            }
+        }
+    }
+
+    private static long columnCharacterLength(Connection connection, String table, String column) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT character_maximum_length FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+                """)) {
+            statement.setString(1, table);
+            statement.setString(2, column);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next(), "missing expected column " + table + "." + column);
+                return rows.getLong(1);
+            }
+        }
     }
 
     private record Endpoint(String url, String user, String password) {

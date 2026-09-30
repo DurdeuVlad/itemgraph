@@ -2,7 +2,6 @@ package com.itemgraph.command;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.Container;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
 import net.neoforged.bus.api.EventPriority;
@@ -20,32 +19,19 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 public class InspectionListener {
 
     @FunctionalInterface
-    interface BrowserOpener {
-        int open(ServerPlayer player, Level level, BlockPos pos);
-    }
-
-    @FunctionalInterface
     interface BlockHistoryOpener {
         int open(ServerPlayer player, Level level, BlockPos pos);
     }
 
     private final InspectionService inspections;
-    private final BrowserOpener browserOpener;
     private final BlockHistoryOpener blockHistoryOpener;
 
     public InspectionListener() {
-        this(InspectionService.getInstance(), InspectionListener::openFlowBrowser,
-                InspectionListener::openBlockHistory);
+        this(InspectionService.getInstance(), InspectionListener::openBlockHistory);
     }
 
-    InspectionListener(InspectionService inspections, BrowserOpener browserOpener) {
-        this(inspections, browserOpener, InspectionListener::openBlockHistory);
-    }
-
-    InspectionListener(InspectionService inspections, BrowserOpener browserOpener,
-                       BlockHistoryOpener blockHistoryOpener) {
+    InspectionListener(InspectionService inspections, BlockHistoryOpener blockHistoryOpener) {
         this.inspections = inspections;
-        this.browserOpener = browserOpener;
         this.blockHistoryOpener = blockHistoryOpener;
     }
 
@@ -62,16 +48,11 @@ public class InspectionListener {
             inspections.clear(player.getUUID());
             return;
         }
-        if (level.getBlockEntity(event.getPos()) instanceof Container) {
-            int accepted = browserOpener.open(player, level, event.getPos());
-            if (accepted == 0) {
-                return;
-            }
-        } else {
-            // A block inspection click must never fall through to block/item use when
-            // the read-only query cannot be queued. The opener reports the failure;
-            // cancellation preserves the inspection-mode safety boundary.
-            blockHistoryOpener.open(player, level, event.getPos());
+        if (!BlockInspectionTargets.isInspectableRightClickTarget(level, event.getPos())) {
+            return;
+        }
+        if (blockHistoryOpener.open(player, level, event.getPos()) == 0) {
+            return;
         }
         event.setCancellationResult(InteractionResult.SUCCESS);
         event.setCanceled(true);
@@ -94,9 +75,9 @@ public class InspectionListener {
             return;
         }
 
-        // See the right-click block path: inspection mode owns the click even when
-        // the asynchronous query was rejected, so a failed lookup cannot break a block.
-        blockHistoryOpener.open(player, level, event.getPos());
+        if (blockHistoryOpener.open(player, level, event.getPos()) == 0) {
+            return;
+        }
         event.setCanceled(true);
     }
 
@@ -109,11 +90,6 @@ public class InspectionListener {
 
     public void clearAll() {
         inspections.clear();
-    }
-
-    private static int openFlowBrowser(ServerPlayer player, Level level, BlockPos pos) {
-        return FlowBrowserService.openContainer(player.createCommandSourceStack(),
-                level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ(), null);
     }
 
     private static int openBlockHistory(ServerPlayer player, Level level, BlockPos pos) {

@@ -162,12 +162,12 @@
     {"grieflogger": null, "itemgraph": "retention.raw_evidence", "status": "extended", "implementation_state": "immutable_indefinite", "owner_issue": 30, "compatibility_note": "Raw evidence is retained indefinitely; unsupported values fail startup. No automatic purge or archive is implemented."}
   ],
   "inspector_behavior": [
-    {"grieflogger": "left_click_block_history", "itemgraph": "block_left_click_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
-    {"grieflogger": "right_click_functional_block_history", "itemgraph": "functional_block_right_click_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
-    {"grieflogger": "container_history", "itemgraph": "container_history", "status": "compatible", "owner_issue": 26},
-    {"grieflogger": "double_chest_history", "itemgraph": "double_chest_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
-    {"grieflogger": "door_history", "itemgraph": "door_history", "status": "unresolved", "implementation_state": "planned", "owner_issue": 26},
-    {"grieflogger": "interaction_cleanup_on_block_removal", "itemgraph": "raw_observation_plus_supersession", "status": "unresolved", "implementation_state": "profile_required", "owner_issue": 26}
+    {"grieflogger": "left_click_block_history", "itemgraph": "block_left_click_history", "status": "compatible", "implementation_state": "automated_verified_live_matrix_pending", "owner_issue": 26},
+    {"grieflogger": "right_click_functional_block_history", "itemgraph": "functional_block_right_click_history", "status": "compatible", "implementation_state": "automated_verified_live_matrix_pending", "owner_issue": 26},
+    {"grieflogger": "container_history", "itemgraph": "unified_exact_position_history", "status": "compatible", "implementation_state": "automated_verified_live_matrix_pending", "owner_issue": 26},
+    {"grieflogger": "double_chest_history", "itemgraph": "double_chest_history", "status": "compatible", "implementation_state": "automated_verified_live_matrix_pending", "owner_issue": 26},
+    {"grieflogger": "door_history", "itemgraph": "door_history", "status": "compatible", "implementation_state": "automated_verified_live_matrix_pending", "owner_issue": 26},
+    {"grieflogger": "interaction_cleanup_on_block_removal", "itemgraph": "raw_observation_plus_supersession", "status": "compatible", "implementation_state": "automated_verified_live_matrix_pending", "owner_issue": 26}
   ],
   "extensions": [
     {"itemgraph": "transformation_lineage", "status": "extended", "evidence_class": "observed", "quantity": "transformation", "loaders": ["fabric", "neoforge"], "compatibility_note": "Supplemental source/result fingerprints and lineage metadata for CRAFT, SMELT, and ANVIL_RENAME."}

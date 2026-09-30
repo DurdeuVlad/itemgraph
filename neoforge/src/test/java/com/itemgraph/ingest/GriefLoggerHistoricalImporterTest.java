@@ -78,6 +78,127 @@ class GriefLoggerHistoricalImporterTest {
     }
 
     @Test
+    void hashesOversizedPrimaryKeysBeforeWritingPortableImportedRows() throws Exception {
+        Path sourcePath = tempDir.resolve("grieflogger-long-primary-key.db");
+        String longPrimaryKey = "🗡".repeat(616);
+        createLongPrimaryKeyFixture(sourcePath, longPrimaryKey);
+        database.initialize(tempDir.resolve("itemgraph-long-primary-key.db"));
+
+        GriefLoggerHistoricalImporter.ImportReport report = new GriefLoggerHistoricalImporter(
+                new GriefLoggerAdapter(sourcePath), database).importAll();
+
+        assertEquals("COMPLETE", report.status());
+        String tail = "🗡".repeat(300);
+        assertEquals("pk:x|y|z" + tail, "pk:" + String.join("|", java.util.List.of("x|y", "z" + tail)));
+        assertFalse(GriefLoggerHistoricalImporter.sourceKeyForPrimaryValues(
+                java.util.List.of("x|y", "z" + tail)).equals(
+                GriefLoggerHistoricalImporter.sourceKeyForPrimaryValues(
+                        java.util.List.of("x", "y|z" + tail))));
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT r.source_key, r.payload_json, l.source_key AS lookup_key
+                FROM ig_grieflogger_rows r
+                JOIN ig_grieflogger_lookup l
+                  ON l.source_sha256 = r.source_sha256
+                 AND l.table_name = r.table_name
+                 AND l.source_key = r.source_key
+                WHERE r.table_name = 'items' AND r.source_key LIKE 'pksha256:%'
+                """); ResultSet rows = statement.executeQuery()) {
+            assertTrue(rows.next());
+            String sourceKey = rows.getString("source_key");
+            assertTrue(sourceKey.codePointCount(0, sourceKey.length())
+                    <= GriefLoggerHistoricalImporter.MAX_SOURCE_KEY_CODE_POINTS);
+            assertEquals(sourceKey, rows.getString("lookup_key"));
+            assertTrue(rows.getString("payload_json").contains(longPrimaryKey));
+            assertFalse(rows.next());
+        }
+        GriefLoggerHistoricalImporter.ImportReport retry = new GriefLoggerHistoricalImporter(
+                new GriefLoggerAdapter(sourcePath), database).importAll();
+        assertEquals("COMPLETE", retry.status());
+        assertEquals(0, retry.rowsImported());
+    }
+
+    @Test
+    void resumesLegacyLongPrimaryKeyCheckpointAndKeepsExistingLedgerIdentity() throws Exception {
+        Path sourcePath = tempDir.resolve("grieflogger-legacy-long-checkpoint.db");
+        String longPrimaryKey = "🗡".repeat(616);
+        createLongPrimaryKeyFixture(sourcePath, longPrimaryKey, 2);
+        database.initialize(tempDir.resolve("itemgraph-legacy-long-checkpoint.db"));
+        GriefLoggerHistoricalImporter importer = new GriefLoggerHistoricalImporter(
+                new GriefLoggerAdapter(sourcePath), database);
+        GriefLoggerHistoricalImporter.ImportReport initial = importer.importAll();
+        String legacyKey = "pk:" + longPrimaryKey;
+        String hashedKey = GriefLoggerHistoricalImporter.sourceKeyForPrimaryValues(
+                java.util.List.of(longPrimaryKey));
+        assertTrue(hashedKey.startsWith("pksha256:"));
+
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                UPDATE ig_grieflogger_rows SET source_key = ?
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = ?
+                """)) {
+            statement.setString(1, legacyKey);
+            statement.setString(2, initial.sourceSha256());
+            statement.setString(3, hashedKey);
+            assertEquals(1, statement.executeUpdate());
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                UPDATE ig_grieflogger_lookup SET source_key = ?
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = ?
+                """)) {
+            statement.setString(1, legacyKey);
+            statement.setString(2, initial.sourceSha256());
+            statement.setString(3, hashedKey);
+            assertEquals(1, statement.executeUpdate());
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                DELETE FROM ig_grieflogger_rows
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:pk-2'
+                """)) {
+            statement.setString(1, initial.sourceSha256());
+            assertEquals(1, statement.executeUpdate());
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                DELETE FROM ig_grieflogger_lookup
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:pk-2'
+                """)) {
+            statement.setString(1, initial.sourceSha256());
+            assertEquals(1, statement.executeUpdate());
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                UPDATE ig_grieflogger_import_checkpoints SET last_source_key = ?
+                WHERE source_sha256 = ? AND table_name = 'items'
+                """)) {
+            statement.setString(1, legacyKey);
+            statement.setString(2, initial.sourceSha256());
+            assertEquals(1, statement.executeUpdate());
+        }
+
+        GriefLoggerHistoricalImporter.ImportReport resumed = importer.importAll();
+        assertEquals("COMPLETE", resumed.status());
+        assertEquals(1, resumed.rowsImported());
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT r.source_key, l.source_key AS lookup_key
+                FROM ig_grieflogger_rows r
+                JOIN ig_grieflogger_lookup l
+                  ON l.source_sha256 = r.source_sha256
+                 AND l.table_name = r.table_name
+                 AND HEX(l.source_key) = HEX(r.source_key)
+                WHERE r.source_sha256 = ? AND r.table_name = 'items'
+                ORDER BY r.row_ordinal
+                """)) {
+            statement.setString(1, initial.sourceSha256());
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals(legacyKey, rows.getString("source_key"));
+                assertEquals(legacyKey, rows.getString("lookup_key"));
+                assertTrue(rows.next());
+                assertEquals("pk:pk-2", rows.getString("source_key"));
+                assertEquals("pk:pk-2", rows.getString("lookup_key"));
+                assertFalse(rows.next());
+            }
+        }
+    }
+
+    @Test
     void projectsEventTablesWithHistoricalReferencesAndProvenance() throws Exception {
         Path sourcePath = tempDir.resolve("grieflogger-lookup.db");
         createLookupFixture(sourcePath);
@@ -239,12 +360,26 @@ class GriefLoggerHistoricalImporterTest {
     }
 
     private static void createFixture(Path path, int itemCount) throws Exception {
+        createFixture(path, itemCount, null);
+    }
+
+    private static void createLongPrimaryKeyFixture(Path path, String primaryKey) throws Exception {
+        createLongPrimaryKeyFixture(path, primaryKey, 1);
+    }
+
+    private static void createLongPrimaryKeyFixture(Path path, String primaryKey, int itemCount) throws Exception {
+        createFixture(path, itemCount, primaryKey);
+    }
+
+    private static void createFixture(Path path, int itemCount, String itemPrimaryKey) throws Exception {
         Class.forName("org.sqlite.JDBC");
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath())) {
             for (String table : GriefLoggerHistoricalImporter.SOURCE_TABLES) {
                 String definition = switch (table) {
                     case "items", "containers" ->
-                            "id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, "
+                            (table.equals("items") && itemPrimaryKey != null
+                                    ? "id TEXT PRIMARY KEY, " : "id INTEGER PRIMARY KEY, ")
+                                    + "time INTEGER, user INTEGER, level INTEGER, "
                                     + "x INTEGER, y INTEGER, z INTEGER, type INTEGER, data BLOB, amount INTEGER, "
                                     + "action INTEGER, payload BLOB, label TEXT";
                     case "users" -> "id INTEGER PRIMARY KEY, name TEXT, uuid TEXT, action INTEGER, payload BLOB, label TEXT";
@@ -258,7 +393,11 @@ class GriefLoggerHistoricalImporterTest {
             try (PreparedStatement stmt = conn.prepareStatement("INSERT INTO items (id, action, payload, label) VALUES (?, ?, ?, ?)")) {
                 for (int item = 0; item < itemCount; item++) {
                     int action = item % 18;
-                    stmt.setInt(1, item + 1);
+                    if (itemPrimaryKey != null) {
+                        stmt.setString(1, item == 0 ? itemPrimaryKey : "pk-" + (item + 1));
+                    } else {
+                        stmt.setInt(1, item + 1);
+                    }
                     stmt.setInt(2, action);
                     stmt.setBytes(3, new byte[]{(byte) action, 0x01, (byte) 0xff});
                     stmt.setString(4, "action-" + action);

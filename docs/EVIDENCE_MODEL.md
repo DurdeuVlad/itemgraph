@@ -35,6 +35,15 @@ ItemGraph `ingest_event_uuid`, stored under a unique index in its ledger. This k
 separate from producer `source_event_id`: it makes retrying the same queued record
 idempotent after an uncertain database commit, even when a producer supplied no ID.
 
+Schema V19 represents GriefLogger-style interaction cleanup with append-only links,
+not deletion. `ig_audit_event_supersessions` links an ItemGraph audit row to its
+superseding block-break row; `ig_grieflogger_row_supersessions` links an imported
+source hash/table/key to that same break row. The reason code is
+`BLOCK_REMOVED_AT_TARGET`. The raw native audit row, imported provenance payload, and
+normalized lookup projection remain stored. `/ig inspect` shows active history after
+the link; `/ig lookup` can still return the original row with `superseded_by=audit#…`
+and the reason code. This is a deterministic lifecycle fact, not an inferred transfer.
+
 ### 2. Inferred
 
 A relationship constructed from two or more observations.

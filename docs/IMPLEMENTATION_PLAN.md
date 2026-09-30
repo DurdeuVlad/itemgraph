@@ -360,10 +360,14 @@ including accepted projectile-spawn evidence.
 - Fabric `HopperBlockEntityMixin` captures successful vanilla hopper transfers as
   endpoint-unknown `HOPPER_INSERT`/`HOPPER_EXTRACT` net deltas, preserving quantity
   without attributing automation to a player.
-- Both loaders expose the same read-only container inspector: NeoForge uses its
-  high-priority `InspectionListener`, while Fabric uses `UseBlockCallback` and the
-  shared `FlowBrowserService`. A click is consumed only after the asynchronous query
-  is accepted, and inspection state is cleared on disconnect and server stop.
+- Both loaders expose the same per-player inspector: NeoForge uses its high-priority
+  `InspectionListener`, while Fabric uses `UseBlockCallback`/`AttackBlockCallback`;
+  each delegates to `ItemGraphCommands.openBlockInspection` and the shared exact-position
+  `UnifiedEvidenceQueryService` page. The page merges block events, either-endpoint
+  container deltas, transformations, and imported GriefLogger event rows. Query rejection
+  preserves normal gameplay. V19 appends native and imported-row supersession links when
+  a block/door is removed. Automated loader/query tests pass; the local server/client
+  matrix and independent evidence audit remain open under #26.
 - `/ig lookup <eventType> [limit] [sinceMinutes]` and
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
   bounded native audit evidence; `/ig lookup near` adds exact dimension and

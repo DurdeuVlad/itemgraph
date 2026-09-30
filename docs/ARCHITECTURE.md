@@ -91,6 +91,20 @@ inventory or that the projectile reached the ground. This preserves quantity
 conservation for Infinity bows, multishot, and throwable items without a matching
 inventory delta.
 
+Schema V19 adds `ig_audit_event_supersessions` for native block-interaction rows and
+`ig_grieflogger_row_supersessions` for imported GriefLogger rows. A non-canceled block
+break links earlier interactions at the same dimension and target cell(s) to the
+retained break evidence using `BLOCK_REMOVED_AT_TARGET`. These are visibility
+supersessions, not evidence deletion or a claim that inventory moved. The inspector
+omits superseded interactions; ordinary lookup retains them and displays the linked
+break evidence ID and reason. The persistence worker creates the links in the same
+ItemGraph transaction that writes the break event; loader callbacks only enqueue
+immutable target positions and never access SQL. Imported supersession identity uses
+a SHA-256 source-key digest; it retains the complete source key as `LONGTEXT` and
+uses an indexed 191-code-point prefix plus byte-exact full-key comparison for lookup,
+so imported keys are not truncated, prefix collisions do not merge rows, and
+case-insensitive MySQL/MariaDB collations cannot merge case-distinct source keys.
+
 ### Observations
 
 An observation is a direct fact from a trusted source.

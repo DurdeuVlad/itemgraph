@@ -39,30 +39,32 @@ public final class AuditEventQueryService {
         int limit = QueryLimits.clampLimit(requestedLimit);
         int offset = QueryLimits.clampOffset(requestedOffset);
         StringBuilder sql = new StringBuilder("""
-                SELECT id, event_type, timestamp_ms, player_uuid, player_name,
-                       level_id, x, y, z, subject_id, detail
-                FROM ig_audit_events
+                SELECT a.id, a.event_type, a.timestamp_ms, a.player_uuid, a.player_name,
+                       a.level_id, a.x, a.y, a.z, a.subject_id, a.detail,
+                       s.superseding_event_id, s.reason_code
+                FROM ig_audit_events a
+                LEFT JOIN ig_audit_event_supersessions s ON s.superseded_event_id = a.id
                 WHERE 1 = 1
                 """);
         List<Object> args = new ArrayList<>();
         if (eventType != null && !eventType.isBlank() && !"all".equalsIgnoreCase(eventType)) {
-            sql.append(" AND event_type = ?");
+            sql.append(" AND a.event_type = ?");
             args.add(eventType.toUpperCase(java.util.Locale.ROOT));
         }
         if (playerName != null && !playerName.isBlank() && !"*".equals(playerName)) {
-            sql.append(" AND player_name = ?");
+            sql.append(" AND a.player_name = ?");
             args.add(playerName);
         }
         if (window != null && window.sinceMs() != null) {
-            sql.append(" AND timestamp_ms >= ?");
+            sql.append(" AND a.timestamp_ms >= ?");
             args.add(window.sinceMs());
         }
         if (window != null && window.untilMs() != null) {
-            sql.append(" AND timestamp_ms <= ?");
+            sql.append(" AND a.timestamp_ms <= ?");
             args.add(window.untilMs());
         }
         if (levelId != null && !levelId.isBlank()) {
-            sql.append(" AND level_id = ?");
+            sql.append(" AND a.level_id = ?");
             args.add(levelId);
         }
         if (centerX != null && centerY != null && centerZ != null && requestedRadius != null) {
@@ -71,13 +73,13 @@ public final class AuditEventQueryService {
                 // approximation that can include adjacent blocks. This sentinel is only
                 // used by the server-side inspector; public near lookups still clamp to
                 // the documented minimum radius.
-                sql.append(" AND x = ? AND y = ? AND z = ?");
+                sql.append(" AND a.x = ? AND a.y = ? AND a.z = ?");
                 args.add(centerX);
                 args.add(centerY);
                 args.add(centerZ);
             } else {
                 double radius = Math.max(1.0, Math.min(MAX_RADIUS_BLOCKS, requestedRadius));
-                sql.append(" AND ((x - ?) * (x - ?) + (y - ?) * (y - ?) + (z - ?) * (z - ?)) <= ?");
+                sql.append(" AND ((a.x - ?) * (a.x - ?) + (a.y - ?) * (a.y - ?) + (a.z - ?) * (a.z - ?)) <= ?");
                 args.add(centerX);
                 args.add(centerX);
                 args.add(centerY);
@@ -87,7 +89,7 @@ public final class AuditEventQueryService {
                 args.add(radius * radius);
             }
         }
-        sql.append(" ORDER BY timestamp_ms DESC, id DESC LIMIT ? OFFSET ?");
+        sql.append(" ORDER BY a.timestamp_ms DESC, a.id DESC LIMIT ? OFFSET ?");
         args.add(limit);
         args.add(offset);
 
@@ -118,7 +120,8 @@ public final class AuditEventQueryService {
                             rs.getDouble("y"),
                             rs.getDouble("z"),
                             rs.getString("subject_id"),
-                            rs.getString("detail")));
+                            rs.getString("detail"), nullableLong(rs, "superseding_event_id"),
+                            rs.getString("reason_code")));
                 }
                 return List.copyOf(result);
             }
@@ -315,5 +318,10 @@ public final class AuditEventQueryService {
                 pstmt.setString(i + 1, (String) arg);
             }
         }
+    }
+
+    private static Long nullableLong(ResultSet rs, String column) throws SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
     }
 }

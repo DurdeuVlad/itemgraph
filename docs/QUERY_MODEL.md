@@ -116,8 +116,13 @@ results synchronously within the five-second buffer timeout. Player queries have
 SQLite cancellation deadline as well: the progress handler interrupts a selective scan so
 the single query worker cannot be monopolized by one lookup.
 
-`/ig inspect` changes only per-player volatile state and returns immediately. The subsequent
-container click opens the same asynchronous read-only browser described below.
+`/ig inspect` changes only per-player volatile state and returns immediately. Left-click
+and right-click requests use the bounded query worker and open the same exact-position
+timeline. Container clicks include item observations whose source or destination endpoint
+is the inspected cell; double chests and doors query both validated physical positions in
+one globally paginated result. The inspector excludes rows with a schema V19 supersession
+link, while ordinary lookup shows those immutable rows with the replacement break ID and
+reason. A rejected query does not consume the gameplay click.
 
 ### Unified filtered lookup
 
