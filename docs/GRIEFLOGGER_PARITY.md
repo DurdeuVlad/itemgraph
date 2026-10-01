@@ -209,9 +209,14 @@ versioned source discrepancy is retained above rather than silently represented
 as exact parity.
 
 Published lookup examples are parser-tested under both roots in
-`ItemGraphCommandsHelpTest` and `FabricItemGraphCommandsParityTest`. Both
-loaders cover aliases, filter bounds, suggestions, permission checks, inspect
-forms, invalid pages, and asynchronous no-result handling. Lookup pages keep
+`ItemGraphCommandsHelpTest` and `FabricItemGraphCommandsParityTest`. Each of
+the 15 examples now checks both Brigadier command parsing and the normalized
+`AuditLookupFilters` values: action IDs, player names, item registry IDs,
+radius, and the fixed-clock time window. The command-tree parse also asserts
+that the `lookupFilters` argument retains the published expression through
+both roots. Both loaders cover aliases, filter
+bounds, suggestions, permission checks, inspect forms, invalid pages, and
+asynchronous no-result handling. Lookup pages keep
 per-player state, expire after 30 minutes, cap offset at 10,000 rows, and emit
 Previous/Next commands tied to the same session.
 Fabric and NeoForge dispatcher tests execute both inspector roots and verify
