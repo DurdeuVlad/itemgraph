@@ -4,6 +4,7 @@ import com.itemgraph.correlation.CorrelationEngine;
 import com.itemgraph.correlation.CorrelationResult;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.graph.NodeManager;
+import com.itemgraph.metrics.OperationalMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -193,7 +194,15 @@ public class IngestionService {
      * the connection monitor also protects direct callers from overlapping ingestion writes.
      */
     public synchronized CorrelationResult runCorrelation() {
-        return correlationEngine.runCorrelation();
+        long started = System.nanoTime();
+        boolean succeeded = false;
+        try {
+            CorrelationResult result = correlationEngine.runCorrelation();
+            succeeded = true;
+            return result;
+        } finally {
+            OperationalMetrics.getInstance().recordCorrelation(System.nanoTime() - started, succeeded);
+        }
     }
 
     /** Queues a standalone correlation pass on the ingestion worker. No-op when stopped. */

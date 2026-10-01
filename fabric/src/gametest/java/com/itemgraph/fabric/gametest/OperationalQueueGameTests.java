@@ -1,6 +1,7 @@
 package com.itemgraph.fabric.gametest;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.gametest.PerformanceReportFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -10,9 +11,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Fabric runtime proof for the configured server-tick queue flush adapter. */
@@ -49,58 +51,82 @@ public final class OperationalQueueGameTests implements FabricGameTest {
 
         int flushEveryTicks = service.getQueueFrequencyTicks();
         LOGGER.info("Issue #30 Fabric queue probe: flushEveryTicks={} accepted={}", flushEveryTicks, EVENT_COUNT);
-        awaitDurableProbe(helper, service, detailPrefix, endTickCallbacksBefore, persistedBefore,
-                droppedBefore, new AtomicBoolean(), flushEveryTicks, flushEveryTicks + 5,
-                System.nanoTime() + TimeUnit.SECONDS.toNanos(10));
+        awaitDurableProbe(helper, service, detailPrefix, endTickCallbacksBefore, persistedBefore, droppedBefore,
+                flushEveryTicks, flushEveryTicks + 5,
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(10), enqueueNanos);
     }
 
     private static void awaitDurableProbe(GameTestHelper helper, InternalObservationService service,
-                                          String detailPrefix, int endTickCallbacksBefore,
-                                          long persistedBefore, long droppedBefore,
-                                          AtomicBoolean earlyLedgerReadDone, int flushEveryTicks,
-                                          int checkAtTick, long deadlineNanos) {
+                                          String detailPrefix, int endTickCallbacksBefore, long persistedBefore,
+                                          long droppedBefore, int flushEveryTicks, int checkAtTick,
+                                          long deadlineNanos, long enqueueNanos) {
         helper.runAtTickTime(checkAtTick, () -> {
             long persistedDelta = service.getTotalPersisted() - persistedBefore;
             long droppedDelta = service.getTotalDropped() - droppedBefore;
-            boolean deadlineReached = System.nanoTime() >= deadlineNanos;
-            boolean countersSuggestPersisted = persistedDelta >= EVENT_COUNT;
-            boolean shouldReadLedger = droppedDelta > 0 || deadlineReached
-                    || (countersSuggestPersisted && earlyLedgerReadDone.compareAndSet(false, true));
-            long durableRows = -1;
-            if (shouldReadLedger) {
-                try {
-                    durableRows = countProbeRows(detailPrefix);
-                } catch (RuntimeException failure) {
-                    helper.fail("Fabric audit queue durability probe could not read its ledger: "
-                            + failure.getMessage() + ", queueDepth=" + service.getQueueSize()
-                            + ", endTickCallbacks=" + (END_TICK_CALLBACKS.get() - endTickCallbacksBefore)
-                            + ", flushEveryTicks=" + flushEveryTicks
-                            + ", persistedDelta=" + persistedDelta + ", droppedDelta=" + droppedDelta);
-                    return;
-                }
-            }
             int callbacksSinceProbe = END_TICK_CALLBACKS.get() - endTickCallbacksBefore;
-            boolean persisted = durableRows == EVENT_COUNT
-                    && persistedDelta >= EVENT_COUNT
-                    && droppedDelta == 0
-                    && callbacksSinceProbe >= flushEveryTicks;
+            boolean persisted = persistedDelta >= EVENT_COUNT && droppedDelta == 0
+                    && service.getQueueSize() == 0 && callbacksSinceProbe >= flushEveryTicks;
             if (persisted) {
-                helper.succeed();
+                CompletableFuture<Long> ledgerRead = CompletableFuture.supplyAsync(
+                        () -> countProbeRows(detailPrefix));
+                awaitLedgerRead(helper, service, detailPrefix, ledgerRead, flushEveryTicks,
+                        checkAtTick + 1, deadlineNanos, enqueueNanos, persistedDelta,
+                        droppedDelta, callbacksSinceProbe);
                 return;
             }
-
-            if (droppedDelta > 0 || deadlineReached) {
+            if (droppedDelta > 0 || System.nanoTime() >= deadlineNanos) {
                 helper.fail("Fabric audit queue did not durably flush within the 10-second worker window: "
-                        + "durableRows=" + durableRows + ", persistedDelta=" + persistedDelta
-                        + ", droppedDelta=" + droppedDelta + ", queueDepth=" + service.getQueueSize()
+                        + "persistedDelta=" + persistedDelta + ", droppedDelta=" + droppedDelta
+                        + ", queueDepth=" + service.getQueueSize()
                         + ", endTickCallbacks=" + callbacksSinceProbe
                         + ", flushEveryTicks=" + flushEveryTicks + ", expectedRows=" + EVENT_COUNT);
                 return;
             }
-
             awaitDurableProbe(helper, service, detailPrefix, endTickCallbacksBefore, persistedBefore,
-                    droppedBefore, earlyLedgerReadDone, flushEveryTicks,
-                    checkAtTick + flushEveryTicks, deadlineNanos);
+                    droppedBefore, flushEveryTicks, checkAtTick + flushEveryTicks,
+                    deadlineNanos, enqueueNanos);
+        });
+    }
+
+    private static void awaitLedgerRead(GameTestHelper helper, InternalObservationService service,
+                                        String detailPrefix, CompletableFuture<Long> ledgerRead,
+                                        int flushEveryTicks, int checkAtTick, long deadlineNanos,
+                                        long enqueueNanos, long persistedDelta, long droppedDelta,
+                                        int callbacksSinceProbe) {
+        helper.runAtTickTime(checkAtTick, () -> {
+            if (!ledgerRead.isDone()) {
+                if (System.nanoTime() >= deadlineNanos) {
+                    helper.fail("Fabric queue ledger read exceeded the 10-second worker window");
+                    return;
+                }
+                awaitLedgerRead(helper, service, detailPrefix, ledgerRead, flushEveryTicks,
+                        checkAtTick + 1, deadlineNanos, enqueueNanos, persistedDelta,
+                        droppedDelta, callbacksSinceProbe);
+                return;
+            }
+            long durableRows;
+            try {
+                durableRows = ledgerRead.join();
+            } catch (RuntimeException failure) {
+                helper.fail("Fabric queue durability probe could not read its ledger off the server thread: "
+                        + failure.getMessage());
+                return;
+            }
+            if (durableRows != EVENT_COUNT) {
+                helper.fail("Fabric queue ledger contains " + durableRows + " probe rows; expected "
+                        + EVENT_COUNT + ", persistedCounterDelta=" + persistedDelta);
+                return;
+            }
+            PerformanceReportFixture.writeIfRequested("fabric", "queue_flush_durability", Map.of(
+                    "accepted_events", (long) EVENT_COUNT,
+                    "persisted_counter_delta", persistedDelta,
+                    "dropped_counter_delta", droppedDelta,
+                    "durable_rows", durableRows,
+                    "queue_remaining", (long) service.getQueueSize(),
+                    "end_tick_callbacks", (long) callbacksSinceProbe,
+                    "flush_every_ticks", (long) flushEveryTicks,
+                    "enqueue_total_ns", enqueueNanos));
+            helper.succeed();
         });
     }
 

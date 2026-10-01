@@ -410,6 +410,46 @@ Verify that ItemGraph reports authoritative inventory evidence independent of cl
 
 ## Performance tests
 
+CI integration tests and GameTests emit redacted performance JSON under
+`ITEMGRAPH_PERFORMANCE_REPORT_DIR`. `tools/validate_itemgraph_performance_report.py`
+checks the pinned report schema, both loader/scenario identities, durable row
+counts, zero drops/backlog, queue bounds, and existing 50 ms server-thread
+budgets. `tools/test_validate_itemgraph_performance_report.py` checks schema
+rejection and the SQLite and network report forms. CI uploads validated output as the
+`itemgraph-performance-reports` artifact for 14 days.
+
+The automated report set covers the NeoForge SQLite 8,000-event burst, Fabric
+SQLite 32-event tick-flush probe, and NeoForge 512-event queue probes against
+disposable MySQL and MariaDB CI services. Each network probe runs 20 read-only
+exact-ledger count queries across four reader workers and requires a completed
+lookup to overlap the remaining event-submission window. It labels synthetic
+hopper, automation, and modded-inventory audit events. It does not exercise real
+automation/mod inventory adapters or the moderator command query path. Idle
+baselines, saturation/shutdown performance, and cross-loader MySQL/MariaDB runs
+remain unimplemented. No latency or heap regression thresholds are claimed for
+those scenarios; use the staging backend matrix before setting those budgets.
+
+### Consolidated local validation (2026-10-02)
+
+- One Gradle invocation ran `:neoforge:test`, `:neoforge:runGameTestServer`,
+  `:fabric:test`, and `:fabric:runGameTest`. It completed successfully. NeoForge
+  and Fabric each passed all 3 required GameTests. The NeoForge probe accepted
+  8,000 events, measured a 9.299 ms slowest 400-event submission batch, peaked
+  at 7,900 queued events, and verified exactly 8,000 matching durable rows,
+  zero drops, and an empty queue. Fabric verified exactly 32 matching durable
+  rows after its end-tick flush. NeoForge used a fresh temporary GameTest
+  directory through `-PitemgraphGameTestDirectory`; the default project path is
+  unchanged.
+- `python -B tools/test_validate_itemgraph_performance_report.py` passed all 12
+  validator cases, including rejection of a missing queue-depth measurement;
+  `git diff --check` passed. Local GameTests did not write performance JSON
+  because `ITEMGRAPH_PERFORMANCE_REPORT_DIR` was unset. Both network backend
+  integration tests compiled and were skipped by their GitHub Actions-only
+  guard. CI artifact upload and MySQL/MariaDB performance reports therefore
+  remain unverified locally.
+- These runs use ItemGraph 0.3.2 and build no distributable mod jar. They are
+  isolated SQLite checks and do not establish staging latency or memory budgets.
+
 Measure:
 
 - event ingestion rate

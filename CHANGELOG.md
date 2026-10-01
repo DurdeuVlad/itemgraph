@@ -8,6 +8,20 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #32 operational metrics and queue probes:** `/ig status` now reports
+  redacted enqueue, persistence, query, correlation, queue-pressure, component
+  decode-cache, and heap aggregates. CI emits validated 14-day JSON artifacts
+  for NeoForge SQLite, Fabric SQLite, and 512-event NeoForge queue probes against
+  disposable MySQL and MariaDB CI services. Network probes run 20 read-only
+  ledger count queries across four reader workers and require a completed
+  lookup to overlap later submissions; they use labeled synthetic automation
+  and modded-inventory events. Reports require exact durable row counts, zero
+  drops/backlog, positive queue-depth samples, and the existing 50 ms
+  server-thread submission limits. Real automation/modded-inventory adapters,
+  moderator command lookups, idle/saturation/shutdown probes, cross-loader
+  network runs, and staging-derived latency/memory budgets remain open under
+  #32. Local NeoForge and Fabric GameTests passed in this worktree. Mod version
+  remains 0.3.2; no distributable jar is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus seven allowlisted audit
   events, including namespaced entity/block `subject_id`, and a count-only

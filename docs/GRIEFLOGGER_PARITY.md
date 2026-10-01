@@ -361,17 +361,24 @@ the range 1–100. Raw evidence is retained indefinitely and is never automatica
 purged. `ingestion.queue_frequency_ticks` defaults to 20, accepts the source
 range 1–100, and flushes on server end tick through a background worker; bounded
 SQL batch passes continue until the backlog drains. The isolated local NeoForge
-21.1.248 GameTest on Minecraft 1.21.1 persisted 8,000 queued audit events with
-zero drops, zero backlog, and 8,000 matching durable rows; its queue peak was
-6,815 of 10,000 entries, and its slowest 400-event producer batch took 7.694 ms
-against a 50 ms server-thread budget. The run logged `flushEveryTicks=20`, took
-47.235 ms total to enqueue all 8,000 events, and completed all three NeoForge
-GameTests. The isolated Fabric run used a 20-tick cadence and persisted all 32
-accepted queue events after the end-tick callback with zero drops; all three
-registered Fabric GameTests passed in hosted CI. The local Fabric GameTest on
-this worktree previously failed to persist the queue probe within its logical
-tick window; that discrepancy is recorded in `docs/TEST_PLAN.md` and remains
-under investigation.
+21.1.248 GameTest on Minecraft 1.21.1 persisted 8,000 uniquely tagged queued
+audit events with zero drops, zero backlog, and exactly 8,000 matching durable
+rows. The latest local run recorded a queue peak of 7,900 across the three
+bounded queues and a slowest 400-event producer batch of 9.299 ms, below the
+existing 50 ms per-batch server-thread budget. The isolated Fabric GameTest used
+a 20-tick cadence and persisted all 32 accepted queue events after the end-tick
+callback with zero drops; all three registered Fabric GameTests passed locally.
+CI uploads redacted reports for both loader SQLite probes and 512-event
+NeoForge ingestion probes against disposable MySQL and MariaDB services. Each
+network probe runs 20 read-only ledger count queries across four worker threads
+and requires a completed lookup to overlap the remaining synthetic hopper,
+automation, and modded-inventory audit-event submissions. These synthetic
+events do not measure real mod adapters or the
+moderator command lookup. Idle baselines, saturation/shutdown performance,
+cross-loader network runs, and staging-derived latency/memory budgets remain
+open under [#32](https://github.com/DurdeuVlad/itemgraph/issues/32). The metrics
+and current probe limits are documented in [configuration](CONFIGURATION.md)
+and the [test plan](TEST_PLAN.md); they do not establish staging budgets.
 `helloFrequency` defaults to 600 ticks
 (30,000 ms at 20 TPS); disposable MariaDB and MySQL CI services verify successful
 background JDBC heartbeats and reconnection after a closed connection. ItemGraph's

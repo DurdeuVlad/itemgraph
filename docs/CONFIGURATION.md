@@ -87,6 +87,34 @@ database heartbeat behavior is covered by the CI integration tests against
 disposable MariaDB and MySQL services. Local SQLite tests do not exercise that
 network path.
 
+## Operational metrics
+
+`/itemgraph status` (alias `/ig status`) reports aggregate enqueue, persistence,
+query, and correlation counts, failures, and bounded p95 latency upper bounds. It
+also reports queue peak/rejected-item totals, persisted item and batch totals,
+decode-failure cache insertion/hit totals, and current JVM heap use. These
+counters contain no item payloads, player names, UUIDs, coordinates, or database
+credentials. They reset when the ingestion service starts.
+
+CI stores redacted JSON reports for the NeoForge SQLite 8,000-event burst, the
+Fabric SQLite 32-event tick-flush probe, and 512-event NeoForge ingestion probes
+against disposable MySQL and MariaDB services for 14 days. The network probes
+run 20 read-only ledger count queries across four reader workers while
+enqueuing synthetic hopper, automation, and modded-inventory audit events; each
+report requires a completed lookup to overlap the remaining submission window.
+They do not exercise
+actual modded inventory adapters or a moderator command lookup. The pinned
+server-thread submission budgets are 50 ms per NeoForge batch and 50 ms for the
+Fabric submission set;
+both fail CI at or above the limit. The queue remains capped at 10,000 entries
+per queue, flush cadence remains 1–100 ticks, and SQL batches remain capped at
+1,000 records. The current reports include aggregate latency and heap snapshots
+for the listed CI probes. Idle baselines, real automation and modded-inventory
+workloads, moderator command lookups, saturation/shutdown performance, and
+cross-loader MySQL/MariaDB runs are not implemented yet. Numeric latency and
+memory thresholds require the full SQLite/MySQL/MariaDB staging matrix; these
+CI service runs do not establish staging budgets.
+
 ## Secret-safe status
 
 `/ig status` reports the active backend identifier, ItemGraph schema version,

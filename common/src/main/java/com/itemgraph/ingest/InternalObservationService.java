@@ -3,6 +3,7 @@ package com.itemgraph.ingest;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.metrics.OperationalMetrics;
 import com.itemgraph.graph.NodeManager;
 import com.itemgraph.query.AuditEventQueryService;
 import org.slf4j.Logger;
@@ -452,6 +453,7 @@ public class InternalObservationService {
         if (running.get()) {
             return;
         }
+        OperationalMetrics.getInstance().reset();
         running.set(true);
         workerThread = new Thread(this::drainQueueSafely, "ItemGraph-Internal-Worker");
         workerThread.setDaemon(true);
@@ -505,6 +507,17 @@ public class InternalObservationService {
      * this lock guarantees each following offer succeeds without a partial batch.
      */
     public boolean submitAll(List<InternalObservation> observations) {
+        long enqueueStarted = System.nanoTime();
+        boolean accepted = false;
+        try {
+            accepted = submitAllNow(observations);
+            return accepted;
+        } finally {
+            OperationalMetrics.getInstance().recordEnqueue(System.nanoTime() - enqueueStarted, accepted);
+        }
+    }
+
+    private boolean submitAllNow(List<InternalObservation> observations) {
         if (observations == null || observations.stream().anyMatch(Objects::isNull)) {
             return false;
         }
@@ -517,6 +530,7 @@ public class InternalObservationService {
         synchronized (observationQueueLock) {
             if (queue.remainingCapacity() < observations.size()) {
                 long dropped = totalDropped.addAndGet(observations.size());
+                OperationalMetrics.getInstance().recordQueueRejection(observations.size());
                 if (dropped == observations.size() || dropped % 1000 < observations.size()) {
                     LOGGER.warn("Internal observation queue is full — rejected {} observation batch ({} dropped total; evidence loss)",
                             observations.size(), dropped);
@@ -531,12 +545,27 @@ public class InternalObservationService {
                 }
             }
             totalEnqueued.addAndGet(observations.size());
+            OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
             signalQueuedWork();
             return true;
         }
     }
 
     public boolean submitTransformation(InternalTransformation trans) {
+        long enqueueStarted = System.nanoTime();
+        boolean accepted = false;
+        try {
+            accepted = submitTransformationNow(trans);
+            return accepted;
+        } finally {
+            OperationalMetrics.getInstance().recordEnqueue(System.nanoTime() - enqueueStarted, accepted);
+        }
+    }
+
+    private boolean submitTransformationNow(InternalTransformation trans) {
+        if (trans == null) {
+            return false;
+        }
         if (!captureEnabled) {
             return true;
         }
@@ -548,15 +577,30 @@ public class InternalObservationService {
         } else {
             pendingTransformations.decrementAndGet();
             long dropped = totalDropped.incrementAndGet();
+            OperationalMetrics.getInstance().recordQueueRejection(1);
             if (dropped == 1 || dropped % 1000 == 0) {
                 LOGGER.warn("Transformation queue is full — dropped {} ({} dropped total; evidence loss)",
                         trans.transformationType(), dropped);
             }
         }
+        if (ok) {
+            OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
+        }
         return ok;
     }
 
     public boolean submitAuditEvent(InternalAuditEvent event) {
+        long enqueueStarted = System.nanoTime();
+        boolean accepted = false;
+        try {
+            accepted = submitAuditEventNow(event);
+            return accepted;
+        } finally {
+            OperationalMetrics.getInstance().recordEnqueue(System.nanoTime() - enqueueStarted, accepted);
+        }
+    }
+
+    private boolean submitAuditEventNow(InternalAuditEvent event) {
         if (event == null) {
             return false;
         }
@@ -569,16 +613,20 @@ public class InternalObservationService {
             signalQueuedWork();
         } else {
             long dropped = totalDropped.incrementAndGet();
+            OperationalMetrics.getInstance().recordQueueRejection(1);
             if (dropped == 1 || dropped % 1000 == 0) {
                 LOGGER.warn("Native audit event queue is full — dropped {} ({} dropped total; evidence loss)",
                         event.eventType(), dropped);
             }
         }
+        if (ok) {
+            OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
+        }
         return ok;
     }
 
     public int getQueueSize() {
-        return queue.size() + pendingTransformations.get() + auditEventQueue.size();
+        return queue.size() + transformationQueue.size() + auditEventQueue.size();
     }
 
     public long getTotalEnqueued() {
@@ -613,6 +661,7 @@ public class InternalObservationService {
         totalAuditEvents.set(0);
         totalDatabaseHeartbeats.set(0);
         totalDatabaseHeartbeatFailures.set(0);
+        OperationalMetrics.getInstance().reset();
         queuedWorkSignals.drainPermits();
         queuedWorkSignalPending.set(false);
         queueFlushDue.set(false);
@@ -645,7 +694,7 @@ public class InternalObservationService {
 
                         if (!obsBatch.isEmpty()) {
                             try {
-                                persistBatch(obsBatch);
+                                persistMeasured(obsBatch.size(), () -> persistBatch(obsBatch));
                                 resetObservationRetryState();
                                 totalPersisted.addAndGet(obsBatch.size());
                             } catch (Exception failure) {
@@ -656,7 +705,7 @@ public class InternalObservationService {
 
                         if (!transBatch.isEmpty()) {
                             try {
-                                persistTransformations(transBatch);
+                                persistMeasured(transBatch.size(), () -> persistTransformations(transBatch));
                                 resetTransformationRetryState();
                                 totalTransformations.addAndGet(transBatch.size());
                                 totalPersisted.addAndGet(transBatch.size());
@@ -670,7 +719,7 @@ public class InternalObservationService {
 
                         if (!auditBatch.isEmpty()) {
                             try {
-                                persistAuditEvents(auditBatch);
+                                persistMeasured(auditBatch.size(), () -> persistAuditEvents(auditBatch));
                                 resetAuditRetryState();
                                 totalAuditEvents.addAndGet(auditBatch.size());
                                 totalPersisted.addAndGet(auditBatch.size());
@@ -751,7 +800,7 @@ public class InternalObservationService {
         queue.drainTo(remainingObs);
         if (!remainingObs.isEmpty()) {
             try {
-                persistBatch(remainingObs);
+                persistMeasured(remainingObs.size(), () -> persistBatch(remainingObs));
                 totalPersisted.addAndGet(remainingObs.size());
             } catch (Exception e) {
                 long dropped = totalDropped.addAndGet(remainingObs.size());
@@ -763,7 +812,7 @@ public class InternalObservationService {
         List<InternalTransformation> remainingTrans = new ArrayList<>(maxBatchSize);
         while (transformationQueue.drainTo(remainingTrans, maxBatchSize) > 0) {
             try {
-                persistTransformations(remainingTrans);
+                persistMeasured(remainingTrans.size(), () -> persistTransformations(remainingTrans));
                 resetTransformationRetryState();
                 totalTransformations.addAndGet(remainingTrans.size());
                 totalPersisted.addAndGet(remainingTrans.size());
@@ -779,7 +828,7 @@ public class InternalObservationService {
         auditEventQueue.drainTo(remainingAudit);
         if (!remainingAudit.isEmpty()) {
             try {
-                persistAuditEvents(remainingAudit);
+                persistMeasured(remainingAudit.size(), () -> persistAuditEvents(remainingAudit));
                 resetAuditRetryState();
                 totalAuditEvents.addAndGet(remainingAudit.size());
                 totalPersisted.addAndGet(remainingAudit.size());
@@ -788,6 +837,23 @@ public class InternalObservationService {
                 // would not provide a future retry after the database closes.
                 reportAuditBatchLoss(remainingAudit, e);
             }
+        }
+    }
+
+    @FunctionalInterface
+    private interface PersistenceOperation {
+        void run() throws Exception;
+    }
+
+    private static void persistMeasured(int batchSize, PersistenceOperation operation) throws Exception {
+        long started = System.nanoTime();
+        boolean succeeded = false;
+        try {
+            operation.run();
+            succeeded = true;
+        } finally {
+            OperationalMetrics.getInstance().recordPersistenceBatch(
+                    batchSize, System.nanoTime() - started, succeeded);
         }
     }
 
@@ -807,6 +873,7 @@ public class InternalObservationService {
         for (InternalAuditEvent event : batch) {
             if (!auditEventQueue.offer(event)) {
                 long dropped = totalDropped.incrementAndGet();
+                OperationalMetrics.getInstance().recordQueueRejection(1);
                 if (dropped == 1 || dropped % 1000 == 0) {
                     LOGGER.warn("Native audit queue remained full while retrying; dropped {} ({} dropped total; evidence loss)",
                             event.eventType(), dropped);
@@ -815,6 +882,7 @@ public class InternalObservationService {
                 signalQueuedWork();
             }
         }
+        OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
         if (running.get()) {
             long backoff = auditRetryBackoffMs;
             auditRetryBackoffMs = Math.min(AUDIT_RETRY_MAX_BACKOFF_MS, backoff * 2L);
@@ -851,6 +919,7 @@ public class InternalObservationService {
             if (!transformationQueue.offer(transformation)) {
                 pendingTransformations.decrementAndGet();
                 long dropped = totalDropped.incrementAndGet();
+                OperationalMetrics.getInstance().recordQueueRejection(1);
                 if (dropped == 1 || dropped % 1000 == 0) {
                     LOGGER.warn("Transformation queue remained full while retrying; dropped {} ({} dropped total; evidence loss)",
                             transformation.transformationType(), dropped);
@@ -859,6 +928,7 @@ public class InternalObservationService {
                 signalQueuedWork();
             }
         }
+        OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
         if (running.get()) {
             long backoff = transformationRetryBackoffMs;
             transformationRetryBackoffMs = Math.min(AUDIT_RETRY_MAX_BACKOFF_MS, backoff * 2L);
@@ -906,6 +976,7 @@ public class InternalObservationService {
             for (InternalObservation observation : batch) {
                 if (!queue.offer(observation)) {
                     long dropped = totalDropped.incrementAndGet();
+                    OperationalMetrics.getInstance().recordQueueRejection(1);
                     if (dropped == 1 || dropped % 1000 == 0) {
                         LOGGER.warn("Internal observation queue remained full while retrying; dropped {} ({} dropped total)",
                                 observation.actionType(), dropped);
@@ -915,6 +986,7 @@ public class InternalObservationService {
                 }
             }
         }
+        OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
         if (running.get()) {
             long backoff = observationRetryBackoffMs;
             observationRetryBackoffMs = Math.min(AUDIT_RETRY_MAX_BACKOFF_MS, backoff * 2L);
