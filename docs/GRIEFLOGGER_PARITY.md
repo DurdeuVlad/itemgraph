@@ -215,8 +215,9 @@ forms, invalid pages, and asynchronous no-result handling. Lookup pages keep
 per-player state, expire after 30 minutes, cap offset at 10,000 rows, and emit
 Previous/Next commands tied to the same session.
 Fabric and NeoForge dispatcher tests execute both inspector roots and verify
-the toggle, explicit `on`/`off`, `status`, and permission denial. Fabric's
-dispatcher test also asserts the exact chat receipts. These checks do not
+the toggle, explicit `on`/`off`, `status`, and permission denial. Both assert
+the same seven exact chat receipts for the published toggle plus ItemGraph's
+explicit forms. These checks do not
 replace the required vanilla-client command replay. Paired server GameTests
 also send `ServerboundChatCommandPacket` through each loader's actual
 `handleChatCommand` handler for `itemgraph inspect on`, `ig inspect status`,
