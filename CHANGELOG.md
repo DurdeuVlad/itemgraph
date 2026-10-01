@@ -39,6 +39,15 @@ The project follows a simple pre-1.0 development changelog model.
   signal-driven queue have different semantics. Local NeoForge-only startup,
   schema upgrade, and 2,000-record SQLite worker load passed. See
   `docs/CONFIGURATION.md` and `docs/TEST_PLAN.md`.
+- **Issue #30 fail-closed NeoForge config validation:** numeric settings now
+  reject invalid types and out-of-range values with the full config key before
+  NeoForge can clamp them; string, boolean, and integer values retain their
+  native config metadata. Fresh GameTest startup probes confirm
+  `query.max_page_size=101` and `general.database_port=0` fail before database
+  initialization and remain unchanged in TOML. This closes the reproduced
+  `database_port=0` to `1` normalization gap; full invalid-config matrix
+  coverage across both loaders remains open. No mod version bump or
+  distributable jar was produced.
 - **Evidence and queue failure handling:** legacy topology migrations now copy
   observations, referenced fingerprint values, and raw payloads into
   `ig_legacy_observation_evidence`

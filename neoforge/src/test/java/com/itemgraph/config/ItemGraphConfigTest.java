@@ -1,6 +1,7 @@
 package com.itemgraph.config;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
+import net.neoforged.neoforge.common.ModConfigSpec;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -58,9 +59,63 @@ class ItemGraphConfigTest {
         assertTrue(spec.test(86_400), "Upper bound 86400s (24h) must be valid");
 
         // Invalid values
-        assertFalse(spec.test(0), "0s must be rejected (min is 1s)");
-        assertFalse(spec.test(-10), "Negative values must be rejected");
-        assertFalse(spec.test(86_401), "Values above 86400s must be rejected");
+        assertRejectedValue(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, 0, "correlation.ground_bridge_max_seconds");
+        assertRejectedValue(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, -10, "correlation.ground_bridge_max_seconds");
+        assertRejectedValue(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, 86_401, "correlation.ground_bridge_max_seconds");
+    }
+
+    @Test
+    void rejectsOutOfRangeIntegersBeforeNeoForgeCanNormalizeThem() {
+        assertAcceptedRange(ItemGraphConfig.DATABASE_PORT, 1, 65_535);
+        assertAcceptedRange(ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS, 250, 120_000);
+        assertAcceptedRange(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, 1, 86_400);
+        assertAcceptedRange(ItemGraphConfig.MAX_PAGE_SIZE, 1, 100);
+        assertAcceptedRange(ItemGraphConfig.QUEUE_POLL_INTERVAL_MS, 10, 5_000);
+        assertAcceptedRange(ItemGraphConfig.MAX_BATCH_SIZE, 1, 1_000);
+        assertAcceptedRange(ItemGraphConfig.DATABASE_HEARTBEAT_INTERVAL_MS, 1_000, 3_600_000);
+
+        assertRejectedValue(ItemGraphConfig.DATABASE_PORT, 0, "general.database_port");
+        assertRejectedValue(ItemGraphConfig.DATABASE_PORT, 65_536, "general.database_port");
+        assertRejectedValue(ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS, 249, "general.database_connection_timeout_ms");
+        assertRejectedValue(ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS, 120_001, "general.database_connection_timeout_ms");
+        assertRejectedValue(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, 0, "correlation.ground_bridge_max_seconds");
+        assertRejectedValue(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, 86_401, "correlation.ground_bridge_max_seconds");
+        assertRejectedValue(ItemGraphConfig.MAX_PAGE_SIZE, 0, "query.max_page_size");
+        assertRejectedValue(ItemGraphConfig.MAX_PAGE_SIZE, 101, "query.max_page_size");
+        assertRejectedValue(ItemGraphConfig.QUEUE_POLL_INTERVAL_MS, 9, "ingestion.poll_interval_ms");
+        assertRejectedValue(ItemGraphConfig.QUEUE_POLL_INTERVAL_MS, 5_001, "ingestion.poll_interval_ms");
+        assertRejectedValue(ItemGraphConfig.MAX_BATCH_SIZE, 0, "ingestion.max_batch_size");
+        assertRejectedValue(ItemGraphConfig.MAX_BATCH_SIZE, 1_001, "ingestion.max_batch_size");
+        assertRejectedValue(ItemGraphConfig.DATABASE_HEARTBEAT_INTERVAL_MS, 999, "operations.database_heartbeat_interval_ms");
+        assertRejectedValue(ItemGraphConfig.DATABASE_HEARTBEAT_INTERVAL_MS, 3_600_001,
+                "operations.database_heartbeat_interval_ms");
+    }
+
+    @Test
+    void malformedConfigTypesFailWithTheExactKeyInsteadOfFallingBackToDefaults() {
+        assertRejectedValue(ItemGraphConfig.MAX_PAGE_SIZE, "twenty-five", "query.max_page_size");
+        assertRejectedValue(ItemGraphConfig.CAPTURE_ENABLED, "enabled", "capture.enabled");
+        assertRejectedValue(ItemGraphConfig.DATABASE_BACKEND, 42, "general.database_backend");
+    }
+
+    @Test
+    void configValuesRetainNeoForgeTypeMetadata() {
+        assertConfigType(String.class, ItemGraphConfig.DATABASE_PATH, ItemGraphConfig.DATABASE_BACKEND,
+                ItemGraphConfig.DATABASE_HOST, ItemGraphConfig.DATABASE_NAME, ItemGraphConfig.DATABASE_USERNAME,
+                ItemGraphConfig.DATABASE_PASSWORD, ItemGraphConfig.DATABASE_SSL_MODE,
+                ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH, ItemGraphConfig.RAW_EVIDENCE_RETENTION);
+        assertConfigType(Integer.class, ItemGraphConfig.DATABASE_PORT, ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS,
+                ItemGraphConfig.QUEUE_POLL_INTERVAL_MS, ItemGraphConfig.MAX_BATCH_SIZE,
+                ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, ItemGraphConfig.MAX_PAGE_SIZE,
+                ItemGraphConfig.DATABASE_HEARTBEAT_INTERVAL_MS);
+        assertConfigType(Boolean.class, ItemGraphConfig.USE_INDEXES, ItemGraphConfig.DEBUG_LOGGING,
+                ItemGraphConfig.CAPTURE_ENABLED, ItemGraphConfig.SERVER_SIDE_ONLY);
+    }
+
+    private static void assertConfigType(Class<?> expected, ModConfigSpec.ConfigValue<?>... configValues) {
+        for (ModConfigSpec.ConfigValue<?> configValue : configValues) {
+            assertEquals(expected, configValue.getSpec().getClazz(), String.join(".", configValue.getPath()));
+        }
     }
 
     @Test
@@ -94,22 +149,30 @@ class ItemGraphConfigTest {
         config.set(List.of("correlation", "ground_bridge_max_seconds"), 600);
         assertTrue(ItemGraphConfig.SPEC.isCorrect(config), "Custom in-range value must be correct");
 
-        // Setting an invalid out-of-range value violates spec correctness
+        // Invalid ranges fail before ModConfigSpec can normalize them to a bound/default.
         config.set(List.of("correlation", "ground_bridge_max_seconds"), -999);
-        assertFalse(ItemGraphConfig.SPEC.isCorrect(config), "Out-of-range value must fail isCorrect check");
+        IllegalArgumentException underflow = assertThrows(IllegalArgumentException.class,
+                () -> ItemGraphConfig.SPEC.correct(config));
+        assertTrue(underflow.getMessage().contains("correlation.ground_bridge_max_seconds"));
+        assertEquals(-999, config.getInt(List.of("correlation", "ground_bridge_max_seconds")),
+                "Invalid values must be preserved for the startup validator to reject");
 
-        // correct() clamps underflowing value to min bound (1)
-        ItemGraphConfig.SPEC.correct(config);
-        assertEquals(1, config.getInt(List.of("correlation", "ground_bridge_max_seconds")),
-                "Underflowing ground_bridge_max_seconds must be clamped to min bound of 1s");
-        assertTrue(ItemGraphConfig.SPEC.isCorrect(config), "Config must be correct after clamp to min bound");
-
-        // Overflowing value is clamped to max bound (86,400)
+        // Overflow must be rejected too, without replacing the operator's invalid value.
         config.set(List.of("correlation", "ground_bridge_max_seconds"), 100_000);
-        assertFalse(ItemGraphConfig.SPEC.isCorrect(config));
-        ItemGraphConfig.SPEC.correct(config);
-        assertEquals(86_400, config.getInt(List.of("correlation", "ground_bridge_max_seconds")),
-                "Overflowing ground_bridge_max_seconds must be clamped to max bound of 86400s");
-        assertTrue(ItemGraphConfig.SPEC.isCorrect(config), "Config must be correct after clamp to max bound");
+        IllegalArgumentException overflow = assertThrows(IllegalArgumentException.class,
+                () -> ItemGraphConfig.SPEC.correct(config));
+        assertTrue(overflow.getMessage().contains("correlation.ground_bridge_max_seconds"));
+        assertEquals(100_000, config.getInt(List.of("correlation", "ground_bridge_max_seconds")));
+    }
+
+    private static void assertRejectedValue(ModConfigSpec.ConfigValue<?> configValue, Object value, String key) {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> configValue.getSpec().test(value), key + " must reject " + value);
+        assertTrue(error.getMessage().contains(key), key + " error should identify the full config key");
+    }
+
+    private static void assertAcceptedRange(ModConfigSpec.ConfigValue<Integer> configValue, int minimum, int maximum) {
+        assertTrue(configValue.getSpec().test(minimum), String.join(".", configValue.getPath()) + " minimum");
+        assertTrue(configValue.getSpec().test(maximum), String.join(".", configValue.getPath()) + " maximum");
     }
 }

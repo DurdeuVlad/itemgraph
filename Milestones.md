@@ -176,8 +176,12 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   startup-snapshot behavior: `/reload` kept the original queue/capture controls,
   while restart applied updated controls and page cap. `/ig status` reports the
   effective page cap, connection timeout, and index policy without endpoint or
-  credential values. Full invalid-key coverage and GriefLogger queue-cadence
-  differential evidence remain outstanding; #30 stays open.
+  credential values. This branch makes NeoForge config predicates reject invalid
+  types and ranges before loader normalization; isolated server startup probes
+  reject `query.max_page_size=101` and `general.database_port=0` while preserving
+  both TOML values and failing before DB initialization. Full invalid-config
+  matrix coverage across both loaders and GriefLogger queue-cadence differential
+  evidence remain outstanding; #30 stays open.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
   #24–#28, #30–#31, #43, #54, #75, and #76. Issue #29 is delivered in PR #79, including
