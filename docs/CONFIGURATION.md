@@ -83,9 +83,11 @@ before this mapping can be marked compatible.
 
 ## Secret-safe status
 
-`/ig status` reports the active backend identifier and ItemGraph schema version.
-It omits database paths, hosts, usernames, passwords, and raw exception text.
-Connection diagnostics with private endpoint details remain in the server log.
+`/ig status` reports the active backend identifier, ItemGraph schema version,
+effective query page cap, database connection timeout, index policy, and queue
+controls. It omits database paths, hosts, usernames, passwords, and raw exception
+text. Connection diagnostics with private endpoint details remain in the server
+log.
 Candidate-resolution queries and `/ig explain` evidence retain their stricter
 fixed internal caps; `max_page_size` does not raise those forensic safety bounds.
 `capture_enabled=false` suppresses native listener records only. Public ItemGraph

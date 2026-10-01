@@ -170,6 +170,14 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   Issue #26 is closed, but its visible-client click matrix remains unverified
   because the maintainer explicitly asked to skip live clicks; do not count that
   client evidence as observed in #24 or #31.
+- Issue #30 progress: PR #95 merged the config-application ordering fix and added
+  MySQL plus MariaDB worker-heartbeat CI coverage. A local loopback-only runtime
+  matrix on NeoForge 21.1.248 and Fabric Loader 0.16.9 confirmed representative
+  startup-snapshot behavior: `/reload` kept the original queue/capture controls,
+  while restart applied updated controls and page cap. `/ig status` reports the
+  effective page cap, connection timeout, and index policy without endpoint or
+  credential values. Full invalid-key coverage and GriefLogger queue-cadence
+  differential evidence remain outstanding; #30 stays open.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
   #24–#28, #30–#31, #43, #54, #75, and #76. Issue #29 is delivered in PR #79, including

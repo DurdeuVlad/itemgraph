@@ -3,6 +3,7 @@ package com.itemgraph.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.db.DatabaseSettings;
+import com.itemgraph.query.QueryLimits;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
@@ -24,6 +25,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ItemGraphStatusSecurityTest {
+    private int originalPageSize;
+
     @BeforeAll
     static void initMinecraft() {
         if (LoadingModList.get() == null) {
@@ -40,6 +43,13 @@ class ItemGraphStatusSecurityTest {
     void cleanup() {
         QueryDispatcher.shutdown();
         DatabaseManager.getInstance().close();
+        QueryLimits.configureMaxPageSize(originalPageSize);
+    }
+
+    @org.junit.jupiter.api.BeforeEach
+    void setDefaultPageSize() {
+        originalPageSize = QueryLimits.getConfiguredMaxPageSize();
+        QueryLimits.configureMaxPageSize(10);
     }
 
     @Test
@@ -72,6 +82,9 @@ class ItemGraphStatusSecurityTest {
         String status = successes.get(0);
         assertTrue(status.contains("backend=sqlite"));
         assertTrue(status.contains("schemaVersion=0"));
+        assertTrue(status.contains("maxPageSize=10"));
+        assertTrue(status.contains("databaseConnectionTimeoutMs=5000"));
+        assertTrue(status.contains("useIndexes=true"));
         assertFalse(status.contains(privatePath.toString()));
         assertFalse(status.contains("lastError="));
         assertEquals(List.of("[ItemGraph] Database statistics unavailable; inspect the server log for connection details."), failures);
@@ -84,6 +97,7 @@ class ItemGraphStatusSecurityTest {
         when(database.getSettings()).thenReturn(DatabaseSettings.mysqlMariaDb(
                 "sentinel-host", 3306, "sentinel-database", "sentinel-user", "sentinel-password", 5_000, true));
         when(database.getCurrentSchemaVersion()).thenReturn(20);
+        QueryLimits.configureMaxPageSize(25);
 
         try (var databaseManager = mockStatic(DatabaseManager.class)) {
             databaseManager.when(DatabaseManager::getInstance).thenReturn(database);
@@ -105,6 +119,9 @@ class ItemGraphStatusSecurityTest {
             String status = successes.get(0);
             assertTrue(status.contains("backend=mysql_mariadb"));
             assertTrue(status.contains("schemaVersion=20"));
+            assertTrue(status.contains("maxPageSize=25"));
+            assertTrue(status.contains("databaseConnectionTimeoutMs=5000"));
+            assertTrue(status.contains("useIndexes=true"));
             assertFalse(status.contains("sentinel-host"));
             assertFalse(status.contains("sentinel-database"));
             assertFalse(status.contains("sentinel-user"));
