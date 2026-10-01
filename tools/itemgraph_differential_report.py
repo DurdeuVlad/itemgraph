@@ -77,6 +77,16 @@ ITEMGRAPH_VIOLATION_FIELDS = {
     "over_allocated_observations", "invalid_edge_allocations", "invalid_edge_temporal", "non_positive_quantities", "orphaned_allocations",
     "invalid_edge_nodes", "status_mismatches",
 }
+DIFFERENTIAL_EXCEPTION_ISSUES = {
+    "INTERACT_ENTITY": 75,
+    "SMELT": 57,
+    "ANVIL_RENAME": 57,
+    "ANVIL_REPAIR": 57,
+    "HOPPER_INSERT": 34,
+    "HOPPER_EXTRACT": 34,
+    "ADD_ITEM_ENDER": 76,
+    "REMOVE_ITEM_ENDER": 76,
+}
 
 
 class ReportError(ValueError):
@@ -445,9 +455,9 @@ def _validate_differential_exceptions(registry: dict[str, Any]) -> None:
             raise ReportError("differential exception policy must be an array")
         if not exceptions:
             continue
-        issue = action.get("evidence_issue")
-        if action.get("status") not in {"extended", "unsupported-no-writer"} or not _is_integer(issue) or issue <= 0:
-            raise ReportError("differential exception requires an extended action and its positive evidence_issue")
+        status = action.get("status")
+        if status not in {"extended", "unsupported-no-writer"}:
+            raise ReportError("differential exception requires an extended or unsupported-no-writer action")
         seen: set[str] = set()
         for exception in exceptions:
             if not isinstance(exception, dict):
@@ -461,8 +471,17 @@ def _validate_differential_exceptions(registry: dict[str, Any]) -> None:
             if kind in seen:
                 raise ReportError("duplicate differential exception policy")
             seen.add(kind)
-            if not _is_integer(exception.get("issue")) or exception["issue"] != issue:
-                raise ReportError("differential exception issue must match its action evidence_issue")
+            exception_issue = exception.get("issue")
+            if not _is_integer(exception_issue) or exception_issue <= 0:
+                raise ReportError("differential exception issue must be a positive integer")
+            action_name = action.get("itemgraph")
+            expected_issue = DIFFERENTIAL_EXCEPTION_ISSUES.get(action_name)
+            if expected_issue is None or exception_issue != expected_issue:
+                raise ReportError("differential exception issue does not match its pinned action owner")
+            if status == "unsupported-no-writer":
+                issue = action.get("evidence_issue")
+                if not _is_integer(issue) or exception_issue != issue:
+                    raise ReportError("unsupported action exception issue must match its evidence_issue")
             if not isinstance(exception.get("reason_code"), str) or not SAFE_REASON_RE.fullmatch(exception["reason_code"]):
                 raise ReportError("differential exception reason_code must be stable uppercase text")
             if exception.get("source_table") not in ITEMGRAPH_SOURCE_TABLES:

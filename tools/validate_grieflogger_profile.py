@@ -463,6 +463,9 @@ def validate_documents(registry: dict[str, Any]) -> None:
                     owner_issues.add(row["owner_issue"])
                 if isinstance(row.get("evidence_issue"), int):
                     owner_issues.add(row["evidence_issue"])
+                for exception in row.get("differential_exceptions", []):
+                    if isinstance(exception, dict) and isinstance(exception.get("issue"), int):
+                        owner_issues.add(exception["issue"])
     filters = registry.get("filters")
     require(isinstance(filters, dict) and filters.get("owner_issue") == 25, "filters owner_issue must remain 25")
     owner_issues.add(filters["owner_issue"])

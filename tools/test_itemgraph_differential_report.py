@@ -143,12 +143,31 @@ class DifferentialReportTests(unittest.TestCase):
         self.assertEqual("occurred_at_ms", result["differences"][0]["field"])
         self.assertEqual("unexplained", result["differences"][0]["classification"])
 
-    def test_exception_issue_must_match_profile_evidence_issue(self) -> None:
+    def test_unsupported_exception_issue_must_match_profile_evidence_issue(self) -> None:
         changed = copy.deepcopy(self.registry)
-        action = next(row for row in changed["actions"] if row.get("differential_exceptions"))
-        action["differential_exceptions"][0]["issue"] = 999
+        action = next(row for row in changed["actions"] if row.get("itemgraph") == "INTERACT_ENTITY")
+        action["evidence_issue"] = 76
 
-        with self.assertRaisesRegex(report.ReportError, "must match its action evidence_issue"):
+        with self.assertRaisesRegex(report.ReportError, "must match its evidence_issue"):
+            report._validate_differential_exceptions(changed)
+
+    def test_extension_exception_issue_does_not_use_evidence_issue(self) -> None:
+        changed = copy.deepcopy(self.registry)
+        action = next(row for row in changed["actions"] if row.get("itemgraph") == "HOPPER_INSERT")
+        action.pop("evidence_issue", None)
+
+        report._validate_differential_exceptions(changed)
+
+        action["differential_exceptions"][0]["issue"] = 57
+        with self.assertRaisesRegex(report.ReportError, "pinned action owner"):
+            report._validate_differential_exceptions(changed)
+
+    def test_transformation_exception_issue_is_pinned_to_issue_57(self) -> None:
+        changed = copy.deepcopy(self.registry)
+        action = next(row for row in changed["actions"] if row.get("itemgraph") == "SMELT")
+        action["differential_exceptions"][0]["issue"] = 34
+
+        with self.assertRaisesRegex(report.ReportError, "pinned action owner"):
             report._validate_differential_exceptions(changed)
 
     def test_profile_linked_native_extension_stays_visible_and_passes_gate(self) -> None:

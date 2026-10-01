@@ -489,7 +489,14 @@ keys or sequences, unclassified evidence, backwards timestamps, and unresolved
 events without a reason are rejected. Every difference is preserved in the
 JSON output. The checked-in action profile is the only source of accepted
 exceptions: each exception names its exact difference kind, ItemGraph source
-table, reason code, and owning `evidence_issue`. An issue-linked difference remains visible and keeps
+table, reason code, and owning issue. Unsupported GriefLogger actions link their
+exception to the closed evidence issue recorded on the action row. ItemGraph-only
+extensions carry their own issue link because they have no GriefLogger
+`evidence_issue`: hopper deltas link to [#34](https://github.com/DurdeuVlad/itemgraph/issues/34),
+smelting/anvil lineage links to [#57](https://github.com/DurdeuVlad/itemgraph/issues/57),
+entity interaction links to [#75](https://github.com/DurdeuVlad/itemgraph/issues/75),
+and Ender inventory deltas link to [#76](https://github.com/DurdeuVlad/itemgraph/issues/76).
+An issue-linked difference remains visible and keeps
 `equivalent=false`, but does not fail the comparison gate. Every other mismatch
 is classified `unexplained` and fails the gate. Exceptions currently cover the
 documented native-only transformation, automation, entity-interaction, and
