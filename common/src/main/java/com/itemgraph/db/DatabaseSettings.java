@@ -38,15 +38,23 @@ public record DatabaseSettings(
             if (password == null) password = "";
             sslMode = "disable";
         } else {
-            if (host == null || host.isBlank()) throw new IllegalArgumentException("database host must not be blank");
-            if (port < 1 || port > 65_535) throw new IllegalArgumentException("database port must be in [1,65535]");
-            if (database == null || database.isBlank()) throw new IllegalArgumentException("database name must not be blank");
-            if (username == null || username.isBlank()) throw new IllegalArgumentException("database username must not be blank");
+            if (host == null || host.isBlank()) {
+                throw new IllegalArgumentException("general.database_host must not be blank");
+            }
+            if (port < 1 || port > 65_535) {
+                throw new IllegalArgumentException("general.database_port must be in [1,65535]");
+            }
+            if (database == null || database.isBlank()) {
+                throw new IllegalArgumentException("general.database_name must not be blank");
+            }
+            if (username == null || username.isBlank()) {
+                throw new IllegalArgumentException("general.database_username must not be blank");
+            }
             if (password == null) password = "";
             sslMode = normalizeSslMode(sslMode);
         }
         if (connectionTimeoutMs < 250 || connectionTimeoutMs > 120_000) {
-            throw new IllegalArgumentException("connection timeout must be in [250,120000] ms");
+            throw new IllegalArgumentException("general.database_connection_timeout_ms must be in [250,120000] ms");
         }
     }
 
@@ -81,7 +89,7 @@ public record DatabaseSettings(
         if (!normalized.equals("disable") && !normalized.equals("trust")
                 && !normalized.equals("verify-ca") && !normalized.equals("verify-full")) {
             throw new IllegalArgumentException(
-                    "database ssl mode must be disable, trust, verify-ca, or verify-full");
+                    "general.database_ssl_mode must be disable, trust, verify-ca, or verify-full");
         }
         return normalized;
     }

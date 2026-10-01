@@ -1,6 +1,7 @@
 package com.itemgraph.config;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
+import com.itemgraph.db.DatabaseSettings;
 import net.neoforged.neoforge.common.ModConfigSpec;
 import org.junit.jupiter.api.Test;
 
@@ -21,7 +22,6 @@ class ItemGraphConfigTest {
         assertEquals(Boolean.TRUE, ItemGraphConfig.USE_INDEXES.getDefault());
         assertEquals("disable", ItemGraphConfig.DATABASE_SSL_MODE.getDefault());
         assertEquals("database.db", ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getDefault());
-        assertEquals(Boolean.FALSE, ItemGraphConfig.DEBUG_LOGGING.getDefault());
         assertEquals(300, ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getDefault());
         assertEquals(10, ItemGraphConfig.MAX_PAGE_SIZE.getDefault());
         assertEquals(Boolean.TRUE, ItemGraphConfig.SERVER_SIDE_ONLY.getDefault());
@@ -39,7 +39,6 @@ class ItemGraphConfigTest {
         assertEquals(List.of("general", "database_connection_timeout_ms"), ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS.getPath());
         assertEquals(List.of("storage", "use_indexes"), ItemGraphConfig.USE_INDEXES.getPath());
         assertEquals(List.of("general", "grieflogger_database_path"), ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getPath());
-        assertEquals(List.of("general", "debug_logging"), ItemGraphConfig.DEBUG_LOGGING.getPath());
         assertEquals(List.of("correlation", "ground_bridge_max_seconds"), ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getPath());
         assertEquals(List.of("query", "max_page_size"), ItemGraphConfig.MAX_PAGE_SIZE.getPath());
         assertEquals(List.of("operations", "server_side_only"), ItemGraphConfig.SERVER_SIDE_ONLY.getPath());
@@ -95,6 +94,8 @@ class ItemGraphConfigTest {
     void malformedConfigTypesFailWithTheExactKeyInsteadOfFallingBackToDefaults() {
         assertRejectedValue(ItemGraphConfig.MAX_PAGE_SIZE, "twenty-five", "query.max_page_size");
         assertRejectedValue(ItemGraphConfig.CAPTURE_ENABLED, "enabled", "capture.enabled");
+        assertRejectedValue(ItemGraphConfig.USE_INDEXES, "enabled", "storage.use_indexes");
+        assertRejectedValue(ItemGraphConfig.SERVER_SIDE_ONLY, "true", "operations.server_side_only");
         assertRejectedValue(ItemGraphConfig.DATABASE_BACKEND, 42, "general.database_backend");
     }
 
@@ -113,6 +114,43 @@ class ItemGraphConfigTest {
     }
 
     @Test
+    void networkDatabaseValidationNamesTheInvalidConfigKeyWithoutExposingCredentials() {
+        assertNetworkDatabaseError("general.database_host must not be blank",
+                "", 3306, "itemgraph", "itemgraph", "secret", "disable");
+        assertNetworkDatabaseError("general.database_name must not be blank",
+                "localhost", 3306, " ", "itemgraph", "secret", "disable");
+        assertNetworkDatabaseError("general.database_username must not be blank",
+                "localhost", 3306, "itemgraph", "", "secret", "disable");
+        assertNetworkDatabaseError("general.database_ssl_mode must be disable, trust, verify-ca, or verify-full",
+                "localhost", 3306, "itemgraph", "itemgraph", "secret", "invalid");
+
+        IllegalArgumentException portError = assertThrows(IllegalArgumentException.class,
+                () -> DatabaseSettings.mysqlMariaDb("localhost", 0, "itemgraph", "itemgraph", "secret",
+                        5_000, true, "disable"));
+        assertEquals("general.database_port must be in [1,65535]", portError.getMessage());
+
+        IllegalArgumentException timeoutError = assertThrows(IllegalArgumentException.class,
+                () -> DatabaseSettings.mysqlMariaDb("localhost", 3306, "itemgraph", "itemgraph", "secret",
+                        249, true, "disable"));
+        assertEquals("general.database_connection_timeout_ms must be in [250,120000] ms",
+                timeoutError.getMessage());
+
+        DatabaseSettings settings = DatabaseSettings.mysqlMariaDb("localhost", 3306, "itemgraph", "itemgraph",
+                "secret", 5_000, true, "disable");
+        assertFalse(settings.toString().contains("secret"), "database settings must redact passwords from toString");
+        assertTrue(settings.toString().contains("password=<redacted>"));
+    }
+
+    private static void assertNetworkDatabaseError(String expectedMessage, String host, int port,
+            String database, String username, String password, String sslMode) {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> DatabaseSettings.mysqlMariaDb(host, port, database, username, password,
+                        5_000, true, sslMode));
+        assertEquals(expectedMessage, error.getMessage());
+        assertFalse(error.getMessage().contains(password), "validation errors must not expose the password");
+    }
+
+    @Test
     void configValuesRetainNeoForgeTypeMetadata() {
         assertConfigType(String.class, ItemGraphConfig.DATABASE_PATH, ItemGraphConfig.DATABASE_BACKEND,
                 ItemGraphConfig.DATABASE_HOST, ItemGraphConfig.DATABASE_NAME, ItemGraphConfig.DATABASE_USERNAME,
@@ -122,7 +160,7 @@ class ItemGraphConfigTest {
                 ItemGraphConfig.QUEUE_POLL_INTERVAL_MS, ItemGraphConfig.MAX_BATCH_SIZE,
                 ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, ItemGraphConfig.MAX_PAGE_SIZE,
                 ItemGraphConfig.DATABASE_HEARTBEAT_INTERVAL_MS);
-        assertConfigType(Boolean.class, ItemGraphConfig.USE_INDEXES, ItemGraphConfig.DEBUG_LOGGING,
+        assertConfigType(Boolean.class, ItemGraphConfig.USE_INDEXES,
                 ItemGraphConfig.CAPTURE_ENABLED, ItemGraphConfig.SERVER_SIDE_ONLY);
     }
 
@@ -150,7 +188,6 @@ class ItemGraphConfigTest {
         assertTrue(ItemGraphConfig.SPEC.isCorrect(config), "Config populated by correct() must be correct");
         assertEquals("itemgraph/itemgraph.db", config.get(List.of("general", "database_path")));
         assertEquals("database.db", config.get(List.of("general", "grieflogger_database_path")));
-        assertEquals(Boolean.FALSE, config.get(List.of("general", "debug_logging")));
         assertEquals(300, config.getInt(List.of("correlation", "ground_bridge_max_seconds")));
         assertEquals(10, config.getInt(List.of("query", "max_page_size")));
         assertEquals(Boolean.TRUE, config.get(List.of("operations", "server_side_only")));

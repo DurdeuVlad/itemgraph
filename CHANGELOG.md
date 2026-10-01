@@ -45,6 +45,15 @@ The project follows a simple pre-1.0 development changelog model.
   exact config key before applying operational settings or opening ItemGraph
   storage. NeoForge startup CI probes verify both empty paths fail before DB
   initialization and preserve the invalid TOML values.
+- **Issue #30 configuration error keys:** network database settings now report
+  their `general.*` key when rejecting blank host/name/username, invalid port or
+  timeout, and unsupported TLS mode. Fabric also names invalid database backend
+  and boolean settings with the shared NeoForge config key. Errors do not expose
+  database passwords or echo invalid backend text. Network connection logs and
+  failures omit endpoint fields and raw JDBC exception text.
+- **Issue #30 remove unused debug logging setting:** removed the advertised
+  `debug_logging` config value because it did not enable any logging behavior on
+  either loader. The configuration reference no longer describes a no-op control.
 - **Issue #30 fail-closed NeoForge config validation:** numeric settings now
   reject invalid types and out-of-range values with the full config key before
   NeoForge can clamp them; string, boolean, and integer values retain their

@@ -92,7 +92,8 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
                         parseBoolean(properties, "use_indexes", true, configFile),
                         properties.getProperty("database_ssl_mode", "disable"));
             } else {
-                throw new IOException("database_backend must be sqlite or mysql_mariadb in " + configFile);
+                throw new IOException("general.database_backend must be sqlite, mysql, mariadb, or mysql_mariadb in "
+                        + configFile);
             }
         } catch (IllegalArgumentException e) {
             throw new IOException("Invalid database settings in " + configFile + ": " + e.getMessage(), e);
@@ -135,11 +136,14 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         return switch (propertyKey) {
             case "database_port" -> "general.database_port";
             case "database_connection_timeout_ms" -> "general.database_connection_timeout_ms";
+            case "use_indexes" -> "storage.use_indexes";
             case "ground_bridge_max_seconds" -> "correlation.ground_bridge_max_seconds";
             case "max_page_size" -> "query.max_page_size";
             case "poll_interval_ms" -> "ingestion.poll_interval_ms";
             case "max_batch_size" -> "ingestion.max_batch_size";
             case "database_heartbeat_interval_ms" -> "operations.database_heartbeat_interval_ms";
+            case "server_side_only" -> "operations.server_side_only";
+            case "capture_enabled" -> "capture.enabled";
             default -> propertyKey;
         };
     }
@@ -149,7 +153,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         String value = properties.getProperty(key, Boolean.toString(defaultValue)).trim();
         if (value.equalsIgnoreCase("true")) return true;
         if (value.equalsIgnoreCase("false")) return false;
-        throw new IOException(key + " must be true or false in " + configFile);
+        throw new IOException(configKey(key) + " must be true or false in " + configFile);
     }
 
     private static Path resolve(Path gameDirectory, String value, String configKey, Path configFile) throws IOException {

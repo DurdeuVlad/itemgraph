@@ -38,6 +38,23 @@ class DatabaseManagerTest {
         assertFalse(DatabaseManager.isLoopbackHost("0.0.0.0"));
     }
 
+    @Test
+    void failedNetworkDatabaseDiagnosticsDoNotExposeEndpointsOrCredentials() {
+        DatabaseManager databaseManager = DatabaseManager.getInstance();
+        databaseManager.initialize(DatabaseSettings.mysqlMariaDb(
+                "jdbc:mariadb://user:host-secret@127.0.0.1", 1, "private_database", "private_user",
+                "database-secret", 250, true));
+
+        String error = databaseManager.getLastError();
+
+        assertNotNull(error);
+        assertTrue(error.startsWith("Database initialization error"), error);
+        assertFalse(error.contains("host-secret"), "database diagnostics must redact the configured host");
+        assertFalse(error.contains("database-secret"), "database diagnostics must redact the password");
+        assertFalse(error.contains("private_database"), "database diagnostics must redact the database name");
+        assertFalse(error.contains("private_user"), "database diagnostics must redact the username");
+    }
+
     @AfterEach
     void tearDown() {
         DatabaseManager.getInstance().close();

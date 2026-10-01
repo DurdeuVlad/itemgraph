@@ -7,6 +7,11 @@ Invalid ItemGraph operational settings fail server startup with the key and
 accepted value or range in the error. NeoForge validates the original TOML
 value and fails startup on invalid types or ranges; it does not clamp invalid
 database or correlation settings into a different accepted value.
+Network database validation names the corresponding `general.*` key and never
+includes the configured password in its error message. Network database logs
+and connection-failure diagnostics omit the host, database name, username,
+password, and raw JDBC exception text. SQL failures retain only the SQL state;
+initialization logs also identify the selected backend.
 
 ## Common storage and capture settings
 
@@ -23,7 +28,6 @@ database or correlation settings into a different accepted value.
 | Network DB timeout | `general.database_connection_timeout_ms` | `database_connection_timeout_ms` | integer / `5000` | `[250,120000]` milliseconds | Restart |
 | Optional indexes | `storage.use_indexes` | `use_indexes` | boolean / `true` | `true` or `false`; migration-owned unique and required foreign-key indexes remain | Restart |
 | GriefLogger source path | `general.grieflogger_database_path` | `grieflogger_database_path` | string / `database.db` | Non-empty relative or absolute path; source remains read-only | Restart |
-| Debug logging | `general.debug_logging` | `debug_logging` | boolean / `false` | `true` or `false` | Restart |
 | Ground bridge window | `correlation.ground_bridge_max_seconds` | `ground_bridge_max_seconds` | integer / `300` | `[1,86400]` seconds | Restart |
 
 ## Operations and forensic retention
