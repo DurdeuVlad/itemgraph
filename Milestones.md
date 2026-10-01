@@ -158,24 +158,30 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   projection is delivered by #28. The pinned 26.2 source/profile authority is recorded
   in #43. PR #86 delivered the cross-loader entity-interaction slice for #75.
   Remaining open M8 issues are #24 (published-example vanilla-client replay and
-  residual command output/error semantics), #27 (aggregate action mapping), #30
-  (configuration and operations controls), and #31 (differential proof). Issue
+  residual command output/error semantics), #27 (aggregate native action
+  acceptance), #30 (configuration and operations controls), and #31
+  (differential proof). Issue
   #24's shared command contract is implemented and covered by cross-loader tests;
   #76 establishes the exact-release Ender action no-writer result while separately
-  labeling ItemGraph session deltas. The runtime
+  labeling ItemGraph session deltas. PR #93 merged the `m8.8.0` registry and
+  exact `1.2.10-1.21.1` action writer matrix for all 18 source actions; #27
+  remains open for aggregate native acceptance and runtime evidence. The runtime
   matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact current boundary.
-  Issue #26's visible-client click matrix remains unverified because the
-  maintainer explicitly asked to skip live clicks.
+  Issue #26 is closed, but its visible-client click matrix remains unverified
+  because the maintainer explicitly asked to skip live clicks; do not count that
+  client evidence as observed in #24 or #31.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
   #24–#28, #30–#31, #43, #54, #75, and #76. Issue #29 is delivered in PR #79, including
   SQLite/MariaDB/MySQL storage and configurable optional indexes. The current
-  registry is `m8.7.0`; two action mappings and three configuration mappings
-  remain unresolved. Ender actions 9 and 10 are `unsupported-no-writer` for the
-  exact release, and ItemGraph's session net-delta rows are documented as an
-  independent extension. Query page size is now configurable; server-side mode is a
-  true-only invariant, raw evidence retention is indefinite, and queue/hello
-  cadence still needs staging evidence. Issue #27 is decomposed into #73 (projectile outcomes),
+  registry is `m8.8.0`; all 18 source action IDs and exact-release writer statuses
+  are recorded, with no action rows left `unresolved`. Three configuration
+  mappings remain unresolved. `INTERACT_ENTITY` and Ender actions 9 and 10 are
+  `unsupported-no-writer` for the exact release, and ItemGraph's entity and
+  session net-delta rows are labeled as independent extensions. Query page size
+  is now configurable; server-side mode is a true-only invariant, raw evidence
+  retention is indefinite, and queue/hello cadence still needs staging evidence.
+  Issue #27 is decomposed into #73 (projectile outcomes),
   #74 (block interaction outcomes), #75 (entity interaction outcomes, completed
   in PR #86), and #76 (Ender action writer determination). Compatibility artifacts remain supported
   until the M8 gate and the native-only cutover evidence pass.
