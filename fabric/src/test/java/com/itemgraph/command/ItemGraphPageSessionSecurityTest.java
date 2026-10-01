@@ -36,20 +36,28 @@ class ItemGraphPageSessionSecurityTest {
     void lookupPageSessionCannotBeResolvedByAnotherPlayerAndCanBeCleared() {
         UUID ownerId = UUID.randomUUID();
         UUID otherId = UUID.randomUUID();
-        UUID sessionId = UUID.randomUUID();
+        UUID ownerSessionId = UUID.randomUUID();
+        UUID otherSessionId = UUID.randomUUID();
         CommandSourceStack owner = sourceFor(ownerId);
         CommandSourceStack other = sourceFor(otherId);
-        ItemGraphCommands.AuditPageSession session = new ItemGraphCommands.AuditPageSession(
-                sessionId, "BREAK_BLOCK", null, QueryWindow.unbounded(), 10,
+        ItemGraphCommands.AuditPageSession ownerSession = new ItemGraphCommands.AuditPageSession(
+                ownerSessionId, "BREAK_BLOCK", null, QueryWindow.unbounded(), 10,
                 null, null, null, null, null, null, null, "type=BREAK_BLOCK", System.currentTimeMillis());
-        ItemGraphCommands.rememberPageSession(owner, session);
+        ItemGraphCommands.AuditPageSession otherSession = new ItemGraphCommands.AuditPageSession(
+                otherSessionId, "PLACE_BLOCK", null, QueryWindow.unbounded(), 10,
+                null, null, null, null, null, null, null, "type=PLACE_BLOCK", System.currentTimeMillis());
+        ItemGraphCommands.rememberPageSession(owner, ownerSession);
+        ItemGraphCommands.rememberPageSession(other, otherSession);
 
-        assertSame(session, ItemGraphCommands.pageSession(owner, sessionId));
-        assertNull(ItemGraphCommands.pageSession(other, sessionId),
+        assertSame(ownerSession, ItemGraphCommands.pageSession(owner, ownerSessionId));
+        assertSame(otherSession, ItemGraphCommands.pageSession(other, otherSessionId));
+        assertNull(ItemGraphCommands.pageSession(other, ownerSessionId),
                 "a player cannot resolve another player's lookup page token");
         ItemGraphCommands.clearPageSession(ownerId);
-        assertNull(ItemGraphCommands.pageSession(owner, sessionId),
+        assertNull(ItemGraphCommands.pageSession(owner, ownerSessionId),
                 "clearing the player's page state invalidates its session token");
+        assertSame(otherSession, ItemGraphCommands.pageSession(other, otherSessionId),
+                "clearing one player's page state preserves another player's session");
     }
 
     private static CommandSourceStack sourceFor(UUID playerId) {
