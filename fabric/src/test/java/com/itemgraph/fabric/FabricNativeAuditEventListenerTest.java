@@ -4,6 +4,7 @@ import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.command.BlockInspectionTargets;
+import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.doReturn;
@@ -55,6 +57,24 @@ class FabricNativeAuditEventListenerTest {
     @AfterEach
     void clearInspectionState() {
         inspections.clear();
+    }
+
+    @Test
+    void disconnectCleanupTargetsOnlyThatPlayersPageAndInspectionState() {
+        UUID loggedOutPlayer = UUID.randomUUID();
+        UUID otherPlayer = UUID.randomUUID();
+        inspections.setEnabled(loggedOutPlayer, true);
+        inspections.setEnabled(otherPlayer, true);
+
+        try (MockedStatic<ItemGraphCommands> commands = mockStatic(ItemGraphCommands.class)) {
+            FabricNativeAuditEventListener.clearDisconnectState(loggedOutPlayer);
+
+            commands.verify(() -> ItemGraphCommands.clearPageSession(loggedOutPlayer));
+            commands.verify(ItemGraphCommands::clearPageSessions, org.mockito.Mockito.never());
+        }
+
+        assertFalse(inspections.isEnabled(loggedOutPlayer));
+        assertTrue(inspections.isEnabled(otherPlayer));
     }
 
     @Test

@@ -52,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Fabric-native audit capture. Each callback copies only immutable identifiers,
@@ -143,10 +144,9 @@ public final class FabricNativeAuditEventListener {
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayer player = handler.getPlayer();
-            ItemGraphCommands.clearPageSession(player.getUUID());
+            clearDisconnectState(player.getUUID());
             submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
             FabricContainerSessionListener.onMenuClosing(player);
-            InspectionService.getInstance().clear(player.getUUID());
         });
         ServerMessageEvents.CHAT_MESSAGE.register(FabricNativeAuditEventListener::onChat);
         PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
@@ -196,6 +196,11 @@ public final class FabricNativeAuditEventListener {
                         BuiltInRegistries.ENTITY_TYPE.getKey(victim.getType()).toString(), null);
             }
         });
+    }
+
+    static void clearDisconnectState(UUID playerId) {
+        ItemGraphCommands.clearPageSession(playerId);
+        InspectionService.getInstance().clear(playerId);
     }
 
     @FunctionalInterface
