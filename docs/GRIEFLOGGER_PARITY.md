@@ -412,7 +412,7 @@ checksummed historical database when an operator explicitly configures it.
 `tools/itemgraph_differential_report.py` defines normalized report schema
 version 5 for #31. The shared
 `ItemGraphReplayReportFixture` writes raw schema version 3 with six durable
-movement rows and eight allowlisted audit rows checked by the NeoForge and
+movement rows and seven allowlisted audit rows checked by the NeoForge and
 Fabric GameTests. CI normalizes and
 validates each loader report, then uploads the redacted JSON as a workflow
 artifact. The normalizer labels the output `system=itemgraph` and
@@ -449,7 +449,7 @@ invariant violation count to be zero and checks that `healthy` agrees with
 those counts. The comparison result retains the validated audit summary. This
 summary exports counts only and omits database row IDs and violation details.
 It covers the complete database attached to the isolated GameTest run, not just
-the 14 events in the replay report.
+the 13 events in the replay report.
 
 Each event has a unique scenario-local `event_key`, a unique integer `sequence`,
 and explicit normalized action, evidence class, quantity, item registry ID,
@@ -508,10 +508,11 @@ class mismatch, or wrong native source table never inherits an action-level exce
 requires exact per-event quantities and rejects any whole-database allocation
 or integrity violation reported by `AuditService`.
 
-The GameTest export contains 14 checked durable rows: six quantity observations
+The GameTest export contains 13 checked durable rows: six quantity observations
 for chest deposit and withdrawal, ground drop and pickup, and projectile throw
-and shoot; two block audit rows; three entity interaction attempts; two handled
-armor-stand results; and one unresolved inherited-method result. Audit rows
+and shoot; one successful source-water pickup audit row; three entity
+interaction attempts; two handled armor-stand results; and one unresolved
+inherited-method result. Audit rows
 retain only their namespaced `subject_id`, event identity, timestamp, dimension,
 relative position, and replay-local actor. They exclude raw audit detail and
 payloads. The export excludes
@@ -521,7 +522,7 @@ structure origin; actors use fixed replay aliases. Events sort by persisted
 timestamp, source table, and source row ID; row IDs are not exported. This gives
 deterministic ordering when events share a millisecond across source tables. CI
 requires the fixed scenario ID, seed,
-14 event records with pinned per-action counts, unique event keys, and contiguous
+13 event records with pinned per-action counts, unique event keys, and contiguous
 sequence, tests malformed inputs, and pins each report to its loader and source
 profile. The raw report schema is v3 and normalized report schema is v5. It does not start
 GriefLogger or compare its live database rows. A paired GriefLogger capture,

@@ -189,7 +189,7 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                     bucketAuditWatermark,
                     Map.of(movementPlayer.getUUID().toString(), "actor:replay-mover",
                             playerUuid, "actor:replay-interactor",
-                            fluidPlayer.getUUID().toString(), "actor:replay-fluid"));
+                            fluidPlayer.getUUID().toString(), "actor:replay-fluid"), waterPos);
         });
     }
 
