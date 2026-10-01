@@ -362,8 +362,17 @@ coordinates, and replay actor aliases, with no player UUIDs, names, database
 row IDs, or raw payloads. CI validates separate native-only Fabric and NeoForge
 reports and uploads only the normalized JSON. This export validates report
 shape and redaction; it does not establish GriefLogger equivalence or complete
-the paired replay, 24-hour soak, conservation, exception-policy, or rollback
-criteria in #31.
+the paired replay, 24-hour soak, exception-policy, or rollback criteria in
+#31. The raw schema-v2 report also contains an `AuditService.audit` summary from
+one read-only transaction snapshot over the complete isolated GameTest
+database. Every active edge must have SOURCE and DESTINATION allocation sums
+equal to its amount, linked evidence with matching fingerprints, actions, and
+actor endpoints, and no unsupported allocation roles; every observation must
+remain within its quantity capacity. Edge time bounds must equal the source and
+destination observation timestamps in forward order. Both the fixture and CI
+normalizer require zero allocation, edge-time, positivity, orphan, endpoint,
+and lifecycle violations. The normalized schema-v3 comparison report retains
+this count-only summary without database IDs or violation details.
 - explanation available
 
 ## Coffer/modded inventory test
@@ -452,7 +461,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ItemEntityTrackerTest` | in-memory entity tracking: drop/pickup links, unique-only spatial/time matches, ambiguity rejection, expiry, and counters |
 | `ItemEntityCorrelationTest` | authoritative ItemEntity UUID correlation boost to 0.9990 and continuity citation (1 test) |
 | `PlayerAndContainerTraceTest` | player/container traces, fingerprint resolution, and transformation lineage (4 tests) |
-| `AuditServiceTest` | active-edge conservation, non-positive quantities, orphaned allocations, invalid endpoints, correlation status, source-group consistency, and invalid edge-state detection (6 tests) |
+| `AuditServiceTest` | observation capacity, exact per-edge SOURCE/DESTINATION sums, evidence/action/fingerprint/endpoint linkage, unsupported-role and backwards-time rejection, non-positive quantities, orphaned allocations, invalid endpoints, correlation status, source-group consistency, and invalid edge-state detection (10 tests) |
 | `QuantityFlowTest` | stack splits/merges, partial transfers, windows, capacity limits, competing candidates, idempotency, restart continuity, and rollback atomicity (19 tests) |
 | `TransformationEventListenerTest` | anvil rename/repair, crafting matrix fallback, smelting, client guards, and empty-stack handling (12 tests) |
 | `EntityInteractionEvidenceTest` | Armor stand method outcomes, target UUID, actor/position/dimension, and client-side suppression; interaction attempts are queried separately from completed results |

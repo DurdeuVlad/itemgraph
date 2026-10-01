@@ -1,5 +1,8 @@
 package com.itemgraph.gametest;
 
+import com.itemgraph.audit.AuditReport;
+import com.itemgraph.audit.AuditService;
+import com.itemgraph.db.DatabaseDialect;
 import com.itemgraph.db.DatabaseManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -52,12 +55,15 @@ public final class ItemGraphReplayReportFixture {
                 "native report must contain the six expected durable replay observations");
         helper.assertValueEqual(EXPECTED_EVENTS.size(), events.size(),
                 "native report must not omit or duplicate a replay observation");
+        AuditReport audit = readWholeGraphAudit();
+        helper.assertValueEqual(true, audit.healthy(),
+                "native report requires a healthy whole-database quantity and integrity audit");
 
         BlockPos origin = helper.absolutePos(BlockPos.ZERO);
         // readEvents orders by persisted timestamp and row ID. Keep that durable
         // order when two observations share one millisecond timestamp.
         StringBuilder json = new StringBuilder(2048);
-        json.append("{\n  \"raw_schema_version\": 1,\n  \"loader\": ").append(quote(loader))
+        json.append("{\n  \"raw_schema_version\": 2,\n  \"loader\": ").append(quote(loader))
                 .append(",\n  \"scenario_id\": ").append(quote(SCENARIO_ID))
                 .append(",\n  \"seed\": 0,\n  \"events\": [\n");
         for (int i = 0; i < events.size(); i++) {
@@ -88,8 +94,41 @@ public final class ItemGraphReplayReportFixture {
                     .append(", \"privacy_class\": \"replay_fixture_only\"")
                     .append(", \"unresolved_reason\": null}");
         }
-        json.append("\n  ]\n}\n");
+        json.append("\n  ],\n  \"invariants\": ").append(auditJson(audit)).append("\n}\n");
         writeAtomically(Path.of(configuredDirectory).resolve("itemgraph-" + loader + ".raw.json"), json.toString());
+    }
+
+    private static AuditReport readWholeGraphAudit() {
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection()) {
+            // Keep every count on the same read-only database snapshot while the
+            // asynchronous ingestion worker may be persisting other GameTests.
+            if (DatabaseManager.getInstance().getDialect() == DatabaseDialect.MYSQL_MARIADB) {
+                connection.setTransactionIsolation(java.sql.Connection.TRANSACTION_REPEATABLE_READ);
+            }
+            connection.setAutoCommit(false);
+            try {
+                return new AuditService().audit(connection);
+            } finally {
+                connection.rollback();
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not audit whole-graph replay invariants", failure);
+        }
+    }
+
+    private static String auditJson(AuditReport report) {
+        return "{\"healthy\":" + report.healthy()
+                + ",\"total_observations\":" + report.totalObservations()
+                + ",\"total_edges\":" + report.totalEdges()
+                + ",\"total_allocations\":" + report.totalAllocations()
+                + ",\"total_transformations\":" + report.totalTransformations()
+                + ",\"over_allocated_observations\":" + report.overAllocatedObservations()
+                + ",\"invalid_edge_allocations\":" + report.invalidEdgeAllocations()
+                + ",\"invalid_edge_temporal\":" + report.invalidEdgeTemporal()
+                + ",\"non_positive_quantities\":" + report.nonPositiveQuantities()
+                + ",\"orphaned_allocations\":" + report.orphanedAllocations()
+                + ",\"invalid_edge_nodes\":" + report.invalidEdgeNodes()
+                + ",\"status_mismatches\":" + report.statusMismatches() + "}";
     }
 
     private static List<ReplayEvent> readEvents(long priorObservationId, String movementPlayerUuid,

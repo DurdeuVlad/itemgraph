@@ -24,7 +24,7 @@ class DifferentialReportTests(unittest.TestCase):
         registry, fixture_hash = report.current_profile()
         self.registry = registry
         base = {
-            "report_schema_version": 2,
+            "report_schema_version": 3,
             "compatibility_version": registry["compatibility_version"],
             "source_profile_sha256": registry["source_profile"]["sha256"],
             "release_fixture_sha256": fixture_hash,
@@ -33,7 +33,25 @@ class DifferentialReportTests(unittest.TestCase):
             "seed": 781,
         }
         self.legacy = {**base, "system": "grieflogger", "runtime_mode": "grieflogger_present", "events": [self.event()]}
-        self.native = {**base, "system": "itemgraph", "runtime_mode": "native_only", "events": [self.native_event()]}
+        self.native = {**base, "system": "itemgraph", "runtime_mode": "native_only", "events": [self.native_event()],
+                       "invariants": self.healthy_invariants()}
+
+    @staticmethod
+    def healthy_invariants():
+        return {
+            "healthy": True,
+            "total_observations": 1,
+            "total_edges": 0,
+            "total_allocations": 0,
+            "total_transformations": 0,
+            "over_allocated_observations": 0,
+            "invalid_edge_allocations": 0,
+            "invalid_edge_temporal": 0,
+            "non_positive_quantities": 0,
+            "orphaned_allocations": 0,
+            "invalid_edge_nodes": 0,
+            "status_mismatches": 0,
+        }
 
     @staticmethod
     def event(**overrides):
@@ -86,6 +104,7 @@ class DifferentialReportTests(unittest.TestCase):
         self.assertTrue(result["equivalent"])
         self.assertEqual([], result["differences"])
         self.assertEqual(self.registry["source_profile"]["sha256"], result["source_profile_sha256"])
+        self.assertEqual(self.healthy_invariants(), result["itemgraph_invariants"])
 
     def test_missing_native_row_is_not_silently_accepted(self) -> None:
         self.native["events"] = []
@@ -132,6 +151,7 @@ class DifferentialReportTests(unittest.TestCase):
                                          occurred_at_ms=1790870400000)
         native_second = self.native_event(sequence=1, occurred_at_ms=1790870401000)
         self.native["events"] = [native_first, native_second]
+        self.native["invariants"]["total_observations"] = 2
         result = report.compare_reports(self.legacy, self.native)
         self.assertTrue(any(d["kind"] == "temporal_order_mismatch" for d in result["differences"]))
 
@@ -181,6 +201,30 @@ class DifferentialReportTests(unittest.TestCase):
         with self.assertRaisesRegex(report.ReportError, "fields do not match the report schema") as raised:
             report.compare_reports(self.legacy, self.native)
         self.assertNotIn("player_name", str(raised.exception))
+
+    def test_nonzero_whole_graph_quantity_or_integrity_audit_fails_closed(self) -> None:
+        for field in ("over_allocated_observations", "invalid_edge_allocations", "invalid_edge_temporal", "non_positive_quantities", "orphaned_allocations",
+                      "invalid_edge_nodes", "status_mismatches"):
+            with self.subTest(field=field):
+                self.native["invariants"][field] = 1
+                self.native["invariants"]["healthy"] = False
+                with self.assertRaisesRegex(report.ReportError, "violations must be zero"):
+                    report.compare_reports(self.legacy, self.native)
+                self.native["invariants"] = self.healthy_invariants()
+
+    def test_itemgraph_report_requires_audit_and_rejects_inconsistent_summary(self) -> None:
+        del self.native["invariants"]
+        with self.assertRaisesRegex(report.ReportError, "fields do not match the report schema"):
+            report.compare_reports(self.legacy, self.native)
+        self.native["invariants"] = self.healthy_invariants()
+        self.native["invariants"]["healthy"] = False
+        with self.assertRaisesRegex(report.ReportError, "disagrees"):
+            report.compare_reports(self.legacy, self.native)
+
+    def test_itemgraph_observation_total_covers_exported_observation_events(self) -> None:
+        self.native["invariants"]["total_observations"] = 0
+        with self.assertRaisesRegex(report.ReportError, "smaller than its exported observation events"):
+            report.compare_reports(self.legacy, self.native)
 
     def test_raw_uuid_is_rejected_as_actor_identity(self) -> None:
         self.native["events"][0]["actor_ref"] = "actor:replay-123e4567-e89b-12d3-a456-426614174000"

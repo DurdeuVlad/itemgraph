@@ -11,7 +11,7 @@ from typing import Any
 import itemgraph_differential_report as differential
 
 
-RAW_SCHEMA_VERSION = 1
+RAW_SCHEMA_VERSION = 2
 RAW_EVENT_FIELDS = {
     "event_key", "sequence", "action", "evidence_class", "quantity", "item_id", "occurred_at_ms",
     "dimension", "position", "actor_ref", "source_table", "source_action_id", "compatibility_table",
@@ -29,7 +29,7 @@ def normalize(raw: dict[str, Any], expected_loader: str) -> dict[str, Any]:
         raise differential.ReportError(f"raw_schema_version must be integer {RAW_SCHEMA_VERSION}")
     if raw.get("loader") != expected_loader:
         raise differential.ReportError("raw report loader does not match the requested loader")
-    if set(raw) != {"raw_schema_version", "loader", "scenario_id", "seed", "events"}:
+    if set(raw) != {"raw_schema_version", "loader", "scenario_id", "seed", "events", "invariants"}:
         raise differential.ReportError("raw report fields do not match the ItemGraph GameTest schema")
     if raw["scenario_id"] != SCENARIO_ID:
         raise differential.ReportError("raw report scenario_id does not match the native replay fixture")
@@ -40,6 +40,7 @@ def normalize(raw: dict[str, Any], expected_loader: str) -> dict[str, Any]:
     if len(raw["events"]) != len(EXPECTED_ACTIONS):
         raise differential.ReportError("raw report must contain exactly the six native replay events")
     registry, fixture_hash = differential.current_profile()
+    differential._validate_itemgraph_invariants(raw["invariants"])
     normalized_events: list[dict[str, Any]] = []
     for index, raw_event in enumerate(raw["events"]):
         if not isinstance(raw_event, dict) or set(raw_event) != RAW_EVENT_FIELDS:
@@ -79,6 +80,7 @@ def normalize(raw: dict[str, Any], expected_loader: str) -> dict[str, Any]:
         "scenario_id": raw["scenario_id"],
         "seed": raw["seed"],
         "events": normalized_events,
+        "invariants": raw["invariants"],
     }
     return differential.validate_report(report, "itemgraph")
 

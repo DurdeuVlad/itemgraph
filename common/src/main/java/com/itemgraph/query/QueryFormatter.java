@@ -398,6 +398,8 @@ public final class QueryFormatter {
         lines.add("  Observations: " + report.totalObservations() + " | Inferred edges: " + report.totalEdges());
         lines.add("  Allocations: " + report.totalAllocations() + " | Transformations: " + report.totalTransformations());
         lines.add("  Conservation violations: " + report.overAllocatedObservations());
+        lines.add("  Invalid edge allocations: " + report.invalidEdgeAllocations());
+        lines.add("  Invalid edge timestamps: " + report.invalidEdgeTemporal());
         lines.add("  Non-positive quantities: " + report.nonPositiveQuantities());
         lines.add("  Orphaned allocations: " + report.orphanedAllocations());
         lines.add("  Invalid edge nodes: " + report.invalidEdgeNodes());

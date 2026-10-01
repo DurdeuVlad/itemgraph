@@ -673,10 +673,11 @@ Item transformations (identity shifts) are tracked in `ig_item_transformations`:
 ## Database Invariant Auditing & Diagnostics (Phase 10)
 
 `AuditService` enforces ItemGraph's core invariants asynchronously:
-1. **Quantity Conservation**: $\sum \text{allocated} \le \text{evidenced capacity}$ across all observations and inferred edges.
+1. **Quantity Conservation**: each observation's active allocations total at most its evidenced quantity. Each active edge has SOURCE and DESTINATION allocation sums equal to its edge quantity; those allocation observations must be linked evidence with the edge fingerprint and matching source/destination actor endpoints. Unsupported allocation roles are invalid.
 2. **Positivity**: quantities on observations, edges, and allocations are strictly positive ($amount > 0$).
-3. **Relational Graph Integrity**: zero orphaned allocations and zero missing edge endpoint nodes.
+3. **Relational Graph Integrity**: zero orphaned allocations and zero missing edge endpoint nodes; active edges with missing or mismatched role allocations, evidence, fingerprints, actions, or endpoints are reported.
 4. **Lifecycle State Consistency**: validates observation `correlation_status` against active allocations.
+5. **Temporal Validity**: each active edge's start/end timestamps must equal its cited source/destination observation timestamps, and source evidence cannot occur after destination evidence.
 
 The `/ig audit` command runs this engine on the query worker and outputs a comprehensive integrity report. `/ig status` reports active/superseded edges, internal queue throughput/drops, capability queue rejections, transformation totals, active tracked entities, and continuity matches; its database count/checkpoint reads also run on the query worker.
 

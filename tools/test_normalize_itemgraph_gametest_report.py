@@ -46,22 +46,37 @@ def expected_events() -> list[dict]:
 class ItemGraphReplayNormalizerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.raw = {
-            "raw_schema_version": 1,
+            "raw_schema_version": 2,
             "loader": "neoforge",
             "scenario_id": "item-movement-projectile-replay",
             "seed": 0,
             "events": expected_events(),
+            "invariants": {
+                "healthy": True,
+                "total_observations": 6,
+                "total_edges": 0,
+                "total_allocations": 0,
+                "total_transformations": 0,
+                "over_allocated_observations": 0,
+                "invalid_edge_allocations": 0,
+                "invalid_edge_temporal": 0,
+                "non_positive_quantities": 0,
+                "orphaned_allocations": 0,
+                "invalid_edge_nodes": 0,
+                "status_mismatches": 0,
+            },
         }
 
     def test_pins_profile_and_native_only_runtime(self) -> None:
         report = normalizer.normalize(self.raw, "neoforge")
         registry, fixture_hash = differential.current_profile()
-        self.assertEqual(2, report["report_schema_version"])
+        self.assertEqual(3, report["report_schema_version"])
         self.assertEqual("itemgraph", report["system"])
         self.assertEqual("native_only", report["runtime_mode"])
         self.assertEqual(registry["compatibility_version"], report["compatibility_version"])
         self.assertEqual(registry["source_profile"]["sha256"], report["source_profile_sha256"])
         self.assertEqual(fixture_hash, report["release_fixture_sha256"])
+        self.assertEqual(self.raw["invariants"], report["invariants"])
 
     def test_signed_delta_actions_normalize_positive_persisted_counts(self) -> None:
         for action, expected in (("ADD_ITEM", 2), ("REMOVE_ITEM", -3)):
@@ -118,6 +133,26 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
         malformed = copy.deepcopy(self.raw)
         malformed["events"] = None
         with self.assertRaisesRegex(differential.ReportError, "events must be an array"):
+            normalizer.normalize(malformed, "neoforge")
+
+    def test_nonzero_whole_graph_conservation_or_integrity_count_fails(self) -> None:
+        for field in ("over_allocated_observations", "invalid_edge_allocations", "invalid_edge_temporal", "non_positive_quantities", "orphaned_allocations",
+                      "invalid_edge_nodes", "status_mismatches"):
+            with self.subTest(field=field):
+                malformed = copy.deepcopy(self.raw)
+                malformed["invariants"][field] = 1
+                malformed["invariants"]["healthy"] = False
+                with self.assertRaisesRegex(differential.ReportError, "violations must be zero"):
+                    normalizer.normalize(malformed, "neoforge")
+
+    def test_boolean_counts_and_inconsistent_healthy_flag_are_rejected(self) -> None:
+        malformed = copy.deepcopy(self.raw)
+        malformed["invariants"]["total_edges"] = True
+        with self.assertRaisesRegex(differential.ReportError, "non-negative integer"):
+            normalizer.normalize(malformed, "neoforge")
+        malformed = copy.deepcopy(self.raw)
+        malformed["invariants"]["healthy"] = False
+        with self.assertRaisesRegex(differential.ReportError, "disagrees"):
             normalizer.normalize(malformed, "neoforge")
 
 

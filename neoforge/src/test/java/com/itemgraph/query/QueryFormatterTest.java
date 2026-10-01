@@ -205,7 +205,7 @@ class QueryFormatterTest {
 
     @Test
     void testFormatAuditHealthy() {
-        AuditReport report = new AuditReport(true, 10, 5, 5, 0, 0, 0, 0, 0, 0, List.of());
+        AuditReport report = new AuditReport(true, 10, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, List.of());
         List<String> lines = QueryFormatter.formatAudit(report);
         assertTrue(lines.stream().anyMatch(l -> l.contains("HEALTHY (ALL INVARIANTS SATISFIED)")));
         assertTrue(lines.stream().noneMatch(l -> l.contains("Violations:")));
@@ -213,11 +213,13 @@ class QueryFormatterTest {
 
     @Test
     void testFormatAuditViolations() {
-        AuditReport report = new AuditReport(false, 10, 5, 5, 0, 2, 0, 0, 0, 0,
+        AuditReport report = new AuditReport(false, 10, 5, 5, 0, 2, 0, 0, 0, 0, 0, 0,
                 List.of("Conservation violation on obs#1: allocated 12 > capacity 10"));
         List<String> lines = QueryFormatter.formatAudit(report);
         assertTrue(lines.stream().anyMatch(l -> l.contains("VIOLATIONS DETECTED")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("Conservation violations: 2")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("Invalid edge allocations: 0")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("Invalid edge timestamps: 0")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("Conservation violation on obs#1")));
     }
 
