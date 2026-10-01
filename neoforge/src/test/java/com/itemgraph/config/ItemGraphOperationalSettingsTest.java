@@ -8,11 +8,24 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ItemGraphOperationalSettingsTest {
     @Test
+    void legacyOperationsOverloadRetainsTheTwentyTickDefault() {
+        var service = InternalObservationService.getInstance();
+        try {
+            service.configureOperations(250, 100, 30_000, true);
+            assertEquals(20, service.getQueueFrequencyTicks());
+        } finally {
+            service.stop();
+            service.clear();
+        }
+    }
+
+    @Test
     void defaultsMatchThePublishedGriefLoggerPageSizeAndImmutableRetentionPolicy() {
-        var settings = new ItemGraphOperationalSettings(10, true, 250, 100, 30_000, true, "indefinite");
+        var settings = new ItemGraphOperationalSettings(10, true, 250, 20, 100, 30_000, true, "indefinite");
         assertEquals(10, settings.maxPageSize());
         assertTrue(settings.serverSideOnly());
         assertEquals(250, settings.queuePollIntervalMs());
+        assertEquals(20, settings.queueFrequencyTicks());
         assertEquals(100, settings.maxBatchSize());
         assertEquals(30_000, settings.databaseHeartbeatIntervalMs());
         assertTrue(settings.captureEnabled());
@@ -36,6 +49,14 @@ class ItemGraphOperationalSettingsTest {
     }
 
     @Test
+    void rejectsQueueFrequenciesOutsideGriefLoggerTickBounds() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new ItemGraphOperationalSettings(10, true, 250, 0, 100, 30_000, true, "indefinite"));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ItemGraphOperationalSettings(10, true, 250, 101, 100, 30_000, true, "indefinite"));
+    }
+
+    @Test
     void rejectsUnsupportedClientModeAndDestructiveRetentionValues() {
         assertThrows(IllegalArgumentException.class,
                 () -> new ItemGraphOperationalSettings(10, false, 250, 100, 30_000, true, "indefinite"));
@@ -54,19 +75,21 @@ class ItemGraphOperationalSettingsTest {
         var service = InternalObservationService.getInstance();
         int originalPageSize = QueryLimits.getConfiguredMaxPageSize();
         try {
-            var initial = new ItemGraphOperationalSettings(10, true, 250, 100, 30_000, true, "indefinite");
+            var initial = new ItemGraphOperationalSettings(10, true, 250, 20, 100, 30_000, true, "indefinite");
             initial.apply();
             assertEquals(10, QueryLimits.getConfiguredMaxPageSize());
             assertEquals(250, service.getQueuePollIntervalMs());
+            assertEquals(20, service.getQueueFrequencyTicks());
             assertEquals(100, service.getMaxBatchSize());
             assertEquals(30_000, service.getDatabaseHeartbeatIntervalMs());
 
             service.start();
-            var changed = new ItemGraphOperationalSettings(25, true, 500, 250, 60_000, false, "indefinite");
+            var changed = new ItemGraphOperationalSettings(25, true, 500, 25, 250, 60_000, false, "indefinite");
             assertThrows(IllegalStateException.class, changed::apply);
             assertEquals(10, QueryLimits.getConfiguredMaxPageSize(),
                     "a rejected live reload must not partially change the query cap");
             assertEquals(250, service.getQueuePollIntervalMs());
+            assertEquals(20, service.getQueueFrequencyTicks());
             assertEquals(100, service.getMaxBatchSize());
             assertEquals(30_000, service.getDatabaseHeartbeatIntervalMs());
 
@@ -74,6 +97,7 @@ class ItemGraphOperationalSettingsTest {
             changed.apply();
             assertEquals(25, QueryLimits.getConfiguredMaxPageSize());
             assertEquals(500, service.getQueuePollIntervalMs());
+            assertEquals(25, service.getQueueFrequencyTicks());
             assertEquals(250, service.getMaxBatchSize());
             assertEquals(60_000, service.getDatabaseHeartbeatIntervalMs());
             assertFalse(service.isCaptureEnabled());

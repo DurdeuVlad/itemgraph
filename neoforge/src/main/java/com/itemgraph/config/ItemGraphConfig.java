@@ -23,6 +23,7 @@ public class ItemGraphConfig {
     public static final ModConfigSpec.ConfigValue<Boolean> SERVER_SIDE_ONLY;
     public static final ModConfigSpec.ConfigValue<String> RAW_EVIDENCE_RETENTION;
     public static final ModConfigSpec.ConfigValue<Integer> QUEUE_POLL_INTERVAL_MS;
+    public static final ModConfigSpec.ConfigValue<Integer> QUEUE_FREQUENCY_TICKS;
     public static final ModConfigSpec.ConfigValue<Integer> MAX_BATCH_SIZE;
     public static final ModConfigSpec.ConfigValue<Integer> DATABASE_HEARTBEAT_INTERVAL_MS;
     public static final ModConfigSpec.ConfigValue<Boolean> CAPTURE_ENABLED;
@@ -70,6 +71,10 @@ public class ItemGraphConfig {
                 BUILDER.comment("Maximum idle wait between native queue polls in milliseconds; restart after changing"),
                 "poll_interval_ms", "ingestion.poll_interval_ms",
                 ItemGraphOperationalSettings.DEFAULT_QUEUE_POLL_INTERVAL_MS, 10, 5_000);
+        QUEUE_FREQUENCY_TICKS = defineInteger(
+                BUILDER.comment("Flush queued evidence every this many server ticks; default 20 matches GriefLogger queueFrequency"),
+                "queue_frequency_ticks", "ingestion.queue_frequency_ticks",
+                ItemGraphOperationalSettings.DEFAULT_QUEUE_FREQUENCY_TICKS, 1, 100);
         MAX_BATCH_SIZE = defineInteger(
                 BUILDER.comment("Maximum native records drained from each queue in one worker batch; restart after changing"),
                 "max_batch_size", "ingestion.max_batch_size",
@@ -212,7 +217,8 @@ public class ItemGraphConfig {
     /** Validates controls whose invalid values must fail startup rather than be clamped. */
     public static ItemGraphOperationalSettings operationalSettings() {
         return new ItemGraphOperationalSettings(MAX_PAGE_SIZE.get(), SERVER_SIDE_ONLY.get(),
-                QUEUE_POLL_INTERVAL_MS.get(), MAX_BATCH_SIZE.get(), DATABASE_HEARTBEAT_INTERVAL_MS.get(), CAPTURE_ENABLED.get(),
+                QUEUE_POLL_INTERVAL_MS.get(), QUEUE_FREQUENCY_TICKS.get(), MAX_BATCH_SIZE.get(),
+                DATABASE_HEARTBEAT_INTERVAL_MS.get(), CAPTURE_ENABLED.get(),
                 RAW_EVIDENCE_RETENTION.get());
     }
 }

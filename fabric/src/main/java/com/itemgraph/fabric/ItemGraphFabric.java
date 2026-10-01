@@ -12,6 +12,7 @@ import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
@@ -46,6 +47,7 @@ public final class ItemGraphFabric implements ModInitializer {
                 ItemGraphCommands.register(dispatcher));
         ServerLifecycleEvents.SERVER_STARTING.register(this::onServerStarting);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
+        ServerTickEvents.END_SERVER_TICK.register(server -> InternalObservationService.getInstance().onServerTick());
         FabricNativeAuditEventListener.register();
         LOGGER.info("ItemGraph Fabric adapter initialized for Minecraft 1.21.1");
     }

@@ -6,7 +6,9 @@
   "environment": "*",
   "entrypoints": {
     "fabric-gametest": [
-      "com.itemgraph.fabric.gametest.EntityInteractionGameTests"
+      "com.itemgraph.fabric.gametest.EntityInteractionGameTests",
+      "com.itemgraph.fabric.gametest.CommandPacketGameTests",
+      "com.itemgraph.fabric.gametest.OperationalQueueGameTests"
     ]
   }
 }

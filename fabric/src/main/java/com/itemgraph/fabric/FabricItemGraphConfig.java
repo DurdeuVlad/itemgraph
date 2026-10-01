@@ -37,6 +37,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             properties.setProperty("max_page_size", Integer.toString(ItemGraphOperationalSettings.DEFAULT_MAX_PAGE_SIZE));
             properties.setProperty("server_side_only", "true");
             properties.setProperty("poll_interval_ms", Integer.toString(ItemGraphOperationalSettings.DEFAULT_QUEUE_POLL_INTERVAL_MS));
+            properties.setProperty("queue_frequency_ticks", Integer.toString(ItemGraphOperationalSettings.DEFAULT_QUEUE_FREQUENCY_TICKS));
             properties.setProperty("max_batch_size", Integer.toString(ItemGraphOperationalSettings.DEFAULT_MAX_BATCH_SIZE));
             properties.setProperty("database_heartbeat_interval_ms",
                     Integer.toString(ItemGraphOperationalSettings.DEFAULT_DATABASE_HEARTBEAT_INTERVAL_MS));
@@ -61,6 +62,8 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
                     parseBoolean(properties, "server_side_only", true, configFile),
                     parseBoundedInt(properties, "poll_interval_ms",
                             ItemGraphOperationalSettings.DEFAULT_QUEUE_POLL_INTERVAL_MS, 10, 5_000, configFile),
+                    parseBoundedInt(properties, "queue_frequency_ticks",
+                            ItemGraphOperationalSettings.DEFAULT_QUEUE_FREQUENCY_TICKS, 1, 100, configFile),
                     parseBoundedInt(properties, "max_batch_size",
                             ItemGraphOperationalSettings.DEFAULT_MAX_BATCH_SIZE, 1, 1_000, configFile),
                     parseBoundedInt(properties, "database_heartbeat_interval_ms",
@@ -140,6 +143,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             case "ground_bridge_max_seconds" -> "correlation.ground_bridge_max_seconds";
             case "max_page_size" -> "query.max_page_size";
             case "poll_interval_ms" -> "ingestion.poll_interval_ms";
+            case "queue_frequency_ticks" -> "ingestion.queue_frequency_ticks";
             case "max_batch_size" -> "ingestion.max_batch_size";
             case "database_heartbeat_interval_ms" -> "operations.database_heartbeat_interval_ms";
             case "server_side_only" -> "operations.server_side_only";

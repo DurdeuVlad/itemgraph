@@ -63,7 +63,7 @@ class InternalObservationServiceTest {
     @BeforeEach
     void setUp() {
         service = InternalObservationService.getInstance();
-        service.configureOperations(250, 100, 30_000, true);
+        service.configureOperations(250, 1, 100, 30_000, true);
         service.clear();
         IngestionService.getInstance().getNodeManager().clearCaches();
     }
@@ -330,8 +330,8 @@ class InternalObservationServiceTest {
     }
 
     @Test
-    void auditQueueSignalWakesWorkerWithoutWaitingForIdleObservationPoll() throws Exception {
-        service.configureOperations(2_000, 100, 30_000, true);
+    void auditQueueWakeDoesNotPersistBeforeConfiguredServerTickCadence() throws Exception {
+        service.configureOperations(2_000, 2, 100, 30_000, true);
         initializeTopologyDatabase();
         service.start();
 
@@ -339,6 +339,17 @@ class InternalObservationServiceTest {
                 System.currentTimeMillis(), "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
                 10, 64, -20, null, "idle-poll-wakeup", null)));
 
+        Thread.sleep(100);
+        assertEquals(0, service.getTotalAuditEvents(),
+                "enqueue wakeups must not bypass the configured batch cadence");
+        assertEquals(1, service.getQueueSize());
+
+        service.onServerTick();
+        Thread.sleep(100);
+        assertEquals(0, service.getTotalAuditEvents(),
+                "the first of two configured server ticks must not flush the queue");
+
+        service.onServerTick();
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(500);
         while (service.getTotalAuditEvents() == 0 && System.nanoTime() < deadline) {
             Thread.sleep(5);
@@ -531,7 +542,7 @@ class InternalObservationServiceTest {
 
     @Test
     void nativeCaptureCanBeDisabledWithoutTreatingSuppressionAsQueueLoss() {
-        service.configureOperations(125, 7, 30_000, false);
+        service.configureOperations(125, 1, 7, 30_000, false);
         try {
             assertEquals(125, service.getQueuePollIntervalMs());
             assertEquals(7, service.getMaxBatchSize());
@@ -545,7 +556,7 @@ class InternalObservationServiceTest {
             assertEquals(0, service.getTotalEnqueued());
             assertEquals(0, service.getTotalDropped());
         } finally {
-            service.configureOperations(250, 100, 30_000, true);
+            service.configureOperations(250, 1, 100, 30_000, true);
         }
     }
 
@@ -556,7 +567,7 @@ class InternalObservationServiceTest {
                 "127.0.0.1", 1, "itemgraph_test", "test", "test", 250, true));
         assertFalse(database.isInitialized(), "the closed loopback port should not initialize a network database");
 
-        service.configureOperations(10, 100, 1_000, true);
+        service.configureOperations(10, 1, 100, 1_000, true);
         service.start();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (service.getTotalDatabaseHeartbeatFailures() == 0 && System.nanoTime() < deadline) {
@@ -640,7 +651,7 @@ class InternalObservationServiceTest {
 
     @Test
     void failedTransformationBatchIsRetainedAndShutdownLossIsCounted() throws Exception {
-        service.configureOperations(10, 2, 30_000, true);
+        service.configureOperations(10, 1, 2, 30_000, true);
         service.start();
         for (int i = 0; i < 5; i++) {
             assertTrue(service.submitTransformation(createDummyTransformation(i)));
@@ -670,6 +681,7 @@ class InternalObservationServiceTest {
         for (int i = 0; i < 5; i++) {
             service.submit(createDummyObservation(i));
         }
+        service.onServerTick();
 
         // Wait up to 5 seconds for worker thread to drain
         long deadline = System.currentTimeMillis() + 5000;
@@ -693,7 +705,7 @@ class InternalObservationServiceTest {
     @Test
     void workerPersistsConcurrentQueueLoadWithoutDuplicateOrLostRows(@TempDir Path testTempDir) throws Exception {
         initializeTopologyDatabase();
-        service.configureOperations(10, 250, 30_000, true);
+        service.configureOperations(10, 1, 250, 30_000, true);
         service.start();
 
         int threadCount = 8;
@@ -726,6 +738,7 @@ class InternalObservationServiceTest {
             assertTrue(doneLatch.await(10, TimeUnit.SECONDS),
                     "concurrent event producers should finish without waiting on database writes");
             assertEquals(expected, accepted.get(), "all events fit within the bounded queue");
+            service.onServerTick();
 
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
             while (service.getTotalPersisted() < expected && System.nanoTime() < deadline) {
@@ -748,7 +761,7 @@ class InternalObservationServiceTest {
         } finally {
             producers.shutdownNow();
             service.stop();
-            service.configureOperations(250, 100, 30_000, true);
+            service.configureOperations(250, 1, 100, 30_000, true);
         }
     }
 

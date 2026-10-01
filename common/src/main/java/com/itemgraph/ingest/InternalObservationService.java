@@ -358,6 +358,9 @@ public class InternalObservationService {
     private final BlockingQueue<InternalAuditEvent> auditEventQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
     private final Semaphore queuedWorkSignals = new Semaphore(0);
     private final AtomicBoolean queuedWorkSignalPending = new AtomicBoolean(false);
+    private final AtomicBoolean queueFlushDue = new AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicInteger serverTicksSinceFlush =
+            new java.util.concurrent.atomic.AtomicInteger();
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final java.util.concurrent.atomic.AtomicLong totalEnqueued = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalPersisted = new java.util.concurrent.atomic.AtomicLong(0);
@@ -374,6 +377,7 @@ public class InternalObservationService {
     private volatile long observationRetryBackoffMs = AUDIT_RETRY_INITIAL_BACKOFF_MS;
     private volatile long lastObservationRetryLogMs;
     private volatile int queuePollIntervalMs = 250;
+    private volatile int queueFrequencyTicks = 20;
     private volatile int maxBatchSize = DEFAULT_MAX_BATCH_SIZE;
     private volatile int databaseHeartbeatIntervalMs = 30_000;
     private volatile boolean captureEnabled = true;
@@ -382,7 +386,8 @@ public class InternalObservationService {
     private InternalObservationService() {}
 
     /** Applies validated startup settings before the worker begins. */
-    public synchronized void configureOperations(int pollIntervalMs, int configuredMaxBatchSize,
+    public synchronized void configureOperations(int pollIntervalMs, int configuredQueueFrequencyTicks,
+                                                 int configuredMaxBatchSize,
                                                  int configuredDatabaseHeartbeatIntervalMs,
                                                  boolean configuredCaptureEnabled) {
         if (running.get()) {
@@ -391,6 +396,9 @@ public class InternalObservationService {
         if (pollIntervalMs < 10 || pollIntervalMs > 5_000) {
             throw new IllegalArgumentException("ingestion.poll_interval_ms must be in [10,5000]");
         }
+        if (configuredQueueFrequencyTicks < 1 || configuredQueueFrequencyTicks > 100) {
+            throw new IllegalArgumentException("ingestion.queue_frequency_ticks must be in [1,100]");
+        }
         if (configuredMaxBatchSize < 1 || configuredMaxBatchSize > 1_000) {
             throw new IllegalArgumentException("ingestion.max_batch_size must be in [1,1000]");
         }
@@ -398,9 +406,18 @@ public class InternalObservationService {
             throw new IllegalArgumentException("operations.database_heartbeat_interval_ms must be in [1000,3600000]");
         }
         queuePollIntervalMs = pollIntervalMs;
+        queueFrequencyTicks = configuredQueueFrequencyTicks;
         maxBatchSize = configuredMaxBatchSize;
         databaseHeartbeatIntervalMs = configuredDatabaseHeartbeatIntervalMs;
         captureEnabled = configuredCaptureEnabled;
+    }
+
+    /** Retains source compatibility while using the production default flush cadence. */
+    public synchronized void configureOperations(int pollIntervalMs, int configuredMaxBatchSize,
+                                                 int configuredDatabaseHeartbeatIntervalMs,
+                                                 boolean configuredCaptureEnabled) {
+        configureOperations(pollIntervalMs, 20, configuredMaxBatchSize,
+                configuredDatabaseHeartbeatIntervalMs, configuredCaptureEnabled);
     }
 
     public int getQueuePollIntervalMs() {
@@ -409,6 +426,10 @@ public class InternalObservationService {
 
     public int getMaxBatchSize() {
         return maxBatchSize;
+    }
+
+    public int getQueueFrequencyTicks() {
+        return queueFrequencyTicks;
     }
 
     public int getDatabaseHeartbeatIntervalMs() {
@@ -456,6 +477,8 @@ public class InternalObservationService {
             flushQueues();
             queuedWorkSignals.drainPermits();
             queuedWorkSignalPending.set(false);
+            queueFlushDue.set(false);
+            serverTicksSinceFlush.set(0);
             if (interrupted) {
                 Thread.currentThread().interrupt();
             }
@@ -465,6 +488,8 @@ public class InternalObservationService {
         flushQueues();
         queuedWorkSignals.drainPermits();
         queuedWorkSignalPending.set(false);
+        queueFlushDue.set(false);
+        serverTicksSinceFlush.set(0);
     }
 
     public boolean submit(InternalObservation obs) {
@@ -590,6 +615,8 @@ public class InternalObservationService {
         totalDatabaseHeartbeatFailures.set(0);
         queuedWorkSignals.drainPermits();
         queuedWorkSignalPending.set(false);
+        queueFlushDue.set(false);
+        serverTicksSinceFlush.set(0);
         resetAuditRetryState();
         resetObservationRetryState();
     }
@@ -607,54 +634,57 @@ public class InternalObservationService {
                 if (queuedWorkSignals.tryAcquire(pollWaitMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                     queuedWorkSignalPending.set(false);
 
-                    queue.drainTo(obsBatch, maxBatchSize);
+                    if (queueFlushDue.getAndSet(false)) {
+                        queue.drainTo(obsBatch, maxBatchSize);
 
-                    List<InternalTransformation> transBatch = new ArrayList<>(maxBatchSize);
-                    transformationQueue.drainTo(transBatch, maxBatchSize);
+                        List<InternalTransformation> transBatch = new ArrayList<>(maxBatchSize);
+                        transformationQueue.drainTo(transBatch, maxBatchSize);
 
-                    List<InternalAuditEvent> auditBatch = new ArrayList<>(maxBatchSize);
-                    auditEventQueue.drainTo(auditBatch, maxBatchSize);
+                        List<InternalAuditEvent> auditBatch = new ArrayList<>(maxBatchSize);
+                        auditEventQueue.drainTo(auditBatch, maxBatchSize);
 
-                    if (!obsBatch.isEmpty()) {
-                        try {
-                            persistBatch(obsBatch);
-                            resetObservationRetryState();
-                            totalPersisted.addAndGet(obsBatch.size());
-                        } catch (Exception failure) {
-                            requeueObservationBatch(obsBatch, failure);
+                        if (!obsBatch.isEmpty()) {
+                            try {
+                                persistBatch(obsBatch);
+                                resetObservationRetryState();
+                                totalPersisted.addAndGet(obsBatch.size());
+                            } catch (Exception failure) {
+                                requeueObservationBatch(obsBatch, failure);
+                            }
+                            obsBatch.clear();
                         }
-                        obsBatch.clear();
-                    }
 
-                    if (!transBatch.isEmpty()) {
-                        try {
-                            persistTransformations(transBatch);
-                            resetTransformationRetryState();
-                            totalTransformations.addAndGet(transBatch.size());
-                            totalPersisted.addAndGet(transBatch.size());
-                            pendingTransformations.addAndGet(-transBatch.size());
-                        } catch (Exception failure) {
-                            requeueTransformationBatch(transBatch, failure);
-                        } finally {
-                            transBatch.clear();
+                        if (!transBatch.isEmpty()) {
+                            try {
+                                persistTransformations(transBatch);
+                                resetTransformationRetryState();
+                                totalTransformations.addAndGet(transBatch.size());
+                                totalPersisted.addAndGet(transBatch.size());
+                                pendingTransformations.addAndGet(-transBatch.size());
+                            } catch (Exception failure) {
+                                requeueTransformationBatch(transBatch, failure);
+                            } finally {
+                                transBatch.clear();
+                            }
                         }
-                    }
 
-                    if (!auditBatch.isEmpty()) {
-                        try {
-                            persistAuditEvents(auditBatch);
-                            resetAuditRetryState();
-                            totalAuditEvents.addAndGet(auditBatch.size());
-                            totalPersisted.addAndGet(auditBatch.size());
-                        } catch (Exception e) {
-                            requeueAuditBatch(auditBatch, e);
+                        if (!auditBatch.isEmpty()) {
+                            try {
+                                persistAuditEvents(auditBatch);
+                                resetAuditRetryState();
+                                totalAuditEvents.addAndGet(auditBatch.size());
+                                totalPersisted.addAndGet(auditBatch.size());
+                            } catch (Exception e) {
+                                requeueAuditBatch(auditBatch, e);
+                            }
                         }
-                    }
 
-                    // A pass is intentionally bounded per queue. Keep the worker running
-                    // immediately while any bounded queue still has a backlog.
-                    if (!queue.isEmpty() || !transformationQueue.isEmpty() || !auditEventQueue.isEmpty()) {
-                        signalQueuedWork();
+                        // A pass is intentionally bounded per queue. Keep the worker running
+                        // immediately while any bounded queue still has a backlog.
+                        if (!queue.isEmpty() || !transformationQueue.isEmpty() || !auditEventQueue.isEmpty()) {
+                            queueFlushDue.set(true);
+                            signalQueuedWork();
+                        }
                     }
                 }
 
@@ -669,6 +699,23 @@ public class InternalObservationService {
             } catch (Exception e) {
                 LOGGER.error("Error persisting internal observations/transformations batch", e);
             }
+        }
+    }
+
+    /**
+     * Called once from each loader's server-end-tick callback. Queue producers only
+     * wake this worker; database batches are released on the configured server-tick
+     * cadence, matching GriefLogger's queueFrequency control without doing JDBC work
+     * on the server thread.
+     */
+    public void onServerTick() {
+        if (!running.get()) {
+            return;
+        }
+        if (serverTicksSinceFlush.incrementAndGet() >= queueFrequencyTicks) {
+            serverTicksSinceFlush.set(0);
+            queueFlushDue.set(true);
+            signalQueuedWork();
         }
     }
 

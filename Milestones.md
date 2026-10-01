@@ -172,10 +172,12 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   PR #106 adds server packet-handler-to-ledger coverage. The embedded mock-player
   tests do not prove connected-client transport or rendered output. The published
   vanilla-client command replay and residual error/output evidence remain open
-  under #24. Issues #27, #30, #75, and #76 are closed; only #24 and #31 remain
-  open in M8. PR #93 merged the `m8.8.0` registry and exact `1.2.10-1.21.1`
-  action-writer matrix for all 18 source actions; the current registry and runtime
-  matrix in `docs/GRIEFLOGGER_PARITY.md` record the exact current boundary.
+  under #24. Issues #27, #75, and #76 are closed; #24, #30, and #31 remain open
+  in M8. Issue #30 was reopened because queue and network-heartbeat evidence had
+  not met its original acceptance contract. PR #93 merged the `m8.8.0` registry and
+  exact `1.2.10-1.21.1` action-writer matrix for all 18 source actions; the
+  current registry and runtime matrix in `docs/GRIEFLOGGER_PARITY.md` record the
+  exact current boundary.
   Issue #26 is closed, but its visible-client click matrix remains unverified
   because the maintainer explicitly asked to skip live clicks; do not count that
   client evidence as observed in #24 or #31.
@@ -199,21 +201,28 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   and boolean settings, removes the unused `debug_logging` option, and adds an
   isolated unsupported-backend startup probe. Network logs and connection
   failures omit endpoints and raw JDBC exception text. All five startup probes passed.
-  The GitHub issue #30 was closed by the maintainer on 2026-10-01; malformed
-  non-numeric combinations and GriefLogger queue-cadence differential evidence
-  are still not documented as verified, so the closure is not evidence that the
-  full acceptance criteria passed.
+  Issue #30 is reopened and assigned to the maintainer for its remaining queue
+  cadence acceptance. This slice maps GriefLogger's default 20 tick flush cadence
+  and 1–100 range to `ingestion.queue_frequency_ticks` on both loaders. The local
+  NeoForge load GameTest records up to 8,000 accepted events, queue peak, drops,
+  durable rows, total enqueue time, and the largest per-tick producer batch. Hosted
+  CI also supplies disposable MySQL 8.0 and MariaDB 10.11 services to the live
+  heartbeat integration tests. Raw evidence remains immutable and indefinite per
+  the maintainer decision; no purge or archive deletion is added. Fresh isolated
+  local NeoForge (8,000 rows, 0 drops, empty queue) and Fabric (32 rows, 0 drops)
+  end-tick probes pass; both loaders' CI results for this branch remain pending.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
   #24–#28, #30–#31, #43, #54, #75, and #76. Issue #29 is delivered in PR #79, including
   SQLite/MariaDB/MySQL storage and configurable optional indexes. The current
-  registry is `m8.8.0`; all 18 source action IDs and exact-release writer statuses
+  registry is `m8.10.0`; all 18 source action IDs and exact-release writer statuses
   are recorded, with no action rows left `unresolved`. Three configuration
-  mappings remain unresolved. `INTERACT_ENTITY` and Ender actions 9 and 10 are
+  authority differences are explicit in the registry; `INTERACT_ENTITY` and Ender
+  actions 9 and 10 are
   `unsupported-no-writer` for the exact release, and ItemGraph's entity and
   session net-delta rows are labeled as independent extensions. Query page size
   is now configurable; server-side mode is a true-only invariant, raw evidence
-  retention is indefinite, and queue/hello cadence still needs staging evidence.
+  retention is indefinite, and queue flush cadence is tick-configurable.
   Issue #27 is decomposed into #73 (projectile outcomes),
   #74 (block interaction outcomes), #75 (entity interaction outcomes, completed
   in PR #86), and #76 (Ender action writer determination). Compatibility artifacts remain supported

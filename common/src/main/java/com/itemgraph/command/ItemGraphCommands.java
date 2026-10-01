@@ -1291,6 +1291,7 @@ public final class ItemGraphCommands {
                     "[ItemGraph] internal queue: size=" + internalObs.getQueueSize()
                             + " capacityPerQueue=10000"
                             + " idlePollMs=" + internalObs.getQueuePollIntervalMs()
+                            + " flushEveryTicks=" + internalObs.getQueueFrequencyTicks()
                             + " maxBatchSize=" + internalObs.getMaxBatchSize()
                             + " networkHeartbeatMs=" + internalObs.getDatabaseHeartbeatIntervalMs()
                             + " networkHeartbeats=" + internalObs.getTotalDatabaseHeartbeats()

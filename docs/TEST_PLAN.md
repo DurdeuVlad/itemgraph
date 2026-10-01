@@ -36,19 +36,25 @@ Never use production as the primary test environment.
 
 ## Native queue wakeup and isolated NeoForge load check (2026-10-01)
 
-- `InternalObservationServiceTest.auditQueueSignalWakesWorkerWithoutWaitingForIdleObservationPoll`
-  configures a 2,000 ms idle poll, queues only one native audit event, and requires
-  the worker to persist it durably within 500 ms. This catches regressions where
-  the worker blocks on the item-observation queue while another queue has work.
+- `InternalObservationServiceTest.auditQueueWakeDoesNotPersistBeforeConfiguredServerTickCadence`
+  verifies producer wakeups do not bypass the configured flush cadence: with a
+  two-tick test cadence, the row stays absent after tick 1 and persists after
+  tick 2. `ItemGraphOperationalSettingsTest.legacyOperationsOverloadRetainsTheTwentyTickDefault`
+  verifies the compatibility overload retains the production default.
 - `OperationalLoadGameTests.nativeAuditQueueBurstPersistsOnWorkerWithoutBlockingServerThread`
   runs on a fresh local NeoForge 21.1.248 / Minecraft 1.21.1 GameTest server with
   ItemGraph 0.3.2 and no GriefLogger. It queues 8,000 native audit events in 20
   server-thread batches of 400, checks every batch remains below 50 ms, then
   allows 20 seconds of wall-clock worker time before checking counters and the
-  SQLite ledger. The 2026-10-01 run accepted and durably persisted all 8,000,
-  dropped 0, ended with 0 queued records, measured 42.7432 ms total enqueue time,
-  and measured 6.5712 ms for the slowest server-thread batch. Peak queue depth
-  was 6,624 of 10,000 audit queue slots.
+  SQLite ledger. The latest 2026-10-01 run logged a 20-tick flush cadence,
+  accepted and durably persisted all 8,000, dropped 0, ended with 0 queued
+  records, measured 47.234698 ms total enqueue time, and measured 7.694 ms for
+  the slowest server-thread batch. Peak queue depth was 6,815 of 10,000 audit
+  queue slots. All three NeoForge GameTests passed.
+- Fabric's `OperationalQueueGameTests.endServerTickFlushPersistsAcceptedAuditEvents`
+  waits one configured cadence plus five ticks, confirms the Fabric end-tick
+  callback ran, and checks 32 matching durable rows and zero drops. All three
+  registered Fabric GameTests passed locally.
 - The same temporary game directory was restarted against the same SQLite
   database. NeoForge reopened schema version 20, persisted the next 8,000 events
   with 0 drops and an empty queue, and a read-only SQLite check found exactly
@@ -58,9 +64,9 @@ Never use production as the primary test environment.
   tasks exclude the GameTest package. It writes uniquely numbered probe rows to
   the isolated temporary SQLite database so a second server start can verify
   persistence without clearing or modifying prior evidence.
-- This is controlled server-thread queue load, not a realistic player-action
-  replay or a GriefLogger comparison. It does not establish a universal tick
-  budget or validate the MySQL/MariaDB heartbeat against a live endpoint.
+- These are controlled server-thread queue checks, not a realistic player-action
+  replay or a GriefLogger throughput comparison. They do not establish a
+  universal tick budget. The disposable MySQL/MariaDB heartbeat checks run in CI.
 
 ## Operational config lifecycle matrix (2026-10-01)
 
@@ -436,7 +442,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
 | `ItemGraphConfigTest` | default values, config paths and metadata, strict NeoForge type/range rejection, and NightConfig default correction without clamping invalid supplied values (8 tests) |
-| `ItemGraphOperationalSettingsTest`, `FabricItemGraphConfigTest`, `QueryLimitsTest`, `TraceQueryServiceTest.configuredPageCapConstrainsSqlBackedTracePages` | fail-closed operational bounds and policies, both-loader defaults/custom values, Fabric config re-read creates the next startup snapshot, NeoForge worker guard against live setting changes and application after worker stop, atomic rejection without changing the query cap, capture controls, query cap on command and SQL-backed GUI pages, queue poll/batch/heartbeat settings, and retention invariants |
+| `ItemGraphOperationalSettingsTest`, `ItemGraphConfigTest`, `FabricItemGraphConfigTest`, `QueryLimitsTest`, `TraceQueryServiceTest.configuredPageCapConstrainsSqlBackedTracePages` | fail-closed operational bounds and policies, both-loader defaults/custom values, Fabric config re-read creates the next startup snapshot, NeoForge worker guard against live setting changes and application after worker stop, atomic rejection without changing the query cap, capture controls, query cap on command and SQL-backed GUI pages, queue idle poll/batch/flush-tick/heartbeat settings, and retention invariants |
 | `FabricItemGraphPageDispatchTest` | executed `/ig page` and `/itemgraph page` failures for missing, malformed, and expired explicit sessions; expired-session owner-map cleanup; cross-player token denial without invalidating the owner's session; and permission-level-2 enforcement on both roots |
 | `LegacyObservationArchiveTest`, `InternalObservationServiceTest.failedTransformationBatchIsRetainedAndShutdownLossIsCounted` | V3–V5 preserve legacy raw observation payloads before active-projection resets; transformation retries remain bounded and shutdown loss is counted |
 | `ItemGraphStatusSecurityTest` | `/ig status` reports SQLite or MySQL/MariaDB backend and schema while redacting database paths, raw driver errors, and sentinel network host/database/user/password values |

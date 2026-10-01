@@ -74,13 +74,14 @@ public final class OperationalLoadGameTests {
                             "Issue #30 local NeoForge probe: loader=NeoForge 21.1.248 mc=1.21.1 "
                                     + "grieflogger=false accepted={} batches={} batchSize={} "
                                     + "totalEnqueueMs={} maxServerThreadBatchMs={} peakQueue={} "
-                                    + "queueCapacityPerType=10000 idlePollMs={} maxBatchSize={}",
+                                    + "queueCapacityPerType=10000 flushEveryTicks={} idlePollMs={} maxBatchSize={}",
                             EVENT_COUNT,
                             BATCH_COUNT,
                             EVENTS_PER_BATCH,
                             acceptedDurationNanos[0] / 1_000_000.0,
                             maxBatchDurationNanos[0] / 1_000_000.0,
                             peakQueueSize[0],
+                            observations.getQueueFrequencyTicks(),
                             observations.getQueuePollIntervalMs(),
                             observations.getMaxBatchSize());
                 }
