@@ -1,6 +1,7 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.command.ItemGraphCommands;
+import com.itemgraph.command.InspectionService;
 import com.itemgraph.query.AuditLookupFilters;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.ParseResults;
@@ -12,11 +13,15 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -34,6 +40,8 @@ import static org.mockito.Mockito.when;
  * GriefLogger-compatible lookup, paging, inspection, and suggestions.
  */
 class FabricItemGraphCommandsParityTest {
+    private final InspectionService inspectionService = InspectionService.getInstance();
+
     @BeforeAll
     static void bootstrapMinecraftRegistries() {
         SharedConstants.tryDetectVersion();
@@ -42,6 +50,58 @@ class FabricItemGraphCommandsParityTest {
         } catch (Throwable ignored) {
             // The shared registries may already be bootstrapped by another test.
         }
+    }
+
+    @AfterEach
+    void clearInspectionState() {
+        inspectionService.clear();
+    }
+
+    @Test
+    void inspectCommandExecutesBothRootsWithDeterministicStateAndMessagesOnFabric() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        UUID playerUuid = UUID.randomUUID();
+        CommandSourceStack source = sourceForPlayer(playerUuid);
+        List<String> messages = captureSuccesses(source);
+
+        assertEquals(1, dispatcher.execute("itemgraph inspect", source));
+        assertTrue(inspectionService.isEnabled(playerUuid));
+        assertEquals(1, dispatcher.execute("ig inspect status", source));
+        assertTrue(inspectionService.isEnabled(playerUuid), "status must not change inspection mode");
+        assertEquals(1, dispatcher.execute("ig inspect on", source));
+        assertTrue(inspectionService.isEnabled(playerUuid));
+        assertEquals(1, dispatcher.execute("itemgraph inspect off", source));
+        assertFalse(inspectionService.isEnabled(playerUuid));
+        assertEquals(1, dispatcher.execute("ig inspect off", source));
+        assertFalse(inspectionService.isEnabled(playerUuid));
+        assertEquals(1, dispatcher.execute("ig inspect", source));
+        assertTrue(inspectionService.isEnabled(playerUuid));
+        assertEquals(1, dispatcher.execute("itemgraph inspect", source));
+        assertFalse(inspectionService.isEnabled(playerUuid));
+
+        assertEquals(List.of(
+                "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable.",
+                "[ItemGraph] Inspection is enabled.",
+                "[ItemGraph] Inspection is already enabled.",
+                "[ItemGraph] Inspection disabled.",
+                "[ItemGraph] Inspection is already disabled.",
+                "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable.",
+                "[ItemGraph] Inspection disabled."), messages);
+    }
+
+    @Test
+    void inspectCommandRejectsPermissionLevelBelowTwoOnFabric() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        UUID playerUuid = UUID.randomUUID();
+        CommandSourceStack denied = sourceForPlayer(playerUuid);
+        when(denied.hasPermission(2)).thenReturn(false);
+        List<String> messages = captureSuccesses(denied);
+
+        assertThrows(com.mojang.brigadier.exceptions.CommandSyntaxException.class,
+                () -> dispatcher.execute("itemgraph inspect on", denied));
+        assertFalse(inspectionService.isEnabled(playerUuid));
+        assertTrue(messages.isEmpty(), "a denied inspect command must not emit a success receipt");
+        verify(denied, never()).sendFailure(any());
     }
 
     @Test
@@ -227,6 +287,25 @@ class FabricItemGraphCommandsParityTest {
         when(source.getOnlinePlayerNames()).thenReturn(List.of("Alex", "Steve"));
         when(source.levels()).thenReturn(Set.of(Level.OVERWORLD));
         return source;
+    }
+
+    private static CommandSourceStack sourceForPlayer(UUID playerUuid) {
+        ServerPlayer player = mock(ServerPlayer.class);
+        when(player.getUUID()).thenReturn(playerUuid);
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        when(source.hasPermission(2)).thenReturn(true);
+        when(source.getEntity()).thenReturn(player);
+        return source;
+    }
+
+    private static List<String> captureSuccesses(CommandSourceStack source) {
+        List<String> messages = new ArrayList<>();
+        doAnswer(invocation -> {
+            Supplier<Component> message = invocation.getArgument(0);
+            messages.add(message.get().getString());
+            return null;
+        }).when(source).sendSuccess(any(), anyBoolean());
+        return messages;
     }
 
     private static void assertParsedCompletely(ParseResults<CommandSourceStack> parsed,

@@ -8,6 +8,13 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #24 Fabric inspector command execution:** `FabricItemGraphCommandsParityTest`
+  now executes both command roots through enabled, already-enabled, status,
+  disabled, already-disabled, and toggle-back states, asserting the per-player
+  state and exact chat receipts. Permission-denied execution emits no success
+  receipt and does not enable inspection. This is dispatcher-level coverage;
+  it does not replace the pending vanilla-client command replay. Mod version
+  remains 0.3.2; no distributable jar is built.
 - **Issue #27 action registry and exact-release writer matrix:** registry
   `m8.8.0` now records the pinned source enum and ID for all 18 GriefLogger
   actions plus the exact `1.2.10-1.21.1` writer result. CI rejects malformed
