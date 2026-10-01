@@ -89,16 +89,16 @@ Never use production as the primary test environment.
 ## NeoForge invalid server-config startup check (2026-10-01)
 
 - `python tools/test_neoforge_invalid_config_startup.py` creates a fresh
-  temporary NeoForge GameTest directory with
-  `config/itemgraph-server.toml` setting `query.max_page_size=101`.
-- The check requires the exact `query.max_page_size must be in [1,100]` startup
-  error, a failed GameTest server task, and absence of the ItemGraph database
-  initialized message. The Windows Gradle batch launcher returned process code
-  0 despite logging `BUILD FAILED`, so the check validates task output and the
-  pre-database failure point rather than relying on that wrapper exit code.
-- The 2026-10-01 isolated run met those conditions. This verifies a real
-  NeoForge config-load-to-server-start path for an invalid query cap; the shared
-  operational-settings tests cover the other documented bounds.
+  separate temporary NeoForge GameTest directories for
+  `query.max_page_size=101` and `general.database_port=0`.
+- Both checks require the exact key and invalid value in the startup exception,
+  a failed GameTest server task, no ItemGraph database initialization, and the
+  original TOML value still present after NeoForge config loading. This catches
+  the prior behavior where NeoForge rewrote `database_port=0` to `1`.
+- The 2026-10-01 isolated run met those conditions for both values. The Windows
+  Gradle batch launcher returned process code 0 despite logging `BUILD FAILED`,
+  so the script validates task output and the pre-database failure point rather
+  than relying on that wrapper exit code.
 
 ## Compatibility profile gate
 
@@ -421,7 +421,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, 2,000-record worker persistence, shutdown flush and failure accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
 | `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
-| `ItemGraphConfigTest` | default values, config paths, range constraints, and NightConfig correction/clamping (5 tests) |
+| `ItemGraphConfigTest` | default values, config paths and metadata, strict NeoForge type/range rejection, and NightConfig default correction without clamping invalid supplied values (8 tests) |
 | `ItemGraphOperationalSettingsTest`, `FabricItemGraphConfigTest`, `QueryLimitsTest`, `TraceQueryServiceTest.configuredPageCapConstrainsSqlBackedTracePages` | fail-closed operational bounds and policies, both-loader defaults/custom values, Fabric config re-read creates the next startup snapshot, NeoForge worker guard against live setting changes and application after worker stop, atomic rejection without changing the query cap, capture controls, query cap on command and SQL-backed GUI pages, queue poll/batch/heartbeat settings, and retention invariants |
 | `FabricItemGraphPageDispatchTest` | executed `/ig page` and `/itemgraph page` failures for missing, malformed, and expired explicit sessions; expired-session owner-map cleanup; cross-player token denial without invalidating the owner's session; and permission-level-2 enforcement on both roots |
 | `LegacyObservationArchiveTest`, `InternalObservationServiceTest.failedTransformationBatchIsRetainedAndShutdownLossIsCounted` | V3–V5 preserve legacy raw observation payloads before active-projection resets; transformation retries remain bounded and shutdown loss is counted |

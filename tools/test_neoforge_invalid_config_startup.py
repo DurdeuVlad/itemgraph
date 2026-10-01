@@ -11,20 +11,22 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_ERROR = "query.max_page_size must be in [1,100]"
+PROBES = (
+    ("query.max_page_size", "[query]\nmax_page_size = 101\n",
+     "query.max_page_size must be between 1 and 100, got: 101"),
+    ("general.database_port", "[general]\ndatabase_port = 0\n",
+     "general.database_port must be between 1 and 65535, got: 0"),
+)
 
 
-def main() -> int:
-    run_dir = Path(tempfile.mkdtemp(prefix="itemgraph-invalid-neoforge-config-"))
+def run_probe(name: str, toml: str, expected_error: str) -> bool:
+    run_dir = Path(tempfile.mkdtemp(prefix=f"itemgraph-invalid-neoforge-{name}-"))
     config_dir = run_dir / "config"
     config_dir.mkdir()
 
     # This is a fresh isolated GameTest directory. It contains no player data
     # or existing ItemGraph database; the generated files are left for inspection.
-    (config_dir / "itemgraph-server.toml").write_text(
-        "[query]\nmax_page_size = 101\n",
-        encoding="utf-8",
-    )
+    (config_dir / "itemgraph-server.toml").write_text(toml, encoding="utf-8")
     init_script = run_dir / "itemgraph-invalid-config.init.gradle"
     init_script.write_text(
         """gradle.projectsEvaluated {
@@ -67,13 +69,14 @@ def main() -> int:
             print(str(failure.stdout)[-12_000:], file=sys.stderr)
         if failure.stderr:
             print(str(failure.stderr)[-12_000:], file=sys.stderr)
-        return 1
+        return False
 
     output = result.stdout + "\n" + result.stderr
     checks = {
-        "precise validation error": EXPECTED_ERROR in output,
+        "precise validation error": expected_error in output,
         "failed GameTest server launch": "BUILD FAILED" in output,
         "database startup was not reached": "ItemGraph database initialized successfully" not in output,
+        "invalid TOML value was not rewritten": (config_dir / "itemgraph-server.toml").read_text(encoding="utf-8") == toml,
     }
     failed = [label for label, passed in checks.items() if not passed]
 
@@ -81,11 +84,19 @@ def main() -> int:
         print("NeoForge invalid-config startup check failed: " + ", ".join(failed), file=sys.stderr)
         print(f"Isolated run directory: {run_dir}", file=sys.stderr)
         print(output[-12_000:], file=sys.stderr)
-        return 1
+        return False
 
-    print(f"NeoForge rejected max_page_size=101 before database startup: {EXPECTED_ERROR}")
+    print(f"NeoForge rejected {name} before database startup: {expected_error}")
     print(f"Gradle process exit code: {result.returncode}; BUILD FAILED and the validation error are required above.")
     print(f"Isolated run directory retained for inspection: {run_dir}")
+    return True
+
+
+def main() -> int:
+    failed = [name for name, toml, expected_error in PROBES if not run_probe(name, toml, expected_error)]
+    if failed:
+        print("NeoForge invalid-config startup probes failed: " + ", ".join(failed), file=sys.stderr)
+        return 1
     return 0
 
 

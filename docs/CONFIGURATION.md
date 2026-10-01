@@ -4,8 +4,9 @@ All ItemGraph settings are read while the server starts. Restart the server afte
 editing either the NeoForge server config or Fabric's
 `config/itemgraph.properties`; `/reload` does not reload ItemGraph settings.
 Invalid ItemGraph operational settings fail server startup with the key and
-accepted value or range in the error. ModLoader validation may normalize
-out-of-range legacy database and correlation values before ItemGraph reads them.
+accepted value or range in the error. NeoForge validates the original TOML
+value and fails startup on invalid types or ranges; it does not clamp invalid
+database or correlation settings into a different accepted value.
 
 ## Common storage and capture settings
 
