@@ -172,16 +172,17 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   PR #106 adds server packet-handler-to-ledger coverage. The embedded mock-player
   tests do not prove connected-client transport or rendered output. The published
   vanilla-client command replay and residual error/output evidence remain open
-  under #24. Issues #27, #75, and #76 are closed; #24, #30, and #31 remain open
-  in M8. Issue #30 was reopened because queue and network-heartbeat evidence had
-  not met its original acceptance contract. PR #93 merged the `m8.8.0` registry and
+  under #24. Issues #27, #30, #75, and #76 are closed; #24 and #31 remain open in M8.
+  Issue #30 was reopened because its queue-cadence evidence was incomplete, then
+  closed after PR #108 added both-loader cadence coverage and the
+  maintainer-selected local load evidence. PR #93 merged the `m8.8.0` registry and
   exact `1.2.10-1.21.1` action-writer matrix for all 18 source actions; the
   current registry and runtime matrix in `docs/GRIEFLOGGER_PARITY.md` record the
   exact current boundary.
   Issue #26 is closed, but its visible-client click matrix remains unverified
   because the maintainer explicitly asked to skip live clicks; do not count that
   client evidence as observed in #24 or #31.
-- Issue #30 progress: PR #95 merged the config-application ordering fix and added
+- Issue #30 completion: PR #95 merged the config-application ordering fix and added
   MySQL plus MariaDB worker-heartbeat CI coverage. A local loopback-only runtime
   matrix on NeoForge 21.1.248 and Fabric Loader 0.16.9 confirmed representative
   startup-snapshot behavior: `/reload` kept the original queue/capture controls,
@@ -196,21 +197,24 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   for all seven settings, including database ranges ignored by SQLite. Both
   loaders now reject blank ItemGraph and GriefLogger database paths by their
   exact config keys; isolated NeoForge startup probes verify these errors happen
-  before database initialization and leave the invalid values unchanged. This
-  branch extends exact-key errors to network database values and Fabric backend
-  and boolean settings, removes the unused `debug_logging` option, and adds an
-  isolated unsupported-backend startup probe. Network logs and connection
-  failures omit endpoints and raw JDBC exception text. All five startup probes passed.
-  Issue #30 is reopened and assigned to the maintainer for its remaining queue
-  cadence acceptance. This slice maps GriefLogger's default 20 tick flush cadence
-  and 1–100 range to `ingestion.queue_frequency_ticks` on both loaders. The local
+  before database initialization and leave the invalid values unchanged. The
+  merged config-validation work extends exact-key errors to network database
+  values and Fabric backend and boolean settings, removes the unused
+  `debug_logging` option, and adds an isolated unsupported-backend startup probe.
+  Network logs and connection failures omit endpoints and raw JDBC exception
+  text. All five startup probes passed.
+  PR #108 closes the remaining queue-cadence acceptance: it maps GriefLogger's
+  default 20 tick flush cadence and 1–100 range to
+  `ingestion.queue_frequency_ticks` on both loaders. The local
   NeoForge load GameTest records up to 8,000 accepted events, queue peak, drops,
-  durable rows, total enqueue time, and the largest per-tick producer batch. Hosted
-  CI also supplies disposable MySQL 8.0 and MariaDB 10.11 services to the live
-  heartbeat integration tests. Raw evidence remains immutable and indefinite per
+  durable rows, total enqueue time, and the largest per-tick producer batch.
+  Hosted CI also supplies disposable MySQL 8.0 and MariaDB 10.11 services to the
+  live heartbeat integration tests. Raw evidence remains immutable and indefinite per
   the maintainer decision; no purge or archive deletion is added. Fresh isolated
   local NeoForge (8,000 rows, 0 drops, empty queue) and Fabric (32 rows, 0 drops)
-  end-tick probes pass; both loaders' CI results for this branch remain pending.
+  end-tick probes pass. PR #108 CI run 36860071874 passed both loader suites, the
+  profile/release fixture checks, and the NeoForge invalid-config startup probe. No
+  version bump or distributable artifact build was performed.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
   #24–#28, #30–#31, #43, #54, #75, and #76. Issue #29 is delivered in PR #79, including

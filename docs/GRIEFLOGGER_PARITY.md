@@ -231,12 +231,20 @@ parity. The required connected vanilla-client replay remains open under #24.
 `pageSessionTokensAreIsolatedByPlayerAndExplicitlyClearable` and
 `lookupPageSessionCannotBeResolvedByAnotherPlayerAndCanBeCleared` verify a
 copied token cannot expose one player's page to another level-2 player and that
-the shared cleanup helper invalidates the owner's token. Both loader disconnect
-callbacks call that helper (`NativeAuditEventListener.onPlayerLoggedOut` and the
-`ServerPlayConnectionEvents.DISCONNECT` callback in
-`FabricNativeAuditEventListener.register`); callback execution itself is source-
-inspected, not directly exercised by these page-session tests. The output
-continues to label evidence source/type and retain evidence IDs; ItemGraph-only
+the shared cleanup helper invalidates the owner's token. The
+`NativeAuditEventListener.onPlayerLoggedOut` handler clears the NeoForge page
+token and records `PLAYER_QUIT`; NeoForge inspection cleanup is handled by
+`InspectionListener`. Fabric's
+`FabricNativeAuditEventListener.onDisconnect` clears that player's page token
+and inspection mode, records `PLAYER_QUIT`, and closes its container session.
+`NativeAuditEventListenerTest.playerLogoutClearsItsPageSessionAndRecordsQuit`
+and
+`FabricNativeAuditEventListenerTest.disconnectHandlerClearsOnlyThatPlayersStateAndRecordsPlayerQuit`
+invoke those audit handlers directly. The Fabric inspection logout behavior is
+also covered by `InspectionListenerTest.logoutClearsOnlyThatPlayersInspectionMode`.
+The Fabric callback registration and NeoForge event-bus registration remain
+source-inspected; these tests do not simulate socket disconnect transport. The
+output continues to label evidence source/type and retain evidence IDs; ItemGraph-only
 output remains an explicit extension.
 
 Fabric `FabricItemGraphPageDispatchTest` also executes `/ig page` and

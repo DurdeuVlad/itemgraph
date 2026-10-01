@@ -143,12 +143,7 @@ public final class FabricNativeAuditEventListener {
             ServerPlayer player = handler.getPlayer();
             submit("PLAYER_JOIN", player, player.level(), player.blockPosition(), null, null);
         });
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-            ServerPlayer player = handler.getPlayer();
-            clearDisconnectState(player.getUUID());
-            submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
-            FabricContainerSessionListener.onMenuClosing(player);
-        });
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.getPlayer()));
         ServerMessageEvents.CHAT_MESSAGE.register(FabricNativeAuditEventListener::onChat);
         PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
@@ -197,6 +192,16 @@ public final class FabricNativeAuditEventListener {
                         BuiltInRegistries.ENTITY_TYPE.getKey(victim.getType()).toString(), null);
             }
         });
+    }
+
+    static void onDisconnect(ServerPlayer player) {
+        if (player == null) {
+            return;
+        }
+        UUID playerId = player.getUUID();
+        clearDisconnectState(playerId);
+        submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
+        FabricContainerSessionListener.onMenuClosing(player);
     }
 
     static void clearDisconnectState(UUID playerId) {

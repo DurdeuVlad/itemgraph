@@ -1,5 +1,6 @@
 package com.itemgraph.listener;
 
+import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.ingest.InternalObservationService;
 import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.StringReader;
@@ -22,6 +23,7 @@ import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.fml.loading.LoadingModList;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import com.mojang.authlib.GameProfile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
@@ -52,6 +54,32 @@ class NativeAuditEventListenerTest {
             Bootstrap.bootStrap();
         } catch (Throwable ignored) {
         }
+    }
+
+    @Test
+    void playerLogoutClearsItsPageSessionAndRecordsQuit() {
+        UUID disconnectedPlayerId = UUID.randomUUID();
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(player.getUUID()).thenReturn(disconnectedPlayerId);
+        when(player.getGameProfile()).thenReturn(new GameProfile(disconnectedPlayerId, "logout-test"));
+        when(player.level()).thenReturn(level);
+        when(player.blockPosition()).thenReturn(new BlockPos(4, 64, 2));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        InternalObservationService service = mock(InternalObservationService.class);
+
+        try (MockedStatic<InternalObservationService> services = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemGraphCommands> commands = mockStatic(ItemGraphCommands.class)) {
+            services.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onPlayerLoggedOut(new PlayerEvent.PlayerLoggedOutEvent(player));
+            commands.verify(() -> ItemGraphCommands.clearPageSession(disconnectedPlayerId));
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("PLAYER_QUIT", captured.getValue().eventType());
+        assertEquals(disconnectedPlayerId.toString(), captured.getValue().playerUuid());
     }
 
     @Test

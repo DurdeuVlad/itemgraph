@@ -6,6 +6,7 @@ import com.itemgraph.command.InspectionService;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.ingest.InternalObservationService;
+import com.mojang.authlib.GameProfile;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
@@ -75,6 +76,42 @@ class FabricNativeAuditEventListenerTest {
 
         assertFalse(inspections.isEnabled(loggedOutPlayer));
         assertTrue(inspections.isEnabled(otherPlayer));
+    }
+
+    @Test
+    void disconnectHandlerClearsOnlyThatPlayersStateAndRecordsPlayerQuit() {
+        UUID disconnectedPlayerId = UUID.randomUUID();
+        UUID otherPlayerId = UUID.randomUUID();
+        inspections.setEnabled(disconnectedPlayerId, true);
+        inspections.setEnabled(otherPlayerId, true);
+
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(player.getUUID()).thenReturn(disconnectedPlayerId);
+        when(player.getGameProfile()).thenReturn(new GameProfile(disconnectedPlayerId, "disconnect-test"));
+        when(player.level()).thenReturn(level);
+        when(player.blockPosition()).thenReturn(new BlockPos(4, 64, 2));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        InternalObservationService service = mock(InternalObservationService.class);
+
+        try (MockedStatic<InternalObservationService> services = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemGraphCommands> commands = mockStatic(ItemGraphCommands.class);
+             MockedStatic<FabricContainerSessionListener> containers =
+                     mockStatic(FabricContainerSessionListener.class)) {
+            services.when(InternalObservationService::getInstance).thenReturn(service);
+            FabricNativeAuditEventListener.onDisconnect(player);
+
+            commands.verify(() -> ItemGraphCommands.clearPageSession(disconnectedPlayerId));
+            containers.verify(() -> FabricContainerSessionListener.onMenuClosing(player));
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("PLAYER_QUIT", captured.getValue().eventType());
+        assertEquals(disconnectedPlayerId.toString(), captured.getValue().playerUuid());
+        assertFalse(inspections.isEnabled(disconnectedPlayerId));
+        assertTrue(inspections.isEnabled(otherPlayerId));
     }
 
     @Test
