@@ -217,7 +217,16 @@ Previous/Next commands tied to the same session.
 Fabric and NeoForge dispatcher tests execute both inspector roots and verify
 the toggle, explicit `on`/`off`, `status`, and permission denial. Fabric's
 dispatcher test also asserts the exact chat receipts. These checks do not
-replace the required vanilla-client command replay.
+replace the required vanilla-client command replay. Paired server GameTests
+also send `ServerboundChatCommandPacket` through each loader's actual
+`handleChatCommand` handler for `itemgraph inspect on`, `ig inspect status`,
+and `ig inspect off`. They verify permission level 2, player-scoped state
+transitions, exactly one persisted `COMMAND_ATTEMPT` per packet, player and
+timestamp fields, and unchanged JDBC value and Java type snapshots for every
+`ig_observations` cell. Their shared fixture reads ItemGraph's database only. These embedded
+mock-player tests establish handler-to-ledger behavior; they do not establish
+client socket transport, rendered command output, or GriefLogger differential
+parity. The required connected vanilla-client replay remains open under #24.
 `pageSessionTokensAreIsolatedByPlayerAndExplicitlyClearable` and
 `lookupPageSessionCannotBeResolvedByAnotherPlayerAndCanBeCleared` verify a
 copied token cannot expose one player's page to another level-2 player and that
