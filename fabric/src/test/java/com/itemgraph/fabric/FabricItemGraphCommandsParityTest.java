@@ -7,11 +7,13 @@ import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.suggestion.Suggestion;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Set;
@@ -20,7 +22,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -125,6 +131,11 @@ class FabricItemGraphCommandsParityTest {
         assertEquals(List.of("Alex"), parsed.playerNames());
         assertEquals(List.of("minecraft:diamond_ore"), parsed.includeSubjects());
         assertEquals(50.0, parsed.radiusBlocks());
+        AuditLookupFilters fiveFilters = AuditLookupFilters.parse(
+                "action.break_block user.Alex include.stone time.1h radius.50", 10_000_000L);
+        assertEquals(List.of("BREAK_BLOCK"), fiveFilters.eventTypes());
+        assertEquals(List.of("Alex"), fiveFilters.playerNames());
+        assertEquals(List.of("minecraft:stone"), fiveFilters.includeSubjects());
         assertEquals(List.of("PROJECTILE_SPAWN_ACCEPTED"),
                 AuditLookupFilters.parse("action.projectile_spawn_accepted radius.10", 10_000_000L)
                         .eventTypes());
@@ -141,6 +152,39 @@ class FabricItemGraphCommandsParityTest {
                 () -> AuditLookupFilters.parse("include.stone exclude.dirt radius.50", 10_000_000L),
                 "include and exclude are mutually exclusive");
     }
+
+    @Test
+    void malformedLookupFiltersReturnExactFailuresOnBothRootsAndFormsOnFabric() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        List<InvalidLookup> invalidLookups = List.of(
+                new InvalidLookup("action.break_block", "radius filter is required"),
+                new InvalidLookup("radius.", "invalid filter 'radius.'; use name.value"),
+                new InvalidLookup("radius.0", "radius must be a positive number"),
+                new InvalidLookup("who.Alex radius.10", "unknown filter 'who'"),
+                new InvalidLookup("action.break_block a.join radius.10", "filter 'action' may be used once"),
+                new InvalidLookup("include.stone exclude.dirt radius.10",
+                        "include and exclude filters cannot be combined"),
+                new InvalidLookup("action.break_block user.Alex include.stone time.1h radius.10 exclude.dirt",
+                        "at most 5 filters are allowed"));
+
+        for (String root : List.of("ig", "itemgraph")) {
+            for (String lookupPrefix : List.of(root + " lookup ", root + " lookup filters ")) {
+                for (InvalidLookup invalid : invalidLookups) {
+                    CommandSourceStack source = source();
+                    ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+
+                    assertEquals(0, dispatcher.execute(lookupPrefix + invalid.filters(), source),
+                            lookupPrefix + invalid.filters());
+                    verify(source).sendFailure(failure.capture());
+                    assertEquals("[ItemGraph] Invalid lookup filter: " + invalid.expectedDetail(),
+                            failure.getValue().getString(), lookupPrefix + invalid.filters());
+                    verify(source, never()).sendSuccess(any(), anyBoolean());
+                }
+            }
+        }
+    }
+
+    private record InvalidLookup(String filters, String expectedDetail) { }
 
     @Test
     void filterSuggestionsOfferPublishedValuesAndRespectUsedFilterLimitsOnFabric() {

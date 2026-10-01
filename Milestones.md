@@ -161,7 +161,13 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   residual command output/error semantics), #27 (aggregate native action
   acceptance), #30 (configuration and operations controls), and #31
   (differential proof). Issue
-  #24's shared command contract is implemented and covered by cross-loader tests;
+  #24's shared command contract is implemented and covered by cross-loader tests.
+  Exactly five valid filters parse on both loaders; exact invalid-filter
+  command failures execute under both roots and direct/`lookup filters` forms on
+  both loaders for missing radius, malformed/range-invalid values, unknown or
+  duplicate filters, include/exclude conflict, and the six-filter rejection.
+  The live vanilla-client command replay and remaining inspect/output evidence
+  are still unverified;
   #76 establishes the exact-release Ender action no-writer result while separately
   labeling ItemGraph session deltas. PR #93 merged the `m8.8.0` registry and
   exact `1.2.10-1.21.1` action writer matrix for all 18 source actions; #27
