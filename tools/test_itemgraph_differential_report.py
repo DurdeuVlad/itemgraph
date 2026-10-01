@@ -66,6 +66,7 @@ class DifferentialReportTests(unittest.TestCase):
             "occurred_at_ms": 1790870400000,
             "dimension": "minecraft:overworld",
             "position": {"x": 0, "y": 64, "z": 0},
+            "subject_id": None,
             "actor_ref": "actor:replay-alias-0",
             "source_table": "items",
             "source_action_id": 7,

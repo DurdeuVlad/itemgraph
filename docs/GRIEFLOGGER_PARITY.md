@@ -25,7 +25,7 @@ canonical action names, accepted GriefLogger spellings, compatibility status,
 evidence and quantity semantics, loader/storage support, lookup filters,
 permission and paging controls, inspector behavior, configuration controls, and
 the GitHub issue responsible for incomplete mappings.
-The current registry compatibility version is `m8.11.0`.
+The current registry compatibility version is `m8.12.0`.
 
 The registry version changes when a mapping, status, evidence or quantity
 meaning, loader, or backend contract changes. Documentation-only clarifications
@@ -410,9 +410,10 @@ checksummed historical database when an operator explicitly configures it.
 ### Differential report comparator foundation
 
 `tools/itemgraph_differential_report.py` defines normalized report schema
-version 4 for #31. The shared
-`ItemGraphReplayReportFixture` writes raw schema version 2 from the durable
-movement rows checked by the NeoForge and Fabric GameTests. CI normalizes and
+version 5 for #31. The shared
+`ItemGraphReplayReportFixture` writes raw schema version 3 with six durable
+movement rows and eight allowlisted audit rows checked by the NeoForge and
+Fabric GameTests. CI normalizes and
 validates each loader report, then uploads the redacted JSON as a workflow
 artifact. The normalizer labels the output `system=itemgraph` and
 `runtime_mode=native_only`; this native-only export does not claim a
@@ -448,16 +449,18 @@ invariant violation count to be zero and checks that `healthy` agrees with
 those counts. The comparison result retains the validated audit summary. This
 summary exports counts only and omits database row IDs and violation details.
 It covers the complete database attached to the isolated GameTest run, not just
-the six events in the replay report.
+the 14 events in the replay report.
 
 Each event has a unique scenario-local `event_key`, a unique integer `sequence`,
 and explicit normalized action, evidence class, quantity, item registry ID,
-Unix-millisecond timestamp, dimension, integer block position, replay-local
-actor reference, raw source table/action identity, separately normalized
+Unix-millisecond timestamp, dimension, integer block position, optional
+namespaced `subject_id` for the affected entity or block, replay-local actor
+reference, raw source table/action identity, separately normalized
 compatibility table/action identity, privacy class, and unresolved reason.
-ItemGraph raw identity remains `ig_observations` plus its native action string;
-the normalized compatibility action ID and table are explicit profile-derived
-fields and are never represented as the raw ItemGraph source identity. Actor
+ItemGraph raw identity remains its actual source table (`ig_observations` or
+`ig_audit_events`) plus the native action string; the normalized compatibility
+action ID and table are explicit profile-derived fields and are never
+represented as the raw ItemGraph source identity. Actor
 references must use an `actor:replay-<alias>` value;
 privacy classes are `replay_fixture_only` or `staging_restricted`, and
 unresolved reasons are stable uppercase codes. The output contains a digest of
@@ -505,15 +508,22 @@ class mismatch, or wrong native source table never inherits an action-level exce
 requires exact per-event quantities and rejects any whole-database allocation
 or integrity violation reported by `AuditService`.
 
-The GameTest export contains the six checked durable rows for chest deposit and
-withdrawal, ground drop and pickup, and projectile throw and shoot. It excludes
+The GameTest export contains 14 checked durable rows: six quantity observations
+for chest deposit and withdrawal, ground drop and pickup, and projectile throw
+and shoot; two block audit rows; three entity interaction attempts; two handled
+armor-stand results; and one unresolved inherited-method result. Audit rows
+retain only their namespaced `subject_id`, event identity, timestamp, dimension,
+relative position, and replay-local actor. They exclude raw audit detail and
+payloads. The export excludes
 database IDs, player UUIDs and names, raw payloads, and absolute world
 coordinates. Positions are block coordinates relative to the GameTest
-structure origin; actors use fixed replay aliases. Events are read in timestamp
-and persisted-row order, retaining row order when timestamps share one
-millisecond without exporting row IDs. CI requires the fixed scenario ID, seed,
-six event keys, and contiguous sequence, tests malformed inputs, and pins each
-report to its loader and source profile. It does not start
+structure origin; actors use fixed replay aliases. Events sort by persisted
+timestamp, source table, and source row ID; row IDs are not exported. This gives
+deterministic ordering when events share a millisecond across source tables. CI
+requires the fixed scenario ID, seed,
+14 event records with pinned per-action counts, unique event keys, and contiguous
+sequence, tests malformed inputs, and pins each report to its loader and source
+profile. The raw report schema is v3 and normalized report schema is v5. It does not start
 GriefLogger or compare its live database rows. A paired GriefLogger capture,
 issue-linked exception policy, the 24-hour native-only staging window, and
 rollback rehearsal remain open #31 acceptance criteria. The whole-database
