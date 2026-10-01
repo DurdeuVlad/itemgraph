@@ -1,5 +1,6 @@
 package com.itemgraph.fabric;
 
+import com.itemgraph.fabric.mixin.BucketItemAccessor;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.canon.CanonicalItem;
@@ -944,6 +945,36 @@ public final class FabricNativeAuditEventListener {
                 new InternalObservationService.InternalAuditEvent(
                         System.currentTimeMillis(), "PLACE_BLOCK", playerUuid, playerName, levelName,
                         pos.getX(), pos.getY(), pos.getZ(), blockId, null, null));
+    }
+
+    public static void recordBucketPickup(ServerPlayer player, net.minecraft.world.level.Level level,
+                                          BlockPos pos, net.minecraft.world.level.block.state.BlockState sourceState,
+                                          net.minecraft.world.item.ItemStack result) {
+        if (player == null || level == null || level.isClientSide || pos == null
+                || sourceState == null || sourceState.getFluidState().isEmpty()
+                || result == null || result.isEmpty()
+                || !(result.getItem() instanceof net.minecraft.world.item.BucketItem filledBucket)
+                || !(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        var content = ((BucketItemAccessor) filledBucket).itemgraph$getContent();
+        if (content.defaultFluidState().isEmpty()) {
+            return;
+        }
+        net.minecraft.world.level.block.state.BlockState fluidBlock =
+                content.defaultFluidState().createLegacyBlock();
+        if (fluidBlock.isAir()) {
+            return;
+        }
+        java.util.List<net.minecraft.core.BlockPos> targets = BlockInspectionTargets
+                .resolveBlockPositions(serverLevel, pos, fluidBlock);
+        java.util.List<AuditEventQueryService.ExactPosition> supersessionPositions = targets.stream()
+                .map(target -> new AuditEventQueryService.ExactPosition(
+                        target.getX(), target.getY(), target.getZ()))
+                .toList();
+        submit("BREAK_BLOCK", player, serverLevel, pos,
+                BuiltInRegistries.BLOCK.getKey(fluidBlock.getBlock()).toString(), null,
+                supersessionPositions);
     }
 
     private static void onChat(PlayerChatMessage message, ServerPlayer player, ChatType.Bound boundType) {

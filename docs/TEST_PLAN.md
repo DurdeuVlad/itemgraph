@@ -844,6 +844,16 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   no-writer reason.
 - These are source/binary mapping checks; they do not replace the full
   loader replay or the differential acceptance owned by #31.
+- The paired NeoForge and Fabric `EntityInteractionGameTests` also perform an
+  actual server-side water-bucket use against a source block. The shared
+  `BucketPickupConformanceFixture` requires one durable `BREAK_BLOCK` audit row
+  with `minecraft:water` at the source coordinates and verifies that no
+  non-projectile quantity observation was created for that test player. This
+  mirrors the pinned GriefLogger `MixinBucketItem` behavior without attributing
+  the water source or returned bucket as a quantity transfer. It also verifies
+  that an empty pickup result writes no row and that a mismatched water source
+  with a lava-bucket result records `minecraft:lava`, proving the item content
+  is the recorded fluid source for modded pickup results.
 - The paired NeoForge and Fabric `EntityInteractionGameTests` also exercise
   projectile capture through the real `Projectile.shootFromRotation` mixin and
   accepted-spawn `ServerLevel.addFreshEntity` hook. The shared

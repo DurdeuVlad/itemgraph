@@ -5,6 +5,7 @@ import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.query.AuditEventQueryService;
+import com.itemgraph.neoforge.mixin.BucketItemAccessor;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
@@ -13,7 +14,10 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.block.BucketPickup;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.CommandEvent;
@@ -88,6 +92,33 @@ public final class NativeAuditEventListener {
                 .toList();
         submit("BREAK_BLOCK", player, level, event.getPos(), blockId(event.getState()), null,
                 supersessionPositions);
+    }
+
+    /** Records a source fluid removed by a successful bucket pickup. */
+    public static void recordBucketPickup(ServerPlayer player, LevelAccessor level,
+                                          BlockPos pos, BlockState sourceState, ItemStack result) {
+        if (player == null || !(level instanceof Level actualLevel) || actualLevel.isClientSide
+                || pos == null
+                || sourceState == null || sourceState.getFluidState().isEmpty()
+                || result == null || result.isEmpty()
+                || !(result.getItem() instanceof net.minecraft.world.item.BucketItem filledBucket)
+                || !(actualLevel instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        var content = ((BucketItemAccessor) filledBucket).itemgraph$getContent();
+        if (content.defaultFluidState().isEmpty()) {
+            return;
+        }
+        BlockState fluidBlock = content.defaultFluidState().createLegacyBlock();
+        if (fluidBlock.isAir()) {
+            return;
+        }
+        List<AuditEventQueryService.ExactPosition> positions = BlockInspectionTargets
+                .resolveBlockPositions(serverLevel, pos, fluidBlock).stream()
+                .map(target -> new AuditEventQueryService.ExactPosition(
+                        target.getX(), target.getY(), target.getZ()))
+                .toList();
+        submit("BREAK_BLOCK", player, serverLevel, pos, blockId(fluidBlock), null, positions);
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)

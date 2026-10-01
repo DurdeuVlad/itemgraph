@@ -10,6 +10,8 @@
     "UseEntityCallbackInvokerMixin",
     "CommandsMixin",
     "ProjectileMixin",
+    "BucketItemMixin",
+    "BucketItemAccessor",
     "ServerLevelMixin",
     "BlockItemMixin",
     "ServerPlayerMixin",

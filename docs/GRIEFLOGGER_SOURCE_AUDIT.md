@@ -166,6 +166,12 @@ Important semantics and limits:
 - `ProjectileMixin` injects at `Projectile.shootFromRotation` HEAD and queues
   `THROW_ITEM` for `ThrowableItemProjectile` or `SHOOT_ITEM` for arrow-family
   projectiles before spawn acceptance is known ([pinned source](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/mixin/ProjectileMixin.java)).
+- The pinned `MixinBucketItem` records `BREAK_BLOCK` only after a bucket has
+  successfully picked up fluid. Its injected boundary receives the non-empty
+  filled-bucket stack and the original `BlockHitResult` position, then reports
+  the bucket's fluid as the removed block. ItemGraph implements this as
+  non-quantity block evidence on both loaders after `BucketPickup.pickupBlock`
+  returns a non-empty stack; it does not turn a fluid block into an item flow.
 - Projectile rows carry item data but no projectile entity UUID.
 - ItemGraph keeps the full attempt UUID in `raw_data` and stores a stable
   64-bit projection in the existing INTEGER `source_event_id` column, making
