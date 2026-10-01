@@ -223,10 +223,11 @@ Important semantics and limits:
 ## Configuration and execution
 
 The documented server configuration supports SQLite and MySQL/MariaDB, with
-`useIndexes`, `maxPageSize`, `queueFrequency`, `helloFrequency`, and JDBC connection
+`useIndexes`, `maxPageSize`, `queueFrequency` (default 20 ticks, range 1–100),
+`helloFrequency` (default 600 ticks, range 1–1000), and JDBC connection
 settings. Writes are queued from server ticks to worker threads and serialized under
 one database lock. The source does not implement a bounded queue or explicit
-backpressure limit. See [`GriefLoggerConfig.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/config/GriefLoggerConfig.java),
+backpressure limit. See [`GriefLoggerConfig.java`](https://raw.githubusercontent.com/DAQEM/GriefLogger/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/config/GriefLoggerConfig.java),
 [`Database.java`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/database/Database.java),
 and [official configuration](https://daqem.com/projects/grieflogger/wiki/getting-started/configuration).
 

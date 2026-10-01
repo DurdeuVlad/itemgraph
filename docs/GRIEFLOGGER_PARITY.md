@@ -25,7 +25,7 @@ canonical action names, accepted GriefLogger spellings, compatibility status,
 evidence and quantity semantics, loader/storage support, lookup filters,
 permission and paging controls, inspector behavior, configuration controls, and
 the GitHub issue responsible for incomplete mappings.
-The current registry compatibility version is `m8.9.0`.
+The current registry compatibility version is `m8.10.0`.
 
 The registry version changes when a mapping, status, evidence or quantity
 meaning, loader, or backend contract changes. Documentation-only clarifications
@@ -341,12 +341,23 @@ record those transfers.
 
 ItemGraph's query page cap defaults to ten rows and is operator-configurable in
 the range 1–100. Raw evidence is retained indefinitely and is never automatically
-purged. The [configuration reference](CONFIGURATION.md) records restart behavior
-and ItemGraph-specific queue idle-poll/batch limits; GriefLogger's queue and hello
-queue cadence mapping remains unresolved until staging load evidence establishes
-equivalent behavior. GriefLogger's 600-tick hello is a database keepalive; ItemGraph now
-maps that behavior to a configurable background JDBC ping for MySQL/MariaDB, but
-the mapping remains unresolved until a live network database check passes.
+purged. `ingestion.queue_frequency_ticks` defaults to 20, accepts the source
+range 1–100, and flushes on server end tick through a background worker; bounded
+SQL batch passes continue until the backlog drains. The isolated local NeoForge
+21.1.248 GameTest on Minecraft 1.21.1 persisted 8,000 queued audit events with
+zero drops, zero backlog, and 8,000 matching durable rows; its queue peak was
+6,815 of 10,000 entries, and its slowest 400-event producer batch took 7.694 ms
+against a 50 ms server-thread budget. The run logged `flushEveryTicks=20`, took
+47.235 ms total to enqueue all 8,000 events, and completed all three NeoForge
+GameTests. The isolated Fabric run used a 20-tick cadence and persisted all 32
+accepted queue events after the end-tick callback with zero drops; all three
+registered Fabric GameTests passed. CI runs the NeoForge and Fabric GameTest
+tasks on pull requests; its result for this branch is pending.
+`helloFrequency` defaults to 600 ticks
+(30,000 ms at 20 TPS); disposable MariaDB and MySQL CI services verify successful
+background JDBC heartbeats and reconnection after a closed connection. ItemGraph's
+`server_side_only=true` is an explicit invariant; false is unsupported and is
+classified as a strict ItemGraph extension to preserve vanilla-client support.
 
 ## Native-only cutover and retention plan
 

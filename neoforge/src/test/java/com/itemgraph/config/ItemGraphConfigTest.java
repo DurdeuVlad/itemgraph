@@ -27,6 +27,7 @@ class ItemGraphConfigTest {
         assertEquals(Boolean.TRUE, ItemGraphConfig.SERVER_SIDE_ONLY.getDefault());
         assertEquals("indefinite", ItemGraphConfig.RAW_EVIDENCE_RETENTION.getDefault());
         assertEquals(250, ItemGraphConfig.QUEUE_POLL_INTERVAL_MS.getDefault());
+        assertEquals(20, ItemGraphConfig.QUEUE_FREQUENCY_TICKS.getDefault());
         assertEquals(100, ItemGraphConfig.MAX_BATCH_SIZE.getDefault());
         assertEquals(Boolean.TRUE, ItemGraphConfig.CAPTURE_ENABLED.getDefault());
         assertEquals(300, ItemGraphConfig.DEFAULT_GROUND_BRIDGE_MAX_SECONDS);
@@ -44,6 +45,7 @@ class ItemGraphConfigTest {
         assertEquals(List.of("operations", "server_side_only"), ItemGraphConfig.SERVER_SIDE_ONLY.getPath());
         assertEquals(List.of("retention", "raw_evidence"), ItemGraphConfig.RAW_EVIDENCE_RETENTION.getPath());
         assertEquals(List.of("ingestion", "poll_interval_ms"), ItemGraphConfig.QUEUE_POLL_INTERVAL_MS.getPath());
+        assertEquals(List.of("ingestion", "queue_frequency_ticks"), ItemGraphConfig.QUEUE_FREQUENCY_TICKS.getPath());
         assertEquals(List.of("ingestion", "max_batch_size"), ItemGraphConfig.MAX_BATCH_SIZE.getPath());
         assertEquals(List.of("capture", "enabled"), ItemGraphConfig.CAPTURE_ENABLED.getPath());
     }
@@ -70,6 +72,7 @@ class ItemGraphConfigTest {
         assertAcceptedRange(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, 1, 86_400);
         assertAcceptedRange(ItemGraphConfig.MAX_PAGE_SIZE, 1, 100);
         assertAcceptedRange(ItemGraphConfig.QUEUE_POLL_INTERVAL_MS, 10, 5_000);
+        assertAcceptedRange(ItemGraphConfig.QUEUE_FREQUENCY_TICKS, 1, 100);
         assertAcceptedRange(ItemGraphConfig.MAX_BATCH_SIZE, 1, 1_000);
         assertAcceptedRange(ItemGraphConfig.DATABASE_HEARTBEAT_INTERVAL_MS, 1_000, 3_600_000);
 
@@ -83,6 +86,8 @@ class ItemGraphConfigTest {
         assertRejectedValue(ItemGraphConfig.MAX_PAGE_SIZE, 101, "query.max_page_size");
         assertRejectedValue(ItemGraphConfig.QUEUE_POLL_INTERVAL_MS, 9, "ingestion.poll_interval_ms");
         assertRejectedValue(ItemGraphConfig.QUEUE_POLL_INTERVAL_MS, 5_001, "ingestion.poll_interval_ms");
+        assertRejectedValue(ItemGraphConfig.QUEUE_FREQUENCY_TICKS, 0, "ingestion.queue_frequency_ticks");
+        assertRejectedValue(ItemGraphConfig.QUEUE_FREQUENCY_TICKS, 101, "ingestion.queue_frequency_ticks");
         assertRejectedValue(ItemGraphConfig.MAX_BATCH_SIZE, 0, "ingestion.max_batch_size");
         assertRejectedValue(ItemGraphConfig.MAX_BATCH_SIZE, 1_001, "ingestion.max_batch_size");
         assertRejectedValue(ItemGraphConfig.DATABASE_HEARTBEAT_INTERVAL_MS, 999, "operations.database_heartbeat_interval_ms");

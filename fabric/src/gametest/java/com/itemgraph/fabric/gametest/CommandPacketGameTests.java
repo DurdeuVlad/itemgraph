@@ -13,7 +13,8 @@ import java.util.List;
 
 /** Fabric server packet coverage for the published command roots. */
 public final class CommandPacketGameTests implements FabricGameTest {
-    @GameTest(template = "fabric-gametest-api-v1:empty", timeoutTicks = 400)
+    @GameTest(template = "fabric-gametest-api-v1:empty",
+            batch = "zz_itemgraph_command_packets", timeoutTicks = 400)
     @SuppressWarnings("removal")
     public void inspectCommandsExecuteFromClientPacketsAndPersistAttempts(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();

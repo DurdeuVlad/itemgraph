@@ -8,6 +8,7 @@ public record ItemGraphOperationalSettings(
         int maxPageSize,
         boolean serverSideOnly,
         int queuePollIntervalMs,
+        int queueFrequencyTicks,
         int maxBatchSize,
         int databaseHeartbeatIntervalMs,
         boolean captureEnabled,
@@ -15,6 +16,7 @@ public record ItemGraphOperationalSettings(
 
     public static final int DEFAULT_MAX_PAGE_SIZE = 10;
     public static final int DEFAULT_QUEUE_POLL_INTERVAL_MS = 250;
+    public static final int DEFAULT_QUEUE_FREQUENCY_TICKS = 20;
     public static final int DEFAULT_MAX_BATCH_SIZE = 100;
     public static final int DEFAULT_DATABASE_HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -28,6 +30,9 @@ public record ItemGraphOperationalSettings(
         if (queuePollIntervalMs < 10 || queuePollIntervalMs > 5_000) {
             throw new IllegalArgumentException("ingestion.poll_interval_ms must be in [10,5000]");
         }
+        if (queueFrequencyTicks < 1 || queueFrequencyTicks > 100) {
+            throw new IllegalArgumentException("ingestion.queue_frequency_ticks must be in [1,100]");
+        }
         if (maxBatchSize < 1 || maxBatchSize > 1_000) {
             throw new IllegalArgumentException("ingestion.max_batch_size must be in [1,1000]");
         }
@@ -40,10 +45,20 @@ public record ItemGraphOperationalSettings(
         rawEvidenceRetention = "indefinite";
     }
 
+    /** Compatibility constructor for callers which use the published default cadence. */
+    public ItemGraphOperationalSettings(int maxPageSize, boolean serverSideOnly,
+                                        int queuePollIntervalMs, int maxBatchSize,
+                                        int databaseHeartbeatIntervalMs, boolean captureEnabled,
+                                        String rawEvidenceRetention) {
+        this(maxPageSize, serverSideOnly, queuePollIntervalMs, DEFAULT_QUEUE_FREQUENCY_TICKS,
+                maxBatchSize, databaseHeartbeatIntervalMs, captureEnabled, rawEvidenceRetention);
+    }
+
     /** Applies load-time query bounds before command registration. */
     public void apply() {
         InternalObservationService.getInstance().configureOperations(
-                queuePollIntervalMs, maxBatchSize, databaseHeartbeatIntervalMs, captureEnabled);
+                queuePollIntervalMs, queueFrequencyTicks, maxBatchSize,
+                databaseHeartbeatIntervalMs, captureEnabled);
         QueryLimits.configureMaxPageSize(maxPageSize);
     }
 }

@@ -73,7 +73,7 @@ class MariaDbDialectIntegrationTest {
 
             service.stop();
             service.clear();
-            service.configureOperations(10, 100, 1_000, true);
+            service.configureOperations(10, 1, 100, 1_000, true);
             service.start();
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while (service.getTotalDatabaseHeartbeats() == 0 && System.nanoTime() < deadline) {
@@ -87,7 +87,7 @@ class MariaDbDialectIntegrationTest {
         } finally {
             service.stop();
             service.clear();
-            service.configureOperations(250, 100, 30_000, true);
+            service.configureOperations(250, 20, 100, 30_000, true);
             database.close();
         }
     }

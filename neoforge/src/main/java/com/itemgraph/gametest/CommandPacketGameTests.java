@@ -17,7 +17,8 @@ import java.util.List;
 public final class CommandPacketGameTests {
     private CommandPacketGameTests() { }
 
-    @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 400)
+    @GameTest(templateNamespace = "itemgraph", template = "empty",
+            batch = "zz_itemgraph_command_packets", timeoutTicks = 400)
     @SuppressWarnings("removal")
     public static void inspectCommandsExecuteFromClientPacketsAndPersistAttempts(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();

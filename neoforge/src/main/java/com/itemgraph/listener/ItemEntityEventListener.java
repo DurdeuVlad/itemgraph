@@ -285,6 +285,7 @@ public class ItemEntityEventListener {
      */
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
+        InternalObservationService.getInstance().onServerTick();
         long now = System.currentTimeMillis();
         resolvePendingDrops(now);
         if (pendingPickups.isEmpty()) {

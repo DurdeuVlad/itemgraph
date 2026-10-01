@@ -37,6 +37,7 @@ initialization logs also identify the selected backend.
 | Query page cap | `query.max_page_size` | `max_page_size` | integer / `10` | `[1,100]`; applies to command query rows and trace/browser pages, subject to the GUI's separate 45-slot ceiling | Restart |
 | Server-only operation | `operations.server_side_only` | `server_side_only` | boolean / `true` | `true`; `false` fails startup because client operation is unsupported | Restart |
 | Queue idle poll interval | `ingestion.poll_interval_ms` | `poll_interval_ms` | integer / `250` | `[10,5000]` milliseconds; worker's maximum wait while all three native queues are empty | Restart |
+| Queue flush cadence | `ingestion.queue_frequency_ticks` | `queue_frequency_ticks` | integer / `20` | `[1,100]` server ticks between scheduled evidence flushes; default and range match GriefLogger `queueFrequency` | Restart |
 | Maximum batch size | `ingestion.max_batch_size` | `max_batch_size` | integer / `100` | `[1,1000]` records drained per queue per worker pass | Restart |
 | Network database keepalive | `operations.database_heartbeat_interval_ms` | `database_heartbeat_interval_ms` | integer / `30000` | `[1000,3600000]` milliseconds; best-effort validation of the shared MySQL/MariaDB connection on the ItemGraph worker; SQLite does not send heartbeats | Restart |
 | Native capture | `capture.enabled` | `capture_enabled` | boolean / `true` | `true` or `false`; false suppresses new ItemGraph-native records and does not stop GriefLogger read-only ingestion | Restart |
@@ -56,18 +57,17 @@ retries; existing records remain readable with a null UUID.
 Keep database backups under the server operator's backup policy. ItemGraph does
 not delete raw rows after exporting or archiving them.
 
-## Fixed queue behavior and unresolved controls
+## Bounded queue behavior
 
 Each of the three native ingestion queues is bounded to 10,000 entries. A
-successful enqueue signals the background worker immediately, regardless of
-which queue received the record. The worker waits up to `poll_interval_ms` only
-when all queues are idle, then drains up to `max_batch_size` records from each
-queue in one pass. This setting is an idle wait bound, not a timer that delays
-evidence writes. Queue submission does not access the database or block the
-Minecraft server thread. GriefLogger's `queueFrequency` controls its
-own queue schedule and is not yet claimed as equivalent to ItemGraph's idle poll
-and batch controls; differential staging load evidence is still required. A
-failed transformation write is retried through its bounded queue with backoff.
+Queue submission wakes the ItemGraph worker but does not access the database or
+block the Minecraft server thread. The worker flushes on the configured
+`queue_frequency_ticks` callback at server end tick, matching GriefLogger's
+`queueFrequency` tick-based schedule. It drains at most `max_batch_size` records
+from each queue per worker pass; if a backlog remains, additional bounded passes
+continue on the worker until the queues are empty. `poll_interval_ms` is only the
+maximum idle wait used for worker housekeeping and database heartbeat deadlines.
+A failed transformation write is retried through its bounded queue with backoff.
 If the queue fills while re-queuing, or shutdown cannot persist pending records,
 the dropped count is incremented and the server log reports evidence loss. During
 server shutdown, ItemGraph waits for the active worker write to finish before it
@@ -83,16 +83,17 @@ The worker shortens its idle poll to meet the configured interval, but a slow
 batch write or retry can delay a heartbeat because both use the same worker and
 connection. Failed validation invalidates the connection; the next heartbeat
 retries initialization. SQLite does not need a network heartbeat. Network
-database runtime behavior still requires a live MySQL/MariaDB integration check
-before this mapping can be marked compatible.
+database heartbeat behavior is covered by the CI integration tests against
+disposable MariaDB and MySQL services. Local SQLite tests do not exercise that
+network path.
 
 ## Secret-safe status
 
 `/ig status` reports the active backend identifier, ItemGraph schema version,
 effective query page cap, database connection timeout, index policy, and queue
-controls. It omits database paths, hosts, usernames, passwords, and raw exception
-text. Connection diagnostics with private endpoint details remain in the server
-log.
+idle poll, flush tick cadence, and batch size. It omits database paths, hosts,
+usernames, passwords, and raw exception text. Connection diagnostics with
+private endpoint details remain in the server log.
 Candidate-resolution queries and `/ig explain` evidence retain their stricter
 fixed internal caps; `max_page_size` does not raise those forensic safety bounds.
 `capture_enabled=false` suppresses native listener records only. Public ItemGraph

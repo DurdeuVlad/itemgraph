@@ -34,6 +34,7 @@ class FabricItemGraphConfigTest {
                 max_page_size=25
                 server_side_only=true
                 poll_interval_ms=100
+                queue_frequency_ticks=35
                 max_batch_size=500
                 database_heartbeat_interval_ms=45000
                 capture_enabled=false
@@ -54,6 +55,7 @@ class FabricItemGraphConfigTest {
         assertEquals(25, loaded.operationalSettings().maxPageSize());
         assertTrue(loaded.operationalSettings().serverSideOnly());
         assertEquals(100, loaded.operationalSettings().queuePollIntervalMs());
+        assertEquals(35, loaded.operationalSettings().queueFrequencyTicks());
         assertEquals(500, loaded.operationalSettings().maxBatchSize());
         assertEquals(45_000, loaded.operationalSettings().databaseHeartbeatIntervalMs());
         assertFalse(loaded.operationalSettings().captureEnabled());
@@ -69,6 +71,7 @@ class FabricItemGraphConfigTest {
         assertEquals(10, loaded.operationalSettings().maxPageSize());
         assertTrue(loaded.operationalSettings().serverSideOnly());
         assertEquals(250, loaded.operationalSettings().queuePollIntervalMs());
+        assertEquals(20, loaded.operationalSettings().queueFrequencyTicks());
         assertEquals(100, loaded.operationalSettings().maxBatchSize());
         assertEquals(30_000, loaded.operationalSettings().databaseHeartbeatIntervalMs());
         assertTrue(loaded.operationalSettings().captureEnabled());
@@ -80,10 +83,10 @@ class FabricItemGraphConfigTest {
         Path config = tempDir.resolve("config");
         Files.createDirectories(config);
         Path file = config.resolve("itemgraph.properties");
-        Files.writeString(file, "max_page_size=10\npoll_interval_ms=250\n");
+        Files.writeString(file, "max_page_size=10\npoll_interval_ms=250\nqueue_frequency_ticks=20\n");
 
         FabricItemGraphConfig runningServerSnapshot = FabricItemGraphConfig.load(tempDir, config);
-        Files.writeString(file, "max_page_size=25\npoll_interval_ms=500\n");
+        Files.writeString(file, "max_page_size=25\npoll_interval_ms=500\nqueue_frequency_ticks=35\n");
 
         assertEquals(10, runningServerSnapshot.operationalSettings().maxPageSize(),
                 "editing the file must not mutate the config snapshot already used by the running server");
@@ -91,6 +94,8 @@ class FabricItemGraphConfigTest {
         FabricItemGraphConfig restartedServerConfig = FabricItemGraphConfig.load(tempDir, config);
         assertEquals(25, restartedServerConfig.operationalSettings().maxPageSize());
         assertEquals(500, restartedServerConfig.operationalSettings().queuePollIntervalMs());
+        assertEquals(20, runningServerSnapshot.operationalSettings().queueFrequencyTicks());
+        assertEquals(35, restartedServerConfig.operationalSettings().queueFrequencyTicks());
     }
 
     @Test
@@ -201,6 +206,7 @@ class FabricItemGraphConfigTest {
                 new NumericRange("ground_bridge_max_seconds", "correlation.ground_bridge_max_seconds", 1, 86_400),
                 new NumericRange("max_page_size", "query.max_page_size", 1, 100),
                 new NumericRange("poll_interval_ms", "ingestion.poll_interval_ms", 10, 5_000),
+                new NumericRange("queue_frequency_ticks", "ingestion.queue_frequency_ticks", 1, 100),
                 new NumericRange("max_batch_size", "ingestion.max_batch_size", 1, 1_000),
                 new NumericRange("database_heartbeat_interval_ms", "operations.database_heartbeat_interval_ms",
                         1_000, 3_600_000));

@@ -8,6 +8,13 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #30 queue flush cadence:** both loader configs now expose
+  `ingestion.queue_frequency_ticks` / `queue_frequency_ticks`, defaulting to 20
+  and accepting 1–100 ticks to match GriefLogger's `queueFrequency`. Both server
+  end-tick adapters signal the bounded background writer; queue submissions still
+  do no database work on the server thread. ItemGraph raw evidence retention stays
+  indefinite. Added live queue-flush GameTests to both loaders' registered CI
+  suites. Mod version remains 0.3.2; no distributable jar is built.
 - **Issue #24 Fabric inspector command execution:** `FabricItemGraphCommandsParityTest`
   now executes both command roots through enabled, already-enabled, status,
   disabled, already-disabled, and toggle-back states, asserting the per-player
