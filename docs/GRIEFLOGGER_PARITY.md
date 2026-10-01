@@ -110,6 +110,40 @@ stored; and the source default `maxPageSize` is 10. ItemGraph records the chosen
 operator-safe behavior and the source behavior as a versioned fixture instead of
 claiming that the two are identical.
 
+### Command semantics (#24)
+
+The published [lookup command](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/lookup-command),
+[filter reference](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/filters),
+[page reference](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/pages),
+and [inspect reference](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/inspect-command)
+are the operator-facing command contract. ItemGraph registers `/itemgraph` as
+the full root and redirects `/ig` to the same node; it does not register `/gl`
+or `/grieflogger`. Both roots use permission level 2. The direct lookup form
+accepts the six documented `name.value` filters and one-letter aliases, quoted
+comma-separated values, at most five filters, required radius, cubic distance,
+and AND semantics. The explicit `/ig lookup filters` spelling is an ItemGraph
+extension. The required-radius rule follows the published safety guidance even
+though pinned GriefLogger 26.2 `LookupCommand` accepts a no-radius query; that
+versioned source discrepancy is retained above rather than silently represented
+as exact parity.
+
+Published lookup examples are parser-tested under both roots in
+`ItemGraphCommandsHelpTest` and `FabricItemGraphCommandsParityTest`. Both
+loaders cover aliases, filter bounds, suggestions, permission checks, inspect
+forms, invalid pages, and asynchronous no-result handling. Lookup pages keep
+per-player state, expire after 30 minutes, cap offset at 10,000 rows, and emit
+Previous/Next commands tied to the same session.
+`pageSessionTokensAreIsolatedByPlayerAndExplicitlyClearable` and
+`lookupPageSessionCannotBeResolvedByAnotherPlayerAndCanBeCleared` verify a
+copied token cannot expose one player's page to another level-2 player and that
+the shared cleanup helper invalidates the owner's token. Both loader disconnect
+callbacks call that helper (`NativeAuditEventListener.onPlayerLoggedOut` and the
+`ServerPlayConnectionEvents.DISCONNECT` callback in
+`FabricNativeAuditEventListener.register`); callback execution itself is source-
+inspected, not directly exercised by these page-session tests. The output
+continues to label evidence source/type and retain evidence IDs; ItemGraph-only
+output remains an explicit extension.
+
 | GriefLogger capability | ItemGraph native source | Storage | Query/UI status | Evidence status |
 | --- | --- | --- | --- | --- |
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested; the 2026-09-29 Fabric replay persisted `ADD_ITEM` and `REMOVE_ITEM` rows |

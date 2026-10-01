@@ -157,10 +157,12 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   historical ledger remains the immutable source of truth and its normalized event
   projection is delivered by #28. The pinned 26.2 source/profile authority is recorded
   in #43. PR #86 delivered the cross-loader entity-interaction slice for #75.
-  Remaining open M8 issues are #24 (command semantics and accepted replay scope),
-  #27 (aggregate action mapping), #30 (configuration and operations controls),
-  and #31 (differential proof). Issue #76 establishes the exact-release Ender
-  action no-writer result and separately labels ItemGraph session deltas. The runtime
+  Remaining open M8 issues are #24 (published-example vanilla-client replay and
+  residual command output/error semantics), #27 (aggregate action mapping), #30
+  (configuration and operations controls), and #31 (differential proof). Issue
+  #24's shared command contract is implemented and covered by cross-loader tests;
+  #76 establishes the exact-release Ender action no-writer result while separately
+  labeling ItemGraph session deltas. The runtime
   matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact current boundary.
   Issue #26's visible-client click matrix remains unverified because the
   maintainer explicitly asked to skip live clicks.
