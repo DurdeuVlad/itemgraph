@@ -353,9 +353,18 @@ registry therefore keeps this mapping unresolved against the release and labels
 the richer behavior as an ItemGraph extension. The NeoForge and Fabric runs are
 local isolated server GameTests with mock players and direct server-handler
 dispatch, as directed by the operator; they are not live-client transport tests.
+The mock fixture establishes the world states directly, then posts one NeoForge
+`EntityPlaceEvent`/`RightClickBlock` or invokes Fabric's registered
+`UseBlockCallback` and Fabric's placement capture handler with a simulated
+before/after state. This exercises the production
+listener and durable audit queue without double-dispatching hooks from both a
+mock packet and an explicit callback. It verifies listener persistence, not the
+real-client placement or packet transport path.
 
 The same GameTest exports six persisted item movement and projectile rows plus
-seven audit events only after its durable read-only assertions pass. Its
+ten audit events only after its durable read-only assertions pass. It pins each
+audit action to its expected namespaced subject, and pins block placement,
+block interaction, and kill positions relative to the template origin. Its
 `BREAK_BLOCK` report row is restricted to the successful source-water pickup at
 the fixture position; the separate synthetic water-source/lava-result guard
 probe remains a unit assertion and is excluded because GriefLogger cannot
@@ -369,8 +378,13 @@ separate native-only Fabric and NeoForge reports and uploads only the normalized
 JSON. This export validates report
 shape and redaction; it does not establish GriefLogger equivalence or complete
 the paired replay, 24-hour soak, or rollback criteria in
-#31. The raw schema-v4 report also contains an `AuditService.audit` summary from
-one read-only transaction snapshot over the complete isolated GameTest
+#31. The raw schema-v5 report contains six item movement/projectile observations
+and ten quantity-free block/entity audit rows: `BREAK_BLOCK`, `PLACE_BLOCK`,
+`INTERACT_BLOCK_ATTEMPT`, `KILL_ENTITY`, and the entity interaction attempt,
+completion, and unresolved outcomes. NeoForge and Fabric produce the same
+action and subject counts through their native capture hooks. The same report
+contains an `AuditService.audit` summary from one read-only transaction snapshot
+over the complete isolated GameTest
 database. Every active edge must have SOURCE and DESTINATION allocation sums
 equal to its amount, linked evidence with matching fingerprints, actions, and
 actor endpoints, and no unsupported allocation roles; every observation must

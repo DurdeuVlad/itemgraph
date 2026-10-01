@@ -419,9 +419,10 @@ checksummed historical database when an operator explicitly configures it.
 
 `tools/itemgraph_differential_report.py` defines normalized report schema
 version 6 for #31. The shared
-`ItemGraphReplayReportFixture` writes raw schema version 4 with six durable
-movement rows and seven allowlisted audit rows checked by the NeoForge and
-Fabric GameTests. CI normalizes and
+`ItemGraphReplayReportFixture` writes raw schema version 5 with six durable
+movement/projectile rows and ten allowlisted audit rows, including block place,
+block interaction attempt, and entity kill, checked by the NeoForge and Fabric
+GameTests. CI normalizes and
 validates each loader report, then uploads the redacted JSON as a workflow
 artifact. The normalizer labels the output `system=itemgraph` and
 `runtime_mode=native_only`; this native-only export does not claim a
@@ -457,7 +458,10 @@ invariant violation count to be zero and checks that `healthy` agrees with
 those counts. The comparison result retains the validated audit summary. This
 summary exports counts only and omits database row IDs and violation details.
 It covers the complete database attached to the isolated GameTest run, not just
-the 13 events in the replay report.
+the 16 events in the replay report. Those are six item movement/projectile
+observations and ten quantity-free block/entity audit rows. The block-action
+subset is `BREAK_BLOCK`, `PLACE_BLOCK`, `INTERACT_BLOCK_ATTEMPT`, and
+`KILL_ENTITY`, with namespaced subject IDs retained on every row.
 
 The replay report also records each queue's waiting-entry depth at export, the
 fixed capacity of each queue (10,000), and the cumulative server-wide rejected
@@ -550,9 +554,9 @@ structure origin; actors use fixed replay aliases. Events sort by persisted
 timestamp, source table, and source row ID; row IDs are not exported. This gives
 deterministic ordering when events share a millisecond across source tables. CI
 requires the fixed scenario ID, seed,
-13 event records with pinned per-action counts, unique event keys, and contiguous
+16 event records with pinned per-action and subject counts, unique event keys, and contiguous
 sequence, tests malformed inputs, and pins each report to its loader and source
-profile. The raw report schema is v4 and normalized report schema is v6. It does
+profile. The raw report schema is v5 and normalized report schema is v6. It does
 not start GriefLogger or compare its live database rows. A paired GriefLogger capture,
 issue-linked exception policy, the 24-hour native-only staging window, and
 rollback rehearsal remain open #31 acceptance criteria. The whole-database

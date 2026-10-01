@@ -11,7 +11,7 @@ from typing import Any
 import itemgraph_differential_report as differential
 
 
-RAW_SCHEMA_VERSION = 4
+RAW_SCHEMA_VERSION = 5
 RAW_EVENT_FIELDS = {
     "event_key", "sequence", "action", "evidence_class", "quantity", "item_id", "occurred_at_ms",
     "dimension", "position", "subject_id", "actor_ref", "source_table", "source_action_id", "compatibility_table",
@@ -25,11 +25,29 @@ EXPECTED_ACTION_COUNTS = {
     "THROW_ITEM": 1,
     "SHOOT_ITEM": 1,
     "BREAK_BLOCK": 1,
+    "PLACE_BLOCK": 1,
+    "INTERACT_BLOCK_ATTEMPT": 1,
+    "KILL_ENTITY": 1,
     "INTERACT_ENTITY": 3,
     "INTERACT_ENTITY_COMPLETED": 2,
     "INTERACT_ENTITY_UNRESOLVED": 1,
 }
-SCENARIO_ID = "item-movement-projectile-entity-audit-replay"
+EXPECTED_AUDIT_ACTION_SUBJECT_COUNTS = {
+    ("BREAK_BLOCK", "minecraft:water"): 1,
+    ("PLACE_BLOCK", "minecraft:diamond_block"): 1,
+    ("INTERACT_BLOCK_ATTEMPT", "minecraft:chest"): 1,
+    ("KILL_ENTITY", "minecraft:cow"): 1,
+    ("INTERACT_ENTITY", "minecraft:cow"): 1,
+    ("INTERACT_ENTITY", "minecraft:armor_stand"): 2,
+    ("INTERACT_ENTITY_COMPLETED", "minecraft:armor_stand"): 2,
+    ("INTERACT_ENTITY_UNRESOLVED", "minecraft:armor_stand"): 1,
+}
+EXPECTED_BLOCK_AUDIT_POSITIONS = {
+    "PLACE_BLOCK": {"x": 14, "y": 2, "z": 2},
+    "INTERACT_BLOCK_ATTEMPT": {"x": 12, "y": 1, "z": 2},
+    "KILL_ENTITY": {"x": 16, "y": 1, "z": 2},
+}
+SCENARIO_ID = "item-movement-projectile-block-entity-audit-replay"
 SCENARIO_SEED = 0
 
 
@@ -56,6 +74,7 @@ def normalize(raw: dict[str, Any], expected_loader: str) -> dict[str, Any]:
     normalized_events: list[dict[str, Any]] = []
     action_occurrences: dict[str, int] = {}
     actual_action_counts: dict[str, int] = {}
+    actual_audit_pairs: dict[tuple[str, str], int] = {}
     for index, raw_event in enumerate(raw["events"]):
         if not isinstance(raw_event, dict) or set(raw_event) != RAW_EVENT_FIELDS:
             raise differential.ReportError(f"events[{index}] fields do not match the ItemGraph GameTest schema")
@@ -65,6 +84,9 @@ def normalize(raw: dict[str, Any], expected_loader: str) -> dict[str, Any]:
         occurrence = action_occurrences.get(event["action"], 0)
         action_occurrences[event["action"]] = occurrence + 1
         actual_action_counts[event["action"]] = actual_action_counts.get(event["action"], 0) + 1
+        if event["source_table"] == "ig_audit_events":
+            pair = (event["action"], event["subject_id"])
+            actual_audit_pairs[pair] = actual_audit_pairs.get(pair, 0) + 1
         if event["event_key"] != f"replay-{event['action'].lower()}-{occurrence}":
             raise differential.ReportError(f"events[{index}].event_key does not match its native replay action")
         if type(event["sequence"]) is not int or event["sequence"] != index:
@@ -99,7 +121,16 @@ def normalize(raw: dict[str, Any], expected_loader: str) -> dict[str, Any]:
         "events": normalized_events,
         "invariants": raw["invariants"],
     }
-    return differential.validate_report(report, "itemgraph")
+    validated = differential.validate_report(report, "itemgraph")
+    if actual_audit_pairs != EXPECTED_AUDIT_ACTION_SUBJECT_COUNTS:
+        raise differential.ReportError("raw report audit action/subject pairs do not match the native replay fixture")
+    for index, event in enumerate(normalized_events):
+        expected_position = EXPECTED_BLOCK_AUDIT_POSITIONS.get(event["action"])
+        if event["source_table"] == "ig_audit_events" and expected_position is not None \
+                and event["position"] != expected_position:
+            raise differential.ReportError(
+                f"events[{index}] {event['action']} position does not match the native replay target")
+    return validated
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -12,7 +12,7 @@ The project follows a simple pre-1.0 development changelog model.
   now include each ingestion queue's export-time depth, fixed capacity, and the
   cumulative server-wide rejected-event counter since service initialization.
   The normalizer rejects over-capacity queue depths, capacity drift, or any
-  server-wide rejection since service initialization. Raw report schema is v4
+  server-wide rejection since service initialization. Raw report schema is v5
   and normalized comparison schema is v6; this
   complements the separate 8,000-event peak-backlog/load probe. Mod version
   remains 0.3.2; no distributable jar is built.
@@ -36,29 +36,32 @@ The project follows a simple pre-1.0 development changelog model.
   Java-method or documentation anchors. Mod
   version remains 0.3.2; no jar is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
-  durably verified item movement/projectile rows plus seven allowlisted audit
-  events, including namespaced entity/block `subject_id`, and a count-only
-  `AuditService` whole-database invariant summary to redacted raw schema-v3
-  reports when CI sets `ITEMGRAPH_DIFFERENTIAL_REPORT_DIR`. The audit uses one
+  durably verified item movement/projectile rows plus ten allowlisted audit
+  events, including `PLACE_BLOCK`, `INTERACT_BLOCK_ATTEMPT`, and `KILL_ENTITY`,
+  with namespaced entity/block `subject_id`, and a count-only `AuditService`
+  whole-database invariant summary to redacted raw schema-v5
+  reports when CI sets `ITEMGRAPH_DIFFERENTIAL_REPORT_DIR`. The mock GameTest
+  establishes the target world states, then dispatches each registered loader
+  event or placement capture handler exactly once. The audit uses one
   read-only transaction snapshot and rejects over-capacity observations,
   mismatched per-edge SOURCE/DESTINATION sums, unsupported roles, and
   allocations detached from direct evidence, matching fingerprints/actions, or
   actor endpoints. It rejects edge timestamps that do not match forward source
   and destination evidence. The CI normalizer independently rejects non-zero violation
-  counts; normalized schema-v5 output retains the validated count-only summary,
-  preserves subject IDs, and exposes the issue-linked exception gate. Registry
+  counts; Java and Python gates pin action/subject pairs and the three new
+  block-action positions. Normalized schema-v6 output retains the validated
+  count-only summary, preserves subject IDs, and exposes the issue-linked exception gate. Registry
   compatibility version is `m8.12.0`.
   These native-only reports do not claim a GriefLogger comparison or complete
   #31's paired replay, staging soak, or rollback gates. Mod
   version remains 0.3.2; no distributable jar is built.
-- **Issue #31 parity fixture correction:** the replay report now includes only
-  the successful source-water bucket pickup among `BREAK_BLOCK` rows. It filters
-  by the exact fixture position and `minecraft:water`, excluding the separate
+- **Issue #31 parity fixture correction:** the replay report includes only the
+  successful source-water bucket pickup among `BREAK_BLOCK` rows. It filters by
+  the exact fixture position and `minecraft:water`, excluding the separate
   synthetic water-source/lava-result guard probe, which cannot occur in an actual
-  GriefLogger bucket-pickup writer path. The raw report remains schema-v3 and
-  normalized output remains schema-v5; mod version remains 0.3.2, and no jar is
-  built.
-- **Issue #31 issue-linked differential exceptions:** normalized schema-v5
+  GriefLogger bucket-pickup writer path. The current raw report is schema-v5 and
+  normalized output is schema-v6; mod version remains 0.3.2, and no jar is built.
+- **Issue #31 issue-linked differential exceptions:** normalized schema-v6
   keeps every report difference visible, classifies only profile-declared
   native extensions as expected only when their source table also matches the
   pinned policy, and links each to its owning issue and stable reason code.
