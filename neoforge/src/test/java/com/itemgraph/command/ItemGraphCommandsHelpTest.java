@@ -6,9 +6,16 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.Suggestion;
 import com.mojang.brigadier.tree.CommandNode;
+import com.mojang.brigadier.tree.RootCommandNode;
+import io.netty.buffer.Unpooled;
 import net.minecraft.SharedConstants;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundCommandsPacket;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
@@ -19,6 +26,7 @@ import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.ChestType;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.flag.FeatureFlags;
 import net.neoforged.fml.loading.LoadingModList;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -71,6 +79,35 @@ class ItemGraphCommandsHelpTest {
         assertEquals(1, dispatcher.execute("ig", source));
         assertTrue(successes.stream().anyMatch(line -> line.contains("/ig inspect [on|off|status]")));
         assertTrue(successes.stream().anyMatch(line -> line.contains("/ig page <page>")));
+    }
+
+    @Test
+    void vanillaCommandTreePacketCodecRoundTripsBothCommandRoots() {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        RootCommandNode<SharedSuggestionProvider> commandTree = (RootCommandNode) dispatcher.getRoot();
+        FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            ClientboundCommandsPacket.STREAM_CODEC.encode(encoded, new ClientboundCommandsPacket(commandTree));
+            assertTrue(encoded.readableBytes() > 0, "the registered command tree must produce a network payload");
+
+            ClientboundCommandsPacket decoded = ClientboundCommandsPacket.STREAM_CODEC.decode(encoded);
+            RootCommandNode<SharedSuggestionProvider> received = decoded.getRoot(
+                    CommandBuildContext.simple(RegistryAccess.EMPTY, FeatureFlags.DEFAULT_FLAGS));
+            var itemgraph = received.getChild("itemgraph");
+            var alias = received.getChild("ig");
+            assertNotNull(itemgraph);
+            assertNotNull(itemgraph.getChild("lookup"));
+            assertNotNull(itemgraph.getChild("page"));
+            assertNotNull(itemgraph.getChild("inspect"));
+            assertNotNull(alias);
+            assertSame(itemgraph, alias.getRedirect(), "/ig must retain its redirect to /itemgraph after decode");
+            assertNull(received.getChild("gl"));
+            assertNull(received.getChild("grieflogger"));
+            assertEquals(0, encoded.readableBytes(), "the entire packet payload must decode");
+        } finally {
+            encoded.release();
+        }
     }
 
     @Test
