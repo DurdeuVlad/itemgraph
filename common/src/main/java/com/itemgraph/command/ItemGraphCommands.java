@@ -83,7 +83,7 @@ public final class ItemGraphCommands {
         @Override public boolean isModLoaded(String modId) { return false; }
     };
 
-    private record AuditPageSession(
+    record AuditPageSession(
             UUID sessionId,
             String eventType,
             String playerName,
@@ -1065,7 +1065,7 @@ public final class ItemGraphCommands {
         });
     }
 
-    private static void rememberPageSession(CommandSourceStack source, AuditPageSession session) {
+    static void rememberPageSession(CommandSourceStack source, AuditPageSession session) {
         if (source.getEntity() instanceof ServerPlayer player) {
             UUID playerId = player.getUUID();
             if (playerId != null) {
@@ -1121,7 +1121,7 @@ public final class ItemGraphCommands {
         return active;
     }
 
-    private static AuditPageSession pageSession(CommandSourceStack source, UUID sessionId) {
+    static AuditPageSession pageSession(CommandSourceStack source, UUID sessionId) {
         if (!(source.getEntity() instanceof ServerPlayer player) || sessionId == null) {
             return null;
         }

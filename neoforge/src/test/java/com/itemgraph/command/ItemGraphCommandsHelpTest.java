@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import com.itemgraph.query.AuditLookupFilters;
+import com.itemgraph.query.QueryWindow;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.Suggestion;
@@ -27,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -74,6 +76,9 @@ class ItemGraphCommandsHelpTest {
     @Test
     void helpListsEveryRegisteredCommandPath() {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        assertEquals(Set.of("itemgraph", "ig"), dispatcher.getRoot().getChildren().stream()
+                        .map(CommandNode::getName).collect(Collectors.toSet()),
+                "ItemGraph exposes its two named roots without GriefLogger command aliases");
         CommandNode<CommandSourceStack> root = dispatcher.getRoot().getChild("itemgraph");
         assertNotNull(root);
         assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect"),
@@ -207,6 +212,37 @@ class ItemGraphCommandsHelpTest {
                 "itemgraph page 2 00000000-0000-0000-0000-000000000001", source));
         verify(source).sendFailure(failure.capture());
         assertTrue(failure.getValue().getString().contains("No active lookup page session"));
+    }
+
+    @Test
+    void pageSessionTokensAreIsolatedByPlayerAndExplicitlyClearable() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        UUID ownerId = UUID.randomUUID();
+        UUID otherId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        ServerPlayer ownerPlayer = mock(ServerPlayer.class);
+        ServerPlayer otherPlayer = mock(ServerPlayer.class);
+        when(ownerPlayer.getUUID()).thenReturn(ownerId);
+        when(otherPlayer.getUUID()).thenReturn(otherId);
+        CommandSourceStack owner = sourceForPlayer(ownerPlayer);
+        CommandSourceStack other = sourceForPlayer(otherPlayer);
+        ItemGraphCommands.AuditPageSession session = new ItemGraphCommands.AuditPageSession(
+                sessionId, "BREAK_BLOCK", null, QueryWindow.unbounded(), 10,
+                null, null, null, null, null, null, null, "type=BREAK_BLOCK", System.currentTimeMillis());
+        ItemGraphCommands.rememberPageSession(owner, session);
+
+        assertSame(session, ItemGraphCommands.pageSession(owner, sessionId));
+        assertNull(ItemGraphCommands.pageSession(other, sessionId),
+                "another level-2 player must not resolve a copied session token");
+        assertEquals(0, dispatcher.execute("itemgraph page 2 " + sessionId, other));
+        ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+        verify(other).sendFailure(failure.capture());
+        assertTrue(failure.getValue().getString().contains("No active lookup page session"));
+
+        ItemGraphCommands.clearPageSession(ownerId);
+        assertNull(ItemGraphCommands.pageSession(owner, sessionId),
+                "clearing the owner's page state must invalidate its session token");
+        ItemGraphCommands.clearPageSession(otherId);
     }
 
     @Test
@@ -492,6 +528,13 @@ class ItemGraphCommandsHelpTest {
         when(source.getEntity()).thenReturn(mock(ServerPlayer.class));
         when(source.getOnlinePlayerNames()).thenReturn(List.of("Alex", "Steve"));
         when(source.levels()).thenReturn(Set.of(Level.OVERWORLD));
+        return source;
+    }
+
+    private static CommandSourceStack sourceForPlayer(ServerPlayer player) {
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        when(source.getEntity()).thenReturn(player);
+        when(source.hasPermission(2)).thenReturn(true);
         return source;
     }
 
