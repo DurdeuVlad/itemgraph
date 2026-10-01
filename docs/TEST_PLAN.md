@@ -52,9 +52,11 @@ Never use production as the primary test environment.
   the slowest server-thread batch. Peak queue depth was 6,815 of 10,000 audit
   queue slots. All three NeoForge GameTests passed.
 - Fabric's `OperationalQueueGameTests.endServerTickFlushPersistsAcceptedAuditEvents`
-  waits one configured cadence plus five ticks, confirms the Fabric end-tick
-  callback ran, and checks 32 matching durable rows and zero drops. All three
-  registered Fabric GameTests passed locally.
+  starts checking after one configured cadence plus five ticks, then polls on
+  later test ticks for up to 10 seconds so the async worker can run even when the
+  GameTest advances logical ticks faster than wall time. It confirms the Fabric
+  end-tick callback ran and checks 32 matching durable rows and zero drops. All
+  three registered Fabric GameTests passed locally.
 - The same temporary game directory was restarted against the same SQLite
   database. NeoForge reopened schema version 20, persisted the next 8,000 events
   with 0 drops and an empty queue, and a read-only SQLite check found exactly

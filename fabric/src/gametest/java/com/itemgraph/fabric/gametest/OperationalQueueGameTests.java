@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Fabric runtime proof for the configured server-tick queue flush adapter. */
@@ -43,10 +44,28 @@ public final class OperationalQueueGameTests implements FabricGameTest {
 
         int flushEveryTicks = service.getQueueFrequencyTicks();
         LOGGER.info("Issue #30 Fabric queue probe: flushEveryTicks={} accepted={}", flushEveryTicks, EVENT_COUNT);
-        helper.runAtTickTime(flushEveryTicks + 5, () -> {
+        awaitDurableProbe(helper, service, detailPrefix, endTickCallbacks, persistedBefore, droppedBefore,
+                flushEveryTicks, flushEveryTicks + 5, System.nanoTime() + TimeUnit.SECONDS.toNanos(10));
+    }
+
+    private static void awaitDurableProbe(GameTestHelper helper, InternalObservationService service,
+                                          String detailPrefix, AtomicInteger endTickCallbacks,
+                                          long persistedBefore, long droppedBefore, int flushEveryTicks,
+                                          int checkAtTick, long deadlineNanos) {
+        helper.runAtTickTime(checkAtTick, () -> {
+            long durableRows = countProbeRows(detailPrefix);
+            boolean persisted = durableRows == EVENT_COUNT
+                    && service.getTotalPersisted() == persistedBefore + EVENT_COUNT
+                    && service.getTotalDropped() == droppedBefore;
+            if (!persisted && checkAtTick < flushEveryTicks + 205 && System.nanoTime() < deadlineNanos) {
+                // GameTests can advance logical ticks faster than the async writer gets CPU time.
+                awaitDurableProbe(helper, service, detailPrefix, endTickCallbacks, persistedBefore, droppedBefore,
+                        flushEveryTicks, checkAtTick + 5, deadlineNanos);
+                return;
+            }
+
             helper.assertTrue(endTickCallbacks.get() >= flushEveryTicks,
                     "Fabric server-end-tick callback did not run through the configured flush cadence");
-            long durableRows = countProbeRows(detailPrefix);
             helper.assertValueEqual((long) EVENT_COUNT, durableRows,
                     "Fabric server-end-tick callback did not flush every accepted audit event after "
                             + endTickCallbacks.get() + " ticks");
