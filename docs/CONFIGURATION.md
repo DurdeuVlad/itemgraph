@@ -22,7 +22,7 @@ database or correlation settings into a different accepted value.
 | Network DB TLS mode | `general.database_ssl_mode` | `database_ssl_mode` | string / `disable` | `disable`, `trust`, `verify-ca`, `verify-full` | Restart |
 | Network DB timeout | `general.database_connection_timeout_ms` | `database_connection_timeout_ms` | integer / `5000` | `[250,120000]` milliseconds | Restart |
 | Optional indexes | `storage.use_indexes` | `use_indexes` | boolean / `true` | `true` or `false`; migration-owned unique and required foreign-key indexes remain | Restart |
-| GriefLogger source path | `general.grieflogger_database_path` | `grieflogger_database_path` | string / `database.db` | Relative or absolute path; source remains read-only | Restart |
+| GriefLogger source path | `general.grieflogger_database_path` | `grieflogger_database_path` | string / `database.db` | Non-empty relative or absolute path; source remains read-only | Restart |
 | Debug logging | `general.debug_logging` | `debug_logging` | boolean / `false` | `true` or `false` | Restart |
 | Ground bridge window | `correlation.ground_bridge_max_seconds` | `ground_bridge_max_seconds` | integer / `300` | `[1,86400]` seconds | Restart |
 

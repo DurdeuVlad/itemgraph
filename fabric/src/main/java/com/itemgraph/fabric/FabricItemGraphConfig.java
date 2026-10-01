@@ -78,7 +78,8 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         try {
             if (backend.equals("sqlite")) {
                 databaseSettings = DatabaseSettings.sqlite(
-                        resolve(gameDirectory, properties.getProperty("database_path", "itemgraph/itemgraph.db")),
+                        resolve(gameDirectory, properties.getProperty("database_path", "itemgraph/itemgraph.db"),
+                                "general.database_path", configFile),
                         parseBoolean(properties, "use_indexes", true, configFile));
             } else if (backend.equals("mysql") || backend.equals("mariadb") || backend.equals("mysql_mariadb")) {
                 databaseSettings = DatabaseSettings.mysqlMariaDb(
@@ -99,7 +100,8 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
 
         return new FabricItemGraphConfig(
                 databaseSettings,
-                resolve(gameDirectory, properties.getProperty("grieflogger_database_path", "database.db")),
+                resolve(gameDirectory, properties.getProperty("grieflogger_database_path", "database.db"),
+                        "general.grieflogger_database_path", configFile),
                 groundBridgeMaxSeconds,
                 operationalSettings);
     }
@@ -150,9 +152,9 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         throw new IOException(key + " must be true or false in " + configFile);
     }
 
-    private static Path resolve(Path gameDirectory, String value) throws IOException {
+    private static Path resolve(Path gameDirectory, String value, String configKey, Path configFile) throws IOException {
         if (value == null || value.isBlank()) {
-            throw new IOException("ItemGraph database paths must not be blank");
+            throw new IOException(configKey + " must not be blank in " + configFile);
         }
         Path path = Path.of(value);
         return (path.isAbsolute() ? path : gameDirectory.resolve(path)).normalize();

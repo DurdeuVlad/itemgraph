@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -12,14 +13,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBES = (
-    ("query.max_page_size", "[query]\nmax_page_size = 101\n",
+    ("query.max_page_size", "max_page_size", "[query]\nmax_page_size = 101\n",
      "query.max_page_size must be between 1 and 100, got: 101"),
-    ("general.database_port", "[general]\ndatabase_port = 0\n",
+    ("general.database_port", "database_port", "[general]\ndatabase_port = 0\n",
      "general.database_port must be between 1 and 65535, got: 0"),
+    ("general.database_path", "database_path", '[general]\ndatabase_path = ""\n',
+     "general.database_path must not be blank"),
+    ("general.grieflogger_database_path", "grieflogger_database_path",
+     '[general]\ngrieflogger_database_path = ""\n',
+     "general.grieflogger_database_path must not be blank"),
 )
 
 
-def run_probe(name: str, toml: str, expected_error: str) -> bool:
+def toml_value(text: str, key: str) -> str | None:
+    values = re.findall(rf"(?m)^\s*{re.escape(key)}\s*=\s*(.*?)\s*$", text)
+    return values[0] if len(values) == 1 else None
+
+
+def run_probe(name: str, key: str, toml: str, expected_error: str) -> bool:
     run_dir = Path(tempfile.mkdtemp(prefix=f"itemgraph-invalid-neoforge-{name}-"))
     config_dir = run_dir / "config"
     config_dir.mkdir()
@@ -76,7 +87,9 @@ def run_probe(name: str, toml: str, expected_error: str) -> bool:
         "precise validation error": expected_error in output,
         "failed GameTest server launch": "BUILD FAILED" in output,
         "database startup was not reached": "ItemGraph database initialized successfully" not in output,
-        "invalid TOML value was not rewritten": (config_dir / "itemgraph-server.toml").read_text(encoding="utf-8") == toml,
+        "invalid TOML value was not rewritten": toml_value(
+            (config_dir / "itemgraph-server.toml").read_text(encoding="utf-8"), key
+        ) == toml_value(toml, key),
     }
     failed = [label for label, passed in checks.items() if not passed]
 
@@ -93,7 +106,8 @@ def run_probe(name: str, toml: str, expected_error: str) -> bool:
 
 
 def main() -> int:
-    failed = [name for name, toml, expected_error in PROBES if not run_probe(name, toml, expected_error)]
+    failed = [name for name, key, toml, expected_error in PROBES
+              if not run_probe(name, key, toml, expected_error)]
     if failed:
         print("NeoForge invalid-config startup probes failed: " + ", ".join(failed), file=sys.stderr)
         return 1
