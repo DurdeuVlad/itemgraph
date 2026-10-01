@@ -42,8 +42,8 @@ public record ItemGraphOperationalSettings(
 
     /** Applies load-time query bounds before command registration. */
     public void apply() {
-        QueryLimits.configureMaxPageSize(maxPageSize);
         InternalObservationService.getInstance().configureOperations(
                 queuePollIntervalMs, maxBatchSize, databaseHeartbeatIntervalMs, captureEnabled);
+        QueryLimits.configureMaxPageSize(maxPageSize);
     }
 }

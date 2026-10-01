@@ -37,18 +37,35 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MariaDbDialectIntegrationTest {
     @Test
     void mariaDbNetworkHeartbeatRunsOnTheBackgroundWorker() throws Exception {
-        String url = System.getenv("ITEMGRAPH_TEST_MARIADB_URL");
-        assumeTrue(url != null && !url.isBlank(), "No endpoint configured for ITEMGRAPH_TEST_MARIADB_URL");
+        assertNetworkHeartbeatRunsOnBackgroundWorker(
+                "ITEMGRAPH_TEST_MARIADB_URL", "ITEMGRAPH_TEST_MARIADB_USER", "ITEMGRAPH_TEST_MARIADB_PASSWORD",
+                "disable");
+    }
+
+    @Test
+    void mysqlNetworkHeartbeatRunsOnTheBackgroundWorker() throws Exception {
+        // The CI MySQL account uses caching_sha2_password. Exercise the normal
+        // database-manager path over TLS instead of enabling RSA key retrieval
+        // on an unencrypted connection just for this test.
+        assertNetworkHeartbeatRunsOnBackgroundWorker(
+                "ITEMGRAPH_TEST_MYSQL_URL", "ITEMGRAPH_TEST_MYSQL_USER", "ITEMGRAPH_TEST_MYSQL_PASSWORD",
+                "trust");
+    }
+
+    private void assertNetworkHeartbeatRunsOnBackgroundWorker(String urlVariable, String userVariable,
+                                                               String passwordVariable, String sslMode) throws Exception {
+        String url = System.getenv(urlVariable);
+        assumeTrue(url != null && !url.isBlank(), "No endpoint configured for " + urlVariable);
         URI endpoint = URI.create(url.substring("jdbc:".length()));
         String databaseName = endpoint.getPath().replaceFirst("^/", "");
         DatabaseManager database = DatabaseManager.getInstance();
         InternalObservationService service = InternalObservationService.getInstance();
         try {
             database.initialize(DatabaseSettings.mysqlMariaDb(endpoint.getHost(), endpoint.getPort(), databaseName,
-                    System.getenv().getOrDefault("ITEMGRAPH_TEST_MARIADB_USER", "itemgraph"),
-                    System.getenv().getOrDefault("ITEMGRAPH_TEST_MARIADB_PASSWORD", "itemgraph"),
-                    5_000, true));
-            assertTrue(database.isInitialized(), "the CI MariaDB endpoint should initialize ItemGraph storage");
+                    System.getenv().getOrDefault(userVariable, "itemgraph"),
+                    System.getenv().getOrDefault(passwordVariable, "itemgraph"),
+                    5_000, true, sslMode));
+            assertTrue(database.isInitialized(), "the CI endpoint should initialize ItemGraph storage: " + urlVariable);
             assertTrue(database.validateNetworkConnection(5), "the JDBC protocol ping should report a valid connection");
             database.getConnection().close();
             assertTrue(database.validateNetworkConnection(5),

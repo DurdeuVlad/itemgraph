@@ -75,6 +75,24 @@ class FabricItemGraphConfigTest {
     }
 
     @Test
+    void configChangesTakeEffectWhenReloadedForTheNextServerStart(@TempDir Path tempDir) throws Exception {
+        Path config = tempDir.resolve("config");
+        Files.createDirectories(config);
+        Path file = config.resolve("itemgraph.properties");
+        Files.writeString(file, "max_page_size=10\npoll_interval_ms=250\n");
+
+        FabricItemGraphConfig runningServerSnapshot = FabricItemGraphConfig.load(tempDir, config);
+        Files.writeString(file, "max_page_size=25\npoll_interval_ms=500\n");
+
+        assertEquals(10, runningServerSnapshot.operationalSettings().maxPageSize(),
+                "editing the file must not mutate the config snapshot already used by the running server");
+        assertEquals(250, runningServerSnapshot.operationalSettings().queuePollIntervalMs());
+        FabricItemGraphConfig restartedServerConfig = FabricItemGraphConfig.load(tempDir, config);
+        assertEquals(25, restartedServerConfig.operationalSettings().maxPageSize());
+        assertEquals(500, restartedServerConfig.operationalSettings().queuePollIntervalMs());
+    }
+
+    @Test
     void rejectsOutOfRangePageSizeUnsupportedClientModeAndFiniteRetention(@TempDir Path tempDir) throws Exception {
         Path config = tempDir.resolve("config");
         Files.createDirectories(config);

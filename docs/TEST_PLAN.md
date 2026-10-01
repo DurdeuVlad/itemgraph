@@ -398,7 +398,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
 | `ItemGraphConfigTest` | default values, config paths, range constraints, and NightConfig correction/clamping (5 tests) |
-| `ItemGraphOperationalSettingsTest`, `FabricItemGraphConfigTest`, `QueryLimitsTest`, `TraceQueryServiceTest.configuredPageCapConstrainsSqlBackedTracePages` | fail-closed operational bounds and policies, both-loader defaults/custom values, capture controls, query cap on command and SQL-backed GUI pages, queue poll/batch/heartbeat settings, and retention invariants |
+| `ItemGraphOperationalSettingsTest`, `FabricItemGraphConfigTest`, `QueryLimitsTest`, `TraceQueryServiceTest.configuredPageCapConstrainsSqlBackedTracePages` | fail-closed operational bounds and policies, both-loader defaults/custom values, Fabric config re-read creates the next startup snapshot, NeoForge worker guard against live setting changes and application after worker stop, atomic rejection without changing the query cap, capture controls, query cap on command and SQL-backed GUI pages, queue poll/batch/heartbeat settings, and retention invariants |
 | `FabricItemGraphPageDispatchTest` | executed `/ig page` and `/itemgraph page` failures for missing, malformed, and expired explicit sessions; expired-session owner-map cleanup; cross-player token denial without invalidating the owner's session; and permission-level-2 enforcement on both roots |
 | `LegacyObservationArchiveTest`, `InternalObservationServiceTest.failedTransformationBatchIsRetainedAndShutdownLossIsCounted` | V3–V5 preserve legacy raw observation payloads before active-projection resets; transformation retries remain bounded and shutdown loss is counted |
 | `ItemGraphStatusSecurityTest` | `/ig status` reports SQLite or MySQL/MariaDB backend and schema while redacting database paths, raw driver errors, and sentinel network host/database/user/password values |
@@ -696,8 +696,14 @@ The shared `DialectSqlTest` covers the deterministic rewrites for identity
 columns, text/blob types, idempotent indexes, SQLite `PRAGMA table_info`, and
 upserts. `MariaDbDialectIntegrationTest` is skipped locally unless endpoints
 are supplied, then runs the same migration and basic evidence contract against
-each configured server. CI provisions MariaDB 10.11 on port 3306 and MySQL 8.0
-on port 3307 with the following environment variables:
+each configured server. The background-worker network heartbeat and closed
+connection recovery are checked separately against both servers. CI provisions
+MariaDB 10.11 on port 3306 and MySQL 8.0 on port 3307 with the following
+environment variables. The MySQL heartbeat test uses `sslMode=trust` with the
+ephemeral CI endpoint so MySQL 8's `caching_sha2_password` exchange uses TLS
+instead of enabling unauthenticated RSA public-key retrieval. This mode does
+not verify the server certificate or hostname; it is test-only and is not a
+recommended production TLS policy.
 
 ```text
 ITEMGRAPH_TEST_MARIADB_URL=jdbc:mariadb://127.0.0.1:3306/itemgraph
