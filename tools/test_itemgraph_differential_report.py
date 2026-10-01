@@ -8,6 +8,7 @@ import json
 import os
 import tempfile
 import unittest
+import copy
 from pathlib import Path
 
 
@@ -24,7 +25,7 @@ class DifferentialReportTests(unittest.TestCase):
         registry, fixture_hash = report.current_profile()
         self.registry = registry
         base = {
-            "report_schema_version": 3,
+            "report_schema_version": report.REPORT_SCHEMA_VERSION,
             "compatibility_version": registry["compatibility_version"],
             "source_profile_sha256": registry["source_profile"]["sha256"],
             "release_fixture_sha256": fixture_hash,
@@ -102,6 +103,7 @@ class DifferentialReportTests(unittest.TestCase):
     def test_identical_replay_events_compare_equal(self) -> None:
         result = report.compare_reports(self.legacy, self.native)
         self.assertTrue(result["equivalent"])
+        self.assertTrue(result["gate_passed"])
         self.assertEqual([], result["differences"])
         self.assertEqual(self.registry["source_profile"]["sha256"], result["source_profile_sha256"])
         self.assertEqual(self.healthy_invariants(), result["itemgraph_invariants"])
@@ -126,7 +128,94 @@ class DifferentialReportTests(unittest.TestCase):
         self.native["events"][0]["quantity"] = 2
         result = report.compare_reports(self.legacy, self.native)
         self.assertIn({"sequence": 0, "itemgraph_sequence": 0, "kind": "field_mismatch", "field": "quantity",
-                       "grieflogger": 1, "itemgraph": 2}, result["differences"])
+                       "action": "THROW_ITEM", "grieflogger": 1, "itemgraph": 2,
+                       "classification": "unexplained"}, result["differences"])
+        self.assertFalse(result["gate_passed"])
+        self.assertEqual(1, result["unexplained_difference_count"])
+
+    def test_timestamp_mismatch_is_unexplained(self) -> None:
+        self.native["events"][0]["occurred_at_ms"] += 1
+
+        result = report.compare_reports(self.legacy, self.native)
+
+        self.assertFalse(result["gate_passed"])
+        self.assertEqual("field_mismatch", result["differences"][0]["kind"])
+        self.assertEqual("occurred_at_ms", result["differences"][0]["field"])
+        self.assertEqual("unexplained", result["differences"][0]["classification"])
+
+    def test_exception_issue_must_match_profile_evidence_issue(self) -> None:
+        changed = copy.deepcopy(self.registry)
+        action = next(row for row in changed["actions"] if row.get("differential_exceptions"))
+        action["differential_exceptions"][0]["issue"] = 999
+
+        with self.assertRaisesRegex(report.ReportError, "must match its action evidence_issue"):
+            report._validate_differential_exceptions(changed)
+
+    def test_profile_linked_native_extension_stays_visible_and_passes_gate(self) -> None:
+        hopper = self.native_event(event_key="hopper.insert.0", action="HOPPER_INSERT", quantity=1,
+                                   item_id="minecraft:iron_ingot", source_action_id="HOPPER_INSERT", sequence=1)
+        self.native["events"].append(hopper)
+        self.native["invariants"]["total_observations"] = 2
+
+        result = report.compare_reports(self.legacy, self.native)
+
+        self.assertFalse(result["equivalent"])
+        self.assertTrue(result["gate_passed"])
+        self.assertEqual(1, result["expected_difference_count"])
+        self.assertEqual(0, result["unexplained_difference_count"])
+        self.assertEqual({"kind": "unexpected_native_event", "action": "HOPPER_INSERT",
+                          "classification": "issue_linked_expected", "issue": 34,
+                          "issue_url": "https://github.com/DurdeuVlad/itemgraph/issues/34",
+                          "reason_code": "NATIVE_HOPPER_INSERT_EXTENSION"},
+                         {key: result["differences"][0][key] for key in (
+                             "kind", "action", "classification", "issue", "issue_url", "reason_code")})
+
+    def test_issue_linked_extension_with_wrong_source_table_fails_gate(self) -> None:
+        hopper = self.native_event(event_key="hopper.insert.0", action="HOPPER_INSERT", quantity=1,
+                                   item_id="minecraft:iron_ingot", source_action_id="HOPPER_INSERT",
+                                   source_table="ig_item_transformations", sequence=1)
+        self.native["events"].append(hopper)
+        self.native["invariants"]["total_observations"] = 2
+
+        result = report.compare_reports(self.legacy, self.native)
+
+        self.assertFalse(result["gate_passed"])
+        self.assertEqual("unexplained", result["differences"][0]["classification"])
+        self.assertNotIn("issue", result["differences"][0])
+
+    def test_every_profile_exception_is_an_issue_linked_unmatched_native_event(self) -> None:
+        native_events = [self.native_event()]
+        for action_row in self.registry["actions"]:
+            exceptions = action_row.get("differential_exceptions", [])
+            if not exceptions:
+                continue
+            action = action_row["itemgraph"]
+            semantics = action_row["quantity"]
+            quantity = (report.SIGNED_DELTA_SIGNS[action] * 2 if semantics == "signed_delta" else
+                        2 if semantics == "transformation" else None)
+            source_table = ("ig_audit_events" if semantics == "none" else
+                            "ig_item_transformations" if semantics == "transformation" else "ig_observations")
+            native_events.append(self.native_event(
+                event_key=f"extension.{action.lower()}", action=action,
+                evidence_class=action_row["evidence_class"], quantity=quantity,
+                item_id=None if semantics == "none" else "minecraft:stone",
+                source_table=source_table, source_action_id=action, sequence=len(native_events),
+                unresolved_reason="NO_WRITER_IN_TARGET_RELEASE" if action_row["evidence_class"] == "unresolved" else None))
+        self.native["events"] = native_events
+        self.native["invariants"]["total_observations"] = sum(
+            event["source_table"] == "ig_observations" for event in native_events)
+
+        result = report.compare_reports(self.legacy, self.native)
+
+        expected_count = sum(bool(row.get("differential_exceptions")) for row in self.registry["actions"])
+        self.assertFalse(result["equivalent"])
+        self.assertTrue(result["gate_passed"])
+        self.assertEqual(expected_count, result["expected_difference_count"])
+        self.assertEqual(0, result["unexplained_difference_count"])
+        self.assertEqual(expected_count, len(result["differences"]))
+        self.assertTrue(all(diff["classification"] == "issue_linked_expected"
+                            and diff["issue_url"].startswith("https://github.com/DurdeuVlad/itemgraph/issues/")
+                            for diff in result["differences"]))
 
     def test_quantity_must_follow_profile_semantics(self) -> None:
         for action, source_action_id, quantity, expected in (
@@ -335,6 +424,7 @@ class DifferentialReportTests(unittest.TestCase):
             self.assertEqual(0, result)
             document = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertTrue(document["equivalent"])
+            self.assertTrue(document["gate_passed"])
             self.assertEqual(24, len(document["scenario_id"]))
 
     def test_cli_mismatch_exits_nonzero_and_writes_diff(self) -> None:
@@ -350,7 +440,26 @@ class DifferentialReportTests(unittest.TestCase):
             self.assertEqual(1, result)
             document = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertFalse(document["equivalent"])
+            self.assertFalse(document["gate_passed"])
             self.assertEqual("quantity", document["differences"][0]["field"])
+
+    def test_cli_issue_linked_difference_passes_without_claiming_equivalence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            legacy_path, native_path, output_path = (directory / "legacy.json", directory / "native.json",
+                                                     directory / "diff.json")
+            self.native["events"].append(self.native_event(event_key="hopper.insert.0", action="HOPPER_INSERT",
+                                                            quantity=1, item_id="minecraft:iron_ingot",
+                                                            source_action_id="HOPPER_INSERT", sequence=1))
+            self.native["invariants"]["total_observations"] = 2
+            legacy_path.write_text(json.dumps(self.legacy), encoding="utf-8")
+            native_path.write_text(json.dumps(self.native), encoding="utf-8")
+            result = report.main(["--grieflogger", str(legacy_path), "--itemgraph", str(native_path),
+                                  "--output", str(output_path)])
+            document = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(0, result)
+            self.assertFalse(document["equivalent"])
+            self.assertTrue(document["gate_passed"])
 
     def test_cli_validate_only_pins_native_loader_without_claiming_comparison(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

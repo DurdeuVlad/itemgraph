@@ -25,7 +25,7 @@ canonical action names, accepted GriefLogger spellings, compatibility status,
 evidence and quantity semantics, loader/storage support, lookup filters,
 permission and paging controls, inspector behavior, configuration controls, and
 the GitHub issue responsible for incomplete mappings.
-The current registry compatibility version is `m8.10.0`.
+The current registry compatibility version is `m8.11.0`.
 
 The registry version changes when a mapping, status, evidence or quantity
 meaning, loader, or backend contract changes. Documentation-only clarifications
@@ -410,7 +410,7 @@ checksummed historical database when an operator explicitly configures it.
 ### Differential report comparator foundation
 
 `tools/itemgraph_differential_report.py` defines normalized report schema
-version 3 for #31. The shared
+version 4 for #31. The shared
 `ItemGraphReplayReportFixture` writes raw schema version 2 from the durable
 movement rows checked by the NeoForge and Fabric GameTests. CI normalizes and
 validates each loader report, then uploads the redacted JSON as a workflow
@@ -474,16 +474,29 @@ quantities are required for `ADD_ITEM`, `PICKUP_ITEM`, `ADD_ITEM_ENDER`, and
 `DROP_ITEM`, `BREAK_ITEM`, `CONSUME_ITEM`, `THROW_ITEM`, `SHOOT_ITEM`,
 `REMOVE_ITEM_ENDER`, and `HOPPER_EXTRACT`. Transformation quantities must be
 positive result counts, and actions without quantity semantics require null.
-Unknown source actions
-remain visible as `UNRESOLVED_SOURCE_ACTION` with a stable reason and system
-raw identity; GriefLogger uses its numeric source ID, while ItemGraph preserves
-its native action string. Neither can claim an item identity or quantity. Unknown
-fields, duplicate JSON keys, duplicate event keys or sequences, unclassified
-evidence, backwards timestamps, and unresolved events without a reason are
-rejected. Any mismatch exits non-zero and is emitted in the JSON diff. This
-slice does not yet provide an issue-linked exception policy; it requires exact
-per-event quantities and rejects any whole-database allocation or integrity
-violation reported by `AuditService`.
+The comparison follows SQLite's SQLLogicTest precedent: deterministic inputs
+are compared against the same expected results across systems, and differences
+remain visible rather than being normalized away ([SQLLogicTest method](https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki),
+[SQLite testing strategy](https://www.sqlite.org/testing.html)). ItemGraph keeps
+that strict default while giving documented native extensions explicit,
+profile-pinned issue links.
+
+Unknown source actions remain visible as `UNRESOLVED_SOURCE_ACTION` with a
+stable reason and system raw identity; GriefLogger uses its numeric source ID,
+while ItemGraph preserves its native action string. Neither can claim an item
+identity or quantity. Unknown fields, duplicate JSON keys, duplicate event
+keys or sequences, unclassified evidence, backwards timestamps, and unresolved
+events without a reason are rejected. Every difference is preserved in the
+JSON output. The checked-in action profile is the only source of accepted
+exceptions: each exception names its exact difference kind, ItemGraph source
+table, reason code, and owning `evidence_issue`. An issue-linked difference remains visible and keeps
+`equivalent=false`, but does not fail the comparison gate. Every other mismatch
+is classified `unexplained` and fails the gate. Exceptions currently cover the
+documented native-only transformation, automation, entity-interaction, and
+Ender-inventory events; a quantity, timestamp, endpoint, privacy, or evidence
+class mismatch, or wrong native source table never inherits an action-level exception. The comparator still
+requires exact per-event quantities and rejects any whole-database allocation
+or integrity violation reported by `AuditService`.
 
 The GameTest export contains the six checked durable rows for chest deposit and
 withdrawal, ground drop and pickup, and projectile throw and shoot. It excludes

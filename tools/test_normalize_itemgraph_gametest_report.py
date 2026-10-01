@@ -70,7 +70,7 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
     def test_pins_profile_and_native_only_runtime(self) -> None:
         report = normalizer.normalize(self.raw, "neoforge")
         registry, fixture_hash = differential.current_profile()
-        self.assertEqual(3, report["report_schema_version"])
+        self.assertEqual(differential.REPORT_SCHEMA_VERSION, report["report_schema_version"])
         self.assertEqual("itemgraph", report["system"])
         self.assertEqual("native_only", report["runtime_mode"])
         self.assertEqual(registry["compatibility_version"], report["compatibility_version"])

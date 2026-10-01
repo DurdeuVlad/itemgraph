@@ -22,7 +22,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "docs" / "GRIEFLOGGER_COMPATIBILITY.json"
 FIXTURE_PATH = ROOT / "docs" / "grieflogger-fixtures" / "1.2.10-1.21.1.json"
-REPORT_SCHEMA_VERSION = 3
+REPORT_SCHEMA_VERSION = 4
 LOADERS = {"fabric", "neoforge"}
 SYSTEMS = {"grieflogger", "itemgraph"}
 RUNTIME_MODES = {"grieflogger_present", "native_only"}
@@ -126,6 +126,7 @@ def current_profile() -> tuple[dict[str, Any], str]:
     mapped_actions = {row.get("itemgraph") for row in registry.get("actions", []) if isinstance(row, dict)}
     if mapped_actions != set(ACTION_TABLES):
         raise ReportError("normalized action-to-table contract does not match the compatibility registry")
+    _validate_differential_exceptions(registry)
     fixture = read_json(FIXTURE_PATH)
     fixture_hash = fixture.get("fixture_sha256")
     if not isinstance(fixture_hash, str):
@@ -346,17 +347,19 @@ def compare_reports(legacy: dict[str, Any], native: dict[str, Any]) -> dict[str,
     for key in sorted(old_rows.keys() | new_rows.keys()):
         if key not in old_rows:
             differences.append({"sequence": new_rows[key]["sequence"], "kind": "unexpected_native_event", "field": None,
+                                "action": new_rows[key]["action"],
                                 "grieflogger": None, "itemgraph": _safe_event(new_rows[key])})
             continue
         if key not in new_rows:
             differences.append({"sequence": old_rows[key]["sequence"], "kind": "missing_native_event", "field": None,
+                                "action": old_rows[key]["action"],
                                 "grieflogger": _safe_event(old_rows[key]), "itemgraph": None})
             continue
         for field in COMPARABLE_EVENT_FIELDS:
             if old_rows[key][field] != new_rows[key][field]:
                 differences.append({"sequence": old_rows[key]["sequence"],
                                     "itemgraph_sequence": new_rows[key]["sequence"],
-                                    "kind": "field_mismatch", "field": field,
+                                    "kind": "field_mismatch", "field": field, "action": new_rows[key]["action"],
                                     "grieflogger": _safe_field(field, old_rows[key][field]),
                                     "itemgraph": _safe_field(field, new_rows[key][field])})
     legacy_order = [r["event_key"] for r in sorted(legacy["events"], key=lambda r: r["sequence"])]
@@ -368,6 +371,18 @@ def compare_reports(legacy: dict[str, Any], native: dict[str, Any]) -> dict[str,
         differences.append({"sequence": None, "kind": "temporal_order_mismatch", "field": "occurred_at_ms",
                             "grieflogger": [old_rows[key]["sequence"] for key in common_legacy_order],
                             "itemgraph": [new_rows[key]["sequence"] for key in common_native_order]})
+    action_rows = {row["itemgraph"]: row for row in current_profile()[0]["actions"]}
+    for difference in differences:
+        exception = _matching_exception(difference, action_rows)
+        if exception is None:
+            difference["classification"] = "unexplained"
+        else:
+            difference["classification"] = "issue_linked_expected"
+            difference["issue"] = exception["issue"]
+            difference["issue_url"] = f"https://github.com/DurdeuVlad/itemgraph/issues/{exception['issue']}"
+            difference["reason_code"] = exception["reason_code"]
+    expected_count = sum(diff["classification"] == "issue_linked_expected" for diff in differences)
+    unexplained_count = len(differences) - expected_count
     return {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "compatibility_version": legacy["compatibility_version"],
@@ -377,6 +392,9 @@ def compare_reports(legacy: dict[str, Any], native: dict[str, Any]) -> dict[str,
         "scenario_id": _opaque_key(legacy["scenario_id"]),
         "seed": legacy["seed"],
         "equivalent": not differences,
+        "gate_passed": unexplained_count == 0,
+        "expected_difference_count": expected_count,
+        "unexplained_difference_count": unexplained_count,
         "event_counts": {"grieflogger": len(legacy["events"]), "itemgraph": len(native["events"])},
         "itemgraph_invariants": native["invariants"],
         "differences": differences,
@@ -413,9 +431,59 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ReportError) as exc:
         print(f"differential report failed: {exc}", file=sys.stderr)
         return 2
-    summary = "equivalent" if result["equivalent"] else f"{len(result['differences'])} unexplained difference(s)"
+    summary = ("equivalent" if result["equivalent"] else
+               f"{result['expected_difference_count']} issue-linked expected difference(s), "
+               f"{result['unexplained_difference_count']} unexplained difference(s)")
     print(f"{result['scenario_id']} ({result['loader']}): {summary}")
-    return 0 if result["equivalent"] else 1
+    return 0 if result["gate_passed"] else 1
+
+
+def _validate_differential_exceptions(registry: dict[str, Any]) -> None:
+    for action in registry["actions"]:
+        exceptions = action.get("differential_exceptions", [])
+        if not isinstance(exceptions, list):
+            raise ReportError("differential exception policy must be an array")
+        if not exceptions:
+            continue
+        issue = action.get("evidence_issue")
+        if action.get("status") not in {"extended", "unsupported-no-writer"} or not _is_integer(issue) or issue <= 0:
+            raise ReportError("differential exception requires an extended action and its positive evidence_issue")
+        seen: set[str] = set()
+        for exception in exceptions:
+            if not isinstance(exception, dict):
+                raise ReportError("differential exception must be an object")
+            kind = exception.get("kind")
+            if not isinstance(kind, str):
+                raise ReportError("differential exception kind must be a string")
+            if kind != "unexpected_native_event" or set(exception) != {
+                    "kind", "issue", "reason_code", "source_table"}:
+                raise ReportError("differential exception fields do not match the policy schema")
+            if kind in seen:
+                raise ReportError("duplicate differential exception policy")
+            seen.add(kind)
+            if not _is_integer(exception.get("issue")) or exception["issue"] != issue:
+                raise ReportError("differential exception issue must match its action evidence_issue")
+            if not isinstance(exception.get("reason_code"), str) or not SAFE_REASON_RE.fullmatch(exception["reason_code"]):
+                raise ReportError("differential exception reason_code must be stable uppercase text")
+            if exception.get("source_table") not in ITEMGRAPH_SOURCE_TABLES:
+                raise ReportError("differential exception source_table must be an ItemGraph evidence table")
+            if (action.get("grieflogger") is not None
+                    and action.get("release_writer_status") != "unsupported-no-writer"):
+                raise ReportError("unexpected native event exceptions require no GriefLogger action mapping")
+
+
+def _matching_exception(difference: dict[str, Any], action_rows: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    action = difference.get("action")
+    profile_action = action_rows.get(action)
+    if profile_action is None:
+        return None
+    for exception in profile_action.get("differential_exceptions", []):
+        if (difference["kind"] == exception["kind"]
+                and difference["grieflogger"] is None
+                and isinstance(difference["itemgraph"], dict)
+                and difference["itemgraph"].get("source_table") == exception["source_table"]):
+            return exception
+    return None
 
 
 def _paths_alias(output: Path, source: Path) -> bool:
