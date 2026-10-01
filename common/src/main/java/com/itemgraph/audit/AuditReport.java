@@ -12,6 +12,8 @@ public record AuditReport(
         long totalAllocations,
         long totalTransformations,
         int overAllocatedObservations,
+        int invalidEdgeAllocations,
+        int invalidEdgeTemporal,
         int nonPositiveQuantities,
         int orphanedAllocations,
         int invalidEdgeNodes,

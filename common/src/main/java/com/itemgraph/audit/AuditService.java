@@ -12,7 +12,9 @@ import java.util.List;
  *
  * <p>Verifies all core ItemGraph invariants:
  * <ol>
- *   <li>Quantity conservation: sum of edge allocations never exceeds observation capacity.</li>
+ *   <li>Quantity conservation: allocations never exceed observation capacity and
+ *       each active edge has valid, supported source/destination evidence whose
+ *       allocation totals equal the edge quantity.</li>
  *   <li>Positivity: quantities on observations, edges, and allocations are strictly positive.</li>
  *   <li>Relational integrity: no orphaned allocations or missing endpoint nodes.</li>
  *   <li>Status consistency: correlation_status accurately reflects allocation state.</li>
@@ -47,7 +49,74 @@ public class AuditService {
             }
         }
 
-        // 2. Non-positive quantities in observations, edges, or allocations
+        // 2. Every active edge must account for its full quantity on both sides.
+        // A graph may satisfy every per-observation capacity while an edge's own
+        // amount disagrees with the SOURCE or DESTINATION allocation ledger.
+        int invalidEdgeAllocations = 0;
+        String edgeAllocationSql = """
+            SELECT e.id, e.amount,
+                   COALESCE(SUM(CASE WHEN a.allocation_role = 'SOURCE' THEN a.amount ELSE 0 END), 0) AS source_allocated,
+                   COALESCE(SUM(CASE WHEN a.allocation_role = 'DESTINATION' THEN a.amount ELSE 0 END), 0) AS destination_allocated,
+                   COALESCE(SUM(CASE WHEN a.edge_id IS NOT NULL AND (
+                       a.allocation_role IS NULL OR a.allocation_role NOT IN ('SOURCE', 'DESTINATION')
+                       OR o.id IS NULL OR ev.edge_id IS NULL
+                       OR o.fingerprint_id IS NULL OR o.fingerprint_id != e.fingerprint_id
+                       OR (a.allocation_role = 'SOURCE' AND (
+                           o.action_type IS NULL OR o.action_type NOT IN ('DROP_ITEM', 'THROW_ITEM', 'SHOOT_ITEM', 'DEATH_DROP')
+                           OR o.node_id IS NULL OR o.node_id != e.from_node_id))
+                       OR (a.allocation_role = 'DESTINATION' AND (
+                           o.action_type IS NULL OR o.action_type != 'PICKUP_ITEM'
+                           OR o.target_node_id IS NULL OR o.target_node_id != e.to_node_id))
+                   ) THEN 1 ELSE 0 END), 0) AS invalid_allocations
+            FROM ig_inferred_edges e
+            LEFT JOIN ig_edge_allocations a ON a.edge_id = e.id
+            LEFT JOIN ig_observations o ON o.id = a.observation_id
+            LEFT JOIN ig_edge_evidence ev ON ev.edge_id = e.id AND ev.observation_id = a.observation_id
+            WHERE e.edge_state = 'ACTIVE'
+            GROUP BY e.id, e.amount
+            HAVING source_allocated != e.amount OR destination_allocated != e.amount OR invalid_allocations != 0
+        """;
+        try (PreparedStatement pstmt = conn.prepareStatement(edgeAllocationSql);
+             ResultSet rs = pstmt.executeQuery()) {
+            while (rs.next()) {
+                invalidEdgeAllocations++;
+                details.add("Invalid edge allocations on edge#" + rs.getLong("id")
+                        + ": amount=" + rs.getInt("amount")
+                        + ", source_allocated=" + rs.getLong("source_allocated")
+                        + ", destination_allocated=" + rs.getLong("destination_allocated")
+                        + ", invalid_allocation_rows=" + rs.getLong("invalid_allocations"));
+            }
+        }
+
+        // 3. Every active edge's time interval must exactly cite its allocated
+        // source and destination evidence in forward temporal order.
+        int invalidEdgeTemporal = 0;
+        String edgeTemporalSql = """
+            SELECT e.id, e.time_start, e.time_end,
+                   COALESCE(SUM(CASE WHEN a.allocation_role = 'SOURCE' AND (
+                       o.timestamp_ms IS NULL OR o.timestamp_ms != e.time_start OR o.timestamp_ms >= e.time_end
+                   ) THEN 1 WHEN a.allocation_role = 'DESTINATION' AND (
+                       o.timestamp_ms IS NULL OR o.timestamp_ms != e.time_end OR o.timestamp_ms <= e.time_start
+                   ) THEN 1 ELSE 0 END), 0) AS invalid_temporal_rows
+            FROM ig_inferred_edges e
+            LEFT JOIN ig_edge_allocations a ON a.edge_id = e.id
+            LEFT JOIN ig_observations o ON o.id = a.observation_id
+            WHERE e.edge_state = 'ACTIVE'
+            GROUP BY e.id, e.time_start, e.time_end
+            HAVING e.time_start >= e.time_end OR invalid_temporal_rows != 0
+        """;
+        try (PreparedStatement pstmt = conn.prepareStatement(edgeTemporalSql);
+             ResultSet rs = pstmt.executeQuery()) {
+            while (rs.next()) {
+                invalidEdgeTemporal++;
+                details.add("Invalid temporal edge evidence on edge#" + rs.getLong("id")
+                        + ": edge_start=" + rs.getLong("time_start")
+                        + ", edge_end=" + rs.getLong("time_end")
+                        + ", invalid_temporal_rows=" + rs.getLong("invalid_temporal_rows"));
+            }
+        }
+
+        // 4. Non-positive quantities in observations, edges, or allocations
         int nonPositive = 0;
         nonPositive += (int) count(conn, "SELECT COUNT(*) FROM ig_observations WHERE amount <= 0");
         nonPositive += (int) count(conn, "SELECT COUNT(*) FROM ig_inferred_edges WHERE amount <= 0");
@@ -56,7 +125,7 @@ public class AuditService {
             details.add("Found " + nonPositive + " records with amount <= 0");
         }
 
-        // 3. Orphaned allocations
+        // 5. Orphaned allocations
         int orphanedAllocations = 0;
         String orphanAllocSql = """
             SELECT COUNT(*) FROM ig_edge_allocations a
@@ -68,7 +137,7 @@ public class AuditService {
             details.add("Found " + orphanedAllocations + " orphaned edge allocations (missing edge or observation)");
         }
 
-        // 4. Invalid edge topology references
+        // 6. Invalid edge topology references
         int invalidEdgeNodes = 0;
         String invalidNodesSql = """
             SELECT COUNT(*) FROM ig_inferred_edges e
@@ -81,7 +150,7 @@ public class AuditService {
             details.add("Found " + invalidEdgeNodes + " inferred edges with invalid endpoint nodes");
         }
 
-        // 5. Correlation status consistency check
+        // 7. Correlation status consistency check
         int statusMismatches = 0;
         String statusMismatchSql = """
             SELECT COUNT(*) FROM ig_observations o
@@ -138,7 +207,8 @@ public class AuditService {
             details.add("Found " + statusMismatches + " observations or source groups with inconsistent correlation state");
         }
 
-        boolean healthy = (overAllocated == 0 && nonPositive == 0 && orphanedAllocations == 0 &&
+        boolean healthy = (overAllocated == 0 && invalidEdgeAllocations == 0 && invalidEdgeTemporal == 0
+                && nonPositive == 0 && orphanedAllocations == 0 &&
                            invalidEdgeNodes == 0 && statusMismatches == 0);
 
         return new AuditReport(
@@ -148,6 +218,8 @@ public class AuditService {
                 totalAllocations,
                 totalTransformations,
                 overAllocated,
+                invalidEdgeAllocations,
+                invalidEdgeTemporal,
                 nonPositive,
                 orphanedAllocations,
                 invalidEdgeNodes,

@@ -22,7 +22,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "docs" / "GRIEFLOGGER_COMPATIBILITY.json"
 FIXTURE_PATH = ROOT / "docs" / "grieflogger-fixtures" / "1.2.10-1.21.1.json"
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 LOADERS = {"fabric", "neoforge"}
 SYSTEMS = {"grieflogger", "itemgraph"}
 RUNTIME_MODES = {"grieflogger_present", "native_only"}
@@ -68,6 +68,15 @@ EVENT_FIELDS = (
     "unresolved_reason",
 )
 COMPARABLE_EVENT_FIELDS = tuple(field for field in EVENT_FIELDS if field not in {"source_table", "source_action_id"})
+ITEMGRAPH_INVARIANT_FIELDS = {
+    "healthy", "total_observations", "total_edges", "total_allocations", "total_transformations",
+    "over_allocated_observations", "invalid_edge_allocations", "invalid_edge_temporal", "non_positive_quantities", "orphaned_allocations",
+    "invalid_edge_nodes", "status_mismatches",
+}
+ITEMGRAPH_VIOLATION_FIELDS = {
+    "over_allocated_observations", "invalid_edge_allocations", "invalid_edge_temporal", "non_positive_quantities", "orphaned_allocations",
+    "invalid_edge_nodes", "status_mismatches",
+}
 
 
 class ReportError(ValueError):
@@ -266,6 +275,8 @@ def validate_report(report: dict[str, Any], expected_system: str | None = None) 
         raise ReportError(f"system must be {expected_system}" if expected_system else "system must be grieflogger or itemgraph")
     required = {"report_schema_version", "compatibility_version", "source_profile_sha256", "release_fixture_sha256",
                 "loader", "system", "runtime_mode", "scenario_id", "seed", "events"}
+    if report.get("system") == "itemgraph":
+        required.add("invariants")
     if set(report) != required:
         raise ReportError("report fields do not match the report schema")
     if not isinstance(report["runtime_mode"], str) or report["runtime_mode"] not in RUNTIME_MODES:
@@ -280,6 +291,8 @@ def validate_report(report: dict[str, Any], expected_system: str | None = None) 
         raise ReportError("seed must be an integer")
     if not isinstance(report["events"], list):
         raise ReportError("events must be an array")
+    if report["system"] == "itemgraph":
+        _validate_itemgraph_invariants(report["invariants"])
     seen: set[str] = set()
     seen_sequences: set[int] = set()
     prior_time: int | None = None
@@ -299,7 +312,26 @@ def validate_report(report: dict[str, Any], expected_system: str | None = None) 
             raise ReportError(f"events are not chronological at sequence {event['sequence']}")
         prior_sequence = event["sequence"]
         prior_time = event["occurred_at_ms"]
+    if report["system"] == "itemgraph":
+        exported_observations = sum(event["source_table"] == "ig_observations" for event in report["events"])
+        if exported_observations > report["invariants"]["total_observations"]:
+            raise ReportError("ItemGraph observation total is smaller than its exported observation events")
     return report
+
+
+def _validate_itemgraph_invariants(invariants: Any) -> None:
+    if not isinstance(invariants, dict) or set(invariants) != ITEMGRAPH_INVARIANT_FIELDS:
+        raise ReportError("ItemGraph invariants do not match the whole-graph audit schema")
+    if type(invariants["healthy"]) is not bool:
+        raise ReportError("ItemGraph invariants.healthy must be a boolean")
+    for field in ITEMGRAPH_INVARIANT_FIELDS - {"healthy"}:
+        if not _is_integer(invariants[field]) or invariants[field] < 0:
+            raise ReportError(f"ItemGraph invariants.{field} must be a non-negative integer")
+    violations = sum(invariants[field] for field in ITEMGRAPH_VIOLATION_FIELDS)
+    if invariants["healthy"] != (violations == 0):
+        raise ReportError("ItemGraph invariants.healthy disagrees with the whole-graph violation counts")
+    if violations:
+        raise ReportError("ItemGraph whole-graph quantity or integrity invariant violations must be zero")
 
 
 def compare_reports(legacy: dict[str, Any], native: dict[str, Any]) -> dict[str, Any]:
@@ -346,6 +378,7 @@ def compare_reports(legacy: dict[str, Any], native: dict[str, Any]) -> dict[str,
         "seed": legacy["seed"],
         "equivalent": not differences,
         "event_counts": {"grieflogger": len(legacy["events"]), "itemgraph": len(native["events"])},
+        "itemgraph_invariants": native["invariants"],
         "differences": differences,
     }
 

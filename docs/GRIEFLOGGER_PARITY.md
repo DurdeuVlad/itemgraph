@@ -410,8 +410,8 @@ checksummed historical database when an operator explicitly configures it.
 ### Differential report comparator foundation
 
 `tools/itemgraph_differential_report.py` defines normalized report schema
-version 2 for #31. The shared
-`ItemGraphReplayReportFixture` writes raw schema version 1 from the durable
+version 3 for #31. The shared
+`ItemGraphReplayReportFixture` writes raw schema version 2 from the durable
 movement rows checked by the NeoForge and Fabric GameTests. CI normalizes and
 validates each loader report, then uploads the redacted JSON as a workflow
 artifact. The normalizer labels the output `system=itemgraph` and
@@ -429,6 +429,26 @@ original timestamps. Every normalized report is pinned to the
 must name the same loader, deterministic `scenario_id`, and integer `seed`, with
 GriefLogger captured in `grieflogger_present` mode and ItemGraph captured in
 `native_only` mode.
+
+Each native ItemGraph report also contains a read-only whole-database audit
+summary from `AuditService.audit`: observation, active-edge, allocation, and
+transformation totals plus per-observation over-allocation, invalid per-edge
+allocation/evidence links, invalid edge-time links, non-positive-quantity,
+orphaned-allocation, invalid-edge-node, and status-mismatch counts. Every active edge must have
+SOURCE and DESTINATION allocations whose sums each equal the edge amount.
+Those allocations must reference direct edge evidence, match the edge
+fingerprint and action direction, and use the source and destination actor
+endpoints recorded by the edge; other allocation roles are invalid. Each
+observation's total active allocation must also stay within its amount. Edge
+start/end timestamps must equal the allocated source/destination observation
+timestamps in forward order. The fixture reads these counters in one read-only transaction snapshot (explicit
+`REPEATABLE_READ` for MySQL/MariaDB) and refuses to write an unhealthy report.
+The normalizer independently requires every
+invariant violation count to be zero and checks that `healthy` agrees with
+those counts. The comparison result retains the validated audit summary. This
+summary exports counts only and omits database row IDs and violation details.
+It covers the complete database attached to the isolated GameTest run, not just
+the six events in the replay report.
 
 Each event has a unique scenario-local `event_key`, a unique integer `sequence`,
 and explicit normalized action, evidence class, quantity, item registry ID,
@@ -461,8 +481,9 @@ its native action string. Neither can claim an item identity or quantity. Unknow
 fields, duplicate JSON keys, duplicate event keys or sequences, unclassified
 evidence, backwards timestamps, and unresolved events without a reason are
 rejected. Any mismatch exits non-zero and is emitted in the JSON diff. This
-slice does not yet provide an issue-linked exception policy or a graph-wide
-quantity-conservation check; it currently requires exact per-event quantities.
+slice does not yet provide an issue-linked exception policy; it requires exact
+per-event quantities and rejects any whole-database allocation or integrity
+violation reported by `AuditService`.
 
 The GameTest export contains the six checked durable rows for chest deposit and
 withdrawal, ground drop and pickup, and projectile throw and shoot. It excludes
@@ -474,9 +495,10 @@ millisecond without exporting row IDs. CI requires the fixed scenario ID, seed,
 six event keys, and contiguous sequence, tests malformed inputs, and pins each
 report to its loader and source profile. It does not start
 GriefLogger or compare its live database rows. A paired GriefLogger capture,
-issue-linked exception policy, whole-graph quantity-conservation check, the
-24-hour native-only staging window, and rollback rehearsal remain open #31
-acceptance criteria.
+issue-linked exception policy, the 24-hour native-only staging window, and
+rollback rehearsal remain open #31 acceptance criteria. The whole-database
+quantity and integrity audit is included in each native report and enforced as
+a zero-violation gate; it does not replace paired legacy/native replay.
 
 ## Verification notes
 

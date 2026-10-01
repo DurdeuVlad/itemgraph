@@ -8,13 +8,18 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
-- **Issue #31 native replay reports:** NeoForge and Fabric GameTests now export
-  the six durably verified item movement/projectile rows to redacted, raw
-  schema-v1 reports when CI sets `ITEMGRAPH_DIFFERENTIAL_REPORT_DIR`. CI pins
-  each normalized schema-v2 report to the GriefLogger compatibility profile,
-  validates the loader, and retains the normalized JSON as a workflow artifact.
+- **Issue #31 native replay reports:** NeoForge and Fabric GameTests export the
+  six durably verified item movement/projectile rows and a count-only
+  `AuditService` whole-database invariant summary to redacted raw schema-v2
+  reports when CI sets `ITEMGRAPH_DIFFERENTIAL_REPORT_DIR`. The audit uses one
+  read-only transaction snapshot and rejects over-capacity observations,
+  mismatched per-edge SOURCE/DESTINATION sums, unsupported roles, and
+  allocations detached from direct evidence, matching fingerprints/actions, or
+  actor endpoints. It rejects edge timestamps that do not match forward source
+  and destination evidence. The CI normalizer independently rejects non-zero violation
+  counts; normalized schema-v3 output retains the validated count-only summary.
   These native-only reports do not claim a GriefLogger comparison or complete
-  #31's paired replay, conservation, staging soak, or rollback gates. Mod
+  #31's paired replay, exception policy, staging soak, or rollback gates. Mod
   version remains 0.3.2; no distributable jar is built.
 - **Issue #30 queue flush cadence:** both loader configs now expose
   `ingestion.queue_frequency_ticks` / `queue_frequency_ticks`, defaulting to 20
