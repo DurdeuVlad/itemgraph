@@ -99,6 +99,11 @@ Never use production as the primary test environment.
   Gradle batch launcher returned process code 0 despite logging `BUILD FAILED`,
   so the script validates task output and the pre-database failure point rather
   than relying on that wrapper exit code.
+- `FabricItemGraphConfigTest.validatesEveryNumericConfigRangeBeforeApplyingBackendSpecificSettings`
+  uses temporary `itemgraph.properties` files to accept both boundaries and
+  reject underflow, overflow, and non-integer input for all seven integer
+  settings. Database port and timeout are validated even with the default
+  SQLite backend. The local Fabric test run passed on 2026-10-01.
 
 ## Compatibility profile gate
 

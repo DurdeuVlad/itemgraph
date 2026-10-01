@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -122,4 +123,51 @@ class FabricItemGraphConfigTest {
         IOException error = assertThrows(IOException.class, () -> FabricItemGraphConfig.load(tempDir, config));
         assertTrue(error.getMessage().contains("use_indexes must be true or false"));
     }
+
+    @Test
+    void validatesEveryNumericConfigRangeBeforeApplyingBackendSpecificSettings(@TempDir Path tempDir) throws Exception {
+        Path config = tempDir.resolve("config");
+        Files.createDirectories(config);
+        Path file = config.resolve("itemgraph.properties");
+
+        List<NumericRange> ranges = List.of(
+                new NumericRange("database_port", "general.database_port", 1, 65_535),
+                new NumericRange("database_connection_timeout_ms", "general.database_connection_timeout_ms", 250, 120_000),
+                new NumericRange("ground_bridge_max_seconds", "correlation.ground_bridge_max_seconds", 1, 86_400),
+                new NumericRange("max_page_size", "query.max_page_size", 1, 100),
+                new NumericRange("poll_interval_ms", "ingestion.poll_interval_ms", 10, 5_000),
+                new NumericRange("max_batch_size", "ingestion.max_batch_size", 1, 1_000),
+                new NumericRange("database_heartbeat_interval_ms", "operations.database_heartbeat_interval_ms",
+                        1_000, 3_600_000));
+
+        for (NumericRange range : ranges) {
+            Files.writeString(file, range.key() + "=" + range.minimum() + "\n");
+            FabricItemGraphConfig.load(tempDir, config);
+            Files.writeString(file, range.key() + "=" + range.maximum() + "\n");
+            FabricItemGraphConfig.load(tempDir, config);
+
+            assertRejectedNumericValue(tempDir, config, range.key(), range.configKey(), range.minimum() - 1);
+            assertRejectedNumericValue(tempDir, config, range.key(), range.configKey(), range.maximum() + 1);
+            assertRejectedNumericValue(tempDir, config, range.key(), range.configKey(), "not-an-integer");
+            assertRejectedNumericValue(tempDir, config, range.key(), range.configKey(), "999999999999999");
+        }
+    }
+
+    private static void assertRejectedNumericValue(Path gameDirectory, Path configDirectory, String propertyKey,
+            String configKey, Object value) throws Exception {
+        Path file = configDirectory.resolve("itemgraph.properties");
+        Files.writeString(file, propertyKey + "=" + value + "\n");
+        IOException error = assertThrows(IOException.class,
+                () -> FabricItemGraphConfig.load(gameDirectory, configDirectory), propertyKey + " must reject " + value);
+        assertTrue(error.getMessage().contains(configKey), configKey + " error must identify the full config key");
+        if (value instanceof String string) {
+            assertTrue(error.getMessage().contains("must be an integer"),
+                    configKey + " error must identify invalid integer input");
+            assertTrue(error.getMessage().contains(string), configKey + " error must include the rejected input");
+        } else {
+            assertTrue(error.getMessage().contains(value.toString()), configKey + " error must identify rejected value");
+        }
+    }
+
+    private record NumericRange(String key, String configKey, int minimum, int maximum) { }
 }

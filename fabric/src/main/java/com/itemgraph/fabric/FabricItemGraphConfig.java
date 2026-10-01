@@ -47,25 +47,25 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             }
         }
 
-        int groundBridgeMaxSeconds;
-        try {
-            groundBridgeMaxSeconds = Integer.parseInt(properties.getProperty("ground_bridge_max_seconds", "300"));
-        } catch (NumberFormatException e) {
-            throw new IOException("Invalid integer in " + configFile + ": ground_bridge_max_seconds", e);
-        }
-        if (groundBridgeMaxSeconds < 1 || groundBridgeMaxSeconds > 86_400) {
-            throw new IOException("ground_bridge_max_seconds must be in [1, 86400] in " + configFile);
-        }
+        int groundBridgeMaxSeconds = parseBoundedInt(properties, "ground_bridge_max_seconds", 300,
+                1, 86_400, configFile);
+        int databasePort = parseBoundedInt(properties, "database_port", 3306, 1, 65_535, configFile);
+        int databaseConnectionTimeoutMs = parseBoundedInt(properties, "database_connection_timeout_ms",
+                5_000, 250, 120_000, configFile);
 
         ItemGraphOperationalSettings operationalSettings;
         try {
             operationalSettings = new ItemGraphOperationalSettings(
-                    parseInt(properties, "max_page_size", ItemGraphOperationalSettings.DEFAULT_MAX_PAGE_SIZE, configFile),
+                    parseBoundedInt(properties, "max_page_size", ItemGraphOperationalSettings.DEFAULT_MAX_PAGE_SIZE,
+                            1, 100, configFile),
                     parseBoolean(properties, "server_side_only", true, configFile),
-                    parseInt(properties, "poll_interval_ms", ItemGraphOperationalSettings.DEFAULT_QUEUE_POLL_INTERVAL_MS, configFile),
-                    parseInt(properties, "max_batch_size", ItemGraphOperationalSettings.DEFAULT_MAX_BATCH_SIZE, configFile),
-                    parseInt(properties, "database_heartbeat_interval_ms",
-                            ItemGraphOperationalSettings.DEFAULT_DATABASE_HEARTBEAT_INTERVAL_MS, configFile),
+                    parseBoundedInt(properties, "poll_interval_ms",
+                            ItemGraphOperationalSettings.DEFAULT_QUEUE_POLL_INTERVAL_MS, 10, 5_000, configFile),
+                    parseBoundedInt(properties, "max_batch_size",
+                            ItemGraphOperationalSettings.DEFAULT_MAX_BATCH_SIZE, 1, 1_000, configFile),
+                    parseBoundedInt(properties, "database_heartbeat_interval_ms",
+                            ItemGraphOperationalSettings.DEFAULT_DATABASE_HEARTBEAT_INTERVAL_MS,
+                            1_000, 3_600_000, configFile),
                     parseBoolean(properties, "capture_enabled", true, configFile),
                     properties.getProperty("raw_evidence_retention", "indefinite"));
         } catch (IllegalArgumentException e) {
@@ -83,11 +83,11 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             } else if (backend.equals("mysql") || backend.equals("mariadb") || backend.equals("mysql_mariadb")) {
                 databaseSettings = DatabaseSettings.mysqlMariaDb(
                         properties.getProperty("database_host", "127.0.0.1"),
-                        parseInt(properties, "database_port", 3306, configFile),
+                        databasePort,
                         properties.getProperty("database_name", "itemgraph"),
                         properties.getProperty("database_username", "itemgraph"),
                         properties.getProperty("database_password", ""),
-                        parseInt(properties, "database_connection_timeout_ms", 5_000, configFile),
+                        databaseConnectionTimeoutMs,
                         parseBoolean(properties, "use_indexes", true, configFile),
                         properties.getProperty("database_ssl_mode", "disable"));
             } else {
@@ -111,6 +111,35 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         } catch (NumberFormatException e) {
             throw new IOException("Invalid integer in " + configFile + ": " + key, e);
         }
+    }
+
+    private static int parseBoundedInt(Properties properties, String key, int defaultValue,
+                                       int minimum, int maximum, Path configFile) throws IOException {
+        int value;
+        try {
+            value = parseInt(properties, key, defaultValue, configFile);
+        } catch (IOException e) {
+            throw new IOException(configKey(key) + " must be an integer, got: "
+                    + properties.getProperty(key) + " in " + configFile, e);
+        }
+        if (value < minimum || value > maximum) {
+            throw new IOException(configKey(key) + " must be in [" + minimum + "," + maximum + "], got: " + value
+                    + " in " + configFile);
+        }
+        return value;
+    }
+
+    private static String configKey(String propertyKey) {
+        return switch (propertyKey) {
+            case "database_port" -> "general.database_port";
+            case "database_connection_timeout_ms" -> "general.database_connection_timeout_ms";
+            case "ground_bridge_max_seconds" -> "correlation.ground_bridge_max_seconds";
+            case "max_page_size" -> "query.max_page_size";
+            case "poll_interval_ms" -> "ingestion.poll_interval_ms";
+            case "max_batch_size" -> "ingestion.max_batch_size";
+            case "database_heartbeat_interval_ms" -> "operations.database_heartbeat_interval_ms";
+            default -> propertyKey;
+        };
     }
 
     private static boolean parseBoolean(Properties properties, String key, boolean defaultValue, Path configFile)

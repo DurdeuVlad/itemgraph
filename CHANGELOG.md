@@ -48,6 +48,12 @@ The project follows a simple pre-1.0 development changelog model.
   `database_port=0` to `1` normalization gap; full invalid-config matrix
   coverage across both loaders remains open. No mod version bump or
   distributable jar was produced.
+- **Issue #30 Fabric numeric config parity:** Fabric now validates all seven
+  documented integer settings, including database port and connection timeout
+  even when SQLite is selected. Unit coverage accepts both endpoints and
+  rejects below-range, above-range, and non-integer values with the full config
+  key and rejected input. Non-numeric malformed-config combinations and
+  GriefLogger queue-cadence evidence remain open.
 - **Evidence and queue failure handling:** legacy topology migrations now copy
   observations, referenced fingerprint values, and raw payloads into
   `ig_legacy_observation_evidence`
