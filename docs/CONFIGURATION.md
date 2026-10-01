@@ -31,7 +31,7 @@ out-of-range legacy database and correlation values before ItemGraph reads them.
 |---|---|---|---|---|---|
 | Query page cap | `query.max_page_size` | `max_page_size` | integer / `10` | `[1,100]`; applies to command query rows and trace/browser pages, subject to the GUI's separate 45-slot ceiling | Restart |
 | Server-only operation | `operations.server_side_only` | `server_side_only` | boolean / `true` | `true`; `false` fails startup because client operation is unsupported | Restart |
-| Queue idle poll interval | `ingestion.poll_interval_ms` | `poll_interval_ms` | integer / `250` | `[10,5000]` milliseconds; worker's maximum wait while the observation queue is empty | Restart |
+| Queue idle poll interval | `ingestion.poll_interval_ms` | `poll_interval_ms` | integer / `250` | `[10,5000]` milliseconds; worker's maximum wait while all three native queues are empty | Restart |
 | Maximum batch size | `ingestion.max_batch_size` | `max_batch_size` | integer / `100` | `[1,1000]` records drained per queue per worker pass | Restart |
 | Network database keepalive | `operations.database_heartbeat_interval_ms` | `database_heartbeat_interval_ms` | integer / `30000` | `[1000,3600000]` milliseconds; best-effort validation of the shared MySQL/MariaDB connection on the ItemGraph worker; SQLite does not send heartbeats | Restart |
 | Native capture | `capture.enabled` | `capture_enabled` | boolean / `true` | `true` or `false`; false suppresses new ItemGraph-native records and does not stop GriefLogger read-only ingestion | Restart |
@@ -53,12 +53,13 @@ not delete raw rows after exporting or archiving them.
 
 ## Fixed queue behavior and unresolved controls
 
-Each of the three native ingestion queues is bounded to 10,000 entries. The
-background worker waits up to `poll_interval_ms` for an observation, then drains
-up to `max_batch_size` records from each non-empty queue. A non-empty observation
-queue is drained immediately; this setting is an idle wait bound, not a timer
-that delays evidence writes. Queue submission does not access the database or
-block the Minecraft server thread. GriefLogger's `queueFrequency` controls its
+Each of the three native ingestion queues is bounded to 10,000 entries. A
+successful enqueue signals the background worker immediately, regardless of
+which queue received the record. The worker waits up to `poll_interval_ms` only
+when all queues are idle, then drains up to `max_batch_size` records from each
+queue in one pass. This setting is an idle wait bound, not a timer that delays
+evidence writes. Queue submission does not access the database or block the
+Minecraft server thread. GriefLogger's `queueFrequency` controls its
 own queue schedule and is not yet claimed as equivalent to ItemGraph's idle poll
 and batch controls; differential staging load evidence is still required. A
 failed transformation write is retried through its bounded queue with backoff.

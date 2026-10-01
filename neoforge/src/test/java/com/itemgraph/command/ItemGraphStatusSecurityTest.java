@@ -2,6 +2,7 @@ package com.itemgraph.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.db.DatabaseSettings;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
@@ -74,5 +75,40 @@ class ItemGraphStatusSecurityTest {
         assertFalse(status.contains(privatePath.toString()));
         assertFalse(status.contains("lastError="));
         assertEquals(List.of("[ItemGraph] Database statistics unavailable; inspect the server log for connection details."), failures);
+    }
+
+    @Test
+    void networkStatusReportsBackendAndSchemaWithoutLeakingConnectionSecrets() throws Exception {
+        DatabaseManager database = mock(DatabaseManager.class);
+        when(database.isInitialized()).thenReturn(false);
+        when(database.getSettings()).thenReturn(DatabaseSettings.mysqlMariaDb(
+                "sentinel-host", 3306, "sentinel-database", "sentinel-user", "sentinel-password", 5_000, true));
+        when(database.getCurrentSchemaVersion()).thenReturn(20);
+
+        try (var databaseManager = mockStatic(DatabaseManager.class)) {
+            databaseManager.when(DatabaseManager::getInstance).thenReturn(database);
+
+            CommandSourceStack source = mock(CommandSourceStack.class);
+            when(source.hasPermission(2)).thenReturn(true);
+            List<String> successes = new ArrayList<>();
+            doAnswer(invocation -> {
+                Supplier<Component> message = invocation.getArgument(0);
+                successes.add(message.get().getString());
+                return null;
+            }).when(source).sendSuccess(any(), anyBoolean());
+
+            CommandDispatcher<CommandSourceStack> dispatcher = new CommandDispatcher<>();
+            ItemGraphCommands.register(dispatcher);
+            assertEquals(0, dispatcher.execute("ig status", source));
+
+            assertEquals(1, successes.size());
+            String status = successes.get(0);
+            assertTrue(status.contains("backend=mysql_mariadb"));
+            assertTrue(status.contains("schemaVersion=20"));
+            assertFalse(status.contains("sentinel-host"));
+            assertFalse(status.contains("sentinel-database"));
+            assertFalse(status.contains("sentinel-user"));
+            assertFalse(status.contains("sentinel-password"));
+        }
     }
 }

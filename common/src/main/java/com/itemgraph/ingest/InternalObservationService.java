@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -355,6 +356,8 @@ public class InternalObservationService {
     private final Object observationQueueLock = new Object();
     private final BlockingQueue<InternalTransformation> transformationQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
     private final BlockingQueue<InternalAuditEvent> auditEventQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+    private final Semaphore queuedWorkSignals = new Semaphore(0);
+    private final AtomicBoolean queuedWorkSignalPending = new AtomicBoolean(false);
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final java.util.concurrent.atomic.AtomicLong totalEnqueued = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalPersisted = new java.util.concurrent.atomic.AtomicLong(0);
@@ -451,6 +454,8 @@ public class InternalObservationService {
             workerThread = null;
             // Do not flush or let the database close while a worker still owns a batch.
             flushQueues();
+            queuedWorkSignals.drainPermits();
+            queuedWorkSignalPending.set(false);
             if (interrupted) {
                 Thread.currentThread().interrupt();
             }
@@ -458,6 +463,8 @@ public class InternalObservationService {
         }
         // Flush remaining queues synchronously on shutdown
         flushQueues();
+        queuedWorkSignals.drainPermits();
+        queuedWorkSignalPending.set(false);
     }
 
     public boolean submit(InternalObservation obs) {
@@ -499,6 +506,7 @@ public class InternalObservationService {
                 }
             }
             totalEnqueued.addAndGet(observations.size());
+            signalQueuedWork();
             return true;
         }
     }
@@ -511,6 +519,7 @@ public class InternalObservationService {
         boolean ok = transformationQueue.offer(trans);
         if (ok) {
             totalEnqueued.incrementAndGet();
+            signalQueuedWork();
         } else {
             pendingTransformations.decrementAndGet();
             long dropped = totalDropped.incrementAndGet();
@@ -532,6 +541,7 @@ public class InternalObservationService {
         boolean ok = auditEventQueue.offer(event);
         if (ok) {
             totalEnqueued.incrementAndGet();
+            signalQueuedWork();
         } else {
             long dropped = totalDropped.incrementAndGet();
             if (dropped == 1 || dropped % 1000 == 0) {
@@ -578,13 +588,14 @@ public class InternalObservationService {
         totalAuditEvents.set(0);
         totalDatabaseHeartbeats.set(0);
         totalDatabaseHeartbeatFailures.set(0);
+        queuedWorkSignals.drainPermits();
+        queuedWorkSignalPending.set(false);
         resetAuditRetryState();
         resetObservationRetryState();
     }
 
     private void drainQueueSafely() {
         List<InternalObservation> obsBatch = new ArrayList<>(maxBatchSize);
-        List<InternalTransformation> transBatch = new ArrayList<>(maxBatchSize);
         long nextDatabaseHeartbeatNanos = System.nanoTime()
                 + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(databaseHeartbeatIntervalMs);
 
@@ -593,49 +604,57 @@ public class InternalObservationService {
                 long nanosUntilHeartbeat = nextDatabaseHeartbeatNanos - System.nanoTime();
                 long pollWaitMs = Math.min(queuePollIntervalMs,
                         java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(Math.max(0L, nanosUntilHeartbeat)));
-                InternalObservation firstObs = queue.poll(pollWaitMs, java.util.concurrent.TimeUnit.MILLISECONDS);
-                if (firstObs != null) {
-                    obsBatch.add(firstObs);
-                    queue.drainTo(obsBatch, maxBatchSize - 1);
-                    try {
-                        persistBatch(obsBatch);
-                        resetObservationRetryState();
-                        totalPersisted.addAndGet(obsBatch.size());
-                    } catch (Exception failure) {
-                        requeueObservationBatch(obsBatch, failure);
-                    }
-                    obsBatch.clear();
-                }
+                if (queuedWorkSignals.tryAcquire(pollWaitMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    queuedWorkSignalPending.set(false);
 
-                InternalTransformation firstTrans = transformationQueue.poll();
-                if (firstTrans != null) {
-                    transBatch.add(firstTrans);
-                    transformationQueue.drainTo(transBatch, maxBatchSize - 1);
-                    try {
-                        persistTransformations(transBatch);
-                        resetTransformationRetryState();
-                        totalTransformations.addAndGet(transBatch.size());
-                        totalPersisted.addAndGet(transBatch.size());
-                        pendingTransformations.addAndGet(-transBatch.size());
-                    } catch (Exception failure) {
-                        requeueTransformationBatch(transBatch, failure);
-                    } finally {
-                        transBatch.clear();
-                    }
-                }
+                    queue.drainTo(obsBatch, maxBatchSize);
 
-                InternalAuditEvent firstAudit = auditEventQueue.poll();
-                if (firstAudit != null) {
+                    List<InternalTransformation> transBatch = new ArrayList<>(maxBatchSize);
+                    transformationQueue.drainTo(transBatch, maxBatchSize);
+
                     List<InternalAuditEvent> auditBatch = new ArrayList<>(maxBatchSize);
-                    auditBatch.add(firstAudit);
-                    auditEventQueue.drainTo(auditBatch, maxBatchSize - 1);
-                    try {
-                        persistAuditEvents(auditBatch);
-                        resetAuditRetryState();
-                        totalAuditEvents.addAndGet(auditBatch.size());
-                        totalPersisted.addAndGet(auditBatch.size());
-                    } catch (Exception e) {
-                        requeueAuditBatch(auditBatch, e);
+                    auditEventQueue.drainTo(auditBatch, maxBatchSize);
+
+                    if (!obsBatch.isEmpty()) {
+                        try {
+                            persistBatch(obsBatch);
+                            resetObservationRetryState();
+                            totalPersisted.addAndGet(obsBatch.size());
+                        } catch (Exception failure) {
+                            requeueObservationBatch(obsBatch, failure);
+                        }
+                        obsBatch.clear();
+                    }
+
+                    if (!transBatch.isEmpty()) {
+                        try {
+                            persistTransformations(transBatch);
+                            resetTransformationRetryState();
+                            totalTransformations.addAndGet(transBatch.size());
+                            totalPersisted.addAndGet(transBatch.size());
+                            pendingTransformations.addAndGet(-transBatch.size());
+                        } catch (Exception failure) {
+                            requeueTransformationBatch(transBatch, failure);
+                        } finally {
+                            transBatch.clear();
+                        }
+                    }
+
+                    if (!auditBatch.isEmpty()) {
+                        try {
+                            persistAuditEvents(auditBatch);
+                            resetAuditRetryState();
+                            totalAuditEvents.addAndGet(auditBatch.size());
+                            totalPersisted.addAndGet(auditBatch.size());
+                        } catch (Exception e) {
+                            requeueAuditBatch(auditBatch, e);
+                        }
+                    }
+
+                    // A pass is intentionally bounded per queue. Keep the worker running
+                    // immediately while any bounded queue still has a backlog.
+                    if (!queue.isEmpty() || !transformationQueue.isEmpty() || !auditEventQueue.isEmpty()) {
+                        signalQueuedWork();
                     }
                 }
 
@@ -650,6 +669,13 @@ public class InternalObservationService {
             } catch (Exception e) {
                 LOGGER.error("Error persisting internal observations/transformations batch", e);
             }
+        }
+    }
+
+    /** Coalesce producer wakeups while preserving a signal for enqueues racing a drain. */
+    private void signalQueuedWork() {
+        if (queuedWorkSignalPending.compareAndSet(false, true)) {
+            queuedWorkSignals.release();
         }
     }
 
@@ -738,6 +764,8 @@ public class InternalObservationService {
                     LOGGER.warn("Native audit queue remained full while retrying; dropped {} ({} dropped total; evidence loss)",
                             event.eventType(), dropped);
                 }
+            } else {
+                signalQueuedWork();
             }
         }
         if (running.get()) {
@@ -780,6 +808,8 @@ public class InternalObservationService {
                     LOGGER.warn("Transformation queue remained full while retrying; dropped {} ({} dropped total; evidence loss)",
                             transformation.transformationType(), dropped);
                 }
+            } else {
+                signalQueuedWork();
             }
         }
         if (running.get()) {
@@ -833,6 +863,8 @@ public class InternalObservationService {
                         LOGGER.warn("Internal observation queue remained full while retrying; dropped {} ({} dropped total)",
                                 observation.actionType(), dropped);
                     }
+                } else {
+                    signalQueuedWork();
                 }
             }
         }

@@ -34,6 +34,34 @@ Never use production as the primary test environment.
   measure tick-time impact from real player events, compare GriefLogger's queue
   scheduler, or validate a live MySQL/MariaDB endpoint.
 
+## Native queue wakeup and isolated NeoForge load check (2026-10-01)
+
+- `InternalObservationServiceTest.auditQueueSignalWakesWorkerWithoutWaitingForIdleObservationPoll`
+  configures a 2,000 ms idle poll, queues only one native audit event, and requires
+  the worker to persist it durably within 500 ms. This catches regressions where
+  the worker blocks on the item-observation queue while another queue has work.
+- `OperationalLoadGameTests.nativeAuditQueueBurstPersistsOnWorkerWithoutBlockingServerThread`
+  runs on a fresh local NeoForge 21.1.248 / Minecraft 1.21.1 GameTest server with
+  ItemGraph 0.3.2 and no GriefLogger. It queues 8,000 native audit events in 20
+  server-thread batches of 400, checks every batch remains below 50 ms, then
+  allows 20 seconds of wall-clock worker time before checking counters and the
+  SQLite ledger. The 2026-10-01 run accepted and durably persisted all 8,000,
+  dropped 0, ended with 0 queued records, measured 42.7432 ms total enqueue time,
+  and measured 6.5712 ms for the slowest server-thread batch. Peak queue depth
+  was 6,624 of 10,000 audit queue slots.
+- The same temporary game directory was restarted against the same SQLite
+  database. NeoForge reopened schema version 20, persisted the next 8,000 events
+  with 0 drops and an empty queue, and a read-only SQLite check found exactly
+  80,000 total probe rows. This verifies restart durability for the probe
+  ledger; the probe rows were preserved.
+- The development-only GameTest is in NeoForge `src/main/java`; NeoForge jar
+  tasks exclude the GameTest package. It writes uniquely numbered probe rows to
+  the isolated temporary SQLite database so a second server start can verify
+  persistence without clearing or modifying prior evidence.
+- This is controlled server-thread queue load, not a realistic player-action
+  replay or a GriefLogger comparison. It does not establish a universal tick
+  budget or validate the MySQL/MariaDB heartbeat against a live endpoint.
+
 ## Compatibility profile gate
 
 Run `python tools/validate_grieflogger_profile.py` from the repository root.
@@ -358,7 +386,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ItemGraphConfigTest` | default values, config paths, range constraints, and NightConfig correction/clamping (5 tests) |
 | `ItemGraphOperationalSettingsTest`, `FabricItemGraphConfigTest`, `QueryLimitsTest`, `TraceQueryServiceTest.configuredPageCapConstrainsSqlBackedTracePages` | fail-closed operational bounds and policies, both-loader defaults/custom values, capture controls, query cap on command and SQL-backed GUI pages, queue poll/batch/heartbeat settings, and retention invariants |
 | `LegacyObservationArchiveTest`, `InternalObservationServiceTest.failedTransformationBatchIsRetainedAndShutdownLossIsCounted` | V3–V5 preserve legacy raw observation payloads before active-projection resets; transformation retries remain bounded and shutdown loss is counted |
-| `ItemGraphStatusSecurityTest` | `/ig status` reports backend/schema while redacting database paths and raw driver errors |
+| `ItemGraphStatusSecurityTest` | `/ig status` reports SQLite or MySQL/MariaDB backend and schema while redacting database paths, raw driver errors, and sentinel network host/database/user/password values |
 | `QueryFormatterTest` | forensic labels, confidence/time formatting, session and queue-recovery intervals, source-group labels, trace limits, audit reports, and errors (16 tests) |
 | `ItemEntityEventListenerTest` | successful-spawn-only ground drops, canceled toss/death evidence, pickup quantity, partial-pickup handling, empty/null guards (10 tests) |
 | `CorrelationEngineTest` | ground bridging/scoring, cross-source confirmed/ambiguous groups, canceled-source conflicts, legacy edge supersession, temporal ordering, and MVP chain (24 tests) |
