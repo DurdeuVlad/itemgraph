@@ -62,6 +62,20 @@ Never use production as the primary test environment.
   replay or a GriefLogger comparison. It does not establish a universal tick
   budget or validate the MySQL/MariaDB heartbeat against a live endpoint.
 
+## NeoForge invalid server-config startup check (2026-10-01)
+
+- `python tools/test_neoforge_invalid_config_startup.py` creates a fresh
+  temporary NeoForge GameTest directory with
+  `config/itemgraph-server.toml` setting `query.max_page_size=101`.
+- The check requires the exact `query.max_page_size must be in [1,100]` startup
+  error, a failed GameTest server task, and absence of the ItemGraph database
+  initialized message. The Windows Gradle batch launcher returned process code
+  0 despite logging `BUILD FAILED`, so the check validates task output and the
+  pre-database failure point rather than relying on that wrapper exit code.
+- The 2026-10-01 isolated run met those conditions. This verifies a real
+  NeoForge config-load-to-server-start path for an invalid query cap; the shared
+  operational-settings tests cover the other documented bounds.
+
 ## Compatibility profile gate
 
 Run `python tools/validate_grieflogger_profile.py` from the repository root.

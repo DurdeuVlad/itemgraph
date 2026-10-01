@@ -86,3 +86,6 @@ jobs:
           ITEMGRAPH_TEST_MYSQL_USER: itemgraph
           ITEMGRAPH_TEST_MYSQL_PASSWORD: itemgraph
         run: ./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest
+
+      - name: Reject invalid NeoForge server configuration before database startup
+        run: python3 tools/test_neoforge_invalid_config_startup.py
