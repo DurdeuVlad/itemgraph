@@ -8,6 +8,14 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #31 native replay reports:** NeoForge and Fabric GameTests now export
+  the six durably verified item movement/projectile rows to redacted, raw
+  schema-v1 reports when CI sets `ITEMGRAPH_DIFFERENTIAL_REPORT_DIR`. CI pins
+  each normalized schema-v2 report to the GriefLogger compatibility profile,
+  validates the loader, and retains the normalized JSON as a workflow artifact.
+  These native-only reports do not claim a GriefLogger comparison or complete
+  #31's paired replay, conservation, staging soak, or rollback gates. Mod
+  version remains 0.3.2; no distributable jar is built.
 - **Issue #30 queue flush cadence:** both loader configs now expose
   `ingestion.queue_frequency_ticks` / `queue_frequency_ticks`, defaulting to 20
   and accepting 1–100 ticks to match GriefLogger's `queueFrequency`. Both server

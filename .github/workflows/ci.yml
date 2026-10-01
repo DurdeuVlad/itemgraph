@@ -78,6 +78,9 @@ jobs:
       - name: Test normalized differential replay report comparator
         run: python3 tools/test_itemgraph_differential_report.py
 
+      - name: Test native GameTest report normalization
+        run: python3 tools/test_normalize_itemgraph_gametest_report.py
+
       - name: Validate exact GriefLogger 1.21.1 release fixture
         env:
           GRIEFLOGGER_RELEASE_FIXTURE_CHECK_REMOTE: '1'
@@ -85,13 +88,40 @@ jobs:
 
       - name: Test all loaders without packaging distributable mod jars
         env:
+          ITEMGRAPH_DIFFERENTIAL_REPORT_DIR: ${{ runner.temp }}/itemgraph-differential-reports/raw
           ITEMGRAPH_TEST_MARIADB_URL: jdbc:mariadb://127.0.0.1:3306/itemgraph
           ITEMGRAPH_TEST_MARIADB_USER: itemgraph
           ITEMGRAPH_TEST_MARIADB_PASSWORD: itemgraph
           ITEMGRAPH_TEST_MYSQL_URL: jdbc:mariadb://127.0.0.1:3307/itemgraph?allowPublicKeyRetrieval=true
           ITEMGRAPH_TEST_MYSQL_USER: itemgraph
           ITEMGRAPH_TEST_MYSQL_PASSWORD: itemgraph
-        run: ./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest
+        run: |
+          mkdir -p "$ITEMGRAPH_DIFFERENTIAL_REPORT_DIR"
+          ./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest
+
+      - name: Normalize and validate native-only replay reports
+        env:
+          REPORT_DIR: ${{ runner.temp }}/itemgraph-differential-reports
+        run: |
+          mkdir -p "$REPORT_DIR/normalized"
+          for loader in neoforge fabric; do
+            python3 tools/normalize_itemgraph_gametest_report.py \
+              --loader "$loader" \
+              --input "$REPORT_DIR/raw/itemgraph-$loader.raw.json" \
+              --output "$REPORT_DIR/normalized/itemgraph-$loader.json"
+            python3 tools/itemgraph_differential_report.py \
+              --validate-only "$REPORT_DIR/normalized/itemgraph-$loader.json" \
+              --expected-system itemgraph \
+              --expected-loader "$loader"
+          done
+
+      - name: Upload redacted replay reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: itemgraph-native-replay-reports
+          path: ${{ runner.temp }}/itemgraph-differential-reports/normalized/*.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Reject invalid NeoForge server configuration before database startup
         run: python3 tools/test_neoforge_invalid_config_startup.py

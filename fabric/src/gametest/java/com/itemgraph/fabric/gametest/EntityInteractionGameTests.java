@@ -5,6 +5,7 @@ import com.itemgraph.fabric.FabricNativeAuditEventListener;
 import com.itemgraph.gametest.EntityInteractionConformanceFixture;
 import com.itemgraph.gametest.BucketPickupConformanceFixture;
 import com.itemgraph.gametest.ItemMovementConformanceFixture;
+import com.itemgraph.gametest.ItemGraphReplayReportFixture;
 import com.itemgraph.gametest.ProjectileConformanceFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
@@ -182,6 +183,9 @@ public final class EntityInteractionGameTests implements FabricGameTest {
             EntityInteractionConformanceFixture.assertCow(helper, playerUuid, playerName, cowPos, cowUuid);
             EntityInteractionConformanceFixture.assertArmorStand(
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
+            ItemGraphReplayReportFixture.writeIfRequested(helper, "fabric",
+                    Math.min(movementWatermark, projectileWatermark.observationId()),
+                    movementPlayer.getUUID().toString(), playerUuid);
         });
     }
 
