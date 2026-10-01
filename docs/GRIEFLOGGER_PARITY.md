@@ -144,6 +144,14 @@ inspected, not directly exercised by these page-session tests. The output
 continues to label evidence source/type and retain evidence IDs; ItemGraph-only
 output remains an explicit extension.
 
+Fabric `FabricItemGraphPageDispatchTest` also executes `/ig page` and
+`/itemgraph page` without an active session and checks the exact failure text,
+rejects malformed and expired explicit session tokens, removes expired per-player
+state, denies a copied token owned by another player without invalidating the
+owner's session, and verifies permission level 2 at dispatch on both roots. This
+complements NeoForge's execution-level page tests; Brigadier tests do not verify
+vanilla client transport or rendered clickable chat controls.
+
 | GriefLogger capability | ItemGraph native source | Storage | Query/UI status | Evidence status |
 | --- | --- | --- | --- | --- |
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested; the 2026-09-29 Fabric replay persisted `ADD_ITEM` and `REMOVE_ITEM` rows |
