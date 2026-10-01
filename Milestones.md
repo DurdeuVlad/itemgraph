@@ -157,26 +157,25 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   historical ledger remains the immutable source of truth and its normalized event
   projection is delivered by #28. The pinned 26.2 source/profile authority is recorded
   in #43. PR #86 delivered the cross-loader entity-interaction slice for #75.
-  Remaining open M8 issues are #24 (published-example vanilla-client replay and
-  residual command output/error semantics), #27 (aggregate native action
-  acceptance), and #31
-  (differential proof). Issue
-  #24's shared command contract is implemented and covered by cross-loader tests.
+  Issue #24's shared command contract is implemented and covered by cross-loader tests.
   Paired loader GameTests additionally dispatch inspector command packets through
   the server handler and verify state transitions, exact durable command-attempt
   rows, player attribution, and no quantity-observation cell changes; these use
   embedded mock players and do not satisfy the connected vanilla-client replay.
+  NeoForge and Fabric command dispatcher tests now assert the same seven exact
+  inspector receipts and confirm permission denial emits no success receipt.
   Exactly five valid filters parse on both loaders; exact invalid-filter
   command failures execute under both roots and direct/`lookup filters` forms on
   both loaders for missing radius, malformed/range-invalid values, unknown or
   duplicate filters, include/exclude conflict, and the six-filter rejection.
-  The live vanilla-client command replay and remaining inspect/output evidence
-  are still unverified;
-  #76 establishes the exact-release Ender action no-writer result while separately
-  labeling ItemGraph session deltas. PR #93 merged the `m8.8.0` registry and
-  exact `1.2.10-1.21.1` action writer matrix for all 18 source actions; #27
-  remains open for aggregate native acceptance and runtime evidence. The runtime
-  matrix in `docs/GRIEFLOGGER_PARITY.md` records the exact current boundary.
+  NeoForge and Fabric dispatcher tests assert identical inspector receipts, and
+  PR #106 adds server packet-handler-to-ledger coverage. The embedded mock-player
+  tests do not prove connected-client transport or rendered output. The published
+  vanilla-client command replay and residual error/output evidence remain open
+  under #24. Issues #27, #30, #75, and #76 are closed; only #24 and #31 remain
+  open in M8. PR #93 merged the `m8.8.0` registry and exact `1.2.10-1.21.1`
+  action-writer matrix for all 18 source actions; the current registry and runtime
+  matrix in `docs/GRIEFLOGGER_PARITY.md` record the exact current boundary.
   Issue #26 is closed, but its visible-client click matrix remains unverified
   because the maintainer explicitly asked to skip live clicks; do not count that
   client evidence as observed in #24 or #31.
