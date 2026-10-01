@@ -25,7 +25,7 @@ canonical action names, accepted GriefLogger spellings, compatibility status,
 evidence and quantity semantics, loader/storage support, lookup filters,
 permission and paging controls, inspector behavior, configuration controls, and
 the GitHub issue responsible for incomplete mappings.
-The current registry compatibility version is `m8.8.0`.
+The current registry compatibility version is `m8.9.0`.
 
 The registry version changes when a mapping, status, evidence or quantity
 meaning, loader, or backend contract changes. Documentation-only clarifications
@@ -122,6 +122,14 @@ and differential acceptance in #31.
 | `ItemAction` | 10 | `REMOVE_ITEM_ENDER` | enum only; no writer | unsupported-no-writer; native extension |
 | `SessionAction` | 0 | `JOIN` | present | compatible |
 | `SessionAction` | 1 | `QUIT` | present | compatible |
+
+For `BREAK_BLOCK`, both loaders also record source fluid removed by a successful
+empty-bucket pickup. The hook wraps `BucketPickup.pickupBlock`, waits for its
+non-empty returned stack, then records the returned `BucketItem`'s contained
+fluid block ID at the source block's coordinates. This follows GriefLogger's
+`MixinBucketItem` behavior for modded pickup results where the returned bucket
+fluid can differ from the source block fluid. This is block audit evidence
+only; it does not create an item quantity row.
 
 `CHAT` and `COMMAND` remain source features backed by their own tables, not
 members of these three action enums, so they have no enum ID. The complete

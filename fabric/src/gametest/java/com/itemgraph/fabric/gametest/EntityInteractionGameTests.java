@@ -1,7 +1,9 @@
 package com.itemgraph.fabric.gametest;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.fabric.FabricNativeAuditEventListener;
 import com.itemgraph.gametest.EntityInteractionConformanceFixture;
+import com.itemgraph.gametest.BucketPickupConformanceFixture;
 import com.itemgraph.gametest.ProjectileConformanceFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
@@ -19,6 +21,7 @@ import net.minecraft.world.entity.projectile.Arrow;
 import net.minecraft.world.entity.projectile.Snowball;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 
 import java.sql.SQLException;
@@ -32,6 +35,7 @@ public final class EntityInteractionGameTests implements FabricGameTest {
         long droppedBefore = observations.getTotalDropped();
         var quantityObservationsBefore = EntityInteractionConformanceFixture.snapshotQuantityObservations();
         ProjectileConformanceFixture.Watermark projectileWatermark = ProjectileConformanceFixture.watermark();
+        long bucketAuditWatermark = BucketPickupConformanceFixture.auditWatermark();
 
         Snowball snowball = new Snowball(helper.getLevel(), player);
         snowball.shootFromRotation(player, player.getXRot(), player.getYRot(), 0.0F, 1.5F, 0.0F);
@@ -76,6 +80,33 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                 armorStand.interact(player, InteractionHand.MAIN_HAND),
                 "direct inherited Entity.interact call must return PASS for an ordinary armor stand");
 
+        BlockPos waterPos = helper.absolutePos(new BlockPos(6, 1, 2));
+        BlockPos emptyResultPos = helper.absolutePos(new BlockPos(7, 1, 2));
+        BlockPos alternateFluidPos = helper.absolutePos(new BlockPos(8, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(waterPos, Blocks.WATER.defaultBlockState(), 3),
+                "could not place the source water block for the bucket replay");
+        helper.assertTrue(helper.getLevel().setBlock(emptyResultPos, Blocks.WATER.defaultBlockState(), 3),
+                "could not place the source water block for the empty-result guard replay");
+        helper.assertTrue(helper.getLevel().setBlock(alternateFluidPos, Blocks.WATER.defaultBlockState(), 3),
+                "could not place the source water block for the alternate bucket-content replay");
+        FabricNativeAuditEventListener.recordBucketPickup(player, helper.getLevel(), emptyResultPos,
+                helper.getLevel().getBlockState(emptyResultPos), ItemStack.EMPTY);
+        FabricNativeAuditEventListener.recordBucketPickup(player, helper.getLevel(), alternateFluidPos,
+                helper.getLevel().getBlockState(alternateFluidPos), new ItemStack(Items.LAVA_BUCKET));
+        player.teleportTo(waterPos.getX() + 0.5, waterPos.getY(), waterPos.getZ() + 2.0);
+        player.setYRot(180.0F);
+        player.setXRot(30.0F);
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BUCKET));
+        var bucketResult = Items.BUCKET.use(helper.getLevel(), player, InteractionHand.MAIN_HAND);
+        helper.assertTrue(bucketResult.getResult().consumesAction(),
+                "server-side empty bucket did not complete source-water pickup");
+        helper.assertTrue(helper.getLevel().getBlockState(waterPos).isAir(),
+                "successful source-water pickup must remove the source block");
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BUCKET));
+        var emptyPickupResult = Items.BUCKET.use(helper.getLevel(), player, InteractionHand.MAIN_HAND);
+        helper.assertFalse(emptyPickupResult.getResult().consumesAction(),
+                "empty bucket use without a source fluid must not report a successful pickup");
+
         observations.stop();
         helper.assertTrue(observations.getQueueSize() == 0,
                 "ItemGraph queues must be empty after the worker stops and flushes");
@@ -89,6 +120,12 @@ public final class EntityInteractionGameTests implements FabricGameTest {
         helper.succeedWhen(() -> {
             ProjectileConformanceFixture.assertPersisted(
                     helper, projectileWatermark, playerUuid, quantityObservationsBefore);
+            BucketPickupConformanceFixture.assertPersisted(
+                    helper, bucketAuditWatermark, projectileWatermark.observationId(), playerUuid, waterPos);
+            BucketPickupConformanceFixture.assertNoAuditAt(helper, bucketAuditWatermark,
+                    playerUuid, emptyResultPos);
+            BucketPickupConformanceFixture.assertSubjectAt(helper, bucketAuditWatermark,
+                    playerUuid, alternateFluidPos, "minecraft:lava");
             assertAttempt(helper, playerUuid, cowUuid);
             assertArmorStandOutcomes(helper, playerUuid, armorStandUuid);
             EntityInteractionConformanceFixture.assertCow(helper, playerUuid, playerName, cowPos, cowUuid);

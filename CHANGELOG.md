@@ -15,6 +15,14 @@ The project follows a simple pre-1.0 development changelog model.
   receipt and does not enable inspection. This is dispatcher-level coverage;
   it does not replace the pending vanilla-client command replay. Mod version
   remains 0.3.2; no distributable jar is built.
+- **Issue #27 bucket fluid removal evidence:** NeoForge and Fabric now record a
+  `BREAK_BLOCK` audit row when a server bucket pickup successfully removes a
+  source fluid block. Both hooks wrap `BucketPickup.pickupBlock`, require a
+  non-empty returned `BucketItem`, preserve the source block coordinates, and
+  use the returned bucket's contained fluid for the fluid block ID. They write
+  no item quantity observation. Shared loader GameTests verify the durable row
+  and quantity ledger boundary. Registry compatibility version is
+  `m8.9.0`; mod version remains 0.3.2, and no distributable jar is built.
 - **Issue #27 action registry and exact-release writer matrix:** registry
   `m8.8.0` now records the pinned source enum and ID for all 18 GriefLogger
   actions plus the exact `1.2.10-1.21.1` writer result. CI rejects malformed
