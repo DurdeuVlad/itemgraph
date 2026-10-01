@@ -24,7 +24,7 @@ class DifferentialReportTests(unittest.TestCase):
         registry, fixture_hash = report.current_profile()
         self.registry = registry
         base = {
-            "report_schema_version": 1,
+            "report_schema_version": 2,
             "compatibility_version": registry["compatibility_version"],
             "source_profile_sha256": registry["source_profile"]["sha256"],
             "release_fixture_sha256": fixture_hash,
@@ -33,7 +33,7 @@ class DifferentialReportTests(unittest.TestCase):
             "seed": 781,
         }
         self.legacy = {**base, "system": "grieflogger", "runtime_mode": "grieflogger_present", "events": [self.event()]}
-        self.native = {**base, "system": "itemgraph", "runtime_mode": "native_only", "events": [self.event()]}
+        self.native = {**base, "system": "itemgraph", "runtime_mode": "native_only", "events": [self.native_event()]}
 
     @staticmethod
     def event(**overrides):
@@ -50,9 +50,34 @@ class DifferentialReportTests(unittest.TestCase):
             "actor_ref": "actor:replay-alias-0",
             "source_table": "items",
             "source_action_id": 7,
+            "compatibility_table": "items",
+            "compatibility_action_id": 7,
             "privacy_class": "replay_fixture_only",
             "unresolved_reason": None,
         }
+        event.update(overrides)
+        action_row = next((row for row in report.current_profile()[0]["actions"]
+                           if row.get("itemgraph") == event["action"]), None)
+        if action_row is not None:
+            if "compatibility_table" not in overrides and event["compatibility_table"] not in report.ACTION_TABLES[event["action"]]:
+                event["compatibility_table"] = sorted(report.ACTION_TABLES[event["action"]])[0]
+            if "compatibility_action_id" not in overrides:
+                event["compatibility_action_id"] = action_row.get("release_action_id")
+            if "source_action_id" not in overrides:
+                event["source_action_id"] = action_row.get("release_action_id")
+        return event
+
+    @staticmethod
+    def native_event(**overrides):
+        event = DifferentialReportTests.event()
+        action = overrides.get("action", event["action"])
+        event["source_table"] = "ig_observations"
+        event["source_action_id"] = action
+        action_row = next((row for row in report.current_profile()[0]["actions"]
+                           if row.get("itemgraph") == action), None)
+        if action_row is not None:
+            event["compatibility_table"] = next(iter(report.ACTION_TABLES[action]))
+            event["compatibility_action_id"] = action_row.get("release_action_id")
         event.update(overrides)
         return event
 
@@ -69,7 +94,7 @@ class DifferentialReportTests(unittest.TestCase):
         self.assertEqual("missing_native_event", result["differences"][0]["kind"])
 
     def test_duplicate_scenario_key_fails_validation(self) -> None:
-        self.native["events"].append(self.event())
+        self.native["events"].append(self.native_event())
         try:
             report.compare_reports(self.legacy, self.native)
         except report.ReportError as error:
@@ -93,7 +118,7 @@ class DifferentialReportTests(unittest.TestCase):
             ("CRAFT", 4, None, "positive transformed result count"),
         ):
             with self.subTest(action=action, quantity=quantity):
-                invalid = self.event(action=action, source_action_id=source_action_id, quantity=quantity)
+                invalid = self.native_event(action=action, quantity=quantity)
                 self.native["events"] = [invalid]
                 with self.assertRaisesRegex(report.ReportError, expected):
                     report.compare_reports(self.legacy, self.native)
@@ -102,8 +127,10 @@ class DifferentialReportTests(unittest.TestCase):
         second = self.event(event_key="arrow.shoot.1", action="SHOOT_ITEM", item_id="minecraft:arrow",
                             source_action_id=8, sequence=1, occurred_at_ms=1790870401000)
         self.legacy["events"].append(second)
-        native_first = dict(second, occurred_at_ms=1790870400000, sequence=0)
-        native_second = dict(self.event(sequence=1, occurred_at_ms=1790870401000))
+        native_first = self.native_event(event_key=second["event_key"], action="SHOOT_ITEM",
+                                         item_id="minecraft:arrow", sequence=0,
+                                         occurred_at_ms=1790870400000)
+        native_second = self.native_event(sequence=1, occurred_at_ms=1790870401000)
         self.native["events"] = [native_first, native_second]
         result = report.compare_reports(self.legacy, self.native)
         self.assertTrue(any(d["kind"] == "temporal_order_mismatch" for d in result["differences"]))
@@ -117,7 +144,8 @@ class DifferentialReportTests(unittest.TestCase):
     def test_unresolved_evidence_requires_reason_and_is_retained(self) -> None:
         event = self.event(evidence_class="unresolved", unresolved_reason="OPAQUE_SOURCE_PAYLOAD")
         self.legacy["events"] = [event]
-        self.native["events"] = [dict(event)]
+        self.native["events"] = [self.native_event(evidence_class="unresolved",
+                                                    unresolved_reason="OPAQUE_SOURCE_PAYLOAD")]
         self.assertTrue(report.compare_reports(self.legacy, self.native)["equivalent"])
         self.native["events"][0]["unresolved_reason"] = None
         with self.assertRaisesRegex(report.ReportError, "must keep its unresolved_reason"):
@@ -125,7 +153,7 @@ class DifferentialReportTests(unittest.TestCase):
 
     def test_unresolved_reason_mismatch_does_not_echo_reason_values(self) -> None:
         self.legacy["events"] = [self.event(evidence_class="unresolved", unresolved_reason="PLAYER_ALICE")]
-        self.native["events"] = [self.event(evidence_class="unresolved", unresolved_reason="BASE_AT_X123")]
+        self.native["events"] = [self.native_event(evidence_class="unresolved", unresolved_reason="BASE_AT_X123")]
         result = report.compare_reports(self.legacy, self.native)
         rendered = json.dumps(result)
         self.assertIn('"field": "unresolved_reason"', rendered)
@@ -175,45 +203,59 @@ class DifferentialReportTests(unittest.TestCase):
         self.assertNotIn("-12000", rendered)
 
     def test_unknown_action_and_action_id_pair_are_rejected(self) -> None:
-        for action, action_id, expected in (
-            ("NOT_A_GRIEFLOGGER_ACTION", 999, "not mapped"),
-            ("THROW_ITEM", 999, "does not match"),
+        for action, expected in (
+            ("NOT_A_GRIEFLOGGER_ACTION", "not mapped"),
+            ("THROW_ITEM", "compatibility_action_id"),
         ):
-            with self.subTest(action=action, action_id=action_id):
-                self.native["events"] = [self.event(action=action, source_action_id=action_id)]
+            with self.subTest(action=action):
+                event = self.native_event(action=action)
+                if action == "NOT_A_GRIEFLOGGER_ACTION":
+                    event["source_action_id"] = action
+                else:
+                    event["compatibility_action_id"] = 999
+                self.native["events"] = [event]
                 with self.assertRaisesRegex(report.ReportError, expected):
                     report.compare_reports(self.legacy, self.native)
 
-    def test_action_without_release_id_requires_null_source_action_id(self) -> None:
-        event = self.event(action="CHAT_MESSAGE", source_table="chats", source_action_id=0,
-                           quantity=None, item_id=None)
+    def test_action_without_release_id_keeps_native_and_compatibility_identity_distinct(self) -> None:
+        event = self.native_event(action="CHAT_MESSAGE", quantity=None, item_id=None)
         self.native["events"] = [event]
-        with self.assertRaisesRegex(report.ReportError, "must be null when the release has no action ID"):
-            report.compare_reports(self.legacy, self.native)
+        self.assertEqual(self.native, report.validate_report(self.native, "itemgraph"))
 
     def test_opaque_unknown_action_is_retained_as_unresolved_without_quantity_claim(self) -> None:
-        event = self.event(action=report.UNRESOLVED_SOURCE_ACTION, evidence_class="unresolved",
-                           quantity=None, item_id=None, source_action_id=999,
-                           unresolved_reason="UNKNOWN_SOURCE_ACTION_ID")
-        self.legacy["events"] = [event]
-        self.native["events"] = [dict(event)]
+        legacy_event = self.event(action=report.UNRESOLVED_SOURCE_ACTION, evidence_class="unresolved",
+                                  quantity=None, item_id=None, source_action_id=999,
+                                  compatibility_table="items", compatibility_action_id=None,
+                                  unresolved_reason="UNKNOWN_SOURCE_ACTION_ID")
+        native_event = self.native_event(action=report.UNRESOLVED_SOURCE_ACTION, evidence_class="unresolved",
+                                         quantity=None, item_id=None, source_action_id="UNKNOWN_SOURCE_ACTION_ID",
+                                         compatibility_table="items", compatibility_action_id=None,
+                                         unresolved_reason="UNKNOWN_SOURCE_ACTION_ID")
+        self.legacy["events"] = [legacy_event]
+        self.native["events"] = [native_event]
         result = report.compare_reports(self.legacy, self.native)
         self.assertTrue(result["equivalent"])
         self.assertEqual(1, result["event_counts"]["grieflogger"])
 
     def test_action_table_and_evidence_class_must_match_profile(self) -> None:
         for overrides, expected in (
-            ({"source_table": "blocks"}, "table family"),
+            ({"compatibility_table": "blocks"}, "table family"),
             ({"evidence_class": "inferred"}, "evidence class"),
         ):
             with self.subTest(overrides=overrides):
-                self.native["events"] = [self.event(**overrides)]
+                self.native["events"] = [self.native_event(**overrides)]
                 with self.assertRaisesRegex(report.ReportError, expected):
                     report.compare_reports(self.legacy, self.native)
 
     def test_boolean_cannot_impersonate_numeric_action_id(self) -> None:
-        self.native["events"][0]["source_action_id"] = True
+        self.native["events"][0]["compatibility_action_id"] = True
         with self.assertRaisesRegex(report.ReportError, "must be an integer"):
+            report.compare_reports(self.legacy, self.native)
+
+    def test_boolean_cannot_impersonate_grieflogger_action_id_one(self) -> None:
+        self.legacy["events"] = [self.event(action="ADD_ITEM", quantity=2,
+                                             compatibility_table="items", source_action_id=True)]
+        with self.assertRaisesRegex(report.ReportError, "source_action_id must be an integer"):
             report.compare_reports(self.legacy, self.native)
 
     def test_event_key_and_scenario_ids_are_hashed_in_diff_output(self) -> None:
@@ -265,6 +307,17 @@ class DifferentialReportTests(unittest.TestCase):
             document = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertFalse(document["equivalent"])
             self.assertEqual("quantity", document["differences"][0]["field"])
+
+    def test_cli_validate_only_pins_native_loader_without_claiming_comparison(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "native.json"
+            path.write_text(json.dumps(self.native), encoding="utf-8")
+            result = report.main(["--validate-only", str(path), "--expected-system", "itemgraph",
+                                  "--expected-loader", "neoforge"])
+            self.assertEqual(0, result)
+            wrong_loader = report.main(["--validate-only", str(path), "--expected-system", "itemgraph",
+                                        "--expected-loader", "fabric"])
+            self.assertEqual(2, wrong_loader)
 
     def test_cli_cannot_overwrite_an_input_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

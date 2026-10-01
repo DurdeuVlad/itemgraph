@@ -286,6 +286,9 @@ public final class EntityInteractionGameTests {
             EntityInteractionConformanceFixture.assertCow(helper, playerUuid, playerName, targetPos, targetUuid);
             EntityInteractionConformanceFixture.assertArmorStand(
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
+            ItemGraphReplayReportFixture.writeIfRequested(helper, "neoforge",
+                    Math.min(movementWatermark, projectileWatermark.observationId()),
+                    movementPlayer.getUUID().toString(), playerUuid);
             helper.succeed();
         });
     }

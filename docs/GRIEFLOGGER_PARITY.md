@@ -409,20 +409,36 @@ checksummed historical database when an operator explicitly configures it.
 
 ### Differential report comparator foundation
 
-`tools/itemgraph_differential_report.py` defines report schema version 1 for
-the first #31 harness slice. It reads exported JSON only; it does not open or
-modify either system's database. Every report is pinned to the
+`tools/itemgraph_differential_report.py` defines normalized report schema
+version 2 for #31. The shared
+`ItemGraphReplayReportFixture` writes raw schema version 1 from the durable
+movement rows checked by the NeoForge and Fabric GameTests. CI normalizes and
+validates each loader report, then uploads the redacted JSON as a workflow
+artifact. The normalizer labels the output `system=itemgraph` and
+`runtime_mode=native_only`; this native-only export does not claim a
+GriefLogger side-by-side comparison. The tools read exported JSON only; they do
+not open or modify either system's database. The GameTest event timestamps are
+the persisted observation timestamps and are not seeded; the integer seed
+identifies the deterministic scenario setup, not a fixed clock. These native
+exports validate the data contract and redaction but cannot be compared as a
+timestamp-exact paired replay. A future #31 capture must establish a shared
+replay clock or a documented timestamp comparison rule while retaining the
+original timestamps. Every normalized report is pinned to the
 `compatibility_version`, `source_profile_sha256`, and exact-release
 `release_fixture_sha256` from the checked-in registry and fixture. Reports
-must name the same loader, seeded `scenario_id`, and integer `seed`, with
+must name the same loader, deterministic `scenario_id`, and integer `seed`, with
 GriefLogger captured in `grieflogger_present` mode and ItemGraph captured in
 `native_only` mode.
 
 Each event has a unique scenario-local `event_key`, a unique integer `sequence`,
 and explicit normalized action, evidence class, quantity, item registry ID,
 Unix-millisecond timestamp, dimension, integer block position, replay-local
-actor reference, normalized source table/action ID, privacy class, and
-unresolved reason. Actor references must use an `actor:replay-<alias>` value;
+actor reference, raw source table/action identity, separately normalized
+compatibility table/action identity, privacy class, and unresolved reason.
+ItemGraph raw identity remains `ig_observations` plus its native action string;
+the normalized compatibility action ID and table are explicit profile-derived
+fields and are never represented as the raw ItemGraph source identity. Actor
+references must use an `actor:replay-<alias>` value;
 privacy classes are `replay_fixture_only` or `staging_restricted`, and
 unresolved reasons are stable uppercase codes. The output contains a digest of
 the scenario ID, uses only the integer sequence to refer to events, and replaces
@@ -439,18 +455,28 @@ quantities are required for `ADD_ITEM`, `PICKUP_ITEM`, `ADD_ITEM_ENDER`, and
 `REMOVE_ITEM_ENDER`, and `HOPPER_EXTRACT`. Transformation quantities must be
 positive result counts, and actions without quantity semantics require null.
 Unknown source actions
-remain visible as `UNRESOLVED_SOURCE_ACTION` with a stable reason, source table,
-and numeric source ID; they cannot claim an item identity or quantity. Unknown
+remain visible as `UNRESOLVED_SOURCE_ACTION` with a stable reason and system
+raw identity; GriefLogger uses its numeric source ID, while ItemGraph preserves
+its native action string. Neither can claim an item identity or quantity. Unknown
 fields, duplicate JSON keys, duplicate event keys or sequences, unclassified
 evidence, backwards timestamps, and unresolved events without a reason are
 rejected. Any mismatch exits non-zero and is emitted in the JSON diff. This
 slice does not yet provide an issue-linked exception policy or a graph-wide
 quantity-conservation check; it currently requires exact per-event quantities.
 
-CI exercises the comparator with synthetic adversarial cases. It does not yet
-export reports from paired GameTests, start GriefLogger, compare live database
-rows, or establish the 24-hour native-only staging window and rollback proof.
-Those remain open acceptance criteria for #31.
+The GameTest export contains the six checked durable rows for chest deposit and
+withdrawal, ground drop and pickup, and projectile throw and shoot. It excludes
+database IDs, player UUIDs and names, raw payloads, and absolute world
+coordinates. Positions are block coordinates relative to the GameTest
+structure origin; actors use fixed replay aliases. Events are read in timestamp
+and persisted-row order, retaining row order when timestamps share one
+millisecond without exporting row IDs. CI requires the fixed scenario ID, seed,
+six event keys, and contiguous sequence, tests malformed inputs, and pins each
+report to its loader and source profile. It does not start
+GriefLogger or compare its live database rows. A paired GriefLogger capture,
+issue-linked exception policy, whole-graph quantity-conservation check, the
+24-hour native-only staging window, and rollback rehearsal remain open #31
+acceptance criteria.
 
 ## Verification notes
 

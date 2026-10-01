@@ -353,6 +353,17 @@ registry therefore keeps this mapping unresolved against the release and labels
 the richer behavior as an ItemGraph extension. The NeoForge and Fabric runs are
 local isolated server GameTests with mock players and direct server-handler
 dispatch, as directed by the operator; they are not live-client transport tests.
+
+The same GameTest exports the six persisted item movement and projectile rows
+only after its durable read-only assertions pass. `ItemGraphReplayReportFixture`
+queries `ig_observations` through `DatabaseManager.openReadOnlyConnection()`;
+the artifact contains profile-normalized action identities, fixture-relative
+coordinates, and replay actor aliases, with no player UUIDs, names, database
+row IDs, or raw payloads. CI validates separate native-only Fabric and NeoForge
+reports and uploads only the normalized JSON. This export validates report
+shape and redaction; it does not establish GriefLogger equivalence or complete
+the paired replay, 24-hour soak, conservation, exception-policy, or rollback
+criteria in #31.
 - explanation available
 
 ## Coffer/modded inventory test
