@@ -6,12 +6,20 @@ import com.itemgraph.query.AuditLookupFilters;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.suggestion.Suggestion;
+import com.mojang.brigadier.tree.RootCommandNode;
+import io.netty.buffer.Unpooled;
 import net.minecraft.SharedConstants;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundCommandsPacket;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.flag.FeatureFlags;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +33,9 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,6 +52,35 @@ import static org.mockito.Mockito.when;
  */
 class FabricItemGraphCommandsParityTest {
     private final InspectionService inspectionService = InspectionService.getInstance();
+
+    @Test
+    void vanillaCommandTreePacketCodecRoundTripsBothCommandRootsOnFabric() {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        RootCommandNode<SharedSuggestionProvider> commandTree = (RootCommandNode) dispatcher.getRoot();
+        FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            ClientboundCommandsPacket.STREAM_CODEC.encode(encoded, new ClientboundCommandsPacket(commandTree));
+            assertTrue(encoded.readableBytes() > 0, "the registered command tree must produce a network payload");
+
+            ClientboundCommandsPacket decoded = ClientboundCommandsPacket.STREAM_CODEC.decode(encoded);
+            RootCommandNode<SharedSuggestionProvider> received = decoded.getRoot(
+                    CommandBuildContext.simple(RegistryAccess.EMPTY, FeatureFlags.DEFAULT_FLAGS));
+            var itemgraph = received.getChild("itemgraph");
+            var alias = received.getChild("ig");
+            assertNotNull(itemgraph);
+            assertNotNull(itemgraph.getChild("lookup"));
+            assertNotNull(itemgraph.getChild("page"));
+            assertNotNull(itemgraph.getChild("inspect"));
+            assertNotNull(alias);
+            assertSame(itemgraph, alias.getRedirect(), "/ig must retain its redirect to /itemgraph after decode");
+            assertNull(received.getChild("gl"));
+            assertNull(received.getChild("grieflogger"));
+            assertEquals(0, encoded.readableBytes(), "the entire packet payload must decode");
+        } finally {
+            encoded.release();
+        }
+    }
 
     @BeforeAll
     static void bootstrapMinecraftRegistries() {

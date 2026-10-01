@@ -218,8 +218,12 @@ Fabric and NeoForge dispatcher tests execute both inspector roots and verify
 the toggle, explicit `on`/`off`, `status`, and permission denial. Both assert
 the same seven exact chat receipts for the published toggle plus ItemGraph's
 explicit forms. These checks do not
-replace the required vanilla-client command replay. Paired server GameTests
-also send `ServerboundChatCommandPacket` through each loader's actual
+replace the required vanilla-client command replay. Both loader command suites
+also encode and decode the full tree through Minecraft 1.21.1's
+`ClientboundCommandsPacket` codec, then verify `/itemgraph` and `/ig` survive
+and `/gl` and `/grieflogger` remain absent. This exercises vanilla packet
+serialization but not a connection or client-side command rendering. Paired
+server GameTests also send `ServerboundChatCommandPacket` through each loader's actual
 `handleChatCommand` handler for `itemgraph inspect on`, `ig inspect status`,
 and `ig inspect off`. They verify permission level 2, player-scoped state
 transitions, exactly one persisted `COMMAND_ATTEMPT` per packet, player and
