@@ -870,6 +870,31 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   exercises the production server hooks and persistence boundary but not a real
   client socket, GriefLogger-present differential replay, or bow-ammunition
   consumption semantics.
+- The paired NeoForge and Fabric `EntityInteractionGameTests` also exercise
+  container and ground item movement. Each test seeds 2 dirt in the player's
+  inventory and 3 cobblestone in a chest, uses server-side `QUICK_MOVE` chest
+  menu clicks to deposit the dirt and withdraw the cobblestone, and asserts both
+  inventory and chest counts after each transfer. It then removes 4 diamonds
+  from the player's inventory, drops them, picks up the same `ItemEntity`, and
+  asserts the inventory receives all 4 back. `ItemMovementConformanceFixture`
+  opens SQLite read-only and requires exactly four new rows: `ADD_ITEM` (player to container),
+  `REMOVE_ITEM` (container to player), `DROP_ITEM` (player to ground), and
+  `PICKUP_ITEM` (ground to player). An unfiltered observation query also
+  requires these to be the replay player's only four new quantity rows, all
+  `ITEMGRAPH_INTERNAL`. The fixture checks item IDs, amounts, canonical
+  fingerprints, player ownership, exact container coordinates and dimension,
+  session net-delta raw markers and non-negative intervals, distinct drop and
+  pickup event identities, and the exact spawned entity UUID and fingerprint
+  across the drop/pickup pair. Ground endpoints must stay in the same dimension
+  and within one block to account for entity movement between event capture and the server
+  tick that confirms the drop. It compares the full prior quantity-row
+  snapshot to ensure the replay did not mutate earlier evidence. NeoForge calls
+  the two-argument `Player.drop` overload so `ItemTossEvent` reaches the native
+  listener; Fabric calls the three-argument `ServerPlayer.drop` overload covered
+  by its accepted-entity mixin. The mock-player GameTests verify both loader
+  persistence paths but do not establish client transport or GriefLogger-present
+  differential parity. The other exact-release item writers and full #27
+  replay remain outstanding.
 
 ## M8 issue #26: exact block/container inspector and immutable supersession
 

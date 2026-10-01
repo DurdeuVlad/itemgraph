@@ -146,6 +146,7 @@ public final class ProjectileConformanceFixture {
                 JOIN ig_nodes target ON target.id = o.target_node_id
                 JOIN ig_item_fingerprints fingerprint ON fingerprint.id = o.fingerprint_id
                 WHERE o.id > ? AND o.source_type = 'ITEMGRAPH_INTERNAL'
+                  AND o.action_type IN ('THROW_ITEM', 'SHOOT_ITEM')
                   AND source.owner_uuid = ?
                 ORDER BY o.id
                 """;

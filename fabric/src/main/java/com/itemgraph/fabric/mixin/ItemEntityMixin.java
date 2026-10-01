@@ -1,6 +1,7 @@
 package com.itemgraph.fabric.mixin;
 
 import com.itemgraph.fabric.FabricNativeAuditEventListener;
+import com.itemgraph.fabric.capture.ItemEntityPickupCapture;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
