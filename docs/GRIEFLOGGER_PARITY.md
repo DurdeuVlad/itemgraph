@@ -368,8 +368,10 @@ against a 50 ms server-thread budget. The run logged `flushEveryTicks=20`, took
 47.235 ms total to enqueue all 8,000 events, and completed all three NeoForge
 GameTests. The isolated Fabric run used a 20-tick cadence and persisted all 32
 accepted queue events after the end-tick callback with zero drops; all three
-registered Fabric GameTests passed. CI runs the NeoForge and Fabric GameTest
-tasks on pull requests; its result for this branch is pending.
+registered Fabric GameTests passed in hosted CI. The local Fabric GameTest on
+this worktree previously failed to persist the queue probe within its logical
+tick window; that discrepancy is recorded in `docs/TEST_PLAN.md` and remains
+under investigation.
 `helloFrequency` defaults to 600 ticks
 (30,000 ms at 20 TPS); disposable MariaDB and MySQL CI services verify successful
 background JDBC heartbeats and reconnection after a closed connection. ItemGraph's
@@ -404,6 +406,51 @@ checksummed historical database when an operator explicitly configures it.
    checksum, the restore command and timestamp, the successful read-only schema
    check, and the post-restore staging acceptance report. This plan does not
    authorize production changes.
+
+### Differential report comparator foundation
+
+`tools/itemgraph_differential_report.py` defines report schema version 1 for
+the first #31 harness slice. It reads exported JSON only; it does not open or
+modify either system's database. Every report is pinned to the
+`compatibility_version`, `source_profile_sha256`, and exact-release
+`release_fixture_sha256` from the checked-in registry and fixture. Reports
+must name the same loader, seeded `scenario_id`, and integer `seed`, with
+GriefLogger captured in `grieflogger_present` mode and ItemGraph captured in
+`native_only` mode.
+
+Each event has a unique scenario-local `event_key`, a unique integer `sequence`,
+and explicit normalized action, evidence class, quantity, item registry ID,
+Unix-millisecond timestamp, dimension, integer block position, replay-local
+actor reference, normalized source table/action ID, privacy class, and
+unresolved reason. Actor references must use an `actor:replay-<alias>` value;
+privacy classes are `replay_fixture_only` or `staging_restricted`, and
+unresolved reasons are stable uppercase codes. The output contains a digest of
+the scenario ID, uses only the integer sequence to refer to events, and replaces
+actor references, block coordinates, and unresolved reason values with
+`[REDACTED]`; raw event and actor keys are never echoed, including in validation
+errors.
+Reports must not contain player UUIDs, names, or raw
+payloads. The comparator checks event multiplicity, profile-mapped action,
+action ID, evidence class and table family, every listed field, profile pins,
+and chronological order against the recorded sequence. Positive `signed_delta`
+quantities are required for `ADD_ITEM`, `PICKUP_ITEM`, `ADD_ITEM_ENDER`, and
+`HOPPER_INSERT`; negative quantities are required for `REMOVE_ITEM`,
+`DROP_ITEM`, `BREAK_ITEM`, `CONSUME_ITEM`, `THROW_ITEM`, `SHOOT_ITEM`,
+`REMOVE_ITEM_ENDER`, and `HOPPER_EXTRACT`. Transformation quantities must be
+positive result counts, and actions without quantity semantics require null.
+Unknown source actions
+remain visible as `UNRESOLVED_SOURCE_ACTION` with a stable reason, source table,
+and numeric source ID; they cannot claim an item identity or quantity. Unknown
+fields, duplicate JSON keys, duplicate event keys or sequences, unclassified
+evidence, backwards timestamps, and unresolved events without a reason are
+rejected. Any mismatch exits non-zero and is emitted in the JSON diff. This
+slice does not yet provide an issue-linked exception policy or a graph-wide
+quantity-conservation check; it currently requires exact per-event quantities.
+
+CI exercises the comparator with synthetic adversarial cases. It does not yet
+export reports from paired GameTests, start GriefLogger, compare live database
+rows, or establish the 24-hour native-only staging window and rollback proof.
+Those remain open acceptance criteria for #31.
 
 ## Verification notes
 
