@@ -52,16 +52,25 @@ Never use production as the primary test environment.
   the slowest server-thread batch. Peak queue depth was 6,815 of 10,000 audit
   queue slots. All three NeoForge GameTests passed.
 - Fabric's `OperationalQueueGameTests.endServerTickFlushPersistsAcceptedAuditEvents`
-  starts checking after one configured cadence plus five ticks, then polls on
-  later test ticks for up to 10 seconds so the async worker can run even when the
-  GameTest advances logical ticks faster than wall time. It confirms the Fabric
-  end-tick callback ran and checks 32 matching durable rows and zero drops. All
-  three registered Fabric GameTests passed in an earlier local run. A later
-  local run on 2026-10-01 failed this probe after 225 logical ticks: it accepted
-  32 audit events and observed 32 end-tick callbacks, but read 0 matching durable
-  rows. The focused Fabric command unit test passes with `:fabric:runGameTest`
-  excluded; the queue probe still needs separate diagnosis and a passing replay
-  before claiming the full Fabric GameTest suite passes.
+  uses `GameTestHelper.runAtTickTime` to poll once per configured queue cadence
+  and reads the ledger at most once early when the global persisted counter
+  delta reaches the probe size, then again at the 10-second wall-clock deadline
+  if needed. A queue drop triggers one immediate ledger read and failure. Its
+  GameTest tick timeout is 300,000 ticks, providing headroom for the worker
+  window; tick
+  timeout and worker deadline use separate clocks, so extreme tick acceleration
+  can still end the test first.
+  It checks 32 matching durable rows, the persisted counter delta, zero drops,
+  and reports queue depth plus callback/cadence details on failure. A single
+  class-level end-tick callback avoids accumulating global listeners across
+  repeated test runs. An earlier local run on 2026-10-01 failed the former
+  225-logical-tick polling probe after 32 end-tick callbacks but before any
+  matching rows became durable. After the revision, the grouped local run on
+  2026-10-02 passed all three Fabric GameTests and Fabric unit tests; the queue
+  probe saw all 32 rows and completed after its early ledger check. A first
+  revision using `CompletableFuture.delayedExecutor` plus `server.execute` did
+  persist the rows but left the GameTest in its running batch, so it was stopped
+  and replaced with native `GameTestHelper.runAtTickTime` scheduling.
 - The same temporary game directory was restarted against the same SQLite
   database. NeoForge reopened schema version 20, persisted the next 8,000 events
   with 0 drops and an empty queue, and a read-only SQLite check found exactly
