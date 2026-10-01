@@ -162,6 +162,10 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   acceptance), and #31
   (differential proof). Issue
   #24's shared command contract is implemented and covered by cross-loader tests.
+  Paired loader GameTests additionally dispatch inspector command packets through
+  the server handler and verify state transitions, exact durable command-attempt
+  rows, player attribution, and no quantity-observation cell changes; these use
+  embedded mock players and do not satisfy the connected vanilla-client replay.
   Exactly five valid filters parse on both loaders; exact invalid-filter
   command failures execute under both roots and direct/`lookup filters` forms on
   both loaders for missing radius, malformed/range-invalid values, unknown or
