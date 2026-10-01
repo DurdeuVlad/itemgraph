@@ -843,6 +843,22 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   no-writer reason.
 - These are source/binary mapping checks; they do not replace the full
   loader replay or the differential acceptance owned by #31.
+- The paired NeoForge and Fabric `EntityInteractionGameTests` also exercise
+  projectile capture through the real `Projectile.shootFromRotation` mixin and
+  accepted-spawn `ServerLevel.addFreshEntity` hook. The shared
+  `ProjectileConformanceFixture` reads ItemGraph's SQLite database read-only and
+  requires exactly one durable amount-1 `THROW_ITEM` snowball row and one
+  `SHOOT_ITEM` arrow row, each from the mock player's node to `UNKNOWN` with a
+  non-null `source_event_id`. Their `THROW_ITEM`/`SHOOT_ITEM` audit projections
+  must reuse those event IDs; two `PROJECTILE_SPAWN_ACCEPTED` rows must have
+  distinct IDs and no `quantity=` claim. Accepted-spawn action, `subject_id`
+  and raw projectile identifier must map to the expected snowball or arrow.
+  The fixture compares all prior raw
+  quantity rows byte-for-byte and rejects any additional quantity row for the
+  test player. This
+  exercises the production server hooks and persistence boundary but not a real
+  client socket, GriefLogger-present differential replay, or bow-ammunition
+  consumption semantics.
 
 ## M8 issue #26: exact block/container inspector and immutable supersession
 
