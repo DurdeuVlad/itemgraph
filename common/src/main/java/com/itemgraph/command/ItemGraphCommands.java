@@ -1139,9 +1139,16 @@ public final class ItemGraphCommands {
         }
         if (pageSessionExpired(session.createdAtMs(), System.currentTimeMillis())) {
             sessions.remove(sessionId, session);
+            if (sessions.isEmpty()) {
+                AUDIT_PAGE_SESSIONS.remove(playerId, sessions);
+            }
             return null;
         }
         return session;
+    }
+
+    static boolean hasPageSessionOwner(UUID playerId) {
+        return playerId != null && AUDIT_PAGE_SESSIONS.containsKey(playerId);
     }
 
     static boolean pageSessionExpired(long createdAtMs, long nowMs) {

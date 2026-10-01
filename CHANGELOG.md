@@ -115,6 +115,10 @@ The project follows a simple pre-1.0 development changelog model.
   salted IDs when a distinct event collides, preserving paired observation and
   audit rows even when their raw payload details differ.
 
+### Fixed
+
+- **Expired lookup-page cleanup (#24):** following an expired explicit `/ig page <page> <session>` link now removes the player's empty page-session map. Fabric dispatcher coverage exercises both command roots, invalid/expired sessions, cross-player tokens, denied permission, and error-only output; NeoForge page-session regressions remain green.
+
 ## [0.3.2] — 2026-09-28
 
 ### Added
