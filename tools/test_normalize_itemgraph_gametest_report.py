@@ -44,7 +44,7 @@ def expected_events() -> list[dict]:
         raw_event("SHOOT_ITEM", sequence=5, quantity=1, item_id="minecraft:arrow", compatibility_table="items"),
     ]
     audit_actions = [
-        ("BREAK_BLOCK", "minecraft:water"), ("BREAK_BLOCK", "minecraft:water"),
+        ("BREAK_BLOCK", "minecraft:water"),
         ("INTERACT_ENTITY", "minecraft:cow"), ("INTERACT_ENTITY", "minecraft:armor_stand"),
         ("INTERACT_ENTITY", "minecraft:armor_stand"),
         ("INTERACT_ENTITY_COMPLETED", "minecraft:armor_stand"),
@@ -112,6 +112,13 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
             with self.subTest(action=action):
                 event = next(event for event in report["events"] if event["action"] == action)
                 self.assertEqual(1, event["quantity"])
+
+    def test_report_contains_only_the_real_bucket_pickup_break_event(self) -> None:
+        report = normalizer.normalize(self.raw, "neoforge")
+        break_events = [event for event in report["events"] if event["action"] == "BREAK_BLOCK"]
+        self.assertEqual(13, len(report["events"]))
+        self.assertEqual(1, len(break_events))
+        self.assertEqual("minecraft:water", break_events[0]["subject_id"])
 
     def test_bad_loader_schema_and_source_identity_are_rejected(self) -> None:
         with self.assertRaisesRegex(differential.ReportError, "loader"):

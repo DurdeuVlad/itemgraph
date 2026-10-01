@@ -355,7 +355,11 @@ local isolated server GameTests with mock players and direct server-handler
 dispatch, as directed by the operator; they are not live-client transport tests.
 
 The same GameTest exports six persisted item movement and projectile rows plus
-eight audit events only after its durable read-only assertions pass.
+seven audit events only after its durable read-only assertions pass. Its
+`BREAK_BLOCK` report row is restricted to the successful source-water pickup at
+the fixture position; the separate synthetic water-source/lava-result guard
+probe remains a unit assertion and is excluded because GriefLogger cannot
+produce it through a real bucket pickup.
 `ItemGraphReplayReportFixture` queries `ig_observations` and the allowlisted
 `ig_audit_events` columns through `DatabaseManager.openReadOnlyConnection()`;
 the artifact contains profile-normalized action identities, fixture-relative

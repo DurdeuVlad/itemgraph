@@ -9,7 +9,7 @@ The project follows a simple pre-1.0 development changelog model.
 ### Added
 
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
-  durably verified item movement/projectile rows plus eight allowlisted audit
+  durably verified item movement/projectile rows plus seven allowlisted audit
   events, including namespaced entity/block `subject_id`, and a count-only
   `AuditService` whole-database invariant summary to redacted raw schema-v3
   reports when CI sets `ITEMGRAPH_DIFFERENTIAL_REPORT_DIR`. The audit uses one
@@ -24,6 +24,13 @@ The project follows a simple pre-1.0 development changelog model.
   These native-only reports do not claim a GriefLogger comparison or complete
   #31's paired replay, staging soak, or rollback gates. Mod
   version remains 0.3.2; no distributable jar is built.
+- **Issue #31 parity fixture correction:** the replay report now includes only
+  the successful source-water bucket pickup among `BREAK_BLOCK` rows. It filters
+  by the exact fixture position and `minecraft:water`, excluding the separate
+  synthetic water-source/lava-result guard probe, which cannot occur in an actual
+  GriefLogger bucket-pickup writer path. The raw report remains schema-v3 and
+  normalized output remains schema-v5; mod version remains 0.3.2, and no jar is
+  built.
 - **Issue #31 issue-linked differential exceptions:** normalized schema-v5
   keeps every report difference visible, classifies only profile-declared
   native extensions as expected only when their source table also matches the

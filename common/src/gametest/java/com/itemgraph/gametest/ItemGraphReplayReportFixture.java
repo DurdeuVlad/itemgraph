@@ -35,7 +35,7 @@ public final class ItemGraphReplayReportFixture {
             "THROW_ITEM", new ExpectedEvent("minecraft:snowball", 1),
             "SHOOT_ITEM", new ExpectedEvent("minecraft:arrow", 1));
     private static final Map<String, Integer> EXPECTED_AUDIT_ACTION_COUNTS = Map.of(
-            "BREAK_BLOCK", 2,
+            "BREAK_BLOCK", 1,
             "INTERACT_ENTITY", 3,
             "INTERACT_ENTITY_COMPLETED", 2,
             "INTERACT_ENTITY_UNRESOLVED", 1);
@@ -48,7 +48,8 @@ public final class ItemGraphReplayReportFixture {
      * GameTest assertion has passed.
      */
     public static void writeIfRequested(GameTestHelper helper, String loader, long priorObservationId,
-                                        long priorAuditId, Map<String, String> actorAliases) {
+                                        long priorAuditId, Map<String, String> actorAliases,
+                                        BlockPos successfulWaterPickupPos) {
         String configuredDirectory = System.getenv("ITEMGRAPH_DIFFERENTIAL_REPORT_DIR");
         if (configuredDirectory == null || configuredDirectory.isBlank()) {
             return;
@@ -63,7 +64,7 @@ public final class ItemGraphReplayReportFixture {
                 "native report must contain the six expected durable replay observations");
         helper.assertValueEqual(EXPECTED_OBSERVATION_EVENTS.size(), observationEvents.size(),
                 "native report must not omit or duplicate a replay observation");
-        List<ReplayEvent> auditEvents = readAuditEvents(priorAuditId, actorAliases);
+        List<ReplayEvent> auditEvents = readAuditEvents(priorAuditId, actorAliases, successfulWaterPickupPos);
         Map<String, Integer> actualAuditActionCounts = auditEvents.stream().collect(Collectors.groupingBy(
                 ReplayEvent::action, Collectors.summingInt(ignored -> 1)));
         helper.assertValueEqual(EXPECTED_AUDIT_ACTION_COUNTS, actualAuditActionCounts,
@@ -219,7 +220,8 @@ public final class ItemGraphReplayReportFixture {
         }
     }
 
-    private static List<ReplayEvent> readAuditEvents(long priorAuditId, Map<String, String> actorAliases) {
+    private static List<ReplayEvent> readAuditEvents(long priorAuditId, Map<String, String> actorAliases,
+                                                    BlockPos successfulWaterPickupPos) {
         String sql = """
                 SELECT id, event_type, timestamp_ms, player_uuid, level_id, x, y, z, subject_id
                 FROM ig_audit_events
@@ -227,6 +229,9 @@ public final class ItemGraphReplayReportFixture {
                   AND player_uuid IN (%s)
                   AND event_type IN ('BREAK_BLOCK', 'INTERACT_ENTITY', 'INTERACT_ENTITY_COMPLETED',
                                      'INTERACT_ENTITY_UNRESOLVED')
+                  -- Exclude the direct-call guard probe with a synthetic lava-bucket result.
+                  AND (event_type <> 'BREAK_BLOCK' OR
+                       (subject_id = 'minecraft:water' AND x = ? AND y = ? AND z = ?))
                 ORDER BY timestamp_ms, id
                 """.formatted(String.join(",", java.util.Collections.nCopies(actorAliases.size(), "?")));
         try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
@@ -234,6 +239,9 @@ public final class ItemGraphReplayReportFixture {
             statement.setLong(1, priorAuditId);
             int parameter = 2;
             for (String uuid : actorAliases.keySet()) statement.setString(parameter++, uuid);
+            statement.setInt(parameter++, successfulWaterPickupPos.getX());
+            statement.setInt(parameter++, successfulWaterPickupPos.getY());
+            statement.setInt(parameter, successfulWaterPickupPos.getZ());
             try (var rows = statement.executeQuery()) {
                 List<ReplayEvent> result = new ArrayList<>();
                 while (rows.next()) {
