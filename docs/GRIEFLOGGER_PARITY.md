@@ -131,6 +131,26 @@ fluid block ID at the source block's coordinates. This follows GriefLogger's
 fluid can differ from the source block fluid. This is block audit evidence
 only; it does not create an item quantity row.
 
+For the exact-release item writers, paired NeoForge and Fabric GameTests now
+cover `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`, and `PICKUP_ITEM`. The chest
+session fixture uses server-side `QUICK_MOVE` clicks and checks the matching
+player inventory and container deltas; the ground fixture removes an item from
+player inventory before dropping it and checks the pickup restores it. A shared
+read-only SQLite fixture checks these transfers, including item registry IDs,
+quantities, canonical fingerprints, player/container/ground endpoints, the container's
+position and dimension, session interval evidence, distinct event IDs, and the
+exact spawned `ItemEntity` UUID across the drop/pickup pair. Ground endpoints
+must remain in the same dimension and within one block, allowing for the server
+tick between drop confirmation and pickup. A second unfiltered query requires
+the replay player to have exactly these four new ItemGraph-sourced quantity
+rows; an unexpected fifth observation fails the fixture. CoreProtect's
+documented inventory lookup also normalizes a transfer into player inventory
+addition/removal rows; ItemGraph uses its own container session deltas and keeps
+that implementation separate from the external API's semantics. This fixture
+proves only these four ItemGraph persistence paths. It does not verify the
+remaining exact-release writers, connected clients, or differential replay
+against GriefLogger; those gates remain open under #27 and #31.
+
 `CHAT` and `COMMAND` remain source features backed by their own tables, not
 members of these three action enums, so they have no enum ID. The complete
 field-access class lists, source IDs, and no-writer reason codes are in the

@@ -4,6 +4,7 @@ import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.listener.NativeAuditEventListener;
 import com.itemgraph.gametest.EntityInteractionConformanceFixture;
 import com.itemgraph.gametest.BucketPickupConformanceFixture;
+import com.itemgraph.gametest.ItemMovementConformanceFixture;
 import com.itemgraph.gametest.ProjectileConformanceFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.BlockPos;
@@ -17,9 +18,13 @@ import net.minecraft.world.entity.animal.Cow;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.projectile.Arrow;
 import net.minecraft.world.entity.projectile.Snowball;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
@@ -35,6 +40,8 @@ public final class EntityInteractionGameTests {
     @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 2_000)
     public static void serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        ServerPlayer fluidPlayer = helper.makeMockServerPlayerInLevel();
+        ServerPlayer movementPlayer = helper.makeMockServerPlayerInLevel();
         BlockPos targetPos = helper.absolutePos(new BlockPos(2, 1, 2));
         Cow target = new Cow(EntityType.COW, helper.getLevel());
         target.moveTo(targetPos.getX() + 0.5, targetPos.getY(), targetPos.getZ() + 0.5,
@@ -47,6 +54,8 @@ public final class EntityInteractionGameTests {
         long persistedBefore = observations.getTotalPersisted();
         long droppedBefore = observations.getTotalDropped();
         var quantityObservationsBefore = EntityInteractionConformanceFixture.snapshotQuantityObservations();
+        long movementWatermark = ItemMovementConformanceFixture.observationWatermark();
+        var movementRowsBefore = ItemMovementConformanceFixture.snapshotRows();
         ProjectileConformanceFixture.Watermark projectileWatermark = ProjectileConformanceFixture.watermark();
         long bucketAuditWatermark = BucketPickupConformanceFixture.auditWatermark();
 
@@ -103,23 +112,61 @@ public final class EntityInteractionGameTests {
                 "could not place the source water block for the empty-result guard replay");
         helper.assertTrue(helper.getLevel().setBlock(alternateFluidPos, Blocks.WATER.defaultBlockState(), 3),
                 "could not place the source water block for the alternate bucket-content replay");
-        NativeAuditEventListener.recordBucketPickup(player, helper.getLevel(), emptyResultPos,
+        NativeAuditEventListener.recordBucketPickup(fluidPlayer, helper.getLevel(), emptyResultPos,
                 helper.getLevel().getBlockState(emptyResultPos), ItemStack.EMPTY);
-        NativeAuditEventListener.recordBucketPickup(player, helper.getLevel(), alternateFluidPos,
+        NativeAuditEventListener.recordBucketPickup(fluidPlayer, helper.getLevel(), alternateFluidPos,
                 helper.getLevel().getBlockState(alternateFluidPos), new ItemStack(Items.LAVA_BUCKET));
-        player.teleportTo(waterPos.getX() + 0.5, waterPos.getY(), waterPos.getZ() + 2.0);
-        player.setYRot(180.0F);
-        player.setXRot(30.0F);
-        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BUCKET));
-        var bucketResult = Items.BUCKET.use(helper.getLevel(), player, InteractionHand.MAIN_HAND);
+        fluidPlayer.teleportTo(waterPos.getX() + 0.5, waterPos.getY(), waterPos.getZ() + 2.0);
+        fluidPlayer.setYRot(180.0F);
+        fluidPlayer.setXRot(30.0F);
+        fluidPlayer.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BUCKET));
+        var bucketResult = Items.BUCKET.use(helper.getLevel(), fluidPlayer, InteractionHand.MAIN_HAND);
         helper.assertTrue(bucketResult.getResult().consumesAction(),
                 "server-side empty bucket did not complete source-water pickup");
         helper.assertTrue(helper.getLevel().getBlockState(waterPos).isAir(),
                 "successful source-water pickup must remove the source block");
-        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BUCKET));
-        var emptyPickupResult = Items.BUCKET.use(helper.getLevel(), player, InteractionHand.MAIN_HAND);
+        fluidPlayer.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BUCKET));
+        var emptyPickupResult = Items.BUCKET.use(helper.getLevel(), fluidPlayer, InteractionHand.MAIN_HAND);
         helper.assertFalse(emptyPickupResult.getResult().consumesAction(),
                 "empty bucket use without a source fluid must not report a successful pickup");
+
+        BlockPos containerPos = helper.absolutePos(new BlockPos(10, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(containerPos, Blocks.CHEST.defaultBlockState(), 3),
+                "could not place the chest for the item movement replay");
+        helper.getLevel().getBlockEntity(containerPos, net.minecraft.world.level.block.entity.BlockEntityType.CHEST)
+                .ifPresentOrElse(chest -> {
+                    chest.setItem(0, new ItemStack(Items.COBBLESTONE, 3));
+                    chest.setChanged();
+                    movementPlayer.teleportTo(containerPos.getX() + 1.0, containerPos.getY(), containerPos.getZ() + 0.5);
+                    movementPlayer.getInventory().setItem(0, new ItemStack(Items.DIRT, 2));
+                    helper.assertTrue(movementPlayer.openMenu(chest).isPresent(),
+                            "mock server player could not open the single-chest menu");
+                    movementPlayer.containerMenu.clicked(54, 0, ClickType.QUICK_MOVE, movementPlayer);
+                    helper.assertTrue(movementPlayer.getInventory().getItem(0).isEmpty()
+                                    && chest.getItem(1).is(Items.DIRT)
+                                    && chest.getItem(1).getCount() == 2,
+                            "server menu quick-move did not transfer both dirt from player inventory to chest");
+                    movementPlayer.containerMenu.clicked(0, 0, ClickType.QUICK_MOVE, movementPlayer);
+                    helper.assertTrue(chest.getItem(0).isEmpty()
+                                    && inventoryCount(movementPlayer, Items.COBBLESTONE) == 3,
+                            "server menu quick-move did not transfer all three cobblestone to player inventory");
+                    chest.setChanged();
+                    movementPlayer.closeContainer();
+                }, () -> helper.fail("placed chest has no ChestBlockEntity"));
+
+        movementPlayer.getInventory().setItem(1, new ItemStack(Items.DIAMOND, 4));
+        ItemStack diamondStack = movementPlayer.getInventory().removeItem(1, 4);
+        helper.assertTrue(diamondStack.getCount() == 4 && inventoryCount(movementPlayer, Items.DIAMOND) == 0,
+                "drop replay must first remove the four diamonds from player inventory");
+        ItemEntity droppedDiamond = movementPlayer.drop(diamondStack, false);
+        helper.assertTrue(droppedDiamond != null && droppedDiamond.isAddedToLevel(),
+                "server did not accept the four-diamond player drop");
+        droppedDiamond.setNoPickUpDelay();
+        droppedDiamond.playerTouch(movementPlayer);
+        helper.assertTrue(droppedDiamond.isRemoved(),
+                "mock server player did not pick up the accepted diamond stack");
+        helper.assertTrue(inventoryCount(movementPlayer, Items.DIAMOND) == 4,
+                "ground pickup must restore all four diamonds to player inventory");
 
         String playerUuid = player.getUUID().toString();
         String targetUuid = target.getUUID().toString();
@@ -133,11 +180,15 @@ public final class EntityInteractionGameTests {
             ProjectileConformanceFixture.assertPersisted(
                     helper, projectileWatermark, playerUuid, quantityObservationsBefore);
             BucketPickupConformanceFixture.assertPersisted(
-                    helper, bucketAuditWatermark, projectileWatermark.observationId(), playerUuid, waterPos);
+                    helper, bucketAuditWatermark, projectileWatermark.observationId(),
+                    fluidPlayer.getUUID().toString(), waterPos);
             BucketPickupConformanceFixture.assertNoAuditAt(helper, bucketAuditWatermark,
-                    playerUuid, emptyResultPos);
+                    fluidPlayer.getUUID().toString(), emptyResultPos);
             BucketPickupConformanceFixture.assertSubjectAt(helper, bucketAuditWatermark,
-                    playerUuid, alternateFluidPos, "minecraft:lava");
+                    fluidPlayer.getUUID().toString(), alternateFluidPos, "minecraft:lava");
+            ItemMovementConformanceFixture.assertPersisted(helper, movementWatermark,
+                    movementRowsBefore, movementPlayer.getUUID().toString(), containerPos,
+                    droppedDiamond.getUUID().toString());
             try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
                  var statement = connection.prepareStatement("""
                          SELECT event_type, detail
@@ -237,5 +288,16 @@ public final class EntityInteractionGameTests {
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
             helper.succeed();
         });
+    }
+
+    private static int inventoryCount(ServerPlayer player, Item item) {
+        int count = 0;
+        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.is(item)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
     }
 }

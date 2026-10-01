@@ -42,6 +42,21 @@ The project follows a simple pre-1.0 development changelog model.
   The test uses embedded mock players and does not establish vanilla-client
   transport or bow-ammunition accounting. Mod version remains 0.3.2; no
   distributable jar is built.
+- **Issue #27 item movement runtime conformance:** both loader GameTests now
+  exercise real chest-menu quick-moves and player inventory removal/drop/pickup.
+  The shared read-only SQLite fixture requires exactly one `ADD_ITEM`, `REMOVE_ITEM`,
+  `DROP_ITEM`, and `PICKUP_ITEM` row with expected registry IDs, quantities,
+  endpoints, coordinates, metadata fingerprints, session intervals, and shared
+  dropped-entity identity across drop/pickup. NeoForge uses the two-argument
+  `Player.drop` path that posts `ItemTossEvent`; Fabric exercises its accepted
+  `ServerPlayer.drop`/`ServerLevel.addFreshEntity` mixin path. Both assert that
+  inventory counts before and after each transfer. The fixture also requires
+  the exact spawned entity UUID, rejects any fifth observation for the replay
+  player regardless of action/source, and verifies prior quantity rows remain
+  unchanged. Ground evidence coordinates may differ by one block across the
+  server tick. The remaining #27 writer actions still need paired runtime
+  fixtures. Mod version remains 0.3.2; no distributable jar
+  is built.
 - **Issue #75 cross-loader interaction evidence:** non-armor-stand callbacks now carry stable `target_support=callback_only` and `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT` metadata, while armor-stand rows identify their supported method-result boundary. Callback-level denied/unresolved outcomes remain recorded where observed. NeoForge and Fabric isolated server GameTests send entity-use packets through each loader's server handler for unsupported-entity attempts and armor-stand boot equip/unequip. They separately call inherited `ArmorStand.interact` to verify its `PASS` return hook and persisted unresolved method result. Both tests compare the complete `ig_observations` row snapshots before and after, and check the same normalized audit query and `QueryFormatter` output used by `/ig lookup`. CI runs both loader GameTests without creating distributable mod jars.
 - **Issue #76 Ender action compatibility:** the release fixture validator now checksum-verifies both published 1.2.10-1.21.1 jars and finds no Ender action constant field references outside `ItemAction.class`; its `values()` calls are limited to the generic `Actions` catalog and the enum's own `fromId` decoder, and the only external `fromId` caller is `ItemHistory.<init>` reconstructing stored rows. The registry marks both GriefLogger actions `unsupported-no-writer` using `NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE`; existing ItemGraph session net deltas stay labeled as `ITEMGRAPH_INTERNAL` extensions. Regression coverage checks duplicate opens, reconnects, partial signed counts, atomic queue rejection/retry including orderly shutdown under one shared five-second retry deadline, opaque component redaction, no-net sessions, and restart persistence. Registry compatibility version is `m8.7.0`; ItemGraph mod version stays 0.3.2.
 - **Issue #24 command contract:** `/ig` and `/itemgraph` expose the same level-2 command tree; GriefLogger's published direct `name.value` lookup syntax, six filter names and one-letter aliases, required cubic radius, five-filter limit, AND combination, ten-row page default, per-player pages, and page navigation are covered across NeoForge and Fabric tests. The selected published-doc radius requirement is explicit because GriefLogger 26.2 source accepts no-radius lookup. Output retains ItemGraph evidence labels and provenance; `/gl` and `/grieflogger` remain unregistered.
