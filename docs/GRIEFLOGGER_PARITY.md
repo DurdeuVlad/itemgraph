@@ -25,7 +25,7 @@ canonical action names, accepted GriefLogger spellings, compatibility status,
 evidence and quantity semantics, loader/storage support, lookup filters,
 permission and paging controls, inspector behavior, configuration controls, and
 the GitHub issue responsible for incomplete mappings.
-The current registry compatibility version is `m8.7.0`.
+The current registry compatibility version is `m8.8.0`.
 
 The registry version changes when a mapping, status, evidence or quantity
 meaning, loader, or backend contract changes. Documentation-only clarifications
@@ -65,9 +65,10 @@ for both Fabric and NeoForge. The checked-in
 records the official Modrinth file IDs, URLs, byte sizes, SHA-1/SHA-256/SHA-512
 digests, loader metadata, Java 21 mixin contracts, embedded SQLite 3.47.2.0
 and MySQL Connector/J 8.4.0 versions, action IDs, all 11 table column layouts,
-commands, configuration defaults, and inspector behavior. Its canonical
-fixture digest is
-`f0e922f3b3c4b926b2d115a2809ea0d157cfba1f3941b5836da30a3f84a54574`.
+commands, configuration defaults, inspector behavior, and an action enum
+field-access matrix verified against both published jars. Its canonical fixture
+digest is
+`d8181c2af8ba8eccb289bf0e6678be2d3a75ada4e0d51c0d459ba257afaf0853`.
 
 The exact published artifacts are the authority for the 1.21.1 target. The
 Git tag named `1.2.10-1.21.1` points at source metadata from the later 26.2
@@ -85,6 +86,58 @@ Minecraft 26.2/Java 25 (owned by #54), and observable native-only behavior still
 requires differential replay against that source profile (owned by
 [#31](https://github.com/DurdeuVlad/itemgraph/issues/31)). Neither difference
 is hidden behind a generic “compatible” label.
+
+### Native action ID and release-writer matrix (#27)
+
+The registry stores the pinned 26.2 enum class and numeric ID for each of the
+18 source actions. `release_action_id` and `release_writer_status` separately
+describe the exact 1.2.10-1.21.1 target. The release-fixture validator scans
+both checksum-verified loader jars and requires the listed action enum-field
+access instructions in the expected class files. Enum declaration
+self-references do not count as writers. The action enum IDs are not globally
+unique, so the enum class is part of every source ID.
+
+This is static bytecode evidence that each listed class accesses an action
+constant. It does not prove that the path is reachable or that a row is
+persisted at runtime; runtime behavior remains subject to the loader replay
+and differential acceptance in #31.
+
+| Source enum | 26.2 ID | Action | Exact 1.2.10-1.21.1 writer result | ItemGraph mapping |
+| --- | ---: | --- | --- | --- |
+| `BlockAction` | 0 | `BREAK_BLOCK` | present | compatible |
+| `BlockAction` | 1 | `PLACE_BLOCK` | present | compatible |
+| `BlockAction` | 2 | `INTERACT_BLOCK` | present, main-hand attempt only | compatible |
+| `BlockAction` | 3 | `KILL_ENTITY` | present | compatible |
+| `BlockAction` | 4 | `INTERACT_ENTITY` | no action ID or writer | unsupported-no-writer; native extension |
+| `ItemAction` | 0 | `REMOVE_ITEM` | present | compatible |
+| `ItemAction` | 1 | `ADD_ITEM` | present | compatible |
+| `ItemAction` | 2 | `DROP_ITEM` | present | compatible |
+| `ItemAction` | 3 | `PICKUP_ITEM` | present | compatible |
+| `ItemAction` | 4 | `CRAFT_ITEM` | present | extended; preserves transformation lineage |
+| `ItemAction` | 5 | `BREAK_ITEM` | present | compatible |
+| `ItemAction` | 6 | `CONSUME_ITEM` | present | compatible |
+| `ItemAction` | 7 | `THROW_ITEM` | present | compatible |
+| `ItemAction` | 8 | `SHOOT_ITEM` | present | compatible |
+| `ItemAction` | 9 | `ADD_ITEM_ENDER` | enum only; no writer | unsupported-no-writer; native extension |
+| `ItemAction` | 10 | `REMOVE_ITEM_ENDER` | enum only; no writer | unsupported-no-writer; native extension |
+| `SessionAction` | 0 | `JOIN` | present | compatible |
+| `SessionAction` | 1 | `QUIT` | present | compatible |
+
+`CHAT` and `COMMAND` remain source features backed by their own tables, not
+members of these three action enums, so they have no enum ID. The complete
+field-access class lists, source IDs, and no-writer reason codes are in the
+machine-readable registry and release fixture. For comparison, CoreProtect's
+API v13 also distinguishes action types and action strings instead of treating
+an integer ID as a globally unique action; that is the reason ItemGraph keys
+these IDs by enum class ([CoreProtect API v13](https://docs.coreprotect.net/api/version/v13/)).
+
+The block interaction row is compatible only at its observed attempt boundary:
+the listener records the same main-hand/functional-block attempt before use
+completion is known, and never claims the click was accepted. Entity
+interaction and Ender IDs differ by target: the published 1.21.1 artifacts do
+not expose a writer for them. Their later 26.2 source behavior does not upgrade
+the compatibility claim for the older exact release. Those mappings cite the
+closed #75/#76 evidence and remain explicitly unsupported for this target.
 
 The source-profile hash is computed with SHA-256. Its canonical input is the
 compact, sorted-key JSON object containing the pinned `ref`, `commit`, sorted
@@ -164,7 +217,7 @@ vanilla client transport or rendered clickable chat controls.
 | Block place/break | `NativeAuditEventListener`, Fabric break callback, Fabric `BlockItemMixin` | `ig_audit_events` | `/ig lookup` | NeoForge place/break and Fabric place/break capture/query implemented; the Fabric replay persisted `PLACE_BLOCK` and `BREAK_BLOCK` rows |
 | Block interaction | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Both loaders record main-hand attempts against the exact 28-class 1.21.1 GriefLogger target set as `INTERACT_BLOCK_ATTEMPT`; modded `Container` inspection remains separate, and pre-use callbacks do not claim that block use completed. The Fabric replay persisted interaction attempts. |
 | Player-killed entities | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted a `KILL_ENTITY` row for a player-killed zombie |
-| Entity interaction and Ender inventory actions | NeoForge `NativeAuditEventListener` and `ArmorStandInteractionMixin`, Fabric aggregate `UseEntityCallback` audit decorator and `ArmorStandInteractionMixin`; shared `EnderChestInteractionTracker` bound by both menu adapters | `ig_audit_events` for attempt, denied, handled-result, and unresolved-result evidence; `ig_observations` for ItemGraph Ender session deltas | `/ig lookup INTERACT_ENTITY`, `/ig lookup INTERACT_ENTITY_COMPLETED`, `/ig lookup INTERACT_ENTITY_DENIED`, `/ig lookup INTERACT_ENTITY_UNRESOLVED`, `/ig lookup filters`, and `/ig trace` | Both loaders retain entity-use attempts, target UUID when available, and held stack registry ID/count/fingerprint without raw component values. NeoForge retains canceled specific/generic callbacks and suppresses only duplicate generic attempts; the armor-stand mixin hooks the `interactAt` override and the entity mixin hooks inherited fallback `interact`, with fallback-method `PASS` explicit as `INTERACT_ENTITY_UNRESOLVED` (without claiming the full entity-use pipeline ended). These are method results, not proof of equipment movement. No non-armor-stand target class has a method-result hook. Those records retain the entity registry ID in `subject_id`, declare `target_support=callback_only`, and carry `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT`; callback-level denied or unresolved outcomes remain recordable. Armor-stand records declare `target_support=armor_stand_method_result`. Fabric wraps the aggregate `UseEntityCallback` invoker and records one final non-`PASS` result, including short-circuits before or after ItemGraph's listener. Both loaders have local server GameTests that dispatch entity-use packets through the server handler, verify a cow attempt, armor-stand equip/unequip packet attempts and `interact_at` results, then separately invoke inherited `ArmorStand.interact` directly and verify its `PASS` return is retained as unresolved; the direct call is a method-hook check and is not attributed to a packet. Both runs assert duplicate-free persisted counts. The shared `EntityInteractionConformanceFixture` checks the same event-type and detail contracts through read-only `AuditEventQueryService` and `QueryFormatter`, including normalized actor, dimension, position, subject, timestamp presence, and console formatter output. Each test compares the complete `ig_observations` row snapshot before and after, proving the replay neither adds nor mutates quantity-flow evidence. The formatter is called directly; these tests do not execute `/ig lookup` through command dispatch. They use GameTest mock players and direct server-handler calls, so they do not prove real client transport. The exact GriefLogger 1.2.10-1.21.1 binary has no entity interaction writer; the 26.2 source has a success-only armor-stand writer. Entity mapping work is closed in #75; the action remains aggregate-unresolved under [#27](https://github.com/DurdeuVlad/itemgraph/issues/27). Ender action IDs 9 and 10 exist in the source enum but have no writer in the exact release binaries; the registry marks them `unsupported-no-writer` with reason `NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE` under [#76](https://github.com/DurdeuVlad/itemgraph/issues/76). ItemGraph's signed Ender rows come from its own `ender_inventory_session_net_delta` capture under `ITEMGRAPH_INTERNAL` and are an extension, not mapped GriefLogger actions. |
+| Entity interaction and Ender inventory actions | NeoForge `NativeAuditEventListener` and `ArmorStandInteractionMixin`, Fabric aggregate `UseEntityCallback` audit decorator and `ArmorStandInteractionMixin`; shared `EnderChestInteractionTracker` bound by both menu adapters | `ig_audit_events` for attempt, denied, handled-result, and unresolved-result evidence; `ig_observations` for ItemGraph Ender session deltas | `/ig lookup INTERACT_ENTITY`, `/ig lookup INTERACT_ENTITY_COMPLETED`, `/ig lookup INTERACT_ENTITY_DENIED`, `/ig lookup INTERACT_ENTITY_UNRESOLVED`, `/ig lookup filters`, and `/ig trace` | Both loaders retain entity-use attempts, target UUID when available, and held stack registry ID/count/fingerprint without raw component values. NeoForge retains canceled specific/generic callbacks and suppresses only duplicate generic attempts; the armor-stand mixin hooks the `interactAt` override and the entity mixin hooks inherited fallback `interact`, with fallback-method `PASS` explicit as `INTERACT_ENTITY_UNRESOLVED` (without claiming the full entity-use pipeline ended). These are method results, not proof of equipment movement. No non-armor-stand target class has a method-result hook. Those records retain the entity registry ID in `subject_id`, declare `target_support=callback_only`, and carry `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT`; callback-level denied or unresolved outcomes remain recordable. Armor-stand records declare `target_support=armor_stand_method_result`. Fabric wraps the aggregate `UseEntityCallback` invoker and records one final non-`PASS` result, including short-circuits before or after ItemGraph's listener. Both loaders have local server GameTests that dispatch entity-use packets through the server handler, verify a cow attempt, armor-stand equip/unequip packet attempts and `interact_at` results, then separately invoke inherited `ArmorStand.interact` directly and verify its `PASS` return is retained as unresolved; the direct call is a method-hook check and is not attributed to a packet. Both runs assert duplicate-free persisted counts. The shared `EntityInteractionConformanceFixture` checks the same event-type and detail contracts through read-only `AuditEventQueryService` and `QueryFormatter`, including normalized actor, dimension, position, subject, timestamp presence, and console formatter output. Each test compares the complete `ig_observations` row snapshot before and after, proving the replay neither adds nor mutates quantity-flow evidence. The formatter is called directly; these tests do not execute `/ig lookup` through command dispatch. They use GameTest mock players and direct server-handler calls, so they do not prove real client transport. The exact GriefLogger 1.2.10-1.21.1 binary has no entity interaction writer; the 26.2 source has a success-only armor-stand writer. Entity capture work is closed in #75; the exact-release mapping is `unsupported-no-writer` and is no longer counted as unresolved action coverage under [#27](https://github.com/DurdeuVlad/itemgraph/issues/27). Ender action IDs 9 and 10 exist in the source enum but have no writer in the exact release binaries; the registry marks them `unsupported-no-writer` with reason `NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE` under [#76](https://github.com/DurdeuVlad/itemgraph/issues/76). ItemGraph's signed Ender rows come from its own `ender_inventory_session_net_delta` capture under `ITEMGRAPH_INTERNAL` and are an extension, not mapped GriefLogger actions. |
 | Consume, break, throw, shoot item actions | NeoForge `NativeItemActionEventListener`, NeoForge `ProjectileMixin`, NeoForge `ServerLevelMixin`, `ItemEntityEventListener`; Fabric `LivingEntityMixin`, `ItemStackMixin`, `ProjectileMixin`, `ServerLevelMixin` | `ig_observations` for the GriefLogger-compatible attempt row; `ig_audit_events` for the accepted-spawn extension | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record completed eat/drink consumption at the return boundary, durability breaks at the `ItemStack.hurtAndBreak` shrink boundary, and `THROW_ITEM`/`SHOOT_ITEM` at the exact `Projectile.shootFromRotation` HEAD attempt boundary with the canonical source stack and observed count. Projectile attempt rows carry a durable `source_event_id` derived from their UUID event identity, so worker retries cannot manufacture a second quantity row. Accepted player-owned spawns are retained as `PROJECTILE_SPAWN_ACCEPTED` raw evidence only after `ServerLevel.addFreshEntity` returns true, without a second quantity row or quantity claim in the audit detail. Projectile type and coordinates remain raw evidence; no projectile UUID or landing location is claimed. |
 | Location/action filtered lookup | `AuditLookupFilters`, `UnifiedEvidenceQueryService`, `AuditEventQueryService` | `ig_audit_events`, `ig_observations`, `ig_item_transformations`, `ig_grieflogger_lookup` | `/ig lookup`, `/ig lookup near`, direct `/ig lookup <filter...>`, and `/ig lookup filters` | GriefLogger-style action/user/include/exclude/time/radius filters use one bounded asynchronous merge across native audit, item-flow, transformation, and normalized historical GriefLogger events. The published direct filter spelling now has token-aware suggestions and the ten-row default; the explicit `filters` literal remains an ItemGraph extension. Five-filter cap, required cube radius, AND semantics, global timestamp ordering, source/evidence IDs, and unresolved historical rows are tested; the Fabric replay returned rows from both `/ig lookup CHAT_MESSAGE 10 60` and `/ig lookup filters action.chat_message time.1h radius.50` |
 | Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `BlockInspectionTargets`, `UnifiedEvidenceQueryService`, and `AuditPageSession` | `ig_audit_events`, `ig_observations`, `ig_item_transformations`, `ig_grieflogger_lookup`, ItemGraph supersession tables | `/ig inspect`, `/ig page`, `/ig trace container` | Implemented in code: one exact-position, globally paginated timeline merges audit, item-flow, transformation, and imported rows; observation matching checks either endpoint. Double chests and doors deduplicate target cells. Schema V19 preserves block/door removal history through explicit supersession links, and normal lookup exposes each retained row and reason. Automated cross-loader tests pass; issue #26 remains open for the required local server/client matrix and independent raw-evidence audit. |

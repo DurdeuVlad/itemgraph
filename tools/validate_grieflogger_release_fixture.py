@@ -35,6 +35,19 @@ class FixtureError(RuntimeError):
     pass
 
 
+def reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def parse_json_document(source: str) -> Any:
+    return json.loads(source, object_pairs_hook=reject_duplicate_json_keys)
+
+
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise FixtureError(message)
@@ -42,8 +55,8 @@ def require(condition: bool, message: str) -> None:
 
 def load_fixture() -> dict[str, Any]:
     try:
-        fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        fixture = parse_json_document(FIXTURE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
         raise FixtureError(f"cannot read {FIXTURE_PATH.relative_to(ROOT)}: {exc}") from exc
     require(isinstance(fixture, dict), "fixture must be a JSON object")
     return fixture
@@ -55,7 +68,8 @@ def canonical_fixture(fixture: dict[str, Any]) -> bytes:
 
 
 def validate_static(fixture: dict[str, Any]) -> None:
-    require(fixture.get("fixture_schema_version") == 1, "fixture_schema_version must be 1")
+    require(type(fixture.get("fixture_schema_version")) is int and fixture["fixture_schema_version"] == 2,
+            "fixture_schema_version must be integer 2")
     digest = fixture.get("fixture_sha256")
     require(isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest), "fixture_sha256 must be lowercase SHA-256")
     require(hashlib.sha256(canonical_fixture(fixture)).hexdigest() == digest, "fixture_sha256 does not match canonical fixture")
@@ -129,7 +143,49 @@ def validate_static(fixture: dict[str, Any]) -> None:
     }
     for category, expected in expected_actions.items():
         actual = [(row.get("name"), row.get("id")) for row in actions.get(category, [])]
+        require(all(type(row.get("id")) is int for row in actions.get(category, [])),
+                f"{category} action IDs must be integers")
         require(actual == expected, f"{category} action IDs/names do not match the release fixture")
+
+    action_writer_audit = fixture.get("action_writer_audit")
+    require(isinstance(action_writer_audit, dict), "action writer audit must be present")
+    require(action_writer_audit.get("verified_loaders") == ["fabric", "neoforge"],
+            "action writer audit must cover Fabric and NeoForge")
+    require(action_writer_audit.get("source_ref") == "26.2"
+            and action_writer_audit.get("source_commit") == "d315098b3f37317a5cddfbd75086f4f912f16a83",
+            "action writer audit source provenance changed")
+    writer_references = action_writer_audit.get("expected_action_field_access_classes")
+    expected_writer_keys = {
+        f"{enum}.{name}"
+        for enum, rows in expected_actions.items()
+        for name, _action_id in rows
+    }
+    expected_writer_keys = {
+        key.replace("block.", "BlockAction.").replace("item.", "ItemAction.").replace("session.", "SessionAction.")
+        for key in expected_writer_keys
+    }
+    require(isinstance(writer_references, dict) and set(writer_references) == expected_writer_keys,
+            "action writer audit must enumerate each exact-release enum action exactly once")
+    for action_key, classfiles in writer_references.items():
+        require(isinstance(classfiles, list) and classfiles == sorted(set(classfiles)),
+                f"{action_key} writer class references must be unique and sorted")
+        enum_name = action_key.split(".", 1)[0]
+        enum_class = f"com/daqem/grieflogger/model/action/{enum_name}.class"
+        require(enum_class not in classfiles,
+                f"{action_key} writer class references must exclude the enum declaration")
+        require(bool(classfiles) != action_key.endswith(("ADD_ITEM_ENDER", "REMOVE_ITEM_ENDER")),
+                f"{action_key} writer presence conflicts with the Ender no-writer audit")
+    absent_release_actions = action_writer_audit.get("absent_release_actions")
+    require(absent_release_actions == {
+        "INTERACT_ENTITY": {
+            "source_enum": "BlockAction",
+            "source_id": 4,
+            "reason_code": "NO_ACTION_ID_OR_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE",
+            "evidence_issue": 75,
+        }
+    }, "exact-release action absence evidence changed")
+    require(not any(name == "INTERACT_ENTITY" for category in expected_actions.values() for name, _action_id in category),
+            "INTERACT_ENTITY must remain absent from the exact-release action ID catalog")
 
     expected_tables = {
         "blocks": ["time", "user", "level", "x", "y", "z", "type", "action"],
@@ -188,10 +244,11 @@ def validate_documentation_links(fixture: dict[str, Any]) -> None:
 
 
 def classfile_action_references(
-        bytecode: bytes, ender_audit: dict[str, Any]) -> tuple[set[str], set[str], set[str]]:
-    """Return Ender constant field-reference classes and enum selector/factory callsites."""
+        bytecode: bytes, ender_audit: dict[str, Any], include_callsites: bool = True
+        ) -> tuple[set[str], set[str], set[str], dict[str, set[str]]]:
+    """Return action field accesses and enum selector/factory callsites."""
     if len(bytecode) < 10 or bytecode[:4] != b"\xca\xfe\xba\xbe":
-        return set(), set(), set()
+        return set(), set(), set(), {}
     constant_pool_count = int.from_bytes(bytecode[8:10], "big")
     pool: list[tuple[int, Any] | None] = [None] * constant_pool_count
     cursor = 10
@@ -254,6 +311,7 @@ def classfile_action_references(
     cursor += 2 + interfaces_count * 2
 
     action_field_reference_classes: set[str] = set()
+    action_field_access_classes_by_name = {action: set() for action in action_constants}
     for entry in pool:
         if entry is None or entry[0] != 9:
             continue
@@ -261,6 +319,8 @@ def classfile_action_references(
         name, _descriptor = name_and_type(name_and_type_index)
         if class_name(owner_index) == enum_owner and name in action_constants:
             action_field_reference_classes.add(this_class + ".class")
+            # The aggregate set is retained for the Ender enum-only check. The
+            # per-action matrix below records executable field instructions.
 
     def skip_attributes(offset: int, count: int) -> int:
         for _ in range(count):
@@ -295,7 +355,20 @@ def classfile_action_references(
                 pc = 0
                 while pc < len(code):
                     opcode = code[pc]
-                    if opcode == 0xB8 and pc + 2 < len(code):  # invokestatic
+                    if opcode in (0xB2, 0xB3, 0xB4, 0xB5) and pc + 2 < len(code):  # field access
+                        reference_index = int.from_bytes(code[pc + 1:pc + 3], "big")
+                        reference = pool[reference_index]
+                        if reference is not None and reference[0] == 9:
+                            owner_index, name_and_type_index = reference[1]
+                            field_name, descriptor = name_and_type(name_and_type_index)
+                            if (
+                                opcode == 0xB2
+                                and class_name(owner_index) == enum_owner
+                                and field_name in action_constants
+                                and descriptor == f"L{enum_owner};"
+                            ):
+                                action_field_access_classes_by_name[field_name].add(this_class + ".class")
+                    if include_callsites and opcode == 0xB8 and pc + 2 < len(code):  # invokestatic
                         reference_index = int.from_bytes(code[pc + 1:pc + 3], "big")
                         reference = pool[reference_index]
                         if reference is not None and reference[0] in (10, 11):
@@ -336,11 +409,17 @@ def classfile_action_references(
                         pc += length
             attribute_offset = payload_offset + attribute_length
         cursor = attribute_offset
-    return action_field_reference_classes, selector_callsites, id_factory_callsites
+    return (
+        action_field_reference_classes,
+        selector_callsites,
+        id_factory_callsites,
+        action_field_access_classes_by_name,
+    )
 
 
 def verify_jar(loader: str, artifact: dict[str, Any], path: Path,
-               ender_audit: dict[str, Any]) -> None:
+               fixture: dict[str, Any]) -> None:
+    ender_audit = fixture["ender_action_writer_audit"]
     require(path.is_file(), f"{loader} jar does not exist: {path}")
     require(path.stat().st_size == artifact["size_bytes"], f"{loader} jar size does not match the release record")
     require(hashlib.sha1(path.read_bytes()).hexdigest() == artifact["sha1"], f"{loader} jar SHA-1 does not match the release record")
@@ -361,17 +440,36 @@ def verify_jar(loader: str, artifact: dict[str, Any], path: Path,
         require(class_count == artifact["class_count"], f"{loader} class count does not match the release fixture")
         symbol_classes = set()
         enum_constant_reference_classes = set()
+        action_audit = fixture.get("action_writer_audit", {})
+        expected_action_references = action_audit.get("expected_action_field_access_classes", {})
+        grouped_actions: dict[str, set[str]] = {}
+        for action_key in expected_action_references:
+            enum_name, action_name = action_key.split(".", 1)
+            grouped_actions.setdefault(enum_name, set()).add(action_name)
+        actual_action_references: dict[str, set[str]] = {key: set() for key in expected_action_references}
         dynamic_selector_callsites = set()
         id_factory_callsites = set()
         for name in names:
             if not name.endswith(".class"):
                 continue
             bytecode = jar.read(name)
-            field_references, dynamic_selectors, id_factory_callers = classfile_action_references(bytecode, ender_audit)
+            field_references, dynamic_selectors, id_factory_callers, references_by_action = classfile_action_references(
+                bytecode, ender_audit
+            )
             if field_references:
                 enum_constant_reference_classes.add(name)
             dynamic_selector_callsites.update(dynamic_selectors)
             id_factory_callsites.update(id_factory_callers)
+            for enum_name, action_names in grouped_actions.items():
+                enum_class = f"com/daqem/grieflogger/model/action/{enum_name}.class"
+                enum_context = {"enum_class": enum_class, "actions": {action: 0 for action in action_names}}
+                _all_references, _selectors, _factories, references_by_action = classfile_action_references(
+                    bytecode, enum_context, include_callsites=False
+                )
+                for action_name, classfiles in references_by_action.items():
+                    actual_action_references[f"{enum_name}.{action_name}"].update(
+                        classfile for classfile in classfiles if classfile != enum_class
+                    )
             if any(symbol.encode("ascii") in bytecode for symbol in ender_audit["actions"]):
                 symbol_classes.add(name)
         require(
@@ -384,6 +482,12 @@ def verify_jar(loader: str, artifact: dict[str, Any], path: Path,
                 f"{loader} ItemAction.values/valueOf callsites changed: {sorted(dynamic_selector_callsites)}")
         require(sorted(id_factory_callsites) == ender_audit["expected_id_factory_callsites"],
                 f"{loader} ItemAction.fromId callers changed: {sorted(id_factory_callsites)}")
+        for action, expected_classes in expected_action_references.items():
+            actual_classes = sorted(actual_action_references[action])
+            require(
+                actual_classes == expected_classes,
+                f"{loader} {action} executable field-access classes changed: {actual_classes}",
+            )
         require("com/daqem/grieflogger/model/action/BlockAction.class" in names, f"{loader} action classes are missing")
         require("com/daqem/grieflogger/database/Database.class" in names, f"{loader} database class is missing")
         require("com/mysql/cj/Constants.class" in names, f"{loader} embedded MySQL driver is missing")
@@ -413,6 +517,10 @@ def verify_jar(loader: str, artifact: dict[str, Any], path: Path,
         specific_name = "grieflogger-fabric.mixins.json" if loader == "fabric" else "grieflogger-neoforge.mixins.json"
         specific = json.loads(jar.read(specific_name))
         require(specific.get("mixins") == artifact["mixin_contract"]["loader_specific"], f"{loader} loader-specific mixin classes changed")
+    print(
+        f"Verified {loader} release jar: sha256={artifact['sha256']} "
+        f"classCount={artifact['class_count']} actionRowsVerified={len(expected_action_references)}"
+    )
 
 
 def verify_remote(fixture: dict[str, Any]) -> None:
@@ -425,7 +533,7 @@ def verify_remote(fixture: dict[str, Any]) -> None:
                     stream.write(response.read())
             except OSError as exc:
                 raise FixtureError(f"cannot download {loader} release fixture: {exc}") from exc
-            verify_jar(loader, artifact, destination, fixture["ender_action_writer_audit"])
+            verify_jar(loader, artifact, destination, fixture)
 
 
 def main() -> int:
@@ -441,8 +549,7 @@ def main() -> int:
         paths = {"fabric": args.fabric_jar, "neoforge": args.neoforge_jar}
         for loader, path in paths.items():
             if path is not None:
-                verify_jar(loader, fixture["artifacts"][loader], path,
-                           fixture["ender_action_writer_audit"])
+                verify_jar(loader, fixture["artifacts"][loader], path, fixture)
         if args.check_remote or os.environ.get("GRIEFLOGGER_RELEASE_FIXTURE_CHECK_REMOTE") == "1":
             verify_remote(fixture)
     except (FixtureError, OSError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
