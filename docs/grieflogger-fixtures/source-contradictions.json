@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "source_profile": {
+    "release": "1.2.10-1.21.1",
+    "source_ref": "26.2",
+    "source_commit": "d315098b3f37317a5cddfbd75086f4f912f16a83",
+    "release_fixture": "docs/grieflogger-fixtures/1.2.10-1.21.1.json"
+  },
+  "cases": [
+    {
+      "case_id": "lookup-radius-doc-vs-source",
+      "topic": "lookup.radius",
+      "claims": [
+        {
+          "authority": "published_documentation",
+          "reference": "https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/filters",
+          "claim": "A radius filter is required for a bounded lookup."
+        },
+        {
+          "authority": "pinned_source_26_2",
+          "reference": "https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/command/LookupCommand.java",
+          "claim": "The command accepts a lookup with no radius filter."
+        }
+      ],
+      "decision": "ItemGraph requires radius and clamps it to 1..1024 blocks to bound the query.",
+      "owner_issue": 25,
+      "verification": [
+        {
+          "path": "neoforge/src/test/java/com/itemgraph/command/ItemGraphCommandsHelpTest.java",
+          "kind": "java_method",
+          "symbol": "malformedLookupFiltersReturnExactFailuresOnBothRootsAndForms"
+        }
+      ]
+    },
+    {
+      "case_id": "chat-command-storage-vs-lookup",
+      "topic": "lookup.chat-command",
+      "claims": [
+        {
+          "authority": "pinned_source_26_2",
+          "reference": "https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/database/repository/ChatRepository.java",
+          "claim": "Chat records are stored in the source chats table."
+        },
+        {
+          "authority": "pinned_source_26_2",
+          "reference": "https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/database/repository/CommandRepository.java",
+          "claim": "Command records are stored in the source commands table."
+        },
+        {
+          "authority": "pinned_source_26_2",
+          "reference": "https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/command/LookupCommand.java",
+          "claim": "The GriefLogger in-game lookup merge omits chat and command tables."
+        }
+      ],
+      "decision": "ItemGraph exposes its stored chat and command evidence through permission-checked native audit lookup and labels it as an ItemGraph extension.",
+      "owner_issue": 27,
+      "verification": [
+        {
+          "path": "neoforge/src/test/java/com/itemgraph/query/AuditEventQueryServiceTest.java",
+          "kind": "java_method",
+          "symbol": "migrationCreatesNativeAuditLedgerAndQueriesFilters"
+        },
+        {
+          "path": "neoforge/src/test/java/com/itemgraph/command/QueryDispatcherTest.java",
+          "kind": "java_method",
+          "symbol": "testTextQueryRechecksPermissionBeforeDelivery"
+        },
+        {
+          "path": "docs/GRIEFLOGGER_PARITY.md",
+          "kind": "text",
+          "symbol": "ItemGraph's unified lookup intentionally extends"
+        }
+      ]
+    },
+    {
+      "case_id": "ender-enum-vs-release-writer",
+      "topic": "actions.ender-inventory",
+      "claims": [
+        {
+          "authority": "pinned_source_26_2",
+          "reference": "https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/model/action/ItemAction.java",
+          "claim": "The newer source enum declares ADD_ITEM_ENDER and REMOVE_ITEM_ENDER."
+        },
+        {
+          "authority": "exact_1_21_1_release_bytes",
+          "reference": "docs/grieflogger-fixtures/1.2.10-1.21.1.json#ender_action_writer_audit",
+          "claim": "Neither exact-release jar contains an Ender action writer."
+        }
+      ],
+      "decision": "Use the exact 1.2.10-1.21.1 bytecode as release authority; classify both actions unsupported-no-writer and keep ItemGraph Ender deltas as a native extension.",
+      "owner_issue": 76,
+      "verification": [
+        {
+          "path": "tools/validate_grieflogger_release_fixture.py",
+          "kind": "text",
+          "symbol": "Ender action writer audit must be present"
+        },
+        {
+          "path": "docs/grieflogger-fixtures/1.2.10-1.21.1.json",
+          "kind": "text",
+          "symbol": "\"ender_action_writer_audit\""
+        }
+      ]
+    }
+  ]
+}

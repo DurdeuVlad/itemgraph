@@ -60,6 +60,18 @@ class AuditEventQueryServiceTest {
             insert.setString(10, "hello");
             insert.executeUpdate();
 
+            insert.setString(1, "COMMAND_ATTEMPT");
+            insert.setLong(2, 2_500L);
+            insert.setString(3, "uuid-alex");
+            insert.setString(4, "Alex");
+            insert.setString(5, "minecraft:overworld");
+            insert.setDouble(6, 10);
+            insert.setDouble(7, 64);
+            insert.setDouble(8, -3);
+            insert.setString(9, null);
+            insert.setString(10, "command=example:test");
+            insert.executeUpdate();
+
             insert.setString(1, "BREAK_BLOCK");
             insert.setLong(2, 3_000L);
             insert.setString(3, "uuid-sam");
@@ -81,7 +93,7 @@ class AuditEventQueryServiceTest {
 
         List<AuditEventDetail> recent = service.find(
                 conn, "all", null, new QueryWindow(2_000L, 3_000L), 100);
-        assertEquals(List.of("BREAK_BLOCK", "CHAT_MESSAGE"),
+        assertEquals(List.of("BREAK_BLOCK", "COMMAND_ATTEMPT", "CHAT_MESSAGE"),
                 recent.stream().map(AuditEventDetail::eventType).toList());
 
         String formatted = String.join("\n", QueryFormatter.formatAuditEvents(

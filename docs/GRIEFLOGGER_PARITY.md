@@ -191,6 +191,14 @@ stored; and the source default `maxPageSize` is 10. ItemGraph records the chosen
 operator-safe behavior and the source behavior as a versioned fixture instead of
 claiming that the two are identical.
 
+The explicit conflict cases and their ItemGraph decisions are machine-readable in
+[`source-contradictions.json`](grieflogger-fixtures/source-contradictions.json).
+CI requires every case to name both claims, the chosen behavior, its owner issue,
+and typed source/test anchors; the CI test pins each issue owner and decision
+string and verifies Java method declarations for method anchors. The fixture covers required
+radius, stored chat/command rows omitted from GriefLogger's in-game lookup, and
+Ender action enum values with no writer in the exact 1.21.1 release.
+
 ### Command semantics (#24)
 
 The published [lookup command](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/lookup-command),
@@ -507,6 +515,16 @@ Ender-inventory events; a quantity, timestamp, endpoint, privacy, or evidence
 class mismatch, or wrong native source table never inherits an action-level exception. The comparator still
 requires exact per-event quantities and rejects any whole-database allocation
 or integrity violation reported by `AuditService`.
+
+The historical import path applies the same rule to unknown or missing source
+actions. `ig_grieflogger_rows` keeps the original action ID, payload, and opaque
+component bytes for provenance. The normalized `ig_grieflogger_lookup` projection
+labels the row `UNRESOLVED`, sets quantity to zero, leaves `subject_id` null, and
+retains the raw-byte SHA-256; it does not interpret the row's `amount` or `type`
+columns as item-flow claims. Action IDs are validated against each source table's
+mapping; oversized integer IDs and non-integral malformed values remain raw
+payload evidence with an explicit unresolved reason rather than being narrowed
+into the portable 32-bit action index column.
 
 The GameTest export contains 13 checked durable rows: six quantity observations
 for chest deposit and withdrawal, ground drop and pickup, and projectile throw

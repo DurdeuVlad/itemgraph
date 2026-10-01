@@ -8,6 +8,25 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #31 unresolved historical actions:** GriefLogger action IDs are checked
+  against the source table's action map without narrowing; raw payloads and
+  unresolved reasons retain larger IDs exactly, so table-
+  invalid, oversized, and non-integral malformed IDs remain importable as
+  unresolved evidence, with original values retained in the raw payload. The
+  lookup projection no longer exposes an unknown or missing source action's amount
+  or item-type ID as event semantics. The immutable import ledger retains the action,
+  complete payload, and component bytes; the projection reports quantity `0`, no
+  `subject_id`, `UNRESOLVED`, and the original raw-byte hash. Added an importer
+  regression fixture with action ID `999` and malformed component bytes that also
+  verifies the source database remains byte-for-byte unchanged. Mod version remains
+  0.3.2; no distributable jar is built.
+- **Issue #31 source contradiction fixtures:** added a machine-readable corpus
+  for the required-radius documentation/source difference, GriefLogger's stored
+  chat/command rows versus its lookup surface, and newer Ender enum values absent
+  from the exact 1.21.1 release writers. CI checks the pinned source identity,
+  duplicate-free case IDs, exact owner issues and decisions, and declared
+  Java-method or documentation anchors. Mod
+  version remains 0.3.2; no jar is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus seven allowlisted audit
   events, including namespaced entity/block `subject_id`, and a count-only
