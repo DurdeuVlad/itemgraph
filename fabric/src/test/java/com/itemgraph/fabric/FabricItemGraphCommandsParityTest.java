@@ -3,6 +3,7 @@ package com.itemgraph.fabric;
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.query.AuditLookupFilters;
+import com.itemgraph.query.QueryWindow;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.suggestion.Suggestion;
@@ -198,29 +199,81 @@ class FabricItemGraphCommandsParityTest {
     void allPublishedLookupExamplesParseForBothItemGraphRootsOnFabric() {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();
-        List<String> publishedExamples = List.of(
-                "action.break_block include.diamond_ore radius.50",
-                "user.Griefer42 time.1h radius.100",
-                "action.remove_item \"include.diamond,netherite_ingot\" radius.30 time.6h",
-                "\"action.break_block,place_block\" radius.15",
-                "\"action.join,quit\" time.10m radius.100",
-                "user.MinerJoe action.break_block \"exclude.stone,dirt,cobblestone,gravel\" radius.50",
-                "radius.20 action.remove_item exclude.cobblestone",
-                "include.diamond_block radius.100",
-                "action.remove_item \"include.netherite_sword,netherite_pickaxe,netherite_ingot\" time.1d radius.50",
-                "radius.5",
-                "include.tnt time.30m radius.25",
-                "\"action.add_item,remove_item\" time.90m radius.50",
-                "action.join time.3d radius.50",
-                "user.Notch radius.50",
-                "\"user.Player1,Player2\" action.break_block time.1d radius.50");
+        for (PublishedLookupExample example : publishedExamples()) {
+            AuditLookupFilters expected = example.expectedFilters();
+            AuditLookupFilters actual = AuditLookupFilters.parse(
+                    example.filters(), PUBLISHED_LOOKUP_NOW_MS);
+            assertEquals(expected.eventTypes(), actual.eventTypes(), example.filters());
+            assertEquals(expected.playerNames(), actual.playerNames(), example.filters());
+            assertEquals(expected.includeSubjects(), actual.includeSubjects(), example.filters());
+            assertEquals(expected.excludeSubjects(), actual.excludeSubjects(), example.filters());
+            assertEquals(expected.radiusBlocks(), actual.radiusBlocks(), example.filters());
+            assertEquals(expected.window(), actual.window(), example.filters());
 
-        for (String example : publishedExamples) {
-            assertParsedCompletely(dispatcher.parse("ig lookup " + example, source),
-                    "published /ig lookup " + example);
-            assertParsedCompletely(dispatcher.parse("itemgraph lookup " + example, source),
-                    "published /itemgraph lookup " + example);
+            for (String root : List.of("ig", "itemgraph")) {
+                String command = root + " lookup " + example.filters();
+                var parsed = dispatcher.parse(command, source);
+                assertParsedCompletely(parsed, "published /" + command);
+                assertEquals(example.filters(), argumentValue(parsed, "lookupFilters"), command);
+            }
         }
+    }
+
+    private static final long PUBLISHED_LOOKUP_NOW_MS = 10_000_000L;
+
+    private record PublishedLookupExample(
+            String filters,
+            List<String> actions,
+            List<String> users,
+            List<String> includes,
+            List<String> excludes,
+            double radius,
+            long timeWindowMinutes) {
+        private AuditLookupFilters expectedFilters() {
+            return new AuditLookupFilters(actions, users, includes, excludes, radius,
+                    timeWindowMinutes == 0
+                            ? new QueryWindow(null, null)
+                            : new QueryWindow(PUBLISHED_LOOKUP_NOW_MS - timeWindowMinutes * 60_000L,
+                                    PUBLISHED_LOOKUP_NOW_MS));
+        }
+    }
+
+    private static List<PublishedLookupExample> publishedExamples() {
+        return List.of(
+                new PublishedLookupExample("action.break_block include.diamond_ore radius.50",
+                        List.of("BREAK_BLOCK"), List.of(), List.of("minecraft:diamond_ore"), List.of(), 50, 0),
+                new PublishedLookupExample("user.Griefer42 time.1h radius.100",
+                        List.of(), List.of("Griefer42"), List.of(), List.of(), 100, 60),
+                new PublishedLookupExample("action.remove_item \"include.diamond,netherite_ingot\" radius.30 time.6h",
+                        List.of("REMOVE_ITEM"), List.of(), List.of("minecraft:diamond", "minecraft:netherite_ingot"),
+                        List.of(), 30, 360),
+                new PublishedLookupExample("\"action.break_block,place_block\" radius.15",
+                        List.of("BREAK_BLOCK", "PLACE_BLOCK"), List.of(), List.of(), List.of(), 15, 0),
+                new PublishedLookupExample("\"action.join,quit\" time.10m radius.100",
+                        List.of("PLAYER_JOIN", "PLAYER_QUIT"), List.of(), List.of(), List.of(), 100, 10),
+                new PublishedLookupExample("user.MinerJoe action.break_block \"exclude.stone,dirt,cobblestone,gravel\" radius.50",
+                        List.of("BREAK_BLOCK"), List.of("MinerJoe"), List.of(),
+                        List.of("minecraft:stone", "minecraft:dirt", "minecraft:cobblestone", "minecraft:gravel"), 50, 0),
+                new PublishedLookupExample("radius.20 action.remove_item exclude.cobblestone",
+                        List.of("REMOVE_ITEM"), List.of(), List.of(), List.of("minecraft:cobblestone"), 20, 0),
+                new PublishedLookupExample("include.diamond_block radius.100",
+                        List.of(), List.of(), List.of("minecraft:diamond_block"), List.of(), 100, 0),
+                new PublishedLookupExample("action.remove_item \"include.netherite_sword,netherite_pickaxe,netherite_ingot\" time.1d radius.50",
+                        List.of("REMOVE_ITEM"), List.of(),
+                        List.of("minecraft:netherite_sword", "minecraft:netherite_pickaxe", "minecraft:netherite_ingot"),
+                        List.of(), 50, 1_440),
+                new PublishedLookupExample("radius.5",
+                        List.of(), List.of(), List.of(), List.of(), 5, 0),
+                new PublishedLookupExample("include.tnt time.30m radius.25",
+                        List.of(), List.of(), List.of("minecraft:tnt"), List.of(), 25, 30),
+                new PublishedLookupExample("\"action.add_item,remove_item\" time.90m radius.50",
+                        List.of("ADD_ITEM", "REMOVE_ITEM"), List.of(), List.of(), List.of(), 50, 90),
+                new PublishedLookupExample("action.join time.3d radius.50",
+                        List.of("PLAYER_JOIN"), List.of(), List.of(), List.of(), 50, 4_320),
+                new PublishedLookupExample("user.Notch radius.50",
+                        List.of(), List.of("Notch"), List.of(), List.of(), 50, 0),
+                new PublishedLookupExample("\"user.Player1,Player2\" action.break_block time.1d radius.50",
+                        List.of("BREAK_BLOCK"), List.of("Player1", "Player2"), List.of(), List.of(), 50, 1_440));
     }
 
     @Test
@@ -354,6 +407,18 @@ class FabricItemGraphCommandsParityTest {
                 description + " was not consumed: " + parsed.getReader().getRemaining());
         assertTrue(parsed.getExceptions().isEmpty(),
                 description + " produced parse errors: " + parsed.getExceptions());
+    }
+
+    private static Object argumentValue(ParseResults<CommandSourceStack> parsed, String name) {
+        var context = parsed.getContext();
+        while (context != null) {
+            var argument = context.getArguments().get(name);
+            if (argument != null) {
+                return argument.getResult();
+            }
+            context = context.getChild();
+        }
+        throw new AssertionError("Parsed command did not contain argument " + name);
     }
 
     private static void assertSuggestions(CommandDispatcher<CommandSourceStack> dispatcher,
