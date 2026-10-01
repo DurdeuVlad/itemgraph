@@ -1218,7 +1218,11 @@ public final class ItemGraphCommands {
                 " griefLogger=" + glStatus +
                 " db=" + (dbConnected ? "connected" : "NOT CONNECTED") +
                 " backend=" + backend +
-                " schemaVersion=" + db.getCurrentSchemaVersion()
+                " schemaVersion=" + db.getCurrentSchemaVersion() +
+                " maxPageSize=" + QueryLimits.getConfiguredMaxPageSize() +
+                " databaseConnectionTimeoutMs=" + (dbSettings == null
+                        ? "not configured" : dbSettings.connectionTimeoutMs()) +
+                " useIndexes=" + (dbSettings == null ? "not configured" : dbSettings.useIndexes())
         ), false);
         if (!dbConnected) {
             source.sendFailure(Component.literal("[ItemGraph] Database statistics unavailable; inspect the server log for connection details."));

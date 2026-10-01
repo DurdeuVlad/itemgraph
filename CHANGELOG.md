@@ -25,14 +25,19 @@ The project follows a simple pre-1.0 development changelog model.
 - **Issue #30 configuration baseline:** added cross-loader page-cap, bounded
   queue idle-poll/batch, native-capture, server-only, and indefinite-retention
   settings and a configurable 30-second MySQL/MariaDB connection keepalive on
-  the background worker. `/ig status` reports backend, schema, and effective queue controls
-  while omitting database paths and raw exception details. The cross-loader
-  config tests check Fabric startup snapshots and NeoForge worker-stop
-  application; rejected live application leaves the query cap unchanged.
-  CI exercises the worker heartbeat against both MySQL and MariaDB. GriefLogger
-  queue cadence equivalence remains unverified because its scheduled flush and
-  ItemGraph's signal-driven queue have different semantics. Local NeoForge-only
-  startup, schema upgrade, and 2,000-record SQLite worker load passed. See
+  the background worker. `/ig status` reports backend, schema, effective query
+  cap, connection timeout, index policy, and queue controls while omitting
+  database paths and raw exception details. A temporary loopback-only NeoForge
+  21.1.248 server and Fabric Loader 0.16.9 server both confirmed that `/reload`
+  leaves startup-snapshot controls unchanged and restart applies representative
+  edited values; both status responses showed page cap 25, timeout 5,000 ms,
+  indexes enabled, and the expected queue controls. The cross-loader config
+  tests check Fabric startup snapshots and NeoForge worker-stop application;
+  rejected live application leaves the query cap unchanged. CI exercises the
+  worker heartbeat against both MySQL and MariaDB. GriefLogger queue cadence
+  equivalence remains unverified because its scheduled flush and ItemGraph's
+  signal-driven queue have different semantics. Local NeoForge-only startup,
+  schema upgrade, and 2,000-record SQLite worker load passed. See
   `docs/CONFIGURATION.md` and `docs/TEST_PLAN.md`.
 - **Evidence and queue failure handling:** legacy topology migrations now copy
   observations, referenced fingerprint values, and raw payloads into

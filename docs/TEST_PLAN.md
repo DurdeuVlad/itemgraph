@@ -62,6 +62,30 @@ Never use production as the primary test environment.
   replay or a GriefLogger comparison. It does not establish a universal tick
   budget or validate the MySQL/MariaDB heartbeat against a live endpoint.
 
+## Operational config lifecycle matrix (2026-10-01)
+
+- A fresh temporary NeoForge 21.1.248 / Minecraft 1.21.1 server and a fresh
+  temporary Fabric Loader 0.16.9 / Minecraft 1.21.1 server each ran ItemGraph
+  0.3.2 on loopback only. EULA acceptance, RCON credentials, configs, worlds,
+  logs, and SQLite databases stayed inside their respective temporary
+  directories. Neither server had GriefLogger installed or player workload.
+- Both servers started with `idlePollMs=250`, `maxBatchSize=100`,
+  `networkHeartbeatMs=30000`, and `captureEnabled=true`. Their ItemGraph config
+  files were changed to 550 ms, 250 rows, 60,000 ms, and `false`; `query.max_page_size`
+  was set to 25. Running `/reload` left the worker controls at the original
+  values, confirming that these server settings are startup snapshots.
+- Each server then shut down cleanly and restarted against the same temporary
+  config and database. NeoForge loaded `idlePollMs=550`, `maxBatchSize=250`,
+  `networkHeartbeatMs=60000`, `captureEnabled=false`; Fabric loaded the same
+  values. Both opened ItemGraph schema version 20. The queue remained empty and
+  no records were dropped. After `/ig status` exposed effective settings, the
+  follow-up live run verified `maxPageSize=25`, `databaseConnectionTimeoutMs=5000`,
+  and `useIndexes=true` on both loaders.
+- This verifies representative worker, capture, query-cap, and status settings
+  across startup, `/reload`, and restart. It does not cover every invalid config
+  field or compare queue cadence with GriefLogger; both remain outside this
+  runtime matrix.
+
 ## NeoForge invalid server-config startup check (2026-10-01)
 
 - `python tools/test_neoforge_invalid_config_startup.py` creates a fresh
