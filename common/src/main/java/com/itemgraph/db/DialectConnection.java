@@ -6,7 +6,9 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.sql.CallableStatement;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Locale;
@@ -53,9 +55,10 @@ final class DialectConnection {
                     result = method.invoke(delegate, translated);
                     return wrapStatement((Statement) result, CallableStatement.class, dialect);
                 }
-                return method.invoke(delegate, args);
+                result = method.invoke(delegate, args);
+                return wrapJdbcResult(result, dialect);
             } catch (InvocationTargetException e) {
-                throw e.getCause();
+                throw sanitize(e.getCause());
             }
         }
     }
@@ -100,13 +103,13 @@ final class DialectConnection {
                 translated[0] = DialectSql.translate((String) args[0], dialect);
             }
             try {
-                return method.invoke(delegate, translated);
+                return wrapJdbcResult(method.invoke(delegate, translated), dialect);
             } catch (InvocationTargetException e) {
                 Throwable cause = e.getCause();
                 if (cause instanceof SQLException sql && isIgnorableDuplicate(sql, method.getName())) {
                     return defaultResult(method.getReturnType());
                 }
-                throw cause;
+                throw sanitize(cause);
             }
         }
 
@@ -133,5 +136,41 @@ final class DialectConnection {
             if (type == long.class) return 0L;
             return null;
         }
+    }
+
+    private static Object wrapJdbcResult(Object result, DatabaseDialect dialect) {
+        if (result instanceof ResultSet resultSet) {
+            return Proxy.newProxyInstance(ResultSet.class.getClassLoader(), new Class<?>[]{ResultSet.class},
+                    (proxy, method, args) -> {
+                        try {
+                            return wrapJdbcResult(method.invoke(resultSet, args), dialect);
+                        } catch (InvocationTargetException e) {
+                            throw sanitize(e.getCause());
+                        }
+                    });
+        }
+        if (result instanceof DatabaseMetaData metadata) {
+            return Proxy.newProxyInstance(DatabaseMetaData.class.getClassLoader(),
+                    new Class<?>[]{DatabaseMetaData.class}, (proxy, method, args) -> {
+                        try {
+                            return wrapJdbcResult(method.invoke(metadata, args), dialect);
+                        } catch (InvocationTargetException e) {
+                            throw sanitize(e.getCause());
+                        }
+                    });
+        }
+        if (result instanceof Statement statement) {
+            Class<?> primaryInterface = statement instanceof CallableStatement ? CallableStatement.class
+                    : statement instanceof PreparedStatement ? PreparedStatement.class : Statement.class;
+            return wrapStatement(statement, primaryInterface, dialect);
+        }
+        if (result instanceof Connection connection) {
+            return wrap(connection, dialect);
+        }
+        return result;
+    }
+
+    private static Throwable sanitize(Throwable failure) {
+        return failure instanceof SQLException sql ? DatabaseDiagnostics.redact(sql) : failure;
     }
 }

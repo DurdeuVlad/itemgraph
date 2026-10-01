@@ -69,10 +69,10 @@ public class DatabaseManager {
             } else {
                 if ("disable".equals(requestedSettings.sslMode())
                         && !isLoopbackHost(requestedSettings.host())) {
-                    LOGGER.warn("ItemGraph network database host '{}' is configured with "
+                    LOGGER.warn("ItemGraph network database is configured with "
                             + "database_ssl_mode=disable; database traffic is plaintext. "
                             + "Use database_ssl_mode=verify-full (or verify-ca with a trusted CA) "
-                            + "for non-loopback deployments.", requestedSettings.host());
+                            + "for non-loopback deployments.");
                 }
                 Class.forName("org.mariadb.jdbc.Driver");
                 String url = "jdbc:mariadb://" + requestedSettings.host() + ":"
@@ -83,9 +83,7 @@ public class DatabaseManager {
                 Properties properties = new Properties();
                 properties.setProperty("user", requestedSettings.username());
                 properties.setProperty("password", requestedSettings.password());
-                LOGGER.info("Connecting to ItemGraph {} database at {}:{}/{}",
-                        requestedSettings.backend(), requestedSettings.host(),
-                        requestedSettings.port(), requestedSettings.database());
+                LOGGER.info("Connecting to ItemGraph {} database", requestedSettings.backend());
                 raw = DriverManager.getConnection(url, properties);
                 raw.setReadOnly(false);
             }
@@ -97,7 +95,13 @@ public class DatabaseManager {
         } catch (ClassNotFoundException e) {
             this.lastError = "JDBC driver not found for backend " + requestedSettings.backend();
             LOGGER.error("Failed to load JDBC driver for ItemGraph backend {}", requestedSettings.backend(), e);
-        } catch (SQLException | IOException e) {
+        } catch (SQLException e) {
+            String sqlState = e.getSQLState();
+            this.lastError = "Database initialization error"
+                    + (sqlState == null ? "" : " (SQL state " + sqlState + ")");
+            LOGGER.error("Failed to initialize ItemGraph {} database{}",
+                    requestedSettings.backend(), sqlState == null ? "" : " (SQL state " + sqlState + ")");
+        } catch (IOException e) {
             this.lastError = "Database initialization error: " + e.getMessage();
             LOGGER.error("Failed to initialize ItemGraph {} database", requestedSettings.backend(), e);
         }
@@ -238,7 +242,7 @@ public class DatabaseManager {
         return DialectConnection.wrap(writeConn, DatabaseDialect.fromSettings(current));
     }
 
-    private static Connection openIndependentConnection(DatabaseSettings current, boolean readOnly)
+    static Connection openIndependentConnection(DatabaseSettings current, boolean readOnly)
             throws SQLException {
         if (current.backend() == DatabaseSettings.Backend.SQLITE) {
             Connection connection = DriverManager.getConnection("jdbc:sqlite:" + current.sqlitePath().toAbsolutePath());
@@ -259,9 +263,13 @@ public class DatabaseManager {
         Properties properties = new Properties();
         properties.setProperty("user", current.username());
         properties.setProperty("password", current.password());
-        Connection connection = DriverManager.getConnection(url, properties);
-        connection.setReadOnly(readOnly);
-        return connection;
+        try {
+            Connection connection = DriverManager.getConnection(url, properties);
+            connection.setReadOnly(readOnly);
+            return connection;
+        } catch (SQLException failure) {
+            throw DatabaseDiagnostics.redact(failure);
+        }
     }
 
     static boolean isLoopbackHost(String host) {

@@ -91,16 +91,23 @@ Never use production as the primary test environment.
 - `python tools/test_neoforge_invalid_config_startup.py` creates a fresh
   separate temporary NeoForge GameTest directories for
   `query.max_page_size=101`, `general.database_port=0`, and an empty
-  `general.database_path` or `general.grieflogger_database_path`.
+  `general.database_path`, `general.grieflogger_database_path`, and an
+  unsupported `general.database_backend`.
 - Every probe requires the exact key and rejection reason in the startup exception,
   a failed GameTest server task, no ItemGraph database initialization, and the
   original invalid setting unchanged after NeoForge fills missing config
   defaults. This catches
   the prior behavior where NeoForge rewrote `database_port=0` to `1`.
-- The 2026-10-01 isolated run met those conditions for all four settings. The Windows
+- The 2026-10-01 isolated run met those conditions for all five settings. The Windows
   Gradle batch launcher returned process code 0 despite logging `BUILD FAILED`,
   so the script validates task output and the pre-database failure point rather
   than relying on that wrapper exit code.
+- The unsupported-backend probe uses a JDBC URL containing a marker credential
+  and requires that marker to be absent from startup output.
+- `DatabaseManagerTest.failedNetworkDatabaseDiagnosticsDoNotExposeEndpointsOrCredentials`
+  and `DialectConnectionTest` check SQLState-only failures for initial and
+  independent connections, connection methods, statements, result sets, and
+  metadata result sets. Raw driver messages and cause chains are not retained.
 - `FabricItemGraphConfigTest.validatesEveryNumericConfigRangeBeforeApplyingBackendSpecificSettings`
   uses temporary `itemgraph.properties` files to accept both boundaries and
   reject underflow, overflow, and non-integer input for all seven integer

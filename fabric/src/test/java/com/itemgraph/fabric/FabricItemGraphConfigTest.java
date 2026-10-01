@@ -121,7 +121,7 @@ class FabricItemGraphConfigTest {
         Files.writeString(config.resolve("itemgraph.properties"), "use_indexes=enabled\n");
 
         IOException error = assertThrows(IOException.class, () -> FabricItemGraphConfig.load(tempDir, config));
-        assertTrue(error.getMessage().contains("use_indexes must be true or false"));
+        assertTrue(error.getMessage().contains("storage.use_indexes must be true or false"));
     }
 
     @Test
@@ -140,6 +140,54 @@ class FabricItemGraphConfigTest {
                 () -> FabricItemGraphConfig.load(tempDir, config));
         assertTrue(griefLoggerPathError.getMessage().contains("general.grieflogger_database_path must not be blank"));
     }
+
+    @Test
+    void rejectsInvalidNetworkDatabaseSettingsWithTheirConfigKeys(@TempDir Path tempDir) throws Exception {
+        Path config = tempDir.resolve("config");
+        Files.createDirectories(config);
+        Path file = config.resolve("itemgraph.properties");
+        List<InvalidSetting> invalidSettings = List.of(
+                new InvalidSetting("database_backend=jdbc:mysql://user:backend-secret@db/test\n",
+                        "general.database_backend", "must be sqlite, mysql, mariadb, or mysql_mariadb"),
+                new InvalidSetting("database_backend=mysql_mariadb\ndatabase_host=   \n",
+                        "general.database_host", "must not be blank"),
+                new InvalidSetting("database_backend=mysql_mariadb\ndatabase_name=\n",
+                        "general.database_name", "must not be blank"),
+                new InvalidSetting("database_backend=mysql_mariadb\ndatabase_username=\n",
+                        "general.database_username", "must not be blank"),
+                new InvalidSetting("database_backend=mysql_mariadb\ndatabase_ssl_mode=invalid\n",
+                        "general.database_ssl_mode", "must be disable, trust, verify-ca, or verify-full"));
+
+        for (InvalidSetting invalid : invalidSettings) {
+            Files.writeString(file, "database_password=secret-value\n" + invalid.properties());
+            IOException error = assertThrows(IOException.class,
+                    () -> FabricItemGraphConfig.load(tempDir, config), invalid.key());
+            assertTrue(error.getMessage().contains(invalid.key()), error.getMessage());
+            assertTrue(error.getMessage().contains(invalid.expectedDetail()), error.getMessage());
+            assertFalse(error.getMessage().contains("secret-value"), "database errors must not expose passwords");
+            assertFalse(error.getMessage().contains("backend-secret"), "database errors must not expose backend text");
+        }
+    }
+
+    @Test
+    void rejectsMalformedBooleanSettingsWithTheirConfigKeys(@TempDir Path tempDir) throws Exception {
+        Path config = tempDir.resolve("config");
+        Files.createDirectories(config);
+        Path file = config.resolve("itemgraph.properties");
+        List<InvalidSetting> invalidSettings = List.of(
+                new InvalidSetting("server_side_only=1\n", "operations.server_side_only", "must be true or false"),
+                new InvalidSetting("capture_enabled=yes\n", "capture.enabled", "must be true or false"));
+
+        for (InvalidSetting invalid : invalidSettings) {
+            Files.writeString(file, invalid.properties());
+            IOException error = assertThrows(IOException.class,
+                    () -> FabricItemGraphConfig.load(tempDir, config), invalid.key());
+            assertTrue(error.getMessage().contains(invalid.key()), error.getMessage());
+            assertTrue(error.getMessage().contains(invalid.expectedDetail()), error.getMessage());
+        }
+    }
+
+    private record InvalidSetting(String properties, String key, String expectedDetail) { }
 
     @Test
     void validatesEveryNumericConfigRangeBeforeApplyingBackendSpecificSettings(@TempDir Path tempDir) throws Exception {

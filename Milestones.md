@@ -159,7 +159,7 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   in #43. PR #86 delivered the cross-loader entity-interaction slice for #75.
   Remaining open M8 issues are #24 (published-example vanilla-client replay and
   residual command output/error semantics), #27 (aggregate native action
-  acceptance), #30 (configuration and operations controls), and #31
+  acceptance), and #31
   (differential proof). Issue
   #24's shared command contract is implemented and covered by cross-loader tests.
   Exactly five valid filters parse on both loaders; exact invalid-filter
@@ -191,9 +191,15 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   for all seven settings, including database ranges ignored by SQLite. Both
   loaders now reject blank ItemGraph and GriefLogger database paths by their
   exact config keys; isolated NeoForge startup probes verify these errors happen
-  before database initialization and leave the invalid values unchanged. Other
-  malformed non-numeric combinations and GriefLogger queue-cadence differential
-  evidence remain outstanding; #30 stays open.
+  before database initialization and leave the invalid values unchanged. This
+  branch extends exact-key errors to network database values and Fabric backend
+  and boolean settings, removes the unused `debug_logging` option, and adds an
+  isolated unsupported-backend startup probe. Network logs and connection
+  failures omit endpoints and raw JDBC exception text. All five startup probes passed.
+  The GitHub issue #30 was closed by the maintainer on 2026-10-01; malformed
+  non-numeric combinations and GriefLogger queue-cadence differential evidence
+  are still not documented as verified, so the closure is not evidence that the
+  full acceptance criteria passed.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
   #24–#28, #30–#31, #43, #54, #75, and #76. Issue #29 is delivered in PR #79, including

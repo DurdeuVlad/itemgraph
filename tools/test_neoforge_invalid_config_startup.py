@@ -22,6 +22,9 @@ PROBES = (
     ("general.grieflogger_database_path", "grieflogger_database_path",
      '[general]\ngrieflogger_database_path = ""\n',
      "general.grieflogger_database_path must not be blank"),
+    ("general.database_backend", "database_backend",
+     '[general]\ndatabase_backend = "jdbc:mysql://user:backend-secret@db/test"\n',
+     "general.database_backend must be sqlite, mysql, mariadb, or mysql_mariadb"),
 )
 
 
@@ -87,6 +90,7 @@ def run_probe(name: str, key: str, toml: str, expected_error: str) -> bool:
         "precise validation error": expected_error in output,
         "failed GameTest server launch": "BUILD FAILED" in output,
         "database startup was not reached": "ItemGraph database initialized successfully" not in output,
+        "invalid backend credentials were not logged": "backend-secret" not in output,
         "invalid TOML value was not rewritten": toml_value(
             (config_dir / "itemgraph-server.toml").read_text(encoding="utf-8"), key
         ) == toml_value(toml, key),

@@ -18,7 +18,6 @@ public class ItemGraphConfig {
     public static final ModConfigSpec.ConfigValue<Integer> DATABASE_CONNECTION_TIMEOUT_MS;
     public static final ModConfigSpec.ConfigValue<Boolean> USE_INDEXES;
     public static final ModConfigSpec.ConfigValue<String> GRIEFLOGGER_DATABASE_PATH;
-    public static final ModConfigSpec.ConfigValue<Boolean> DEBUG_LOGGING;
     public static final ModConfigSpec.ConfigValue<Integer> GROUND_BRIDGE_MAX_SECONDS;
     public static final ModConfigSpec.ConfigValue<Integer> MAX_PAGE_SIZE;
     public static final ModConfigSpec.ConfigValue<Boolean> SERVER_SIDE_ONLY;
@@ -40,7 +39,8 @@ public class ItemGraphConfig {
                 BUILDER.comment("Path to ItemGraph SQLite database relative to game directory, or absolute path"),
                 "database_path", "general.database_path", "itemgraph/itemgraph.db");
 
-        DATABASE_BACKEND = defineString(BUILDER.comment("ItemGraph storage backend: sqlite or mysql_mariadb"),
+        DATABASE_BACKEND = defineString(BUILDER.comment(
+                "ItemGraph storage backend: sqlite, mysql, mariadb, or mysql_mariadb"),
                 "database_backend", "general.database_backend", "sqlite");
         DATABASE_HOST = defineString(BUILDER.comment("MySQL/MariaDB host; ignored when database_backend=sqlite"),
                 "database_host", "general.database_host", "127.0.0.1");
@@ -63,8 +63,6 @@ public class ItemGraphConfig {
                 BUILDER.comment("Path to GriefLogger SQLite database relative to game directory, or absolute path"),
                 "grieflogger_database_path", "general.grieflogger_database_path", "database.db");
 
-        DEBUG_LOGGING = defineBoolean(BUILDER.comment("Enable verbose debug logging"),
-                "debug_logging", "general.debug_logging", false);
         BUILDER.pop();
 
         BUILDER.push("ingestion");
@@ -188,7 +186,7 @@ public class ItemGraphConfig {
                     DATABASE_USERNAME.get(), DATABASE_PASSWORD.get(),
                     DATABASE_CONNECTION_TIMEOUT_MS.get(), USE_INDEXES.get(), DATABASE_SSL_MODE.get());
             default -> throw new IllegalArgumentException(
-                    "database_backend must be sqlite or mysql_mariadb, got: " + DATABASE_BACKEND.get());
+                    "general.database_backend must be sqlite, mysql, mariadb, or mysql_mariadb");
         };
     }
 
