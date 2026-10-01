@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 1,
+  "fixture_schema_version": 2,
   "project": {
     "name": "GriefLogger",
     "mod_id": "grieflogger",
@@ -124,6 +124,76 @@
     ],
     "source_audit_commit": "d315098b3f37317a5cddfbd75086f4f912f16a83",
     "source_audit_note": "The pinned source defines both enum values but contains no writer references outside the enum; the verified binaries reference Ender enum constants only inside ItemAction, values() is called by the generic Actions catalog and the enum's fromId decoder, and the only fromId caller is ItemHistory.<init> reconstructing a stored row."
+  },
+  "action_writer_audit": {
+    "method": "Scan checksum-verified JVM Code instructions for GETSTATIC/PUTSTATIC/GETFIELD/PUTFIELD accesses to each action enum constant; enum self-references are excluded from writer classes. Both loaders must match these action-specific accesses.",
+    "source_ref": "26.2",
+    "source_commit": "d315098b3f37317a5cddfbd75086f4f912f16a83",
+    "verified_loaders": [
+      "fabric",
+      "neoforge"
+    ],
+    "expected_action_field_access_classes": {
+      "BlockAction.BREAK_BLOCK": [
+        "com/daqem/grieflogger/event/block/BreakBlockEvent.class"
+      ],
+      "BlockAction.PLACE_BLOCK": [
+        "com/daqem/grieflogger/event/block/PlaceBlockEvent.class"
+      ],
+      "BlockAction.INTERACT_BLOCK": [
+        "com/daqem/grieflogger/event/block/RightClickBlockEvent.class"
+      ],
+      "BlockAction.KILL_ENTITY": [
+        "com/daqem/grieflogger/event/EntityEvents.class"
+      ],
+      "ItemAction.REMOVE_ITEM": [
+        "com/daqem/grieflogger/block/container/ContainerTransactionManager.class",
+        "com/daqem/grieflogger/block/container/ContainersTransactionManager.class",
+        "com/daqem/grieflogger/event/block/BreakContainerEvent.class"
+      ],
+      "ItemAction.ADD_ITEM": [
+        "com/daqem/grieflogger/block/container/ContainerTransactionManager.class",
+        "com/daqem/grieflogger/block/container/ContainersTransactionManager.class"
+      ],
+      "ItemAction.DROP_ITEM": [
+        "com/daqem/grieflogger/event/item/DropItemEvent.class"
+      ],
+      "ItemAction.PICKUP_ITEM": [
+        "com/daqem/grieflogger/event/item/PickupItemEvent.class"
+      ],
+      "ItemAction.CRAFT_ITEM": [
+        "com/daqem/grieflogger/event/item/CraftItemEvent.class",
+        "com/daqem/grieflogger/event/item/SmeltItemEvent.class"
+      ],
+      "ItemAction.BREAK_ITEM": [
+        "com/daqem/grieflogger/event/item/BreakItemEvent.class"
+      ],
+      "ItemAction.CONSUME_ITEM": [
+        "com/daqem/grieflogger/event/item/ConsumeItemEvent.class"
+      ],
+      "ItemAction.THROW_ITEM": [
+        "com/daqem/grieflogger/event/item/ThrowItemEvent.class"
+      ],
+      "ItemAction.SHOOT_ITEM": [
+        "com/daqem/grieflogger/event/item/ShootItemEvent.class"
+      ],
+      "ItemAction.ADD_ITEM_ENDER": [],
+      "ItemAction.REMOVE_ITEM_ENDER": [],
+      "SessionAction.JOIN": [
+        "com/daqem/grieflogger/event/PlayerJoinEvent.class"
+      ],
+      "SessionAction.QUIT": [
+        "com/daqem/grieflogger/event/PlayerQuitEvent.class"
+      ]
+    },
+    "absent_release_actions": {
+      "INTERACT_ENTITY": {
+        "source_enum": "BlockAction",
+        "source_id": 4,
+        "reason_code": "NO_ACTION_ID_OR_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE",
+        "evidence_issue": 75
+      }
+    }
   },
   "embedded_libraries": [
     {
@@ -408,5 +478,5 @@
       }
     ]
   },
-  "fixture_sha256": "f0e922f3b3c4b926b2d115a2809ea0d157cfba1f3941b5836da30a3f84a54574"
+  "fixture_sha256": "d8181c2af8ba8eccb289bf0e6678be2d3a75ada4e0d51c0d459ba257afaf0853"
 }

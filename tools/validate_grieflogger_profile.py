@@ -118,6 +118,26 @@ EXPECTED_ENTITY_INTERACTION_OUTCOME_MODEL = {
     "callback_level_outcomes_remain_recordable": True,
     "equipment_or_item_movement_claimed": False,
 }
+EXPECTED_SOURCE_ACTION_IDS: dict[str, tuple[str, int, int | None]] = {
+    "BREAK_BLOCK": ("BlockAction", 0, 0),
+    "PLACE_BLOCK": ("BlockAction", 1, 1),
+    "INTERACT_BLOCK": ("BlockAction", 2, 2),
+    "KILL_ENTITY": ("BlockAction", 3, 3),
+    "INTERACT_ENTITY": ("BlockAction", 4, None),
+    "REMOVE_ITEM": ("ItemAction", 0, 0),
+    "ADD_ITEM": ("ItemAction", 1, 1),
+    "DROP_ITEM": ("ItemAction", 2, 2),
+    "PICKUP_ITEM": ("ItemAction", 3, 3),
+    "CRAFT_ITEM": ("ItemAction", 4, 4),
+    "BREAK_ITEM": ("ItemAction", 5, 5),
+    "CONSUME_ITEM": ("ItemAction", 6, 6),
+    "THROW_ITEM": ("ItemAction", 7, 7),
+    "SHOOT_ITEM": ("ItemAction", 8, 8),
+    "ADD_ITEM_ENDER": ("ItemAction", 9, 9),
+    "REMOVE_ITEM_ENDER": ("ItemAction", 10, 10),
+    "JOIN": ("SessionAction", 0, 0),
+    "QUIT": ("SessionAction", 1, 1),
+}
 # The action rows are a compatibility contract, not merely a vocabulary list.
 # Keep the expected mapping here so a registry edit cannot silently change the
 # evidence or quantity semantics while retaining the same action names.
@@ -133,9 +153,9 @@ EXPECTED_ACTION_CONTRACT: dict[str, tuple[str, str, str, str]] = {
     "SHOOT_ITEM": ("SHOOT_ITEM", "compatible", "observed", "observed_stack_count"),
     "PLACE_BLOCK": ("PLACE_BLOCK", "compatible", "observed", "none"),
     "BREAK_BLOCK": ("BREAK_BLOCK", "compatible", "observed", "none"),
-    "INTERACT_BLOCK": ("INTERACT_BLOCK_ATTEMPT", "unresolved", "observed", "none"),
+    "INTERACT_BLOCK": ("INTERACT_BLOCK_ATTEMPT", "compatible", "observed", "none"),
     "KILL_ENTITY": ("KILL_ENTITY", "compatible", "observed", "none"),
-    "INTERACT_ENTITY": ("INTERACT_ENTITY", "unresolved", "observed", "none"),
+    "INTERACT_ENTITY": ("INTERACT_ENTITY", "unsupported-no-writer", "unresolved", "none"),
     "JOIN": ("PLAYER_JOIN", "compatible", "observed", "none"),
     "QUIT": ("PLAYER_QUIT", "compatible", "observed", "none"),
     "CHAT": ("CHAT_MESSAGE", "compatible", "observed", "none"),
@@ -144,9 +164,15 @@ EXPECTED_ACTION_CONTRACT: dict[str, tuple[str, str, str, str]] = {
     "REMOVE_ITEM_ENDER": ("REMOVE_ITEM_ENDER", "unsupported-no-writer", "unresolved", "signed_delta"),
 }
 ENDER_NO_WRITER_REASON = "NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE"
+ENTITY_NO_WRITER_REASON = "NO_ACTION_ID_OR_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE"
 ENDER_EXTENSION_CONTRACT = {
     "source_type": "ITEMGRAPH_INTERNAL",
     "capture": "ender_inventory_session_net_delta",
+    "compatibility_mapping": False,
+}
+ENTITY_EXTENSION_CONTRACT = {
+    "source_type": "ITEMGRAPH_NATIVE_AUDIT",
+    "capture": "entity_interaction_callbacks_and_armor_stand_method_results",
     "compatibility_mapping": False,
 }
 EXPECTED_EXTENSION_ACTION_CONTRACT: dict[str, tuple[str, str, str]] = {
@@ -166,6 +192,19 @@ class ProfileError(RuntimeError):
     """A profile invariant failed."""
 
 
+def reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def parse_json_document(source: str) -> Any:
+    return json.loads(source, object_pairs_hook=reject_duplicate_json_keys)
+
+
 def fail(message: str) -> None:
     raise ProfileError(message)
 
@@ -177,8 +216,8 @@ def require(condition: bool, message: str) -> None:
 
 def load_json(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        value = parse_json_document(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
         fail(f"cannot read {path.relative_to(ROOT)}: {exc}")
     require(isinstance(value, dict), f"{path.relative_to(ROOT)} must contain a JSON object")
     return value
@@ -197,7 +236,8 @@ def canonical_source_profile(registry: dict[str, Any]) -> bytes:
 
 
 def validate_registry(registry: dict[str, Any]) -> None:
-    require(registry.get("schema_version") == 1, "registry schema_version must be 1")
+    require(type(registry.get("schema_version")) is int and registry["schema_version"] == 1,
+            "registry schema_version must be integer 1")
     require(registry.get("mod_id") == "itemgraph", "registry mod_id must be itemgraph")
 
     index_policy = next((row for row in registry.get("configuration_controls", [])
@@ -251,6 +291,13 @@ def validate_registry(registry: dict[str, Any]) -> None:
 
     actions = registry.get("actions")
     require(isinstance(actions, list), "registry actions must be an array")
+    release_fixture = load_json(ROOT / "docs" / "grieflogger-fixtures" / "1.2.10-1.21.1.json")
+    release_action_writer_audit = release_fixture.get("action_writer_audit")
+    require(isinstance(release_action_writer_audit, dict),
+            "release fixture action_writer_audit must be present")
+    release_writer_references = release_action_writer_audit.get("expected_action_field_access_classes")
+    require(isinstance(release_writer_references, dict),
+            "release fixture action writer references must be an object")
     source_capabilities = {
         row.get("grieflogger")
         for row in actions
@@ -307,8 +354,43 @@ def validate_registry(registry: dict[str, Any]) -> None:
                 == (expected_itemgraph, expected_status, expected_evidence, expected_quantity),
                 f"actions[{index}] contract for {source_action} changed",
             )
-            if expected_status == "unresolved":
-                require(row.get("owner_issue") == 27, f"actions[{index}] unresolved {source_action} must remain owned by issue #27")
+            if source_action in EXPECTED_SOURCE_ACTION_IDS:
+                expected_enum, expected_source_id, expected_release_id = EXPECTED_SOURCE_ACTION_IDS[source_action]
+                require(row.get("source_enum") == expected_enum,
+                        f"actions[{index}] {source_action} source enum changed")
+                require(type(row.get("source_id")) is int,
+                        f"actions[{index}] {source_action} source ID must be an integer")
+                require(row.get("source_id") == expected_source_id,
+                        f"actions[{index}] {source_action} pinned source ID changed")
+                release_id = row.get("release_action_id")
+                require(release_id is None or type(release_id) is int,
+                        f"actions[{index}] {source_action} release action ID must be an integer or null")
+                require(row.get("release_action_id") == expected_release_id,
+                        f"actions[{index}] {source_action} exact release action ID changed")
+                writer_status = "unsupported-no-writer" if expected_release_id is None or source_action in {
+                    "ADD_ITEM_ENDER", "REMOVE_ITEM_ENDER"
+                } else "present"
+                require(row.get("release_writer_status") == writer_status,
+                        f"actions[{index}] {source_action} exact release writer status changed")
+                if expected_release_id is None:
+                    require(source_action in release_action_writer_audit.get("absent_release_actions", {}),
+                            f"actions[{index}] {source_action} needs exact-release absence evidence")
+                else:
+                    writer_key = f"{expected_enum}.{source_action}"
+                    writer_classes = release_writer_references.get(writer_key)
+                    require(isinstance(writer_classes, list),
+                            f"actions[{index}] {source_action} needs binary writer-reference evidence")
+                    require(bool(writer_classes) == (writer_status == "present"),
+                            f"actions[{index}] {source_action} writer status conflicts with the binary matrix")
+            if expected_status == "unsupported-no-writer" and source_action == "INTERACT_ENTITY":
+                require(row.get("evidence_issue") == 75,
+                        f"actions[{index}] INTERACT_ENTITY needs the closed #75 evidence")
+                require(row.get("reason_code") == ENTITY_NO_WRITER_REASON,
+                        f"actions[{index}] INTERACT_ENTITY needs the exact-release no-action reason")
+                require(row.get("itemgraph_extension") == ENTITY_EXTENSION_CONTRACT,
+                        f"actions[{index}] INTERACT_ENTITY native capture must remain an extension")
+                require("owner_issue" not in row,
+                        f"actions[{index}] INTERACT_ENTITY must not remain open under #27")
             elif expected_status == "unsupported-no-writer":
                 require(row.get("evidence_issue") == 76,
                         f"actions[{index}] unsupported-no-writer {source_action} needs evidence from issue #76")
@@ -318,9 +400,12 @@ def validate_registry(registry: dict[str, Any]) -> None:
                         f"actions[{index}] {source_action} must label the independent ItemGraph extension")
                 require("owner_issue" not in row,
                         f"actions[{index}] unsupported-no-writer {source_action} must not remain open under #27")
-            else:
+            elif expected_status != "unresolved":
                 require("owner_issue" not in row and "evidence_issue" not in row,
                         f"actions[{index}] compatible/extended {source_action} must not claim an unresolved owner issue")
+            else:
+                require(row.get("owner_issue") == 27,
+                        f"actions[{index}] unresolved {source_action} must remain owned by issue #27")
         elif source_action is None:
             expected_status, expected_evidence, expected_quantity = EXPECTED_EXTENSION_ACTION_CONTRACT[itemgraph]
             require(
@@ -332,8 +417,9 @@ def validate_registry(registry: dict[str, Any]) -> None:
         if row.get("status") == "unresolved":
             require(isinstance(row.get("owner_issue"), int), f"actions[{index}] unresolved row needs owner_issue")
         if isinstance(row.get("evidence_issue"), int):
-            require(row["evidence_issue"] == 76,
-                    f"actions[{index}] evidence_issue must refer to the Ender writer determination #76")
+            expected_evidence_issue = 75 if source_action == "INTERACT_ENTITY" else 76
+            require(row["evidence_issue"] == expected_evidence_issue,
+                    f"actions[{index}] evidence_issue must refer to the owning closed child issue #{expected_evidence_issue}")
 
     storage = registry.get("storage")
     require(isinstance(storage, dict), "registry storage must be an object")
@@ -363,7 +449,7 @@ def validate_documents(registry: dict[str, Any]) -> None:
         "11 tables",
         "18 actions",
         "1.2.10-1.21.1",
-        "f0e922f3b3c4b926b2d115a2809ea0d157cfba1f3941b5836da30a3f84a54574",
+        "d8181c2af8ba8eccb289bf0e6678be2d3a75ada4e0d51c0d459ba257afaf0853",
         "issue #54",
     ]
     for fragment in required_parity_fragments:

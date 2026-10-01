@@ -72,6 +72,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 tools/validate_grieflogger_profile.py
 
+      - name: Test GriefLogger validator input rejection
+        run: python3 tools/test_grieflogger_validators.py
+
       - name: Validate exact GriefLogger 1.21.1 release fixture
         env:
           GRIEFLOGGER_RELEASE_FIXTURE_CHECK_REMOTE: '1'

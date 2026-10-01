@@ -778,6 +778,27 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   :fabric:runGameTest` for loader unit and GameTest coverage. The no-writer
   result does not claim transaction-level cross-loader GriefLogger replay.
 
+## M8 issue #27: canonical action IDs and exact-release writers
+
+- `python tools/validate_grieflogger_profile.py` requires all 18 pinned 26.2
+  source action enum names, enum classes, IDs, loader support, evidence and
+  quantity contracts, and exact-release writer status to agree with the
+  compatibility registry. `python tools/test_grieflogger_validators.py`
+  rejects boolean/float IDs, non-integer fixture schema versions, and duplicate
+  JSON object keys even when a modified fixture has a freshly recomputed digest.
+- `python tools/validate_grieflogger_release_fixture.py --check-remote`
+  downloads the official Fabric and NeoForge 1.2.10-1.21.1 artifacts, verifies
+  SHA-1/SHA-256/SHA-512 and class counts, then checks each action's executable enum-field accesses against the pinned
+  class list. The expected matrix is in
+  `docs/grieflogger-fixtures/1.2.10-1.21.1.json`.
+- Regressions require `INTERACT_BLOCK` to remain an exact-release
+  main-hand-attempt mapping, `INTERACT_ENTITY` to remain absent from the exact
+  release action catalog with its native behavior labeled as an extension,
+  and the Ender action constants to remain enum-only with their stable
+  no-writer reason.
+- These are source/binary mapping checks; they do not replace the full
+  loader replay or the differential acceptance owned by #31.
+
 ## M8 issue #26: exact block/container inspector and immutable supersession
 
 Automated checks currently cover the shared query and both loader adapters:

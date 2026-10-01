@@ -25,7 +25,7 @@ and the downloaded official CDN bytes. Fabric is version `zPIDeXeI`, file
 18,956,227 bytes. Both jars target Minecraft 1.21.1 and Java 21, embed SQLite
 JDBC 3.47.2.0 and MySQL Connector/J 8.4.0, and carry required common mixins.
 The fixture digest is
-`f0e922f3b3c4b926b2d115a2809ea0d157cfba1f3941b5836da30a3f84a54574`.
+`d8181c2af8ba8eccb289bf0e6678be2d3a75ada4e0d51c0d459ba257afaf0853`.
 It records the runtime-target mismatch as unresolved under #54 and the
 remaining native-only differential-replay proof as unresolved under #31.
 
