@@ -2,6 +2,7 @@ package com.itemgraph.fabric.gametest;
 
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.gametest.EntityInteractionConformanceFixture;
+import com.itemgraph.gametest.ProjectileConformanceFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.core.BlockPos;
@@ -14,6 +15,8 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.animal.Cow;
 import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.projectile.Arrow;
+import net.minecraft.world.entity.projectile.Snowball;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
@@ -28,6 +31,17 @@ public final class EntityInteractionGameTests implements FabricGameTest {
         InternalObservationService observations = InternalObservationService.getInstance();
         long droppedBefore = observations.getTotalDropped();
         var quantityObservationsBefore = EntityInteractionConformanceFixture.snapshotQuantityObservations();
+        ProjectileConformanceFixture.Watermark projectileWatermark = ProjectileConformanceFixture.watermark();
+
+        Snowball snowball = new Snowball(helper.getLevel(), player);
+        snowball.shootFromRotation(player, player.getXRot(), player.getYRot(), 0.0F, 1.5F, 0.0F);
+        helper.assertTrue(helper.getLevel().addFreshEntity(snowball),
+                "server rejected the player-owned snowball used by the projectile replay");
+        Arrow arrow = new Arrow(helper.getLevel(), player, new ItemStack(Items.ARROW), new ItemStack(Items.BOW));
+        arrow.shootFromRotation(player, player.getXRot(), player.getYRot(), 0.0F, 2.5F, 0.0F);
+        helper.assertTrue(helper.getLevel().addFreshEntity(arrow),
+                "server rejected the player-owned arrow used by the projectile replay");
+
         BlockPos cowPos = helper.absolutePos(new BlockPos(2, 1, 2));
         Cow cow = new Cow(EntityType.COW, helper.getLevel());
         cow.moveTo(cowPos.getX() + 0.5, cowPos.getY(), cowPos.getZ() + 0.5, 0.0F, 0.0F);
@@ -73,8 +87,8 @@ public final class EntityInteractionGameTests implements FabricGameTest {
         String cowUuid = cow.getUUID().toString();
         String armorStandUuid = armorStand.getUUID().toString();
         helper.succeedWhen(() -> {
-            EntityInteractionConformanceFixture.assertQuantityObservationsUnchanged(
-                    helper, quantityObservationsBefore);
+            ProjectileConformanceFixture.assertPersisted(
+                    helper, projectileWatermark, playerUuid, quantityObservationsBefore);
             assertAttempt(helper, playerUuid, cowUuid);
             assertArmorStandOutcomes(helper, playerUuid, armorStandUuid);
             EntityInteractionConformanceFixture.assertCow(helper, playerUuid, playerName, cowPos, cowUuid);

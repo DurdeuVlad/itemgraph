@@ -355,6 +355,18 @@ checksummed historical database when an operator explicitly configures it.
   to vanilla literal event-type nodes; the previous unserializable custom
   argument no longer disconnects clients. Compatibility artifacts remain gated
   by the unresolved action and operations mappings listed in the registry.
+- **2026-10-01, projectile CI conformance:** paired NeoForge and Fabric
+  GameTests call `Projectile.shootFromRotation` for a player-owned snowball and
+  arrow, then require `ServerLevel.addFreshEntity` to accept both. Each loader
+  verifies durable `THROW_ITEM` and `SHOOT_ITEM` rows with amount 1, source
+  player and `UNKNOWN` destination, non-null idempotency keys, and matching
+  attempt IDs in the native audit projection. Each accepted spawn has its own
+  raw audit event whose action, subject and projectile identifier match the
+  snowball or arrow, with no second quantity claim. Every prior quantity row
+  remains byte-for-byte present, and exactly two new quantity rows are
+  attributed to the replay player. These embedded mock-player GameTests validate the server hooks and
+  durable read path; they do not replace connected-client or #31 differential
+  replay evidence.
 - **2026-09-29, Fabric native-only smoke:** the dedicated loopback staging server
   started with no GriefLogger JAR, applied the ItemGraph schema 13 migrations,
   loaded the Fabric mixins, and reached `Done` on port 27992. The ingestion worker

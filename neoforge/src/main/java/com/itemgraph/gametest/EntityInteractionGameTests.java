@@ -2,6 +2,7 @@ package com.itemgraph.gametest;
 
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.gametest.EntityInteractionConformanceFixture;
+import com.itemgraph.gametest.ProjectileConformanceFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
@@ -12,6 +13,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.animal.Cow;
 import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.projectile.Arrow;
+import net.minecraft.world.entity.projectile.Snowball;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
@@ -41,6 +44,17 @@ public final class EntityInteractionGameTests {
         long persistedBefore = observations.getTotalPersisted();
         long droppedBefore = observations.getTotalDropped();
         var quantityObservationsBefore = EntityInteractionConformanceFixture.snapshotQuantityObservations();
+        ProjectileConformanceFixture.Watermark projectileWatermark = ProjectileConformanceFixture.watermark();
+
+        Snowball snowball = new Snowball(helper.getLevel(), player);
+        snowball.shootFromRotation(player, player.getXRot(), player.getYRot(), 0.0F, 1.5F, 0.0F);
+        helper.assertTrue(helper.getLevel().addFreshEntity(snowball),
+                "server rejected the player-owned snowball used by the projectile replay");
+        Arrow arrow = new Arrow(helper.getLevel(), player, new ItemStack(Items.ARROW), new ItemStack(Items.BOW));
+        arrow.shootFromRotation(player, player.getXRot(), player.getYRot(), 0.0F, 2.5F, 0.0F);
+        helper.assertTrue(helper.getLevel().addFreshEntity(arrow),
+                "server rejected the player-owned arrow used by the projectile replay");
+
         ServerboundInteractPacket packet = ServerboundInteractPacket.createInteractionPacket(
                 target, player.isShiftKeyDown(), InteractionHand.MAIN_HAND, new Vec3(0.0, 1.0, 0.5));
         helper.assertTrue(packet.getTarget(helper.getLevel()) == target,
@@ -85,8 +99,8 @@ public final class EntityInteractionGameTests {
                     "server interaction packet did not persist an audit event");
             helper.assertValueEqual(droppedBefore, observations.getTotalDropped(),
                     "the interaction must not lose evidence to a full or failed queue");
-            EntityInteractionConformanceFixture.assertQuantityObservationsUnchanged(
-                    helper, quantityObservationsBefore);
+            ProjectileConformanceFixture.assertPersisted(
+                    helper, projectileWatermark, playerUuid, quantityObservationsBefore);
             try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
                  var statement = connection.prepareStatement("""
                          SELECT event_type, detail
