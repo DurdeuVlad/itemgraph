@@ -944,8 +944,12 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   session net-delta raw markers and non-negative intervals, distinct drop and
   pickup event identities, and the exact spawned entity UUID and fingerprint
   across the drop/pickup pair. Ground endpoints must stay in the same dimension
-  and within one block to account for entity movement between event capture and the server
-  tick that confirms the drop. It compares the full prior quantity-row
+  and within one block. In the native replay, Fabric records the precise item
+  entity coordinates at `playerTouch` return while NeoForge floors the entity
+  coordinates in its pickup event listener; the same pickup therefore differs
+  by one block in Y (Fabric=1, NeoForge=2). The shared entity UUID, fingerprint,
+  and quantity establish entity continuity, not exact position parity. The test
+  compares the full prior quantity-row
   snapshot to ensure the replay did not mutate earlier evidence. NeoForge calls
   the two-argument `Player.drop` overload so `ItemTossEvent` reaches the native
   listener; Fabric calls the three-argument `ServerPlayer.drop` overload covered

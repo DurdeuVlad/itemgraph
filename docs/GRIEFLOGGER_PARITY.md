@@ -140,8 +140,13 @@ read-only SQLite fixture checks these transfers, including item registry IDs,
 quantities, canonical fingerprints, player/container/ground endpoints, the container's
 position and dimension, session interval evidence, distinct event IDs, and the
 exact spawned `ItemEntity` UUID across the drop/pickup pair. Ground endpoints
-must remain in the same dimension and within one block, allowing for the server
-tick between drop confirmation and pickup. A second unfiltered query requires
+must remain in the same dimension and within one block. The current native
+cross-loader replay records the same pickup ground endpoint at Y=2 on NeoForge
+and Y=1 on Fabric: NeoForge floors the entity position in its pickup event
+listener, while Fabric captures the precise entity coordinates at
+`playerTouch` return. The shared fixture preserves the same entity UUID, item
+fingerprint, and quantity and allows this one-block endpoint delta; it proves
+entity continuity, not exact position parity. A second unfiltered query requires
 the replay player to have exactly these four new ItemGraph-sourced quantity
 rows; an unexpected fifth observation fails the fixture. CoreProtect's
 documented inventory lookup also normalizes a transfer into player inventory
