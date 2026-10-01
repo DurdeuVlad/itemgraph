@@ -27,8 +27,14 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.Direction;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.common.util.BlockSnapshot;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.level.BlockEvent;
 
 import java.sql.SQLException;
 import java.util.Map;
@@ -61,6 +67,40 @@ public final class EntityInteractionGameTests {
         ProjectileConformanceFixture.Watermark projectileWatermark = ProjectileConformanceFixture.watermark();
         long bucketAuditWatermark = BucketPickupConformanceFixture.auditWatermark();
 
+        BlockPos interactionChest = helper.absolutePos(new BlockPos(12, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(interactionChest, Blocks.CHEST.defaultBlockState(), 3),
+                "could not place the chest for the native block interaction replay");
+        player.teleportTo(interactionChest.getX() + 0.5, interactionChest.getY(), interactionChest.getZ() + 2.0);
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STICK));
+        BlockHitResult chestHit = new BlockHitResult(Vec3.atCenterOf(interactionChest), Direction.NORTH,
+                interactionChest, false);
+        NeoForge.EVENT_BUS.post(new PlayerInteractEvent.RightClickBlock(
+                player, InteractionHand.MAIN_HAND, interactionChest, chestHit));
+
+        BlockPos placementSupport = helper.absolutePos(new BlockPos(14, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(placementSupport, Blocks.STONE.defaultBlockState(), 3),
+                "could not place the support block for native block placement replay");
+        player.teleportTo(placementSupport.getX() + 0.5, placementSupport.getY(), placementSupport.getZ() + 2.0);
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.DIAMOND_BLOCK));
+        BlockPos placedBlock = placementSupport.above();
+        helper.assertTrue(helper.getLevel().setBlock(placedBlock, Blocks.DIAMOND_BLOCK.defaultBlockState(), 3),
+                "could not establish the diamond block state for the native placement listener replay");
+        helper.assertTrue(helper.getLevel().getBlockState(placedBlock).is(Blocks.DIAMOND_BLOCK),
+                "diamond block state was not present before dispatching the native placement event");
+        NeoForge.EVENT_BUS.post(new BlockEvent.EntityPlaceEvent(
+                BlockSnapshot.create(helper.getLevel().dimension(), helper.getLevel(), placedBlock),
+                helper.getLevel().getBlockState(placedBlock), player));
+
+        BlockPos killedCowPos = helper.absolutePos(new BlockPos(16, 1, 2));
+        Cow killedCow = new Cow(EntityType.COW, helper.getLevel());
+        killedCow.moveTo(killedCowPos.getX() + 0.5, killedCowPos.getY(), killedCowPos.getZ() + 0.5, 0.0F, 0.0F);
+        helper.assertTrue(helper.getLevel().addFreshEntity(killedCow),
+                "could not spawn the cow for native kill replay");
+        player.teleportTo(killedCowPos.getX() + 1.0, killedCowPos.getY(), killedCowPos.getZ() + 0.5);
+        helper.assertTrue(killedCow.hurt(player.damageSources().playerAttack(player), 100.0F)
+                        && !killedCow.isAlive(),
+                "player damage did not kill the cow used by the native kill replay");
+
         Snowball snowball = new Snowball(helper.getLevel(), player);
         snowball.shootFromRotation(player, player.getXRot(), player.getYRot(), 0.0F, 1.5F, 0.0F);
         helper.assertTrue(helper.getLevel().addFreshEntity(snowball),
@@ -70,6 +110,8 @@ public final class EntityInteractionGameTests {
         helper.assertTrue(helper.getLevel().addFreshEntity(arrow),
                 "server rejected the player-owned arrow used by the projectile replay");
 
+        player.teleportTo(targetPos.getX() + 1.0, targetPos.getY(), targetPos.getZ() + 0.5);
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STICK));
         ServerboundInteractPacket packet = ServerboundInteractPacket.createInteractionPacket(
                 target, player.isShiftKeyDown(), InteractionHand.MAIN_HAND, new Vec3(0.0, 1.0, 0.5));
         helper.assertTrue(packet.getTarget(helper.getLevel()) == target,
@@ -293,7 +335,10 @@ public final class EntityInteractionGameTests {
                     bucketAuditWatermark,
                     Map.of(movementPlayer.getUUID().toString(), "actor:replay-mover",
                             playerUuid, "actor:replay-interactor",
-                            fluidPlayer.getUUID().toString(), "actor:replay-fluid"), waterPos);
+                            fluidPlayer.getUUID().toString(), "actor:replay-fluid"), waterPos,
+                    Map.of("PLACE_BLOCK", placedBlock,
+                            "INTERACT_BLOCK_ATTEMPT", interactionChest,
+                            "KILL_ENTITY", killedCowPos));
             helper.succeed();
         });
     }

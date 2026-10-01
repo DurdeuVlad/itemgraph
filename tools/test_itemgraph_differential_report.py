@@ -52,6 +52,13 @@ class DifferentialReportTests(unittest.TestCase):
             "orphaned_allocations": 0,
             "invalid_edge_nodes": 0,
             "status_mismatches": 0,
+            "queue_health": {
+                "observation_waiting_depth": 0,
+                "transformation_waiting_depth": 0,
+                "audit_waiting_depth": 0,
+                "queue_capacity_each": 10_000,
+                "dropped_since_service_start": 0,
+            },
         }
 
     @staticmethod
@@ -329,6 +336,18 @@ class DifferentialReportTests(unittest.TestCase):
         self.native["invariants"]["healthy"] = False
         with self.assertRaisesRegex(report.ReportError, "disagrees"):
             report.compare_reports(self.legacy, self.native)
+
+    def test_itemgraph_report_rejects_queue_overflow_and_capacity_drift(self) -> None:
+        for path, value, message in (
+            (("observation_waiting_depth",), 10_001, "exceeds its configured capacity"),
+            (("queue_capacity_each",), 10_001, "must match the configured capacity"),
+            (("dropped_since_service_start",), 1, "must not lose accepted events"),
+        ):
+            with self.subTest(path=path):
+                self.native["invariants"]["queue_health"][path[0]] = value
+                with self.assertRaisesRegex(report.ReportError, message):
+                    report.compare_reports(self.legacy, self.native)
+                self.native["invariants"] = self.healthy_invariants()
 
     def test_itemgraph_observation_total_covers_exported_observation_events(self) -> None:
         self.native["invariants"]["total_observations"] = 0

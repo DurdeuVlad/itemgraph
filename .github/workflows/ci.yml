@@ -75,6 +75,9 @@ jobs:
       - name: Test GriefLogger validator input rejection
         run: python3 tools/test_grieflogger_validators.py
 
+      - name: Test pinned GriefLogger source contradiction decisions
+        run: python3 tools/test_grieflogger_source_contradictions.py
+
       - name: Test normalized differential replay report comparator
         run: python3 tools/test_itemgraph_differential_report.py
 

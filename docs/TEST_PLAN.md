@@ -353,9 +353,18 @@ registry therefore keeps this mapping unresolved against the release and labels
 the richer behavior as an ItemGraph extension. The NeoForge and Fabric runs are
 local isolated server GameTests with mock players and direct server-handler
 dispatch, as directed by the operator; they are not live-client transport tests.
+The mock fixture establishes the world states directly, then posts one NeoForge
+`EntityPlaceEvent`/`RightClickBlock` or invokes Fabric's registered
+`UseBlockCallback` and Fabric's placement capture handler with a simulated
+before/after state. This exercises the production
+listener and durable audit queue without double-dispatching hooks from both a
+mock packet and an explicit callback. It verifies listener persistence, not the
+real-client placement or packet transport path.
 
 The same GameTest exports six persisted item movement and projectile rows plus
-seven audit events only after its durable read-only assertions pass. Its
+ten audit events only after its durable read-only assertions pass. It pins each
+audit action to its expected namespaced subject, and pins block placement,
+block interaction, and kill positions relative to the template origin. Its
 `BREAK_BLOCK` report row is restricted to the successful source-water pickup at
 the fixture position; the separate synthetic water-source/lava-result guard
 probe remains a unit assertion and is excluded because GriefLogger cannot
@@ -369,15 +378,20 @@ separate native-only Fabric and NeoForge reports and uploads only the normalized
 JSON. This export validates report
 shape and redaction; it does not establish GriefLogger equivalence or complete
 the paired replay, 24-hour soak, or rollback criteria in
-#31. The raw schema-v3 report also contains an `AuditService.audit` summary from
-one read-only transaction snapshot over the complete isolated GameTest
+#31. The raw schema-v5 report contains six item movement/projectile observations
+and ten quantity-free block/entity audit rows: `BREAK_BLOCK`, `PLACE_BLOCK`,
+`INTERACT_BLOCK_ATTEMPT`, `KILL_ENTITY`, and the entity interaction attempt,
+completion, and unresolved outcomes. NeoForge and Fabric produce the same
+action and subject counts through their native capture hooks. The same report
+contains an `AuditService.audit` summary from one read-only transaction snapshot
+over the complete isolated GameTest
 database. Every active edge must have SOURCE and DESTINATION allocation sums
 equal to its amount, linked evidence with matching fingerprints, actions, and
 actor endpoints, and no unsupported allocation roles; every observation must
 remain within its quantity capacity. Edge time bounds must equal the source and
 destination observation timestamps in forward order. Both the fixture and CI
 normalizer require zero allocation, edge-time, positivity, orphan, endpoint,
-and lifecycle violations. The normalized schema-v5 comparison report retains
+and lifecycle violations. The normalized schema-v6 comparison report retains
 this count-only summary without database IDs or violation details. Comparator
 fixtures verify that profile-linked native extensions remain visible with an
 issue URL and stable reason while passing the difference gate; unlinked field
@@ -488,7 +502,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ItemCanonicalizerTest` | fingerprint determinism and DataComponent decoding (Phase 3) |
 | `NodeManagerTest` | node identity resolution (Phase 4) |
 | `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction, and concurrent shared-connection transaction isolation (5 + 10 tests) |
-| `GriefLoggerHistoricalImporterTest` | all 11 source tables, all 18 action IDs, opaque binary retention, source-byte immutability, supported-schema rejection, independent-writer concurrency, durable failed-run counts, per-table checkpoints, and idempotent replay |
+| `GriefLoggerHistoricalImporterTest` | all 11 source tables, recognized and table-invalid action IDs, oversized 64-bit and non-integral malformed action-ID retention, malformed component-byte retention, unknown/missing/invalid-action unresolved projection with zero quantity/null subject, raw/projection reason consistency, source-byte immutability, supported-schema rejection, independent-writer concurrency, durable failed-run counts, per-table checkpoints, and idempotent replay |
 | `DatabaseManagerTest` | migrations V1–V14, interval/group/edge-state schema, API source/external-key schema, historical import provenance/checkpoints, dedup constraints, read-only query connection, and independent writer configuration |
 | `EventQueryServiceTest` | found/not-found, dangling references rendering as "no such row", OBSERVED labelling |
 | `ExplainQueryServiceTest` | evidence resolved back to observation detail, no cross-edge evidence leakage, unjustifiable edges reported, evidence cap, and SQL NULL confidence rejection (8 tests) |
@@ -930,12 +944,20 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   session net-delta raw markers and non-negative intervals, distinct drop and
   pickup event identities, and the exact spawned entity UUID and fingerprint
   across the drop/pickup pair. Ground endpoints must stay in the same dimension
-  and within one block to account for entity movement between event capture and the server
-  tick that confirms the drop. It compares the full prior quantity-row
-  snapshot to ensure the replay did not mutate earlier evidence. NeoForge calls
-  the two-argument `Player.drop` overload so `ItemTossEvent` reaches the native
-  listener; Fabric calls the three-argument `ServerPlayer.drop` overload covered
-  by its accepted-entity mixin. The mock-player GameTests verify both loader
+  and within one block. The native replay differs by one block in pickup Y
+  (Fabric=1, NeoForge=2). The fixtures use loader-specific event hooks:
+  NeoForge's patched two-argument `Player.drop(ItemStack, boolean)` fires
+  `ItemTossEvent` through `CommonHooks.onPlayerTossEvent`; its three-argument
+  overload bypasses that hook. Fabric's accepted-entity capture uses the
+  three-argument `ServerPlayer.drop` path. NeoForge floors pickup coordinates
+  in its pickup listener; Fabric captures the entity position at `playerTouch`
+  return. These capture rules do not prove the cause of the one-block report
+  delta: `NodeManager` floors ground endpoints for both loaders, and normalized
+  reports omit sub-block coordinates. The fixture-level cause remains
+  unverified. A probe using NeoForge's three-argument overload omitted
+  `DROP_ITEM`, confirming that it is not a valid substitute for NeoForge's
+  toss-event path. The test compares the full prior quantity-row snapshot to
+  ensure the replay did not mutate earlier evidence. The mock-player GameTests verify both loader
   persistence paths but do not establish client transport or GriefLogger-present
   differential parity. The other exact-release item writers and full #27
   replay remain outstanding.
