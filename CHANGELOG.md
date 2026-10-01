@@ -17,10 +17,20 @@ The project follows a simple pre-1.0 development changelog model.
   allocations detached from direct evidence, matching fingerprints/actions, or
   actor endpoints. It rejects edge timestamps that do not match forward source
   and destination evidence. The CI normalizer independently rejects non-zero violation
-  counts; normalized schema-v3 output retains the validated count-only summary.
+  counts; normalized schema-v4 output retains the validated count-only summary
+  and exposes the issue-linked exception gate.
   These native-only reports do not claim a GriefLogger comparison or complete
-  #31's paired replay, exception policy, staging soak, or rollback gates. Mod
+  #31's paired replay, staging soak, or rollback gates. Mod
   version remains 0.3.2; no distributable jar is built.
+- **Issue #31 issue-linked differential exceptions:** normalized schema-v4
+  keeps every report difference visible, classifies only profile-declared
+  native extensions as expected only when their source table also matches the
+  pinned policy, and links each to its owning issue and stable reason code.
+  `equivalent` remains false when any difference exists; CI passes
+  only when there are no unexplained differences. Quantity, timestamp,
+  endpoint, privacy, and evidence-class mismatches remain unexplained. Registry
+  compatibility version is `m8.11.0`; mod version remains 0.3.2, and no jar is
+  built.
 - **Issue #30 queue flush cadence:** both loader configs now expose
   `ingestion.queue_frequency_ticks` / `queue_frequency_ticks`, defaulting to 20
   and accepting 1–100 ticks to match GriefLogger's `queueFrequency`. Both server

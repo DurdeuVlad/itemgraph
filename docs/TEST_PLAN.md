@@ -362,7 +362,7 @@ coordinates, and replay actor aliases, with no player UUIDs, names, database
 row IDs, or raw payloads. CI validates separate native-only Fabric and NeoForge
 reports and uploads only the normalized JSON. This export validates report
 shape and redaction; it does not establish GriefLogger equivalence or complete
-the paired replay, 24-hour soak, exception-policy, or rollback criteria in
+the paired replay, 24-hour soak, or rollback criteria in
 #31. The raw schema-v2 report also contains an `AuditService.audit` summary from
 one read-only transaction snapshot over the complete isolated GameTest
 database. Every active edge must have SOURCE and DESTINATION allocation sums
@@ -371,8 +371,11 @@ actor endpoints, and no unsupported allocation roles; every observation must
 remain within its quantity capacity. Edge time bounds must equal the source and
 destination observation timestamps in forward order. Both the fixture and CI
 normalizer require zero allocation, edge-time, positivity, orphan, endpoint,
-and lifecycle violations. The normalized schema-v3 comparison report retains
-this count-only summary without database IDs or violation details.
+and lifecycle violations. The normalized schema-v4 comparison report retains
+this count-only summary without database IDs or violation details. Comparator
+fixtures verify that profile-linked native extensions remain visible with an
+issue URL and stable reason while passing the difference gate; unlinked field
+mismatches, including quantity changes, remain failures.
 - explanation available
 
 ## Coffer/modded inventory test
