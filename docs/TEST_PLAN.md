@@ -354,16 +354,18 @@ the richer behavior as an ItemGraph extension. The NeoForge and Fabric runs are
 local isolated server GameTests with mock players and direct server-handler
 dispatch, as directed by the operator; they are not live-client transport tests.
 
-The same GameTest exports the six persisted item movement and projectile rows
-only after its durable read-only assertions pass. `ItemGraphReplayReportFixture`
-queries `ig_observations` through `DatabaseManager.openReadOnlyConnection()`;
+The same GameTest exports six persisted item movement and projectile rows plus
+eight audit events only after its durable read-only assertions pass.
+`ItemGraphReplayReportFixture` queries `ig_observations` and the allowlisted
+`ig_audit_events` columns through `DatabaseManager.openReadOnlyConnection()`;
 the artifact contains profile-normalized action identities, fixture-relative
-coordinates, and replay actor aliases, with no player UUIDs, names, database
-row IDs, or raw payloads. CI validates separate native-only Fabric and NeoForge
-reports and uploads only the normalized JSON. This export validates report
+coordinates, namespaced subjects, and replay actor aliases, with no player
+UUIDs, names, database row IDs, audit detail, or raw payloads. CI validates
+separate native-only Fabric and NeoForge reports and uploads only the normalized
+JSON. This export validates report
 shape and redaction; it does not establish GriefLogger equivalence or complete
 the paired replay, 24-hour soak, or rollback criteria in
-#31. The raw schema-v2 report also contains an `AuditService.audit` summary from
+#31. The raw schema-v3 report also contains an `AuditService.audit` summary from
 one read-only transaction snapshot over the complete isolated GameTest
 database. Every active edge must have SOURCE and DESTINATION allocation sums
 equal to its amount, linked evidence with matching fingerprints, actions, and
@@ -371,7 +373,7 @@ actor endpoints, and no unsupported allocation roles; every observation must
 remain within its quantity capacity. Edge time bounds must equal the source and
 destination observation timestamps in forward order. Both the fixture and CI
 normalizer require zero allocation, edge-time, positivity, orphan, endpoint,
-and lifecycle violations. The normalized schema-v4 comparison report retains
+and lifecycle violations. The normalized schema-v5 comparison report retains
 this count-only summary without database IDs or violation details. Comparator
 fixtures verify that profile-linked native extensions remain visible with an
 issue URL and stable reason while passing the difference gate; unlinked field

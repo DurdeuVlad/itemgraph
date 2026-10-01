@@ -155,7 +155,7 @@ EXPECTED_ACTION_CONTRACT: dict[str, tuple[str, str, str, str]] = {
     "BREAK_BLOCK": ("BREAK_BLOCK", "compatible", "observed", "none"),
     "INTERACT_BLOCK": ("INTERACT_BLOCK_ATTEMPT", "compatible", "observed", "none"),
     "KILL_ENTITY": ("KILL_ENTITY", "compatible", "observed", "none"),
-    "INTERACT_ENTITY": ("INTERACT_ENTITY", "unsupported-no-writer", "unresolved", "none"),
+    "INTERACT_ENTITY": ("INTERACT_ENTITY", "unsupported-no-writer", "observed", "none"),
     "JOIN": ("PLAYER_JOIN", "compatible", "observed", "none"),
     "QUIT": ("PLAYER_QUIT", "compatible", "observed", "none"),
     "CHAT": ("CHAT_MESSAGE", "compatible", "observed", "none"),
@@ -181,6 +181,9 @@ EXPECTED_EXTENSION_ACTION_CONTRACT: dict[str, tuple[str, str, str]] = {
     "ANVIL_REPAIR": ("extended", "observed", "transformation"),
     "HOPPER_INSERT": ("extended", "observed", "signed_delta"),
     "HOPPER_EXTRACT": ("extended", "observed", "signed_delta"),
+    "INTERACT_ENTITY_COMPLETED": ("extended", "observed", "none"),
+    "INTERACT_ENTITY_DENIED": ("extended", "observed", "none"),
+    "INTERACT_ENTITY_UNRESOLVED": ("extended", "observed", "none"),
 }
 REQUIRED_MILESTONE_ISSUES = {24, 25, 26, 27, 28, 29, 30, 31, 43, 54, 76}
 M8_MILESTONE_TITLE = "M8: Drop-in GriefLogger parity"

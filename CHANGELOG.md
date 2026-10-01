@@ -8,28 +8,30 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
-- **Issue #31 native replay reports:** NeoForge and Fabric GameTests export the
-  six durably verified item movement/projectile rows and a count-only
-  `AuditService` whole-database invariant summary to redacted raw schema-v2
+- **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
+  durably verified item movement/projectile rows plus eight allowlisted audit
+  events, including namespaced entity/block `subject_id`, and a count-only
+  `AuditService` whole-database invariant summary to redacted raw schema-v3
   reports when CI sets `ITEMGRAPH_DIFFERENTIAL_REPORT_DIR`. The audit uses one
   read-only transaction snapshot and rejects over-capacity observations,
   mismatched per-edge SOURCE/DESTINATION sums, unsupported roles, and
   allocations detached from direct evidence, matching fingerprints/actions, or
   actor endpoints. It rejects edge timestamps that do not match forward source
   and destination evidence. The CI normalizer independently rejects non-zero violation
-  counts; normalized schema-v4 output retains the validated count-only summary
-  and exposes the issue-linked exception gate.
+  counts; normalized schema-v5 output retains the validated count-only summary,
+  preserves subject IDs, and exposes the issue-linked exception gate. Registry
+  compatibility version is `m8.12.0`.
   These native-only reports do not claim a GriefLogger comparison or complete
   #31's paired replay, staging soak, or rollback gates. Mod
   version remains 0.3.2; no distributable jar is built.
-- **Issue #31 issue-linked differential exceptions:** normalized schema-v4
+- **Issue #31 issue-linked differential exceptions:** normalized schema-v5
   keeps every report difference visible, classifies only profile-declared
   native extensions as expected only when their source table also matches the
   pinned policy, and links each to its owning issue and stable reason code.
   `equivalent` remains false when any difference exists; CI passes
   only when there are no unexplained differences. Quantity, timestamp,
   endpoint, privacy, and evidence-class mismatches remain unexplained. Registry
-  compatibility version is `m8.11.0`; mod version remains 0.3.2, and no jar is
+  compatibility version is `m8.12.0`; mod version remains 0.3.2, and no jar is
   built.
 - **Issue #30 queue flush cadence:** both loader configs now expose
   `ingestion.queue_frequency_ticks` / `queue_frequency_ticks`, defaulting to 20

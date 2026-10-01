@@ -22,7 +22,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "docs" / "GRIEFLOGGER_COMPATIBILITY.json"
 FIXTURE_PATH = ROOT / "docs" / "grieflogger-fixtures" / "1.2.10-1.21.1.json"
-REPORT_SCHEMA_VERSION = 4
+REPORT_SCHEMA_VERSION = 5
 LOADERS = {"fabric", "neoforge"}
 SYSTEMS = {"grieflogger", "itemgraph"}
 RUNTIME_MODES = {"grieflogger_present", "native_only"}
@@ -41,6 +41,8 @@ ACTION_TABLES = {
     "INTERACT_ENTITY": {"blocks"}, "PLAYER_JOIN": {"sessions"}, "PLAYER_QUIT": {"sessions"},
     "CHAT_MESSAGE": {"chats"}, "COMMAND_ATTEMPT": {"commands"}, "SMELT": {"items"},
     "ANVIL_RENAME": {"items"}, "ANVIL_REPAIR": {"items"},
+    "INTERACT_ENTITY_COMPLETED": {"blocks"}, "INTERACT_ENTITY_DENIED": {"blocks"},
+    "INTERACT_ENTITY_UNRESOLVED": {"blocks"},
     "HOPPER_INSERT": {"containers"}, "HOPPER_EXTRACT": {"containers"},
     "ADD_ITEM_ENDER": {"items"}, "REMOVE_ITEM_ENDER": {"items"},
 }
@@ -59,6 +61,7 @@ EVENT_FIELDS = (
     "occurred_at_ms",
     "dimension",
     "position",
+    "subject_id",
     "actor_ref",
     "source_table",
     "source_action_id",
@@ -79,6 +82,9 @@ ITEMGRAPH_VIOLATION_FIELDS = {
 }
 DIFFERENTIAL_EXCEPTION_ISSUES = {
     "INTERACT_ENTITY": 75,
+    "INTERACT_ENTITY_COMPLETED": 75,
+    "INTERACT_ENTITY_DENIED": 75,
+    "INTERACT_ENTITY_UNRESOLVED": 75,
     "SMELT": 57,
     "ANVIL_RENAME": 57,
     "ANVIL_REPAIR": 57,
@@ -208,7 +214,7 @@ def _validate_event(event: Any, index: int, registry: dict[str, Any], system: st
             raise ReportError(f"events[{index}].position must be null or an x/y/z object")
         if any(not _is_integer(position[axis]) for axis in ("x", "y", "z")):
             raise ReportError(f"events[{index}].position coordinates must be integers")
-    for field in ("item_id", "actor_ref", "source_table", "privacy_class", "unresolved_reason",
+    for field in ("item_id", "subject_id", "actor_ref", "source_table", "privacy_class", "unresolved_reason",
                   "compatibility_table"):
         if event[field] is not None and (not isinstance(event[field], str) or not event[field]):
             raise ReportError(f"events[{index}].{field} must be a non-empty string or null")
@@ -222,6 +228,8 @@ def _validate_event(event: Any, index: int, registry: dict[str, Any], system: st
         raise ReportError(f"events[{index}].privacy_class must be one of {sorted(PRIVACY_CLASSES)}")
     if event["item_id"] is not None and not SAFE_RESOURCE_ID_RE.fullmatch(event["item_id"]):
         raise ReportError(f"events[{index}].item_id must be a namespaced registry ID")
+    if event["subject_id"] is not None and not SAFE_RESOURCE_ID_RE.fullmatch(event["subject_id"]):
+        raise ReportError(f"events[{index}].subject_id must be a namespaced resource ID")
     actor_ref = event["actor_ref"]
     if actor_ref is not None and (not re.fullmatch(r"actor:replay-[A-Za-z0-9_-]+", actor_ref)
                                   or UUID_RE.search(actor_ref)):

@@ -11,14 +11,25 @@ from typing import Any
 import itemgraph_differential_report as differential
 
 
-RAW_SCHEMA_VERSION = 2
+RAW_SCHEMA_VERSION = 3
 RAW_EVENT_FIELDS = {
     "event_key", "sequence", "action", "evidence_class", "quantity", "item_id", "occurred_at_ms",
-    "dimension", "position", "actor_ref", "source_table", "source_action_id", "compatibility_table",
+    "dimension", "position", "subject_id", "actor_ref", "source_table", "source_action_id", "compatibility_table",
     "privacy_class", "unresolved_reason",
 }
-EXPECTED_ACTIONS = {"ADD_ITEM", "REMOVE_ITEM", "DROP_ITEM", "PICKUP_ITEM", "THROW_ITEM", "SHOOT_ITEM"}
-SCENARIO_ID = "item-movement-projectile-replay"
+EXPECTED_ACTION_COUNTS = {
+    "ADD_ITEM": 1,
+    "REMOVE_ITEM": 1,
+    "DROP_ITEM": 1,
+    "PICKUP_ITEM": 1,
+    "THROW_ITEM": 1,
+    "SHOOT_ITEM": 1,
+    "BREAK_BLOCK": 2,
+    "INTERACT_ENTITY": 3,
+    "INTERACT_ENTITY_COMPLETED": 2,
+    "INTERACT_ENTITY_UNRESOLVED": 1,
+}
+SCENARIO_ID = "item-movement-projectile-entity-audit-replay"
 SCENARIO_SEED = 0
 
 
@@ -37,18 +48,24 @@ def normalize(raw: dict[str, Any], expected_loader: str) -> dict[str, Any]:
         raise differential.ReportError("raw report seed does not match the native replay fixture")
     if not isinstance(raw["events"], list):
         raise differential.ReportError("raw report events must be an array")
-    if len(raw["events"]) != len(EXPECTED_ACTIONS):
-        raise differential.ReportError("raw report must contain exactly the six native replay events")
+    expected_event_count = sum(EXPECTED_ACTION_COUNTS.values())
+    if len(raw["events"]) != expected_event_count:
+        raise differential.ReportError("raw report must contain exactly the pinned native replay event count")
     registry, fixture_hash = differential.current_profile()
     differential._validate_itemgraph_invariants(raw["invariants"])
     normalized_events: list[dict[str, Any]] = []
+    action_occurrences: dict[str, int] = {}
+    actual_action_counts: dict[str, int] = {}
     for index, raw_event in enumerate(raw["events"]):
         if not isinstance(raw_event, dict) or set(raw_event) != RAW_EVENT_FIELDS:
             raise differential.ReportError(f"events[{index}] fields do not match the ItemGraph GameTest schema")
         event = dict(raw_event)
-        if not isinstance(event["action"], str) or event["action"] not in EXPECTED_ACTIONS:
+        if not isinstance(event["action"], str) or event["action"] not in EXPECTED_ACTION_COUNTS:
             raise differential.ReportError(f"events[{index}].action is not part of the native replay fixture")
-        if event["event_key"] != "replay-" + event["action"].lower():
+        occurrence = action_occurrences.get(event["action"], 0)
+        action_occurrences[event["action"]] = occurrence + 1
+        actual_action_counts[event["action"]] = actual_action_counts.get(event["action"], 0) + 1
+        if event["event_key"] != f"replay-{event['action'].lower()}-{occurrence}":
             raise differential.ReportError(f"events[{index}].event_key does not match its native replay action")
         if type(event["sequence"]) is not int or event["sequence"] != index:
             raise differential.ReportError("native replay event sequences must be contiguous and start at zero")
@@ -67,8 +84,8 @@ def normalize(raw: dict[str, Any], expected_loader: str) -> dict[str, Any]:
                     raise differential.ReportError(f"events[{index}].quantity must be a positive raw item count")
                 event["quantity"] *= sign
         normalized_events.append(event)
-    if {event["action"] for event in normalized_events} != EXPECTED_ACTIONS:
-        raise differential.ReportError("raw report must contain each expected native replay action exactly once")
+    if actual_action_counts != EXPECTED_ACTION_COUNTS:
+        raise differential.ReportError("raw report action counts do not match the pinned native replay fixture")
     report = {
         "report_schema_version": differential.REPORT_SCHEMA_VERSION,
         "compatibility_version": registry["compatibility_version"],

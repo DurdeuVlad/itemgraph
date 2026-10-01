@@ -31,6 +31,7 @@ import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.phys.Vec3;
 
 import java.sql.SQLException;
+import java.util.Map;
 
 /** Fabric server GameTest exercises the same server packet and ledger boundary as NeoForge. */
 public final class EntityInteractionGameTests implements FabricGameTest {
@@ -185,7 +186,10 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
             ItemGraphReplayReportFixture.writeIfRequested(helper, "fabric",
                     Math.min(movementWatermark, projectileWatermark.observationId()),
-                    movementPlayer.getUUID().toString(), playerUuid);
+                    bucketAuditWatermark,
+                    Map.of(movementPlayer.getUUID().toString(), "actor:replay-mover",
+                            playerUuid, "actor:replay-interactor",
+                            fluidPlayer.getUUID().toString(), "actor:replay-fluid"));
         });
     }
 

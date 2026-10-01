@@ -12,9 +12,10 @@ import itemgraph_differential_report as differential
 
 def raw_event(action: str, *, sequence: int = 0, quantity: int = 2, item_id: str = "minecraft:dirt",
               source_table: str = "ig_observations", source_action_id: str | None = None,
-              compatibility_table: str = "containers") -> dict:
+              compatibility_table: str = "containers", subject_id: str | None = None,
+              occurrence: int = 0) -> dict:
     return {
-        "event_key": f"replay-{action.lower()}",
+        "event_key": f"replay-{action.lower()}-{occurrence}",
         "sequence": sequence,
         "action": action,
         "evidence_class": "observed",
@@ -23,6 +24,7 @@ def raw_event(action: str, *, sequence: int = 0, quantity: int = 2, item_id: str
         "occurred_at_ms": 1790870400000 + sequence,
         "dimension": "minecraft:overworld",
         "position": {"x": 0, "y": 64, "z": 0},
+        "subject_id": subject_id,
         "actor_ref": "actor:replay-mover",
         "source_table": source_table,
         "source_action_id": source_action_id or action,
@@ -33,7 +35,7 @@ def raw_event(action: str, *, sequence: int = 0, quantity: int = 2, item_id: str
 
 
 def expected_events() -> list[dict]:
-    return [
+    events = [
         raw_event("ADD_ITEM", sequence=0, quantity=2, item_id="minecraft:dirt", compatibility_table="containers"),
         raw_event("REMOVE_ITEM", sequence=1, quantity=3, item_id="minecraft:cobblestone", compatibility_table="containers"),
         raw_event("DROP_ITEM", sequence=2, quantity=4, item_id="minecraft:diamond", compatibility_table="items"),
@@ -41,14 +43,30 @@ def expected_events() -> list[dict]:
         raw_event("THROW_ITEM", sequence=4, quantity=1, item_id="minecraft:snowball", compatibility_table="items"),
         raw_event("SHOOT_ITEM", sequence=5, quantity=1, item_id="minecraft:arrow", compatibility_table="items"),
     ]
+    audit_actions = [
+        ("BREAK_BLOCK", "minecraft:water"), ("BREAK_BLOCK", "minecraft:water"),
+        ("INTERACT_ENTITY", "minecraft:cow"), ("INTERACT_ENTITY", "minecraft:armor_stand"),
+        ("INTERACT_ENTITY", "minecraft:armor_stand"),
+        ("INTERACT_ENTITY_COMPLETED", "minecraft:armor_stand"),
+        ("INTERACT_ENTITY_COMPLETED", "minecraft:armor_stand"),
+        ("INTERACT_ENTITY_UNRESOLVED", "minecraft:armor_stand"),
+    ]
+    occurrences: dict[str, int] = {}
+    for action, subject_id in audit_actions:
+        occurrence = occurrences.get(action, 0)
+        occurrences[action] = occurrence + 1
+        events.append(raw_event(action, sequence=len(events), quantity=None, item_id=None,
+                                source_table="ig_audit_events", compatibility_table="blocks",
+                                subject_id=subject_id, occurrence=occurrence))
+    return events
 
 
 class ItemGraphReplayNormalizerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.raw = {
-            "raw_schema_version": 2,
+            "raw_schema_version": 3,
             "loader": "neoforge",
-            "scenario_id": "item-movement-projectile-replay",
+            "scenario_id": "item-movement-projectile-entity-audit-replay",
             "seed": 0,
             "events": expected_events(),
             "invariants": {
@@ -100,7 +118,7 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
             normalizer.normalize(self.raw, "fabric")
         malformed = copy.deepcopy(self.raw)
         malformed["events"] = []
-        with self.assertRaisesRegex(differential.ReportError, "exactly the six"):
+        with self.assertRaisesRegex(differential.ReportError, "pinned native replay event count"):
             normalizer.normalize(malformed, "neoforge")
         malformed = copy.deepcopy(self.raw)
         malformed["events"][0]["raw_data"] = "must not be exported"
@@ -123,6 +141,15 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
         malformed = copy.deepcopy(self.raw)
         malformed["events"][0]["action"] = "CHAT_MESSAGE"
         with self.assertRaisesRegex(differential.ReportError, "not part of the native replay fixture"):
+            normalizer.normalize(malformed, "neoforge")
+
+    def test_audit_subject_is_preserved_and_invalid_resource_id_rejected(self) -> None:
+        report = normalizer.normalize(self.raw, "neoforge")
+        cow = next(event for event in report["events"] if event["action"] == "INTERACT_ENTITY")
+        self.assertEqual("minecraft:cow", cow["subject_id"])
+        malformed = copy.deepcopy(self.raw)
+        next(event for event in malformed["events"] if event["action"] == "INTERACT_ENTITY")["subject_id"] = "private uuid"
+        with self.assertRaisesRegex(differential.ReportError, "subject_id must be a namespaced resource ID"):
             normalizer.normalize(malformed, "neoforge")
         malformed = copy.deepcopy(self.raw)
         malformed["events"][0]["sequence"] = 1

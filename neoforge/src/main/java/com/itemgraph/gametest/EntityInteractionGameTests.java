@@ -5,6 +5,7 @@ import com.itemgraph.listener.NativeAuditEventListener;
 import com.itemgraph.gametest.EntityInteractionConformanceFixture;
 import com.itemgraph.gametest.BucketPickupConformanceFixture;
 import com.itemgraph.gametest.ItemMovementConformanceFixture;
+import com.itemgraph.gametest.ItemGraphReplayReportFixture;
 import com.itemgraph.gametest.ProjectileConformanceFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.BlockPos;
@@ -30,6 +31,7 @@ import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
 import java.sql.SQLException;
+import java.util.Map;
 
 /** Development-only GameTests. Both NeoForge release jar tasks exclude this package. */
 @GameTestHolder("itemgraph")
@@ -288,7 +290,10 @@ public final class EntityInteractionGameTests {
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
             ItemGraphReplayReportFixture.writeIfRequested(helper, "neoforge",
                     Math.min(movementWatermark, projectileWatermark.observationId()),
-                    movementPlayer.getUUID().toString(), playerUuid);
+                    bucketAuditWatermark,
+                    Map.of(movementPlayer.getUUID().toString(), "actor:replay-mover",
+                            playerUuid, "actor:replay-interactor",
+                            fluidPlayer.getUUID().toString(), "actor:replay-fluid"));
             helper.succeed();
         });
     }
