@@ -11,7 +11,7 @@ from typing import Any
 import itemgraph_differential_report as differential
 
 
-RAW_SCHEMA_VERSION = 3
+RAW_SCHEMA_VERSION = 4
 RAW_EVENT_FIELDS = {
     "event_key", "sequence", "action", "evidence_class", "quantity", "item_id", "occurred_at_ms",
     "dimension", "position", "subject_id", "actor_ref", "source_table", "source_action_id", "compatibility_table",

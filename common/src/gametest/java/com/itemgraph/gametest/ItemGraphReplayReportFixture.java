@@ -4,6 +4,7 @@ import com.itemgraph.audit.AuditReport;
 import com.itemgraph.audit.AuditService;
 import com.itemgraph.db.DatabaseDialect;
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 
@@ -78,11 +79,13 @@ public final class ItemGraphReplayReportFixture {
         AuditReport audit = readWholeGraphAudit();
         helper.assertValueEqual(true, audit.healthy(),
                 "native report requires a healthy whole-database quantity and integrity audit");
+        InternalObservationService ingestion = InternalObservationService.getInstance();
+        long droppedSinceServiceStart = ingestion.getTotalDropped();
 
         BlockPos origin = helper.absolutePos(BlockPos.ZERO);
         // Keep persisted row order when events from one source share a millisecond timestamp.
         StringBuilder json = new StringBuilder(2048);
-        json.append("{\n  \"raw_schema_version\": 3,\n  \"loader\": ").append(quote(loader))
+        json.append("{\n  \"raw_schema_version\": 4,\n  \"loader\": ").append(quote(loader))
                 .append(",\n  \"scenario_id\": ").append(quote(SCENARIO_ID))
                 .append(",\n  \"seed\": 0,\n  \"events\": [\n");
         Map<String, Integer> actionOccurrences = new HashMap<>();
@@ -123,7 +126,8 @@ public final class ItemGraphReplayReportFixture {
                     .append(event.unresolvedReason() == null ? "null" : quote(event.unresolvedReason()))
                     .append("}");
         }
-        json.append("\n  ],\n  \"invariants\": ").append(auditJson(audit)).append("\n}\n");
+        json.append("\n  ],\n  \"invariants\": ").append(auditJson(audit, ingestion, droppedSinceServiceStart))
+                .append("\n}\n");
         writeAtomically(Path.of(configuredDirectory).resolve("itemgraph-" + loader + ".raw.json"), json.toString());
     }
 
@@ -145,7 +149,8 @@ public final class ItemGraphReplayReportFixture {
         }
     }
 
-    private static String auditJson(AuditReport report) {
+    private static String auditJson(AuditReport report, InternalObservationService ingestion,
+                                    long droppedSinceServiceStart) {
         return "{\"healthy\":" + report.healthy()
                 + ",\"total_observations\":" + report.totalObservations()
                 + ",\"total_edges\":" + report.totalEdges()
@@ -157,7 +162,12 @@ public final class ItemGraphReplayReportFixture {
                 + ",\"non_positive_quantities\":" + report.nonPositiveQuantities()
                 + ",\"orphaned_allocations\":" + report.orphanedAllocations()
                 + ",\"invalid_edge_nodes\":" + report.invalidEdgeNodes()
-                + ",\"status_mismatches\":" + report.statusMismatches() + "}";
+                + ",\"status_mismatches\":" + report.statusMismatches()
+                + ",\"queue_health\":{\"observation_waiting_depth\":" + ingestion.getObservationQueueSize()
+                + ",\"transformation_waiting_depth\":" + ingestion.getTransformationQueueSize()
+                + ",\"audit_waiting_depth\":" + ingestion.getAuditEventQueueSize()
+                + ",\"queue_capacity_each\":" + ingestion.getQueueCapacity()
+                + ",\"dropped_since_service_start\":" + droppedSinceServiceStart + "}}";
     }
 
     private static List<ReplayEvent> readObservationEvents(long priorObservationId,

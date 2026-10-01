@@ -8,6 +8,14 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #31 replay queue evidence:** NeoForge and Fabric native replay reports
+  now include each ingestion queue's export-time depth, fixed capacity, and the
+  cumulative server-wide rejected-event counter since service initialization.
+  The normalizer rejects over-capacity queue depths, capacity drift, or any
+  server-wide rejection since service initialization. Raw report schema is v4
+  and normalized comparison schema is v6; this
+  complements the separate 8,000-event peak-backlog/load probe. Mod version
+  remains 0.3.2; no distributable jar is built.
 - **Issue #31 unresolved historical actions:** GriefLogger action IDs are checked
   against the source table's action map without narrowing; raw payloads and
   unresolved reasons retain larger IDs exactly, so table-

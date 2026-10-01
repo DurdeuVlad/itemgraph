@@ -64,7 +64,7 @@ def expected_events() -> list[dict]:
 class ItemGraphReplayNormalizerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.raw = {
-            "raw_schema_version": 3,
+            "raw_schema_version": 4,
             "loader": "neoforge",
             "scenario_id": "item-movement-projectile-entity-audit-replay",
             "seed": 0,
@@ -82,6 +82,13 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
                 "orphaned_allocations": 0,
                 "invalid_edge_nodes": 0,
                 "status_mismatches": 0,
+                "queue_health": {
+                    "observation_waiting_depth": 0,
+                    "transformation_waiting_depth": 0,
+                    "audit_waiting_depth": 0,
+                    "queue_capacity_each": 10_000,
+                    "dropped_since_service_start": 0,
+                },
             },
         }
 
@@ -188,6 +195,18 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
         malformed["invariants"]["healthy"] = False
         with self.assertRaisesRegex(differential.ReportError, "disagrees"):
             normalizer.normalize(malformed, "neoforge")
+
+    def test_replay_queue_overflow_and_over_capacity_depth_are_rejected(self) -> None:
+        for field, value, message in (
+            ("dropped_since_service_start", 1, "must not lose accepted events"),
+            ("observation_waiting_depth", 10_001, "exceeds its configured capacity"),
+            ("queue_capacity_each", 9_999, "must match the configured capacity"),
+        ):
+            with self.subTest(field=field):
+                malformed = copy.deepcopy(self.raw)
+                malformed["invariants"]["queue_health"][field] = value
+                with self.assertRaisesRegex(differential.ReportError, message):
+                    normalizer.normalize(malformed, "neoforge")
 
 
 if __name__ == "__main__":

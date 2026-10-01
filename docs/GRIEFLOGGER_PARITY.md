@@ -418,8 +418,8 @@ checksummed historical database when an operator explicitly configures it.
 ### Differential report comparator foundation
 
 `tools/itemgraph_differential_report.py` defines normalized report schema
-version 5 for #31. The shared
-`ItemGraphReplayReportFixture` writes raw schema version 3 with six durable
+version 6 for #31. The shared
+`ItemGraphReplayReportFixture` writes raw schema version 4 with six durable
 movement rows and seven allowlisted audit rows checked by the NeoForge and
 Fabric GameTests. CI normalizes and
 validates each loader report, then uploads the redacted JSON as a workflow
@@ -458,6 +458,16 @@ those counts. The comparison result retains the validated audit summary. This
 summary exports counts only and omits database row IDs and violation details.
 It covers the complete database attached to the isolated GameTest run, not just
 the 13 events in the replay report.
+
+The replay report also records each queue's waiting-entry depth at export, the
+fixed capacity of each queue (10,000), and the cumulative server-wide rejected
+event counter since the ingestion service was initialized. A nonzero counter
+fails the report, including drops from concurrent GameTests. Fabric exports after its
+worker flushes; the depth values are end-state checks, not peak measurements.
+The separate 8,000-event operational load GameTest remains the peak-backlog and
+throughput measurement. In-flight batches are not included in waiting-entry
+depths; accepted replay events are independently required to exist in the
+durable report rows.
 
 Each event has a unique scenario-local `event_key`, a unique integer `sequence`,
 and explicit normalized action, evidence class, quantity, item registry ID,
@@ -542,8 +552,8 @@ deterministic ordering when events share a millisecond across source tables. CI
 requires the fixed scenario ID, seed,
 13 event records with pinned per-action counts, unique event keys, and contiguous
 sequence, tests malformed inputs, and pins each report to its loader and source
-profile. The raw report schema is v3 and normalized report schema is v5. It does not start
-GriefLogger or compare its live database rows. A paired GriefLogger capture,
+profile. The raw report schema is v4 and normalized report schema is v6. It does
+not start GriefLogger or compare its live database rows. A paired GriefLogger capture,
 issue-linked exception policy, the 24-hour native-only staging window, and
 rollback rehearsal remain open #31 acceptance criteria. The whole-database
 quantity and integrity audit is included in each native report and enforced as
