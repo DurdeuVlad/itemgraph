@@ -330,6 +330,33 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void auditQueueSignalWakesWorkerWithoutWaitingForIdleObservationPoll() throws Exception {
+        service.configureOperations(2_000, 100, 30_000, true);
+        initializeTopologyDatabase();
+        service.start();
+
+        assertTrue(service.submitAuditEvent(new InternalAuditEvent(
+                System.currentTimeMillis(), "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, null, "idle-poll-wakeup", null)));
+
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(500);
+        while (service.getTotalAuditEvents() == 0 && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+
+        assertEquals(1, service.getTotalAuditEvents(),
+                "audit submission must wake the worker even when no item-observation row is queued");
+        assertEquals(1, service.getTotalPersisted());
+        assertEquals(0, service.getQueueSize());
+        try (Statement statement = conn.createStatement();
+             ResultSet rows = statement.executeQuery(
+                     "SELECT COUNT(*) FROM ig_audit_events WHERE detail = 'idle-poll-wakeup'")) {
+            assertTrue(rows.next());
+            assertEquals(1, rows.getInt(1), "worker wakeup must produce a durable audit row");
+        }
+    }
+
+    @Test
     void uninitializedDatabaseDoesNotClaimAuditEventsWerePersisted() {
         DatabaseManager.getInstance().close();
         assertTrue(service.submitAuditEvent(new InternalAuditEvent(

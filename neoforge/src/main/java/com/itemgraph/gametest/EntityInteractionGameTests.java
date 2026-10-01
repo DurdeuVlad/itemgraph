@@ -26,7 +26,7 @@ import java.sql.SQLException;
 public final class EntityInteractionGameTests {
     private EntityInteractionGameTests() { }
 
-    @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 100)
+    @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 2_000)
     public static void serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         BlockPos targetPos = helper.absolutePos(new BlockPos(2, 1, 2));
@@ -76,19 +76,15 @@ public final class EntityInteractionGameTests {
                 armorStand.interact(player, InteractionHand.MAIN_HAND),
                 "inherited Entity.interact fallback must return PASS for an ordinary armor stand");
 
-        observations.stop();
-        helper.assertTrue(observations.getTotalPersisted() > persistedBefore,
-                "server interaction packet did not persist an audit event");
-        helper.assertTrue(observations.getQueueSize() == 0,
-                "ItemGraph queues must be empty after the worker stops and flushes");
-        helper.assertValueEqual(droppedBefore, observations.getTotalDropped(),
-                "the interaction must not lose evidence to a full or failed queue");
-
         String playerUuid = player.getUUID().toString();
         String targetUuid = target.getUUID().toString();
         String armorStandUuid = armorStand.getUUID().toString();
         String playerName = player.getGameProfile().getName();
-        helper.succeedWhen(() -> {
+        helper.runAtTickTime(200, () -> {
+            helper.assertTrue(observations.getTotalPersisted() > persistedBefore,
+                    "server interaction packet did not persist an audit event");
+            helper.assertValueEqual(droppedBefore, observations.getTotalDropped(),
+                    "the interaction must not lose evidence to a full or failed queue");
             EntityInteractionConformanceFixture.assertQuantityObservationsUnchanged(
                     helper, quantityObservationsBefore);
             try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
@@ -188,6 +184,7 @@ public final class EntityInteractionGameTests {
             EntityInteractionConformanceFixture.assertCow(helper, playerUuid, playerName, targetPos, targetUuid);
             EntityInteractionConformanceFixture.assertArmorStand(
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
+            helper.succeed();
         });
     }
 }
