@@ -40,6 +40,11 @@ The project follows a simple pre-1.0 development changelog model.
   signal-driven queue have different semantics. Local NeoForge-only startup,
   schema upgrade, and 2,000-record SQLite worker load passed. See
   `docs/CONFIGURATION.md` and `docs/TEST_PLAN.md`.
+- **Issue #30 blank database path validation:** NeoForge and Fabric now reject
+  empty or whitespace-only ItemGraph and GriefLogger database paths with the
+  exact config key before applying operational settings or opening ItemGraph
+  storage. NeoForge startup CI probes verify both empty paths fail before DB
+  initialization and preserve the invalid TOML values.
 - **Issue #30 fail-closed NeoForge config validation:** numeric settings now
   reject invalid types and out-of-range values with the full config key before
   NeoForge can clamp them; string, boolean, and integer values retain their

@@ -182,7 +182,7 @@ public class ItemGraphConfig {
     public static DatabaseSettings databaseSettings() {
         String backend = DATABASE_BACKEND.get().trim().toLowerCase(java.util.Locale.ROOT);
         return switch (backend) {
-            case "sqlite" -> DatabaseSettings.sqlite(DatabaseManager.resolvePath(DATABASE_PATH.get()), USE_INDEXES.get());
+            case "sqlite" -> DatabaseSettings.sqlite(resolveDatabasePath(DATABASE_PATH.get()), USE_INDEXES.get());
             case "mysql", "mariadb", "mysql_mariadb" -> DatabaseSettings.mysqlMariaDb(
                     DATABASE_HOST.get(), DATABASE_PORT.get(), DATABASE_NAME.get(),
                     DATABASE_USERNAME.get(), DATABASE_PASSWORD.get(),
@@ -190,6 +190,25 @@ public class ItemGraphConfig {
             default -> throw new IllegalArgumentException(
                     "database_backend must be sqlite or mysql_mariadb, got: " + DATABASE_BACKEND.get());
         };
+    }
+
+    public static java.nio.file.Path griefLoggerDatabasePath() {
+        return resolveGriefLoggerDatabasePath(GRIEFLOGGER_DATABASE_PATH.get());
+    }
+
+    static java.nio.file.Path resolveDatabasePath(String path) {
+        return resolveConfiguredPath(path, "general.database_path");
+    }
+
+    static java.nio.file.Path resolveGriefLoggerDatabasePath(String path) {
+        return resolveConfiguredPath(path, "general.grieflogger_database_path");
+    }
+
+    private static java.nio.file.Path resolveConfiguredPath(String path, String configKey) {
+        if (path == null || path.isBlank()) {
+            throw new IllegalArgumentException(configKey + " must not be blank");
+        }
+        return DatabaseManager.resolvePath(path);
     }
 
     /** Validates controls whose invalid values must fail startup rather than be clamped. */

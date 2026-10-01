@@ -99,6 +99,20 @@ class ItemGraphConfigTest {
     }
 
     @Test
+    void rejectsBlankDatabasePathBeforeResolvingItToTheGameDirectory() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ItemGraphConfig.resolveDatabasePath("  "));
+        assertEquals("general.database_path must not be blank", error.getMessage());
+    }
+
+    @Test
+    void rejectsBlankGriefLoggerDatabasePathBeforeDatabaseInitialization() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ItemGraphConfig.resolveGriefLoggerDatabasePath("\t"));
+        assertEquals("general.grieflogger_database_path must not be blank", error.getMessage());
+    }
+
+    @Test
     void configValuesRetainNeoForgeTypeMetadata() {
         assertConfigType(String.class, ItemGraphConfig.DATABASE_PATH, ItemGraphConfig.DATABASE_BACKEND,
                 ItemGraphConfig.DATABASE_HOST, ItemGraphConfig.DATABASE_NAME, ItemGraphConfig.DATABASE_USERNAME,

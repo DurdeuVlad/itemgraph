@@ -125,6 +125,23 @@ class FabricItemGraphConfigTest {
     }
 
     @Test
+    void rejectsBlankDatabasePathsWithTheirConfigKeys(@TempDir Path tempDir) throws Exception {
+        Path config = tempDir.resolve("config");
+        Files.createDirectories(config);
+        Path file = config.resolve("itemgraph.properties");
+
+        Files.writeString(file, "database_path=\n");
+        IOException databasePathError = assertThrows(IOException.class,
+                () -> FabricItemGraphConfig.load(tempDir, config));
+        assertTrue(databasePathError.getMessage().contains("general.database_path must not be blank"));
+
+        Files.writeString(file, "grieflogger_database_path=\n");
+        IOException griefLoggerPathError = assertThrows(IOException.class,
+                () -> FabricItemGraphConfig.load(tempDir, config));
+        assertTrue(griefLoggerPathError.getMessage().contains("general.grieflogger_database_path must not be blank"));
+    }
+
+    @Test
     void validatesEveryNumericConfigRangeBeforeApplyingBackendSpecificSettings(@TempDir Path tempDir) throws Exception {
         Path config = tempDir.resolve("config");
         Files.createDirectories(config);

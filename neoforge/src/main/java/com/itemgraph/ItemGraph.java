@@ -68,13 +68,15 @@ public class ItemGraph {
 
     private void onServerStarting(ServerStartingEvent event) {
         ItemCanonicalizer.setRegistryAccess(event.getServer().registryAccess());
-        ItemGraphConfig.operationalSettings().apply();
+        var operationalSettings = ItemGraphConfig.operationalSettings();
+        var databaseSettings = ItemGraphConfig.databaseSettings();
+        var griefLoggerDatabasePath = ItemGraphConfig.griefLoggerDatabasePath();
+        operationalSettings.apply();
         CorrelationEngine.setDefaultWindowSeconds(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.get());
-        DatabaseManager.getInstance().initialize(ItemGraphConfig.databaseSettings());
+        DatabaseManager.getInstance().initialize(databaseSettings);
         com.itemgraph.ingest.InternalObservationService.getInstance().start();
         com.itemgraph.ingest.IngestionService.getInstance().setAdapter(
-                new com.itemgraph.ingest.GriefLoggerAdapter(
-                        DatabaseManager.resolvePath(ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.get())));
+                new com.itemgraph.ingest.GriefLoggerAdapter(griefLoggerDatabasePath));
         com.itemgraph.ingest.IngestionService.getInstance().start();
         com.itemgraph.api.ItemGraphApiLifecycle.start(event.getServer());
         boolean glPresent = net.neoforged.fml.ModList.get().isLoaded("grieflogger");

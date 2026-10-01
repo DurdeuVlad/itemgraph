@@ -188,9 +188,12 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   both TOML values and failing before DB initialization. Full invalid-config
   numeric boundary tests now cover all seven integer settings on NeoForge and
   Fabric. Fabric additionally rejects malformed and overflowing integer text
-  for all seven settings, including database ranges ignored by SQLite. Remaining
-  malformed non-numeric combinations and GriefLogger
-  queue-cadence differential evidence remain outstanding; #30 stays open.
+  for all seven settings, including database ranges ignored by SQLite. Both
+  loaders now reject blank ItemGraph and GriefLogger database paths by their
+  exact config keys; isolated NeoForge startup probes verify these errors happen
+  before database initialization and leave the invalid values unchanged. Other
+  malformed non-numeric combinations and GriefLogger queue-cadence differential
+  evidence remain outstanding; #30 stays open.
 - Proof: the compatibility registry, cross-loader tests, backend tests, source/schema
   fixtures, exact-release fixture, and native-only staging replay tracked by issues
   #24–#28, #30–#31, #43, #54, #75, and #76. Issue #29 is delivered in PR #79, including

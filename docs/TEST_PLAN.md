@@ -90,12 +90,14 @@ Never use production as the primary test environment.
 
 - `python tools/test_neoforge_invalid_config_startup.py` creates a fresh
   separate temporary NeoForge GameTest directories for
-  `query.max_page_size=101` and `general.database_port=0`.
-- Both checks require the exact key and invalid value in the startup exception,
+  `query.max_page_size=101`, `general.database_port=0`, and an empty
+  `general.database_path` or `general.grieflogger_database_path`.
+- Every probe requires the exact key and rejection reason in the startup exception,
   a failed GameTest server task, no ItemGraph database initialization, and the
-  original TOML value still present after NeoForge config loading. This catches
+  original invalid setting unchanged after NeoForge fills missing config
+  defaults. This catches
   the prior behavior where NeoForge rewrote `database_port=0` to `1`.
-- The 2026-10-01 isolated run met those conditions for both values. The Windows
+- The 2026-10-01 isolated run met those conditions for all four settings. The Windows
   Gradle batch launcher returned process code 0 despite logging `BUILD FAILED`,
   so the script validates task output and the pre-database failure point rather
   than relying on that wrapper exit code.
