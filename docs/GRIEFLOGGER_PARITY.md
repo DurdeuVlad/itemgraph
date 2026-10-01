@@ -154,7 +154,8 @@ the cause of the one-block report delta: `NodeManager` floors ground endpoints
 for both loaders, and the normalized report has no sub-block coordinates. The
 exact fixture-level cause remains unverified. The shared fixture preserves the
 exact entity UUID, item fingerprint, and quantity and retains a one-block
-continuity bound for physical movement. A second unfiltered query requires
+continuity bound; that tolerance does not establish exact coordinate parity.
+A second unfiltered query requires
 the replay player to have exactly these four new ItemGraph-sourced quantity
 rows; an unexpected fifth observation fails the fixture. CoreProtect's
 documented inventory lookup also normalizes a transfer into player inventory
