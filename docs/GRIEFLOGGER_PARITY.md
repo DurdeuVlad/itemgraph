@@ -140,13 +140,21 @@ read-only SQLite fixture checks these transfers, including item registry IDs,
 quantities, canonical fingerprints, player/container/ground endpoints, the container's
 position and dimension, session interval evidence, distinct event IDs, and the
 exact spawned `ItemEntity` UUID across the drop/pickup pair. Ground endpoints
-must remain in the same dimension and within one block. The current native
-cross-loader replay records the same pickup ground endpoint at Y=2 on NeoForge
-and Y=1 on Fabric: NeoForge floors the entity position in its pickup event
-listener, while Fabric captures the precise entity coordinates at
-`playerTouch` return. The shared fixture preserves the same entity UUID, item
-fingerprint, and quantity and allows this one-block endpoint delta; it proves
-entity continuity, not exact position parity. A second unfiltered query requires
+must remain in the same dimension and within one block. The native replay
+records pickup Y=2 on NeoForge and Y=1 on Fabric. This is consistent with the
+loader-specific evidence hooks: NeoForge's patched two-argument
+`Player.drop(ItemStack, boolean)` calls `CommonHooks.onPlayerTossEvent`, while
+Fabric's accepted-entity capture uses the three-argument
+`ServerPlayer.drop(ItemStack, boolean, boolean)` path. Calling NeoForge's
+three-argument overload bypasses its toss-event hook and omits `DROP_ITEM`, so
+matching overload arity makes the fixture invalid. NeoForge floors pickup
+coordinates in its pickup listener; Fabric captures the entity position at
+`playerTouch` return. Those different capture rules do not by themselves prove
+the cause of the one-block report delta: `NodeManager` floors ground endpoints
+for both loaders, and the normalized report has no sub-block coordinates. The
+exact fixture-level cause remains unverified. The shared fixture preserves the
+exact entity UUID, item fingerprint, and quantity and retains a one-block
+continuity bound for physical movement. A second unfiltered query requires
 the replay player to have exactly these four new ItemGraph-sourced quantity
 rows; an unexpected fifth observation fails the fixture. CoreProtect's
 documented inventory lookup also normalizes a transfer into player inventory

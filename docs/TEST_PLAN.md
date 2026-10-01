@@ -944,16 +944,20 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   session net-delta raw markers and non-negative intervals, distinct drop and
   pickup event identities, and the exact spawned entity UUID and fingerprint
   across the drop/pickup pair. Ground endpoints must stay in the same dimension
-  and within one block. In the native replay, Fabric records the precise item
-  entity coordinates at `playerTouch` return while NeoForge floors the entity
-  coordinates in its pickup event listener; the same pickup therefore differs
-  by one block in Y (Fabric=1, NeoForge=2). The shared entity UUID, fingerprint,
-  and quantity establish entity continuity, not exact position parity. The test
-  compares the full prior quantity-row
-  snapshot to ensure the replay did not mutate earlier evidence. NeoForge calls
-  the two-argument `Player.drop` overload so `ItemTossEvent` reaches the native
-  listener; Fabric calls the three-argument `ServerPlayer.drop` overload covered
-  by its accepted-entity mixin. The mock-player GameTests verify both loader
+  and within one block. The native replay differs by one block in pickup Y
+  (Fabric=1, NeoForge=2). The fixtures use loader-specific event hooks:
+  NeoForge's patched two-argument `Player.drop(ItemStack, boolean)` fires
+  `ItemTossEvent` through `CommonHooks.onPlayerTossEvent`; its three-argument
+  overload bypasses that hook. Fabric's accepted-entity capture uses the
+  three-argument `ServerPlayer.drop` path. NeoForge floors pickup coordinates
+  in its pickup listener; Fabric captures the entity position at `playerTouch`
+  return. These capture rules do not prove the cause of the one-block report
+  delta: `NodeManager` floors ground endpoints for both loaders, and normalized
+  reports omit sub-block coordinates. The fixture-level cause remains
+  unverified. A probe using NeoForge's three-argument overload omitted
+  `DROP_ITEM`, confirming that it is not a valid substitute for NeoForge's
+  toss-event path. The test compares the full prior quantity-row snapshot to
+  ensure the replay did not mutate earlier evidence. The mock-player GameTests verify both loader
   persistence paths but do not establish client transport or GriefLogger-present
   differential parity. The other exact-release item writers and full #27
   replay remain outstanding.

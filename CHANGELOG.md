@@ -8,6 +8,14 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #31 pickup coordinate rationale:** Documented the loader-specific
+  drop hooks used by the replay fixtures. NeoForge's patched two-argument
+  `Player.drop` fires `ItemTossEvent`; its three-argument overload bypasses that
+  hook. Fabric captures the accepted entity through its three-argument drop
+  path. The normalized replay records pickup Y=2 on NeoForge and Y=1 on Fabric;
+  the exact fixture-level cause remains unverified because both adapters store
+  block coordinates and the report omits sub-block positions. Mod version
+  remains 0.3.2; no distributable jar is built.
 - **Issue #31 replay queue evidence:** NeoForge and Fabric native replay reports
   now include each ingestion queue's export-time depth, fixed capacity, and the
   cumulative server-wide rejected-event counter since service initialization.
