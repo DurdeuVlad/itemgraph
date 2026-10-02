@@ -247,6 +247,25 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   event-taxonomy tracker for #55, #56, and #57.
 - Acceptance evidence: reproducible benchmark output, cross-loader fixtures, malformed and
   opaque evidence cases, export verification, and read-only auditor review.
+- Execution order: complete #32's measurement contract before using its results in #58;
+  establish the shared event registry in #35 before implementing #33, #34, and #55–#57;
+  then finish #36, #37, #44, and #45 against the resulting evidence and query contracts.
+  Research and prioritize the milestone as one batch; then close issues in this dependency
+  order, each through its own reviewed PR and merge receipt. Do not rerun research or create
+  another milestone until this one has no remaining issues.
+- Verification cadence: do not run tests after individual edit passes. For each issue,
+  finish its implementation batch first, then run the issue's complete relevant acceptance
+  suite and final CI before review and merge. At M9 completion, run the full cross-loader,
+  backend, GameTest, benchmark, and export matrix. Repair failures as a focused correction
+  batch and rerun affected checks plus final CI. No distributable artifact or version bump
+  is part of M9 verification.
+- Current evidence: PR #119 merged as `22b892e` and repairs the Fabric durability GameTest.
+  PR #120 adds seven validated benchmark reports, including NeoForge shutdown saturation
+  and Fabric MySQL/MariaDB probes; its CI run passed. #32 still has no staging-derived
+  production budget, idle baseline, representative third-party adapter workload, or
+  live-server tick-impact evidence. PR #120 remains draft; CI and local isolated probes
+  are regression evidence, not production budgets. Numeric thresholds stay unset until
+  measured in an authorized staging environment.
 
 ## M10: Native-only cutover and release hardening
 
