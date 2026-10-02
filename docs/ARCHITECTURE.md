@@ -405,8 +405,12 @@ worker; the 64-entry queue remains bounded and rejects additional requests.
 
 ### Preview mod-integration API worker
 
-`com.itemgraph.api.ItemGraphServiceImpl` exposes the approved `PREVIEW_1` API in the
-main mod JAR. It uses one bounded worker (capacity 1,024) for source registration and
+`com.itemgraph.api.ItemGraphServiceImpl` exposes the `PREVIEW_1` API from shared code
+packaged in both NeoForge and Fabric mod JARs. Both loader adapters install and stop the
+same `ItemGraphApiLifecycle`; CI consumer mods compile and run against each packaged API.
+Consumers negotiate their required API number before registration; preview versions require
+an exact match and return a diagnostic without touching evidence on mismatch. It uses one
+bounded worker (capacity 1,024) for source registration and
 raw `DirectObservation` persistence, and a second bounded worker (capacity 64) for
 read-only API queries. Saturated submissions return `QUEUE_FULL`; saturated
 registrations return `FAILED`/`QUEUE_FULL` because the approved registration enum has no
@@ -415,8 +419,9 @@ touches Minecraft thread-unsafe state. `ItemGraphApiLifecycle` stops both worker
 the database on `ServerStoppingEvent`.
 
 API submissions never create inferred edges or caller-controlled confidence. They enter
-the same `InternalObservationService`/SQLite path as raw `EXTERNAL_API` evidence and
-deduplicate on `(source_mod_id, source_event_id)`. `ApiQueryBridge` reuses the existing
+the `EXTERNAL_API:<modId>` source namespace and persist immutable `OBSERVED` rows with
+`DIRECT_STATE_DELTA` reliability and `SENSITIVE_LOCATION` privacy assigned by ItemGraph.
+They deduplicate on `(source_mod_id, source_event_id)`. `ApiQueryBridge` reuses the existing
 read-only trace/explain services and maps internal rows to immutable API DTOs, preserving
 observed/transformation/inferred provenance and opaque evidence URIs.
 

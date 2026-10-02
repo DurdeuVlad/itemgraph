@@ -691,6 +691,9 @@ final class ItemGraphServiceImpl implements ItemGraphService {
         StringBuilder json = new StringBuilder(512);
         json.append('{');
         field(json, "api_version", String.valueOf(ApiVersion.PREVIEW_1.number()), false);
+        field(json, "evidence_class", "OBSERVED", true);
+        field(json, "source_reliability", "DIRECT_STATE_DELTA", true);
+        field(json, "privacy_class", "SENSITIVE_LOCATION", true);
         field(json, "source_mod_id", source.modId(), true);
         field(json, "source_event_id", String.valueOf(observation.sourceEventId()), false);
         field(json, "timestamp_ms", String.valueOf(observation.timestampMs()), false);

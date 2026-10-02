@@ -93,6 +93,35 @@ class ItemGraphApiTest {
     }
 
     @Test
+    void apiNegotiationRequiresAnExactPositivePreviewNumber() throws Exception {
+        long evidenceBefore = observationCount();
+        ApiCompatibility compatible = ItemGraphApi.negotiate(1);
+        assertTrue(compatible.compatible());
+        assertEquals(ApiCompatibility.Status.COMPATIBLE, compatible.status());
+        assertEquals(1, compatible.requiredVersion());
+        assertEquals(1, compatible.runtimeVersion());
+
+        ApiCompatibility futureVersion = ItemGraphApi.negotiate(2);
+        assertFalse(futureVersion.compatible());
+        assertEquals(ApiCompatibility.Status.INCOMPATIBLE, futureVersion.status());
+        assertEquals("ItemGraph API version mismatch: consumer requires preview-2 but runtime provides preview-1",
+                futureVersion.message());
+
+        ApiCompatibility invalidVersion = ItemGraphApi.negotiate(0);
+        assertFalse(invalidVersion.compatible());
+        assertTrue(invalidVersion.message().contains("must be positive"));
+        assertEquals(evidenceBefore, observationCount(), "negotiation must not persist evidence");
+    }
+
+    private long observationCount() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("SELECT COUNT(*) FROM ig_observations");
+             ResultSet result = statement.executeQuery()) {
+            assertTrue(result.next());
+            return result.getLong(1);
+        }
+    }
+
+    @Test
     void registrationPersistsAndDistinguishesRegistrationStates() {
         RegistrationResult first = service.registerSource(
                 SourceRegistration.of("testmod", "Test Mod")).join();
@@ -154,8 +183,53 @@ class ItemGraphApiTest {
                 assertEquals("PENDING", rs.getString(2));
                 String raw = new String(rs.getBytes(3), java.nio.charset.StandardCharsets.UTF_8);
                 assertTrue(raw.contains("\"api_version\":1"));
+                assertTrue(raw.contains("\"evidence_class\":\"OBSERVED\""));
+                assertTrue(raw.contains("\"source_reliability\":\"DIRECT_STATE_DELTA\""));
+                assertTrue(raw.contains("\"privacy_class\":\"SENSITIVE_LOCATION\""));
                 assertTrue(raw.contains("\"fixture\":\"true\""));
             }
+        }
+    }
+
+    @Test
+    void queuedApiObservationsRetainSubmissionOrderSourceIdsAndPositiveQuantityDirection() throws Exception {
+        SourceHandle source = register("testmod", "Test Mod");
+        ExternalInventoryEndpoint store = new ExternalInventoryEndpoint(
+                "testmod", "fixture-store", "Fixture store", null);
+        UnknownEndpoint unknown = new UnknownEndpoint(Level.OVERWORLD, "explicit fixture boundary");
+        DirectObservation creation = new DirectObservation(
+                900, 1_700_000_000_002L, ObservationAction.CREATE_ITEM,
+                unknown, store, diamond(3), null, null, Map.of());
+        DirectObservation destruction = new DirectObservation(
+                901, 1_700_000_000_001L, ObservationAction.DESTROY_ITEM,
+                store, unknown, diamond(2), null, null, Map.of());
+
+        CompletableFuture<SubmissionResult> first = service.submitObservation(source, creation);
+        CompletableFuture<SubmissionResult> second = service.submitObservation(source, destruction);
+        assertEquals(SubmissionStatus.PERSISTED, first.join().status());
+        assertEquals(SubmissionStatus.PERSISTED, second.join().status());
+
+        try (PreparedStatement statement = conn.prepareStatement("""
+                SELECT source_event_id, action_type, amount, raw_data
+                FROM ig_observations WHERE source_type = 'EXTERNAL_API:testmod' ORDER BY id
+                """ ); ResultSet rows = statement.executeQuery()) {
+            assertTrue(rows.next());
+            assertEquals(900L, rows.getLong("source_event_id"));
+            assertEquals("CREATE_ITEM", rows.getString("action_type"));
+            assertEquals(3, rows.getInt("amount"));
+            String createRaw = new String(rows.getBytes("raw_data"), java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(createRaw.contains("\"source_event_id\":900"));
+            assertTrue(createRaw.contains("\"origin\":{\"kind\":\"UNKNOWN\""));
+            assertTrue(createRaw.contains("\"destination\":{\"kind\":\"EXTERNAL_INVENTORY\""));
+
+            assertTrue(rows.next());
+            assertEquals(901L, rows.getLong("source_event_id"));
+            assertEquals("DESTROY_ITEM", rows.getString("action_type"));
+            assertEquals(2, rows.getInt("amount"));
+            String destroyRaw = new String(rows.getBytes("raw_data"), java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(destroyRaw.contains("\"origin\":{\"kind\":\"EXTERNAL_INVENTORY\""));
+            assertTrue(destroyRaw.contains("\"destination\":{\"kind\":\"UNKNOWN\""));
+            assertFalse(rows.next());
         }
     }
 

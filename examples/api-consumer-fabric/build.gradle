@@ -1,0 +1,68 @@
+plugins {
+    id 'fabric-loom' version '1.10.5'
+}
+
+version = '0.1.0'
+group = 'com.example'
+
+base {
+    archivesName = 'itemgraph-api-consumer-fabric'
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${rootProject.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${rootProject.fabric_loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.fabric_api_version}"
+    modImplementation files(rootProject.layout.buildDirectory.file(
+            "libs/itemgraph-${rootProject.mod_version}-fabric.jar"))
+}
+
+loom {
+    runs {
+        server {
+            server()
+            runDir rootProject.layout.buildDirectory.dir('api-consumer-fabric-server').get().asFile.absolutePath
+            systemProperties.put('itemgraph.api.consumer.result',
+                    rootProject.layout.buildDirectory.file('api-consumer-fabric-server/result.txt')
+                    .get().asFile.absolutePath)
+        }
+    }
+    mods {
+        itemgraph_api_consumer_fabric {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+tasks.named('compileJava', JavaCompile) {
+    dependsOn ':fabric:remapJar'
+}
+
+tasks.named('processResources', ProcessResources) {
+    inputs.property('itemgraph_mod_version', rootProject.mod_version)
+    filesMatching('fabric.mod.json') {
+        expand(itemgraph_mod_version: rootProject.mod_version)
+    }
+}
+
+tasks.named('runServer') {
+    dependsOn ':fabric:remapJar'
+    doFirst {
+        def directory = rootProject.layout.buildDirectory.dir('api-consumer-fabric-server').get().asFile
+        directory.mkdirs()
+        new File(directory, 'eula.txt').setText('eula=true\n', 'UTF-8')
+        new File(directory, 'result.txt').delete()
+    }
+    doLast {
+        def result = rootProject.layout.buildDirectory.file('api-consumer-fabric-server/result.txt')
+                .get().asFile
+        if (!result.isFile() || !result.getText('UTF-8').startsWith('PASS:')) {
+            throw new GradleException('Fabric API consumer fixture did not complete successfully')
+        }
+    }
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}

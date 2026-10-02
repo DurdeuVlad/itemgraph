@@ -18,4 +18,13 @@ public final class ItemGraphApi {
     public static Optional<ItemGraphService> get(MinecraftServer server) {
         return ItemGraphApiLifecycle.serviceFor(server);
     }
+
+    /**
+     * Compares the API number compiled into a consumer with the API provided by this runtime.
+     * Preview compatibility is exact-match only. Consumers should perform this check before
+     * registering a source or submitting observations.
+     */
+    public static ApiCompatibility negotiate(int consumerRequiredVersion) {
+        return ApiCompatibility.negotiate(consumerRequiredVersion, API_VERSION);
+    }
 }

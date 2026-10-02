@@ -19,4 +19,5 @@ plugins {
 
 rootProject.name = 'itemgraph'
 
-include 'core', 'common', 'fabric', 'neoforge', 'examples:api-consumer'
+include 'core', 'common', 'fabric', 'neoforge',
+        'examples:api-consumer', 'examples:api-consumer-fabric'

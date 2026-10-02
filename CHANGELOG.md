@@ -7,6 +7,17 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #36 cross-loader preview API fixture work:** the shared API now exposes exact
+  positive-version negotiation with explicit compatible/incompatible results. Independent
+  NeoForge and Fabric consumer mods call negotiation before registration, submit one stable
+  observation, query it back, and shut down their isolated test servers. CI is configured
+  to run both fixtures against the current checkout's loader JARs. The fixtures use exact
+  current-version loader metadata and write a `PASS` result only after source registration,
+  durable submission, and query all succeed. External API action IDs now have shared
+  `DIRECT_STATE_DELTA` reliability, evidence-state, and privacy classifications, assigned
+  by ItemGraph in raw evidence. The event taxonomy is version 1.1.0. This is an additive
+  PREVIEW_1 API contract; the mod remains 0.3.2. Consolidated M9 verification is pending.
+
 - **Issue #34 opt-in automation adapter contract:** added `AutomationEndpoint` for
   restart-stable opaque inventory identities derived from mod, dimension, position,
   slot policy, and side, plus opt-in Fabric `FabricTransferStorageAdapter` and NeoForge

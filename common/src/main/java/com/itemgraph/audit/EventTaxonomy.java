@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "1.1.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -266,6 +266,20 @@ public final class EventTaxonomy {
         // observation, and transformation lookup parsing.
         action(entries, "ADD_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
                 27, "item_flow", "add");
+        // External integrations submit committed observations through PREVIEW_1. Their
+        // reliability is assigned by ItemGraph from this catalog, never by the consumer.
+        action(entries, "INSERT_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "TRANSFER_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "CREATE_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "DESTROY_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "CONTAINER_NET_DELTA", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "DIRECT_OBSERVED", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
         action(entries, "REMOVE_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
                 27, "item_flow", "remove");
         action(entries, "DROP_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,

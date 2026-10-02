@@ -4,10 +4,10 @@ Status: **implemented for issue #12** — preview boundary; no stable-API guaran
 Package: `com.itemgraph.api`
 API version: **`PREVIEW_1`**
 Minecraft: **1.21.1**
-Loader: **NeoForge**
+Loaders: **NeoForge and Fabric**
 Minimum Java: **21**
 
-This document defines the public Java boundary for another server-side NeoForge mod to
+This document defines the public Java boundary for another server-side NeoForge or Fabric mod to
 submit direct observed item evidence and query bounded, explainable flows. It is a preview
 API shipped inside the main ItemGraph JAR; it is not a stable API, a database contract, a
 network API, or a GriefLogger API.
@@ -20,6 +20,17 @@ The API exists so a consumer can:
 2. submit a source-attributed **direct observed fact**;
 3. ask for a bounded item, player, vanilla-container, or external-inventory flow;
 4. receive explicit accepted/rejected/error results without blocking the server thread.
+
+API observations must describe committed, directly observed facts. ItemGraph assigns
+`DIRECT_STATE_DELTA` reliability from the shared event taxonomy; consumers cannot supply
+their own reliability score or promote an attempt to an authoritative result. Attempted,
+simulated, rolled-back, or cancelled operations must not be submitted as committed movement.
+The taxonomy defines `INSERT_ITEM`, `REMOVE_ITEM`, `TRANSFER_ITEM`, `CREATE_ITEM`,
+`DESTROY_ITEM`, `CONTAINER_NET_DELTA`, and `DIRECT_OBSERVED` for API submissions; existing
+`DROP_ITEM`, `PICKUP_ITEM`, and `CONSUME_ITEM` definitions retain their shared item-flow
+meaning. API endpoints and positive amounts define signed quantity-flow evidence; creation
+and destruction actions still need their explicit cause endpoints and are never inferred
+from metadata equality alone.
 
 It deliberately does not expose:
 
@@ -49,6 +60,15 @@ Policy:
   across preview versions;
 - no separate Maven artifact is required for M7.
 
+Preview API compatibility uses exact version-number matching. A consumer must keep its
+required API number in its own source/build metadata and call
+`ItemGraphApi.negotiate(requiredVersion)` before source registration or evidence submission.
+`ApiCompatibility` reports `COMPATIBLE` only when the required number equals the runtime
+number; non-positive and different numbers return `INCOMPATIBLE` with an explicit
+diagnostic. A mismatch is a consumer startup failure: the consumer must skip all ItemGraph
+API operations, so no incompatible evidence can be persisted. Preview API versions do not
+promise forward or backward compatibility.
+
 ## Compile and runtime setup
 
 Put the built main JAR, not a test/fixture JAR, in the consumer's local `libs/` directory:
@@ -61,7 +81,7 @@ repositories {
 
 dependencies {
     implementation "net.neoforged:neoforge:21.1.248"
-    compileOnly files("libs/itemgraph-0.3.0.jar")
+    compileOnly files("libs/itemgraph-0.3.2-neoforge.jar")
 }
 ```
 
@@ -72,15 +92,37 @@ the consumer cannot run without ItemGraph; use `optional` for an optional integr
 [[dependencies.examplemod]]
     modId="itemgraph"
     type="required"
-    versionRange="[0.3.0]"
+    versionRange="[0.3.2]"
     ordering="AFTER"
     side="SERVER"
 ```
 
 The `compileOnly` declaration is intentionally a local-file dependency for M7. Do not
-publish or fetch a separate `itemgraph-api` artifact. The working consumer fixture lives
-at `examples/api-consumer/` and pins the built `itemgraph-0.3.0.jar`; widen a runtime
-`versionRange` only to releases known to implement `PREVIEW_1`.
+publish or fetch a separate `itemgraph-api` artifact. CI compiles and runs independent
+consumer fixtures against the built NeoForge and Fabric mod JARs in
+`examples/api-consumer/` and `examples/api-consumer-fabric/`; each fixture pins the exact
+ItemGraph version built by the current checkout. Widen a runtime dependency range only to
+releases known to implement the required preview API version.
+
+Before calling `ItemGraphApi.get(server)` or making any service call, a consumer must
+compare its source-controlled required API number with the runtime:
+
+```java
+private static final int REQUIRED_ITEMGRAPH_API_VERSION = 1;
+
+ApiCompatibility compatibility =
+        ItemGraphApi.negotiate(REQUIRED_ITEMGRAPH_API_VERSION);
+if (!compatibility.compatible()) {
+    LOGGER.error("ItemGraph integration disabled: {}", compatibility.message());
+    return;
+}
+```
+
+The version number is recorded by the consumer, not read from the runtime constant, so the
+check detects API drift instead of comparing the runtime with itself. ItemGraph packages the
+same `com.itemgraph.api` types in the NeoForge and Fabric JARs. Loader event registration is
+adapter-specific; the service contract, source identity, observations, and negotiation result
+are shared.
 
 ## Public signatures
 
@@ -105,6 +147,18 @@ public final class ItemGraphApi {
 
     /** Service for a known server instance. */
     public static Optional<ItemGraphService> get(MinecraftServer server);
+
+    /** Exact-match negotiation for a consumer's compile-time required API number. */
+    public static ApiCompatibility negotiate(int consumerRequiredVersion);
+}
+
+public record ApiCompatibility(
+        int requiredVersion,
+        int runtimeVersion,
+        Status status,
+        String message) {
+    public enum Status { COMPATIBLE, INCOMPATIBLE }
+    public boolean compatible();
 }
 
 public enum ApiVersion {
@@ -240,6 +294,14 @@ public record DirectObservation(
 `sourceEventId` is a positive signed 64-bit integer chosen by the consumer and stable
 across restarts. `(source modId, sourceEventId)` is the deduplication identity; a replay
 returns `DUPLICATE`, not a second row.
+
+The `EXTERNAL_API:<modId>` source type preserves the registered source identity, and the
+source event ID remains attached to the raw observation. ItemGraph calculates the canonical
+item fingerprint from the submitted registry ID and normalized component snapshot; consumers
+must not submit their own fingerprint as proof of physical-item identity. Immutable raw API
+rows record `evidence_class=OBSERVED`, `source_reliability=DIRECT_STATE_DELTA`, and
+`privacy_class=SENSITIVE_LOCATION`; those values are assigned by ItemGraph and cannot be
+overridden by the submitting mod.
 
 `timestampMs` must be positive. `timestampEndMs` must be `null` for a point event or
 `>= timestampMs` for an interval such as `CONTAINER_NET_DELTA`. `attributes` must be a

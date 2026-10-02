@@ -26,6 +26,6 @@ description='''Compiles against the built ItemGraph PREVIEW_1 Java API and submi
 [[dependencies.itemgraph_api_consumer]]
     modId="itemgraph"
     type="required"
-    versionRange="[0.3.0]"
+    versionRange="[${itemgraph_mod_version}]"
     ordering="AFTER"
     side="SERVER"
