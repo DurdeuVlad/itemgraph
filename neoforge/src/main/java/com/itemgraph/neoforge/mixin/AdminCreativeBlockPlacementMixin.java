@@ -49,7 +49,7 @@ abstract class AdminCreativeBlockPlacementMixin {
                     BlockPos position = entry.getKey();
                     BlockState after = level.getBlockState(position);
                     if (AdminMutationCapture.isCreativePlacedBlockChange(entry.getValue(), after,
-                            ((BlockItem) (Object) this).getBlock())) {
+                            ((BlockItem) (Object) this).getBlock(), position.equals(context.getClickedPos()))) {
                         AdminMutationCapture.recordCreativeBlockConfirmedSafely(player, "place",
                                 BuiltInRegistries.BLOCK.getKey(after.getBlock()).toString(), position,
                                 "neoforge_block_item_place_return");
@@ -72,7 +72,8 @@ abstract class AdminCreativeBlockPlacementMixin {
             }
             for (Map.Entry<BlockPos, BlockState> entry : beforeStates.entrySet()) {
                 BlockState after = level.getBlockState(entry.getKey());
-                if (AdminMutationCapture.isCreativePlacedBlockChange(entry.getValue(), after, item.getBlock())) {
+                if (AdminMutationCapture.isCreativePlacedBlockChange(entry.getValue(), after, item.getBlock(),
+                        entry.getKey().equals(context.getClickedPos()))) {
                     AdminMutationCapture.recordCreativeBlockUnresolvedSafely(player, "place",
                             BuiltInRegistries.BLOCK.getKey(after.getBlock()).toString(), entry.getKey(),
                             "neoforge_block_item_place_exception");

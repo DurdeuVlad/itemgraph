@@ -996,7 +996,8 @@ public final class FabricNativeAuditEventListener {
                         level::getBlockState,
                         (left, right) -> right,
                         java.util.LinkedHashMap::new));
-        for (BlockPos pos : changedBlockPositions(beforeStates, afterStates, item.getBlock())) {
+        for (BlockPos pos : changedBlockPositions(beforeStates, afterStates, item.getBlock(),
+                context.getClickedPos())) {
             BlockState state = afterStates.get(pos);
             AdminMutationCapture.recordCreativeBlockConfirmedSafely(player, "place",
                     BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos,
@@ -1024,6 +1025,12 @@ public final class FabricNativeAuditEventListener {
     static List<BlockPos> changedBlockPositions(Map<BlockPos, BlockState> beforeStates,
                                                  Map<BlockPos, BlockState> afterStates,
                                                  Block placedBlock) {
+        return changedBlockPositions(beforeStates, afterStates, placedBlock, null);
+    }
+
+    static List<BlockPos> changedBlockPositions(Map<BlockPos, BlockState> beforeStates,
+                                                 Map<BlockPos, BlockState> afterStates,
+                                                 Block placedBlock, BlockPos clickedPos) {
         if (beforeStates == null || afterStates == null || placedBlock == null) {
             return List.of();
         }
@@ -1032,7 +1039,8 @@ public final class FabricNativeAuditEventListener {
             BlockPos pos = entry.getKey();
             BlockState after = entry.getValue();
             BlockState before = beforeStates.get(pos);
-            if (AdminMutationCapture.isCreativePlacedBlockChange(before, after, placedBlock)) {
+            if (AdminMutationCapture.isCreativePlacedBlockChange(before, after, placedBlock,
+                    pos.equals(clickedPos))) {
                 changed.add(pos.immutable());
             }
         }
