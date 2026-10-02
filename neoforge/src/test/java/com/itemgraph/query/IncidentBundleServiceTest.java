@@ -9,6 +9,13 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -199,6 +206,160 @@ class IncidentBundleServiceTest extends QueryTestBase {
                 () -> IncidentBundleService.normalizeFilename("../outside"));
         assertThrows(java.io.IOException.class,
                 () -> IncidentBundleService.verify(tempDir, "case.json"));
+    }
+
+    @Test
+    void exportEnforcesEvidenceEdgeAndTotalRecordCaps() throws Exception {
+        long player = insertPlayerNode("CapFixture");
+        long ground = insertGroundNode(10, 64, 10);
+        long fingerprint = insertFingerprint("minecraft:diamond", "cap-diamond");
+        long lastObservation = -1;
+        for (int i = 0; i < IncidentBundleService.MAX_EVIDENCE_RECORDS + 1; i++) {
+            long observation = insertObservation(now - 20_000 + i, player, ground, fingerprint,
+                    "DROP_ITEM", 1);
+            lastObservation = observation;
+        }
+        try (var statement = conn.createStatement()) {
+            statement.executeUpdate("UPDATE ig_observations SET source_type = 'ITEMGRAPH_INTERNAL'");
+        }
+        for (int i = 0; i < IncidentBundleService.MAX_EVIDENCE_RECORDS + 1; i++) {
+            long edge = insertEdge(player, player, fingerprint, 1, now - 20_000, now - 19_000,
+                    0.8, "cap fixture " + i);
+            linkEvidence(edge, lastObservation);
+        }
+
+        Path exports = tempDir.resolve("caps");
+        IncidentBundleService.export(conn,
+                AuditLookupFilters.parse("action.drop_item include.minecraft:diamond radius.100", now),
+                "minecraft:overworld", 10, 64, 10, 500,
+                IncidentBundleService.RedactionProfile.REDACTED, exports, "caps.json",
+                () -> false, () -> true, ignored -> {});
+
+        JsonObject bundle = JsonParser.parseString(Files.readString(exports.resolve("caps.json")))
+                .getAsJsonObject();
+        JsonObject manifest = bundle.getAsJsonObject("manifest");
+        assertEquals(IncidentBundleService.MAX_RECORDS, manifest.get("record_count").getAsInt());
+        assertEquals(IncidentBundleService.MAX_EVIDENCE_RECORDS,
+                manifest.get("evidence_record_count").getAsInt());
+        assertEquals(IncidentBundleService.MAX_EVIDENCE_RECORDS,
+                manifest.get("inferred_edge_count").getAsInt());
+        assertTrue(manifest.get("inferred_edges_truncated").getAsBoolean());
+        assertEquals(IncidentBundleService.MAX_RECORDS, bundle.getAsJsonArray("records").size());
+    }
+
+    @Test
+    void rejectsBundlesOverFourMiBBeforeBuildingTheFullRecordArray() throws Exception {
+        long player = insertPlayerNode("LargeFixture");
+        long ground = insertGroundNode(10, 64, 10);
+        long fingerprint = insertFingerprint("example:" + "x".repeat(5 * 1024 * 1024), "large-diamond");
+        insertObservation(now - 1_000, player, ground, fingerprint, "DROP_ITEM", 1);
+        Path exports = tempDir.resolve("oversized");
+
+        assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn,
+                AuditLookupFilters.parse("action.drop_item radius.100", now),
+                "minecraft:overworld", 10, 64, 10, 1,
+                IncidentBundleService.RedactionProfile.FULL, exports, "large.json",
+                () -> false, () -> true, ignored -> {}));
+        assertFalse(Files.exists(exports.resolve("large.json")));
+    }
+
+    @Test
+    void rejectsWriteFailureAndCancellationBeforePublication() throws Exception {
+        long player = insertPlayerNode("FailureFixture");
+        long ground = insertGroundNode(10, 64, 10);
+        long fingerprint = insertFingerprint("minecraft:diamond", "failure-diamond");
+        insertObservation(now - 1_000, player, ground, fingerprint, "DROP_ITEM", 1);
+        AuditLookupFilters filters = AuditLookupFilters.parse(
+                "action.drop_item include.minecraft:diamond radius.100", now);
+        Path blockingFile = tempDir.resolve("not-a-directory");
+        Files.writeString(blockingFile, "block directory creation");
+        assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
+                "minecraft:overworld", 10, 64, 10, 1,
+                IncidentBundleService.RedactionProfile.REDACTED, blockingFile.resolve("exports"), "disk.json",
+                () -> false, () -> true, ignored -> {}));
+
+        AtomicInteger cancellationChecks = new AtomicInteger();
+        Path exports = tempDir.resolve("cancelled");
+        assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
+                "minecraft:overworld", 10, 64, 10, 1,
+                IncidentBundleService.RedactionProfile.REDACTED, exports, "query-cancel.json",
+                () -> cancellationChecks.incrementAndGet() >= 2, () -> true, ignored -> {}));
+        assertFalse(Files.exists(exports.resolve("query-cancel.json")));
+
+        for (int i = 0; i < 26; i++) {
+            insertObservation(now - 2_000 + i, player, ground, fingerprint, "DROP_ITEM", 1);
+        }
+        AtomicBoolean cancelDuringBuild = new AtomicBoolean();
+        assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
+                "minecraft:overworld", 10, 64, 10, 100,
+                IncidentBundleService.RedactionProfile.REDACTED, exports, "build-cancel.json",
+                cancelDuringBuild::get, () -> true, completed -> {
+                    if (completed == 25) {
+                        cancelDuringBuild.set(true);
+                    }
+                }));
+        assertFalse(Files.exists(exports.resolve("build-cancel.json")));
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
+                    "minecraft:overworld", 10, 64, 10, 1,
+                    IncidentBundleService.RedactionProfile.REDACTED, exports, "shutdown-cancel.json",
+                    () -> false, () -> true, ignored -> {}));
+        } finally {
+            Thread.interrupted();
+        }
+        assertFalse(Files.exists(exports.resolve("shutdown-cancel.json")));
+    }
+
+    @Test
+    void concurrentSameFilenameExportsPublishExactlyOneBundle() throws Exception {
+        long player = insertPlayerNode("ConcurrentFixture");
+        long ground = insertGroundNode(10, 64, 10);
+        long fingerprint = insertFingerprint("minecraft:diamond", "concurrent-diamond");
+        insertObservation(now - 1_000, player, ground, fingerprint, "DROP_ITEM", 1);
+        AuditLookupFilters filters = AuditLookupFilters.parse(
+                "action.drop_item include.minecraft:diamond radius.100", now);
+        Path exports = tempDir.resolve("concurrent");
+        CountDownLatch atPublish = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        try {
+            Future<Boolean> first = workers.submit(() -> concurrentExport(filters, exports, atPublish, release));
+            Future<Boolean> second = workers.submit(() -> concurrentExport(filters, exports, atPublish, release));
+            assertTrue(atPublish.await(10, TimeUnit.SECONDS), "both jobs should reach the publication barrier");
+            release.countDown();
+            assertEquals(1, (first.get(10, TimeUnit.SECONDS) ? 1 : 0)
+                    + (second.get(10, TimeUnit.SECONDS) ? 1 : 0));
+            assertTrue(IncidentBundleService.verify(exports, "same-name.json").valid());
+        } finally {
+            release.countDown();
+            workers.shutdownNow();
+            assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    private boolean concurrentExport(AuditLookupFilters filters, Path exports,
+                                     CountDownLatch atPublish, CountDownLatch release) throws Exception {
+        try (var readConnection = java.sql.DriverManager.getConnection(
+                "jdbc:sqlite:" + tempDir.resolve("itemgraph.db"))) {
+            IncidentBundleService.export(readConnection, filters, "minecraft:overworld", 10, 64, 10, 1,
+                    IncidentBundleService.RedactionProfile.REDACTED, exports, "same-name.json",
+                    () -> false, () -> true, ignored -> {
+                        atPublish.countDown();
+                        try {
+                            if (!release.await(10, TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("publication barrier timed out");
+                            }
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("publication barrier interrupted", interrupted);
+                        }
+                    });
+            return true;
+        } catch (java.io.IOException collision) {
+            return false;
+        }
     }
 
     private void insertHistoricalLookup(String sourceHash, String table, String sourceKey,

@@ -9,6 +9,9 @@ Filters use the `/ig lookup` `name.value` grammar and require `radius`; the
 player's current dimension and position are captured before asynchronous work
 starts. At most 100 observed evidence rows and 100 linked inferred edges are
 written (200 chain records total), and the finished file may not exceed 4 MiB.
+Canonical record bytes are counted as records are built; export stops at the
+byte ceiling before adding another record to the in-memory JSON array. The full
+manifest and envelope are checked against 4 MiB before any file is published.
 
 `/ig export full <filename> <filters>` uses the same bounds and requires command
 permission level 4. `/ig export verify <filename>` verifies a bundle in the

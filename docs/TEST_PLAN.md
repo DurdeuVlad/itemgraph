@@ -1144,9 +1144,18 @@ Run once with the consolidated M9 verification batch:
 - Confirm all source reads use ItemGraph's read-only connection and that neither
   export nor verification mutates GriefLogger or ItemGraph evidence storage.
 
+The current local SQLite unit batch covers 100 observed rows, 100 linked edges,
+200 total records, the 4 MiB rejection, same-name concurrent publication,
+existing-file collision, invalid/missing names, write failure, cancellation
+before/after the bounded query, cancellation during record processing, and a
+worker interruption before query execution. The expanded-batch command and
+result are recorded in the PR. The remaining matrix items are permission-level
+execution, owner/operator cancellation authorization, MySQL/MariaDB bundle
+exports, and an actual server-shutdown integration fixture. No staging or
+production run is claimed.
+
 CoreProtect's documented lookup filters and caller-managed asynchronous API
 lookups are the comparison point; they do not define a signed incident bundle.
 The ItemGraph SHA-256 chain is tamper-evident only when its manifest/final hash
-is retained separately. It does not authenticate the exporter. These checks are
-pending; no live staging or production run is claimed.
+is retained separately. It does not authenticate the exporter.
 

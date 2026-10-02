@@ -40,6 +40,10 @@ tasks.named('compileJava', JavaCompile) {
     dependsOn ':fabric:remapJar'
 }
 
+tasks.named('generateRemapClasspath') {
+    dependsOn ':fabric:remapJar'
+}
+
 tasks.named('processResources', ProcessResources) {
     inputs.property('itemgraph_mod_version', rootProject.mod_version)
     filesMatching('fabric.mod.json') {

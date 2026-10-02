@@ -14,6 +14,9 @@ import com.itemgraph.query.ObservationDetail;
 import com.itemgraph.query.UnifiedEvidenceDetail;
 import com.itemgraph.query.UnifiedEvidenceQueryService;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
@@ -104,8 +107,10 @@ public final class IncidentBundleService {
         }
         int limit = Math.max(1, Math.min(requestedLimit, MAX_EVIDENCE_RECORDS));
         Path output = safeOutputPath(exportDirectory, filename);
+        checkCancelled(cancelled, "export was cancelled before query execution");
         List<UnifiedEvidenceDetail> matchingRows = new UnifiedEvidenceQueryService().findFiltered(
                 connection, filters, dimension, centerX, centerY, centerZ, limit, 0);
+        checkCancelled(cancelled, "export was cancelled during query execution");
         List<UnifiedEvidenceDetail> evidence = matchingRows.stream()
                 .filter(row -> !"INFERRED".equals(row.source()))
                 .toList();
@@ -123,6 +128,7 @@ public final class IncidentBundleService {
         }
         JsonArray records = new JsonArray();
         String previousHash = GENESIS_HASH;
+        long serializedRecordBytes = 0;
         for (int i = 0; i < evidence.size(); i++) {
             if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
                 throw new IOException("export was cancelled");
@@ -130,13 +136,14 @@ public final class IncidentBundleService {
             UnifiedEvidenceDetail row = evidence.get(i);
             String evidenceRef = evidenceReferences.observedReference(row, i + 1);
             JsonObject payload = payload(row, profile, evidenceRef, evidenceReferences);
-            String payloadHash = sha256(canonicalJson(payload));
+            String payloadHash = jsonStats(payload, MAX_BUNDLE_BYTES).sha256();
             String chainHash = sha256(previousHash + payloadHash);
             JsonObject record = new JsonObject();
             record.add("payload", payload);
             record.addProperty("payload_sha256", payloadHash);
             record.addProperty("previous_hash", previousHash);
             record.addProperty("chain_hash", chainHash);
+            serializedRecordBytes = appendBoundedRecord(records, record, serializedRecordBytes);
             records.add(record);
             payloadHashes.add(payloadHash);
             previousHash = chainHash;
@@ -151,13 +158,14 @@ public final class IncidentBundleService {
             }
             JsonObject edgePayload = inferredEdgePayload(linkedEdges.get(i), profile,
                     evidenceReferences.inferenceReference(i + 1, linkedEdges.get(i).id()), evidenceReferences);
-            String payloadHash = sha256(canonicalJson(edgePayload));
+            String payloadHash = jsonStats(edgePayload, MAX_BUNDLE_BYTES).sha256();
             String chainHash = sha256(previousHash + payloadHash);
             JsonObject record = new JsonObject();
             record.add("payload", edgePayload);
             record.addProperty("payload_sha256", payloadHash);
             record.addProperty("previous_hash", previousHash);
             record.addProperty("chain_hash", chainHash);
+            serializedRecordBytes = appendBoundedRecord(records, record, serializedRecordBytes);
             records.add(record);
             payloadHashes.add(payloadHash);
             previousHash = chainHash;
@@ -194,12 +202,12 @@ public final class IncidentBundleService {
 
         JsonObject bundle = new JsonObject();
         bundle.add("manifest", manifest);
-        bundle.addProperty("manifest_sha256", sha256(canonicalJson(manifest)));
+        bundle.addProperty("manifest_sha256", jsonStats(manifest, MAX_BUNDLE_BYTES).sha256());
         bundle.add("records", records);
-        byte[] bytes = (canonicalJson(bundle) + "\n").getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > MAX_BUNDLE_BYTES) {
+        if (jsonStats(bundle, MAX_BUNDLE_BYTES).byteCount() + 1 > MAX_BUNDLE_BYTES) {
             throw new IOException("bundle exceeds the " + MAX_BUNDLE_BYTES + " byte export limit");
         }
+        byte[] bytes = (canonicalJson(bundle) + "\n").getBytes(StandardCharsets.UTF_8);
         if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             throw new IOException("export was cancelled");
         }
@@ -718,6 +726,85 @@ public final class IncidentBundleService {
             object.add(key, null);
         } else {
             object.addProperty(key, value);
+        }
+    }
+
+    private static long appendBoundedRecord(JsonArray records, JsonObject record, long serializedRecordBytes)
+            throws IOException {
+        if (records.size() >= MAX_RECORDS) {
+            throw new IOException("bundle exceeds the " + MAX_RECORDS + " record export limit");
+        }
+        long nextBytes = serializedRecordBytes + jsonStats(record, MAX_BUNDLE_BYTES).byteCount()
+                + (records.isEmpty() ? 0 : 1);
+        if (nextBytes > MAX_BUNDLE_BYTES) {
+            throw new IOException("bundle records exceed the " + MAX_BUNDLE_BYTES + " byte export limit");
+        }
+        return nextBytes;
+    }
+
+    private record JsonStats(long byteCount, String sha256) {}
+
+    private static JsonStats jsonStats(JsonElement value, long byteLimit) throws IOException {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+        JsonMeasureOutputStream output = new JsonMeasureOutputStream(digest, byteLimit);
+        try (Writer writer = new OutputStreamWriter(output, StandardCharsets.UTF_8)) {
+            GSON.toJson(value, writer);
+        } catch (com.google.gson.JsonIOException wrapped) {
+            Throwable cause = wrapped;
+            while (cause.getCause() != null && !(cause instanceof IOException)) {
+                cause = cause.getCause();
+            }
+            if (cause instanceof IOException ioFailure) {
+                throw ioFailure;
+            }
+            throw wrapped;
+        }
+        return new JsonStats(output.byteCount(), HexFormat.of().formatHex(digest.digest()));
+    }
+
+    private static final class JsonMeasureOutputStream extends OutputStream {
+        private final MessageDigest digest;
+        private final long byteLimit;
+        private long byteCount;
+
+        private JsonMeasureOutputStream(MessageDigest digest, long byteLimit) {
+            this.digest = digest;
+            this.byteLimit = byteLimit;
+        }
+
+        @Override
+        public void write(int value) throws IOException {
+            ensureWithinLimit(1);
+            digest.update((byte) value);
+            byteCount++;
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length) throws IOException {
+            ensureWithinLimit(length);
+            digest.update(bytes, offset, length);
+            byteCount += length;
+        }
+
+        private void ensureWithinLimit(int nextBytes) throws IOException {
+            if (nextBytes < 0 || byteCount + nextBytes > byteLimit) {
+                throw new IOException("JSON value exceeds the " + byteLimit + " byte export limit");
+            }
+        }
+
+        private long byteCount() {
+            return byteCount;
+        }
+    }
+
+    private static void checkCancelled(BooleanSupplier cancelled, String message) throws IOException {
+        if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+            throw new IOException(message);
         }
     }
 
