@@ -207,7 +207,7 @@ are the operator-facing command contract. ItemGraph registers `/itemgraph` as
 the full root and redirects `/ig` to the same node; it does not register `/gl`
 or `/grieflogger`. Both roots use permission level 2. The direct lookup form
 accepts the six documented `name.value` filters and one-letter aliases, quoted
-comma-separated values, at most five filters, required radius, cubic distance,
+comma-separated values, at most six filters (including ItemGraph's `state` filter), required radius, cubic distance,
 and AND semantics. The explicit `/ig lookup filters` spelling is an ItemGraph
 extension. The required-radius rule follows the published safety guidance even
 though pinned GriefLogger 26.2 `LookupCommand` accepts a no-radius query; that

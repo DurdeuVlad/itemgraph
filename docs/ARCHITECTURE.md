@@ -413,7 +413,7 @@ worker; the 64-entry queue remains bounded and rejects additional requests.
 
 ### Preview mod-integration API worker
 
-`com.itemgraph.api.ItemGraphServiceImpl` exposes the `PREVIEW_1` API from shared code
+`com.itemgraph.api.ItemGraphServiceImpl` exposes the `PREVIEW_2` API from shared code
 packaged in both NeoForge and Fabric mod JARs. Both loader adapters install and stop the
 same `ItemGraphApiLifecycle`; CI consumer mods compile and run against each packaged API.
 Consumers negotiate their required API number before registration; preview versions require
@@ -593,9 +593,16 @@ used a corroborating or ambiguous row for an allocation, it is retained with
 from active traces and capacity totals, and visible through `/ig explain <edgeId>` as a
 superseded inference. Migration V20 applies the same lifecycle to dependent edges built from
 legacy pre-use armor-stand callbacks, using `SUPERSEDED_UNVERIFIED_EVIDENCE`; its source rows
-remain inspectable as unresolved evidence but are omitted from current flow traces. Correlation,
+remain visible in traces as unresolved evidence with zero quantity impact. Correlation,
 GriefLogger ingestion, and internal observation writes serialize transactions on the shared
 ItemGraph JDBC connection.
+
+Migration V21 adds `competing_observation_ids` and
+`competing_candidates_truncated` to `ig_inferred_edges`. New edges persist at most 50
+alternative observation IDs, prioritizing the pickup/drop alternatives that set the score's
+nearest-candidate gaps. SQL window counts preserve exact scoring when the in-memory candidate
+read is capped. Old edges keep an empty candidate list because their original alternatives
+were not stored.
 
 ### Ground movement
 - `ItemTossEvent` and `LivingDropsEvent` create bounded pending-drop entries. The
@@ -761,8 +768,8 @@ ItemGraph JDBC connection.
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
 - `/ig trace container <x> <y> <z>`: reconstructs item ingress and egress for a container at coordinates.
 - `/ig trace item <query>`: resolves string queries by numeric ID, item registry ID, or custom name.
-- `/ig lookup filters <filter1> ... <filter5>`: applies GriefLogger's `name.value`
-  action, user, include, exclude, time, and required radius filters to native
+- `/ig lookup filters <filter1> ... <filter7>`: applies GriefLogger's `name.value`
+  action, user, include, exclude, time, state, and required radius filters to native
   audit rows. The radius is a bounded cube around the issuing player and runs
   asynchronously on the read-only query worker.
 

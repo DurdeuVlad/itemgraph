@@ -79,6 +79,127 @@ class UnifiedEvidenceQueryServiceTest {
     }
 
     @Test
+    void stateFilterKeepsDanglingTransformationEvidenceAsUnresolvedWithoutAllocatingQuantity() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations
+                    (transformation_type, player_node_id, source_fingerprint_id,
+                     result_fingerprint_id, quantity, timestamp_ms, details)
+                VALUES ('CRAFTING', ?, 9998, ?, 4, 2_000, 'missing source fingerprint fixture')
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.setLong(2, resultFingerprint);
+            statement.executeUpdate();
+        }
+
+        AuditLookupFilters unresolved = AuditLookupFilters.parse(
+                "state.unresolved radius.100", 10_000L);
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(
+                conn, unresolved, "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, rows.size());
+        assertEquals("transformation#1", rows.get(0).evidenceId());
+        assertEquals("UNRESOLVED", rows.get(0).evidenceClass());
+        assertEquals("UNKNOWN_ENDPOINT", rows.get(0).reasonCode());
+        assertEquals(4, rows.get(0).quantity());
+        assertEquals(0, rows.get(0).quantityImpact());
+        assertTrue(service.findFiltered(conn, AuditLookupFilters.parse(
+                        "state.observed radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0).isEmpty());
+    }
+
+    @Test
+    void unresolvedDispositionRemainsVisibleInFilteredLookupWithZeroQuantityImpact() throws Exception {
+        observation("ITEMGRAPH_INTERNAL", 2_000L, "EQUIP_ARMOR_STAND", stoneFingerprint, 1);
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observation_dispositions
+                    (observation_id, reason_code, detail, created_at_ms)
+                VALUES (1, 'PRE_USE_ARMOR_STAND_TRANSFER_UNVERIFIED', 'fixture', 2_001)
+                """)) {
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.unresolved radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, rows.size());
+        assertEquals("observation#1", rows.get(0).evidenceId());
+        assertEquals("UNRESOLVED", rows.get(0).evidenceClass());
+        assertEquals("PRE_USE_ARMOR_STAND_TRANSFER_UNVERIFIED", rows.get(0).reasonCode());
+        assertEquals(0, rows.get(0).quantityImpact());
+    }
+
+    @Test
+    void ambiguousSourceGroupReturnsSortedCandidateEvidenceWithoutAllocatingQuantity() throws Exception {
+        observation("GRIEFLOGGER", 2_000L, "PICKUP_ITEM", stoneFingerprint, 1);
+        observationFromGround("ITEMGRAPH_INTERNAL", 2_001L, "PICKUP_ITEM", stoneFingerprint, 1);
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observation_groups (state, match_basis, explanation, created_at_ms)
+                VALUES ('AMBIGUOUS', 'fixture', 'competing source rows', 2_002)
+                """, PreparedStatement.RETURN_GENERATED_KEYS)) {
+            statement.executeUpdate();
+            try (var keys = statement.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                long groupId = keys.getLong(1);
+                try (PreparedStatement member = conn.prepareStatement("""
+                        INSERT INTO ig_observation_group_members (group_id, observation_id, member_role)
+                        VALUES (?, ?, 'CANDIDATE')
+                        """)) {
+                    member.setLong(1, groupId);
+                    member.setLong(2, 2);
+                    member.executeUpdate();
+                    member.setLong(1, groupId);
+                    member.setLong(2, 1);
+                    member.executeUpdate();
+                }
+            }
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.ambiguous radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(2, rows.size());
+        for (UnifiedEvidenceDetail row : rows) {
+            assertEquals("AMBIGUOUS", row.evidenceClass());
+            assertEquals("SOURCE_EQUIVALENCE_AMBIGUOUS", row.reasonCode());
+            assertEquals(List.of("observation#1", "observation#2"), row.candidateEvidenceIds());
+            assertEquals(0, row.quantityImpact());
+        }
+    }
+
+    @Test
+    void inferredStateLookupReturnsPersistedConfidenceCandidatesAndQuantityImpact() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_inferred_edges
+                    (from_node_id, to_node_id, fingerprint_id, amount, time_start, time_end,
+                     confidence, explanation, created_at, competing_observation_ids,
+                     competing_candidates_truncated)
+                VALUES (?, ?, ?, 3, 1_000, 2_000, 0.8125, 'scored fixture', 2_100, '17,21', 1)
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.setLong(2, groundNode);
+            statement.setLong(3, stoneFingerprint);
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.inferred radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, rows.size());
+        UnifiedEvidenceDetail edge = rows.get(0);
+        assertEquals("edge#1", edge.evidenceId());
+        assertEquals("INFERRED", edge.source());
+        assertEquals("INFERRED", edge.evidenceClass());
+        assertEquals("CORRELATION_COMPETING_CANDIDATES", edge.reasonCode());
+        assertEquals(List.of("observation#17", "observation#21"), edge.candidateEvidenceIds());
+        assertTrue(edge.candidateEvidenceTruncated());
+        assertEquals(3, edge.quantityImpact());
+        assertTrue(edge.detail().contains("confidence=0.8125"));
+    }
+
+    @Test
     void appliesUserSubjectTimeRadiusAndGlobalPagingAcrossSources() throws Exception {
         audit("BREAK_BLOCK", 7_000L, "minecraft:stone");
         observation("ITEMGRAPH_INTERNAL", 6_000L, "DROP_ITEM", stoneFingerprint, 2);
@@ -306,7 +427,12 @@ class UnifiedEvidenceQueryServiceTest {
                 conn, filters, "minecraft:overworld", 10, 64, 10, 100, 0);
 
         assertEquals(3, rows.size());
-        assertTrue(rows.stream().allMatch(row -> row.evidenceClass().equals("OBSERVED")));
+        assertTrue(rows.stream().anyMatch(row -> "CHAT_MESSAGE".equals(row.actionType())),
+                "exclusion should retain audit evidence with no item subject");
+        assertTrue(rows.stream().anyMatch(row -> row.evidenceId().startsWith("observation#")),
+                "exclusion should retain item evidence whose fingerprint is unresolved");
+        assertTrue(rows.stream().anyMatch(row -> row.evidenceId().startsWith("transformation#")),
+                "exclusion should retain transformation evidence whose fingerprints are unresolved");
     }
 
     @Test

@@ -202,7 +202,7 @@ public final class FlowBrowserService {
             }
         } else if (page.hops().isEmpty()) {
             items.set(22, display(Items.PAPER, "No recorded movement", List.of(
-                    page.targetDescription(), "No observed or inferred movement was recorded in this time window.")));
+                    page.targetDescription(), "No observed, inferred, ambiguous, or unresolved evidence was recorded in this time window.")));
         } else {
             for (int i = 0; i < page.hops().size(); i++) {
                 items.set(i, hopItem(page.hops().get(i)));
@@ -312,9 +312,12 @@ public final class FlowBrowserService {
                     .map(QueryFormatter::formatExplain)
                     .orElseGet(() -> List.of(QueryFormatter.explainNotFound(hop.refId())));
             case TRANSFORMATION -> List.of(
-                    "[OBSERVED] TRANSFORMATION #" + hop.refId(),
+                    "[" + hop.evidenceClass() + "] TRANSFORMATION #" + hop.refId(),
                     "time: " + QueryFormatter.formatTime(hop.timestampMs()),
-                    "quantity: " + hop.amount() + "x",
+                    "reported quantity: " + hop.amount() + "x; quantity impact: " + hop.quantityImpact(),
+                    "reason: " + (hop.reasonCode() == null ? "(none)" : hop.reasonCode()),
+                    "candidates: " + (hop.candidateEvidenceIds().isEmpty() ? "(none)"
+                            : String.join(",", hop.candidateEvidenceIds())),
                     "item: " + (hop.item() == null ? "(no related fingerprint)" : hop.item().describeFull()),
                     "stored details: " + hop.detail());
         };
@@ -399,14 +402,25 @@ public final class FlowBrowserService {
     static ItemStack hopItem(TraceHop hop) {
         boolean transformation = hop.source() == TraceHop.Source.TRANSFORMATION;
         String itemDescription = hop.item() == null ? "item" : hop.item().describe();
-        String provenance = hop.kind() == TraceHop.Kind.OBSERVED
-                ? "[OBSERVED]"
-                : "[INFERRED conf=" + QueryFormatter.formatConfidence(hop.confidence()) + "]";
+        String provenance = switch (hop.evidenceClass()) {
+            case OBSERVED -> "[OBSERVED]";
+            case INFERRED -> "[INFERRED conf=" + QueryFormatter.formatConfidence(hop.confidence()) + "]";
+            case AMBIGUOUS -> "[AMBIGUOUS reason=" + hop.reasonCode() + "]";
+            case UNRESOLVED -> "[UNRESOLVED reason=" + hop.reasonCode() + "]";
+        };
         String title = transformation
                 ? provenance + " TRANSFORMATION #" + hop.refId() + " " + hop.amount() + "x"
                 : provenance + " " + hop.amount() + "x " + itemDescription;
         List<String> lore = new ArrayList<>();
-        lore.add("Amount: " + hop.amount() + "x");
+        lore.add("Reported amount: " + hop.amount() + "x");
+        lore.add("Quantity impact: " + hop.quantityImpact());
+        if (hop.reasonCode() != null) {
+            lore.add("Reason: " + hop.reasonCode());
+        }
+        if (!hop.candidateEvidenceIds().isEmpty()) {
+            lore.add("Candidates: " + String.join(",", hop.candidateEvidenceIds())
+                    + (hop.candidateEvidenceTruncated() ? " (truncated)" : ""));
+        }
         if (hop.endMs() > hop.timestampMs()) {
             lore.add("Time window: " + QueryFormatter.formatTime(hop.timestampMs())
                     + " -> " + QueryFormatter.formatTime(hop.endMs()));

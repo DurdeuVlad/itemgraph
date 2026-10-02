@@ -463,6 +463,7 @@ class QuantityFlowTest {
         // Competing drop candidate lowers drop-ambiguity factor
         assertTrue(edge.confidence() < 0.90, "competing candidate must decrease confidence: " + edge.confidence());
         assertTrue(edge.explanation().contains("competing drop"), edge.explanation());
+        assertEquals(Long.toString(dropNear), competingCandidateIds(edge.id()));
 
         assertEquals("FULLY_ALLOCATED", observationStatus(dropFar));
         assertEquals("CLOSED_UNRESOLVED", observationStatus(dropNear));
@@ -497,10 +498,49 @@ class QuantityFlowTest {
 
         assertTrue(edge.confidence() < 0.90, "competing pickup must lower confidence: " + edge.confidence());
         assertTrue(edge.explanation().contains("next-best was"), edge.explanation());
+        assertEquals(Long.toString(pickupFar), competingCandidateIds(edge.id()));
 
         assertEquals("FULLY_ALLOCATED", observationStatus(dropObs));
         assertEquals("FULLY_ALLOCATED", observationStatus(pickupNear));
         assertEquals("CLOSED_UNRESOLVED", observationStatus(pickupFar));
+    }
+
+    @Test
+    void testLargeCandidateSetUsesBoundedPersistenceAndExactScoringCount() throws Exception {
+        long playerA = insertPlayerNode("CandidateSource");
+        long ground = insertGroundNode(56, 64, 56);
+        long fingerprint = insertFingerprint("minecraft:emerald", "hash-emerald-large-candidate-set");
+        long dropTime = now - CLOSED;
+        insertObservation(dropTime, playerA, ground, fingerprint, "DROP_ITEM", 1);
+
+        List<Long> pickupIds = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            long player = insertPlayerNode("Candidate" + i);
+            pickupIds.add(insertObservation(dropTime + 1_000L * (i + 1), ground, player,
+                    fingerprint, "PICKUP_ITEM", 1));
+        }
+
+        CorrelationResult result = engine.runCorrelation();
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, result.edgesCreated());
+        Edge edge = loadEdges().get(0);
+
+        double expectedConfidence = Math.round(0.95 * engine.proximityFactor(1_000)
+                * engine.ambiguityFactor(60, 1_000) * engine.ambiguityFactor(1, 0) * 10_000) / 10_000.0;
+        assertEquals(expectedConfidence, edge.confidence(), 0.00001,
+                "the SQL result cap must not reduce the exact competing-candidate score count");
+        List<String> persistedIds = List.of(competingCandidateIds(edge.id()).split(","));
+        assertEquals(50, persistedIds.size());
+        assertTrue(persistedIds.contains(Long.toString(pickupIds.get(1))),
+                "the nearest alternative used by the scoring gap must survive the persistence cap");
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT competing_candidates_truncated FROM ig_inferred_edges WHERE id = ?")) {
+            statement.setLong(1, edge.id());
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals(1, rows.getInt(1));
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -825,6 +865,17 @@ class QuantityFlowTest {
              ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_inferred_edges")) {
             rs.next();
             return rs.getInt(1);
+        }
+    }
+
+    private String competingCandidateIds(long edgeId) throws SQLException {
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT competing_observation_ids FROM ig_inferred_edges WHERE id = ?")) {
+            statement.setLong(1, edgeId);
+            try (ResultSet result = statement.executeQuery()) {
+                assertTrue(result.next());
+                return result.getString(1);
+            }
         }
     }
 

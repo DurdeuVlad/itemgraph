@@ -34,13 +34,26 @@ class IncidentBundleServiceTest extends QueryTestBase {
                 + "Confidence 0.9025 = base 0.95 x proximity 0.9500 x pickup-ambiguity 1.0000 "
                 + "x drop-ambiguity 1.0000.";
         long edge = insertEdge(player, player, fingerprint, 1, time, time + 1_000, 0.9025, explanation);
+        try (var statement = conn.prepareStatement("""
+                UPDATE ig_inferred_edges
+                SET competing_observation_ids = ?, competing_candidates_truncated = 1
+                WHERE id = ?
+                """)) {
+            statement.setString(1, pickup + ",900");
+            statement.setLong(2, edge);
+            statement.executeUpdate();
+        }
+        try (var statement = conn.prepareStatement("UPDATE ig_observations SET source_type = 'GRIEFLOGGER' WHERE id = ?")) {
+            statement.setLong(1, pickup);
+            statement.executeUpdate();
+        }
         linkEvidence(edge, drop);
         linkEvidence(edge, pickup);
         insertHistoricalLookup("source-database-sha256", "items", "private-source-key",
                 "raw-byte-payload-sha256", time + 500);
 
         AuditLookupFilters filters = AuditLookupFilters.parse(
-                "action.drop_item user.PrivatePlayer include.diamond radius.100", now);
+                "action.drop_item,pickup_item user.PrivatePlayer include.diamond radius.100", now);
         Path exports = tempDir.resolve("world").resolve("itemgraph").resolve("exports");
         IncidentBundleService.export(conn, filters, "minecraft:overworld", 10, 64, 10, 100,
                 IncidentBundleService.RedactionProfile.REDACTED, exports, "redacted.json",
@@ -50,17 +63,23 @@ class IncidentBundleServiceTest extends QueryTestBase {
         String redactedText = Files.readString(redactedPath);
         JsonObject redacted = JsonParser.parseString(redactedText).getAsJsonObject();
         JsonArray redactedRecords = redacted.getAsJsonArray("records");
-        assertEquals(3, redactedRecords.size());
+        assertEquals(4, redactedRecords.size());
         assertFalse(redactedText.contains("PrivatePlayer"));
         assertFalse(redactedText.contains("Private Name"));
         assertFalse(redactedText.contains("private-source-key"));
         assertTrue(redactedText.contains("source_database_sha256"));
         assertTrue(redactedText.contains("source_raw_payload_sha256"));
         assertFalse(redactedText.contains("center_x\":10"));
-        assertFalse(redacted.getAsJsonObject("manifest").get("dimension").isJsonPrimitive());
+        var redactedDimension = redacted.getAsJsonObject("manifest").get("dimension");
+        assertTrue(redactedDimension == null || redactedDimension.isJsonNull(),
+                "redacted bundles must omit or null out the dimension");
         assertFalse(redacted.getAsJsonObject("manifest").get("query").getAsString().contains("PrivatePlayer"));
         assertFalse(redacted.getAsJsonObject("manifest").get("query").getAsString().contains("diamond"));
-        JsonObject inferredPayload = redactedRecords.get(2).getAsJsonObject().getAsJsonObject("payload");
+        JsonObject selectedGriefLoggerObservation = redactedRecords.get(0).getAsJsonObject()
+                .getAsJsonObject("payload");
+        assertEquals("GRIEFLOGGER", selectedGriefLoggerObservation.get("source").getAsString());
+        assertEquals("evidence#1", selectedGriefLoggerObservation.get("evidence_id").getAsString());
+        JsonObject inferredPayload = redactedRecords.get(3).getAsJsonObject().getAsJsonObject("payload");
         assertEquals("INFERRED_EDGE", inferredPayload.get("record_type").getAsString());
         assertEquals(0.9025, inferredPayload.get("confidence").getAsDouble(), 0.00001);
         JsonObject scoringFactors = inferredPayload.getAsJsonObject("scoring_factors");
@@ -71,6 +90,16 @@ class IncidentBundleServiceTest extends QueryTestBase {
         assertEquals(1, scoringFactors.get("admissible_drop_candidates").getAsInt());
         assertEquals(2, inferredPayload.getAsJsonArray("supporting_evidence_ids").size());
         assertEquals(2, inferredPayload.getAsJsonArray("supporting_observations").size());
+        JsonArray candidateRefs = inferredPayload.getAsJsonArray("candidate_evidence_ids");
+        assertEquals(2, candidateRefs.size());
+        assertEquals("evidence#1", candidateRefs.get(0).getAsString(),
+                "selected GriefLogger-backed observation IDs should resolve to their included evidence row");
+        assertEquals("external-candidate#1", candidateRefs.get(1).getAsString(),
+                "unselected candidate evidence should be explicitly external");
+        assertTrue(inferredPayload.get("candidate_evidence_truncated").getAsBoolean());
+        assertEquals("CORRELATION_COMPETING_CANDIDATES",
+                inferredPayload.get("reason_code").getAsString());
+        assertFalse(redactedText.contains("observation#900"));
         assertTrue(IncidentBundleService.verify(exports, "redacted.json").valid());
 
         IncidentBundleService.export(conn, filters, "minecraft:overworld", 10, 64, 10, 100,

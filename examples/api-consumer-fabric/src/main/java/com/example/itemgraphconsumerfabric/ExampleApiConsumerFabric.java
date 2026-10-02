@@ -32,7 +32,7 @@ import org.slf4j.LoggerFactory;
 public final class ExampleApiConsumerFabric implements ModInitializer {
     public static final String MOD_ID = "itemgraph_api_consumer_fabric";
     private static final Logger LOGGER = LoggerFactory.getLogger(ExampleApiConsumerFabric.class);
-    private static final int REQUIRED_ITEMGRAPH_API_VERSION = 1;
+    private static final int REQUIRED_ITEMGRAPH_API_VERSION = 2;
     private static final long STABLE_FIXTURE_EVENT_ID = 1L;
 
     @Override
@@ -91,6 +91,18 @@ public final class ExampleApiConsumerFabric implements ModInitializer {
                                     if (query.status() != QueryStatus.OK) {
                                         throw new IllegalStateException(
                                                 "fixture query returned " + query.status());
+                                    }
+                                    var fixtureHop = query.result().hops().stream()
+                                            .filter(hop -> hop.evidenceClass()
+                                                    == com.itemgraph.audit.EventTaxonomy.EvidenceClass.OBSERVED)
+                                            .findFirst().orElseThrow(() -> new IllegalStateException(
+                                                    "fixture query returned no observed API hop"));
+                                    if (fixtureHop.quantityImpact() != fixtureHop.amount()
+                                            || fixtureHop.reasonCode() != null
+                                            || !fixtureHop.candidateEvidenceIds().isEmpty()
+                                            || fixtureHop.candidateEvidenceTruncated()) {
+                                        throw new IllegalStateException(
+                                                "observed fixture hop has invalid PREVIEW_2 state fields");
                                     }
                                     return "source=" + sourceId + ", event=" + STABLE_FIXTURE_EVENT_ID
                                             + ", query=" + query.status();

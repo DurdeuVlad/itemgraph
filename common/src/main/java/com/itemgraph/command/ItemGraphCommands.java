@@ -658,13 +658,13 @@ public final class ItemGraphCommands {
         String token = (quoted ? rawToken.substring(1) : rawToken)
                 .toLowerCase(java.util.Locale.ROOT);
         Set<String> usedFilters = usedLookupFilters(remaining.substring(0, tokenStart));
-        if (usedFilters.size() >= 5) {
+        if (usedFilters.size() >= 6) {
             return CompletableFuture.completedFuture(tokenBuilder.build());
         }
         if (!token.contains(".")) {
             boolean hasItemFilter = usedFilters.contains("include") || usedFilters.contains("exclude");
             List<String> suggestions = new java.util.ArrayList<>();
-            for (String filter : List.of("action", "user", "include", "exclude", "time", "radius")) {
+            for (String filter : List.of("action", "user", "include", "exclude", "time", "radius", "state")) {
                 if (usedFilters.contains(filter)
                         || hasItemFilter && (filter.equals("include") || filter.equals("exclude"))) {
                     continue;
@@ -689,6 +689,7 @@ public final class ItemGraphCommands {
                     .toList();
             case "time" -> List.of("5m", "1h", "1d", "1y");
             case "radius" -> List.of("5", "10", "50");
+            case "state" -> List.of("observed", "inferred", "ambiguous", "unresolved");
             default -> List.of();
         };
         if (canonicalName.equals("user")) {
@@ -754,6 +755,7 @@ public final class ItemGraphCommands {
             case "exclude", "e" -> "exclude";
             case "time", "t" -> "time";
             case "radius", "r" -> "radius";
+            case "state", "status", "s" -> "state";
             default -> null;
         };
     }

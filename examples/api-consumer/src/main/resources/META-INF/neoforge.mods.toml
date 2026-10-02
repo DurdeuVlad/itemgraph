@@ -7,7 +7,7 @@ modId="itemgraph_api_consumer"
 version="0.1.0"
 displayName="ItemGraph API Consumer Example"
 authors="ItemGraph"
-description='''Compiles against the built ItemGraph PREVIEW_1 Java API and submits one stable, directly observed fixture event.'''
+description='''Compiles against the built ItemGraph PREVIEW_2 Java API and submits one stable, directly observed fixture event.'''
 
 [[dependencies.itemgraph_api_consumer]]
     modId="neoforge"

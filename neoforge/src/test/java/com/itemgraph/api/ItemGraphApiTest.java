@@ -90,21 +90,30 @@ class ItemGraphApiTest {
         assertEquals("preview", ApiVersion.PREVIEW_1.channel());
         assertTrue(ApiVersion.PREVIEW_1.preview());
         assertEquals("preview-1", ApiVersion.PREVIEW_1.label());
+        assertEquals(2, ApiVersion.PREVIEW_2.number());
+        assertEquals("preview-2", ItemGraphApi.API_VERSION.label());
+        assertEquals(ApiVersion.PREVIEW_2, service.apiVersion());
     }
 
     @Test
     void apiNegotiationRequiresAnExactPositivePreviewNumber() throws Exception {
         long evidenceBefore = observationCount();
-        ApiCompatibility compatible = ItemGraphApi.negotiate(1);
+        ApiCompatibility compatible = ItemGraphApi.negotiate(2);
         assertTrue(compatible.compatible());
         assertEquals(ApiCompatibility.Status.COMPATIBLE, compatible.status());
-        assertEquals(1, compatible.requiredVersion());
-        assertEquals(1, compatible.runtimeVersion());
+        assertEquals(2, compatible.requiredVersion());
+        assertEquals(2, compatible.runtimeVersion());
 
-        ApiCompatibility futureVersion = ItemGraphApi.negotiate(2);
+        ApiCompatibility oldVersion = ItemGraphApi.negotiate(1);
+        assertFalse(oldVersion.compatible());
+        assertEquals(ApiCompatibility.Status.INCOMPATIBLE, oldVersion.status());
+        assertEquals("ItemGraph API version mismatch: consumer requires preview-1 but runtime provides preview-2",
+                oldVersion.message());
+
+        ApiCompatibility futureVersion = ItemGraphApi.negotiate(3);
         assertFalse(futureVersion.compatible());
         assertEquals(ApiCompatibility.Status.INCOMPATIBLE, futureVersion.status());
-        assertEquals("ItemGraph API version mismatch: consumer requires preview-2 but runtime provides preview-1",
+        assertEquals("ItemGraph API version mismatch: consumer requires preview-3 but runtime provides preview-2",
                 futureVersion.message());
 
         ApiCompatibility invalidVersion = ItemGraphApi.negotiate(0);
@@ -128,7 +137,7 @@ class ItemGraphApiTest {
         assertEquals(RegistrationStatus.REGISTERED, first.status());
         assertEquals("testmod", first.source().modId());
         assertEquals("Test Mod", first.source().displayName());
-        assertEquals(ApiVersion.PREVIEW_1, first.source().apiVersion());
+        assertEquals(ApiVersion.PREVIEW_2, first.source().apiVersion());
 
         RegistrationResult unchanged = service.registerSource(
                 SourceRegistration.of("testmod", "Test Mod")).join();
@@ -182,7 +191,7 @@ class ItemGraphApiTest {
                 assertTrue(rs.getString(1).startsWith("EXTERNAL_API:"));
                 assertEquals("PENDING", rs.getString(2));
                 String raw = new String(rs.getBytes(3), java.nio.charset.StandardCharsets.UTF_8);
-                assertTrue(raw.contains("\"api_version\":1"));
+                assertTrue(raw.contains("\"api_version\":2"));
                 assertTrue(raw.contains("\"evidence_class\":\"OBSERVED\""));
                 assertTrue(raw.contains("\"source_reliability\":\"DIRECT_STATE_DELTA\""));
                 assertTrue(raw.contains("\"privacy_class\":\"SENSITIVE_LOCATION\""));
@@ -529,6 +538,9 @@ class ItemGraphApiTest {
 
         FlowHop hop = result.result().hops().get(0);
         assertEquals(Provenance.OBSERVED, hop.provenance());
+        assertEquals(com.itemgraph.audit.EventTaxonomy.EvidenceClass.UNRESOLVED, hop.evidenceClass());
+        assertEquals("UNKNOWN_ENDPOINT", hop.reasonCode());
+        assertEquals(0, hop.quantityImpact());
         assertEquals(EvidenceKind.OBSERVATION, hop.evidence().kind());
         assertTrue(hop.evidence().value().startsWith("itemgraph:observation:"));
         assertNull(hop.confidence());
@@ -722,7 +734,7 @@ class ItemGraphApiTest {
 
         ItemGraphServiceImpl unavailable = new ItemGraphServiceImpl(null, 8);
         SourceHandle unavailableGeneration = new SourceHandle(
-                "testmod", "Test Mod", ApiVersion.PREVIEW_1, 8);
+                "testmod", "Test Mod", ApiVersion.PREVIEW_2, 8);
         unavailable.start();
         try {
             assertEquals(RegistrationStatus.DATABASE_UNAVAILABLE,

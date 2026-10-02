@@ -54,7 +54,8 @@ class EventTaxonomyTest {
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
             assertTrue(reasons.add(reason.id()), "duplicate reason code: " + reason.id());
-            assertTrue(reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57, reason.id());
+            assertTrue(reason.ownerIssue() == 44 || reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57,
+                    reason.id());
         }
     }
 

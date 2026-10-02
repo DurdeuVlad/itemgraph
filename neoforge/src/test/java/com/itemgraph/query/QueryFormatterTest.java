@@ -135,7 +135,7 @@ class QueryFormatterTest {
         TraceResult result = new TraceResult("item #1", null, List.of(), window, 50, 50, false);
 
         List<String> lines = QueryFormatter.formatTrace(result);
-        assertTrue(lines.stream().anyMatch(l -> l.contains("No observed or inferred movement recorded")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("No observed, inferred, ambiguous, or unresolved evidence recorded")));
     }
 
     @Test
@@ -195,7 +195,7 @@ class QueryFormatterTest {
         assertTrue(lines.stream().anyMatch(l -> l.contains("(capped from 100)")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("[OBSERVED]")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("[INFERRED conf=0.9990]")));
-        assertTrue(lines.stream().anyMatch(l -> l.contains("2 observed hops, 1 inferred hop.")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("2 observed, 1 inferred, 0 ambiguous, 0 unresolved result(s).")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("(transformation#3 TRANSFORMATION CRAFTING)")));
         assertTrue(QueryFormatter.formatHop(unscored).contains("[INFERRED conf=(not recorded)]"));
         assertTrue(lines.stream().anyMatch(l -> l.contains("Use /ig event <id> only for observation# IDs")));
@@ -221,6 +221,19 @@ class QueryFormatterTest {
         assertTrue(lines.stream().anyMatch(l -> l.contains("Invalid edge allocations: 0")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("Invalid edge timestamps: 0")));
         assertTrue(lines.stream().anyMatch(l -> l.contains("Conservation violation on obs#1")));
+    }
+
+    @Test
+    void supersededNativeAuditEventIsFormattedAsUnresolved() {
+        AuditEventDetail event = new AuditEventDetail(4, "INTERACT_BLOCK", 1_000L,
+                null, "Alex", "minecraft:overworld", 1, 64, 2, "minecraft:chest",
+                "opened", 9L, "BLOCK_REMOVED_AT_TARGET");
+
+        String output = String.join("\n", QueryFormatter.formatAuditEvents(List.of(event), "all"));
+
+        assertTrue(output.contains("[UNRESOLVED] audit#4"));
+        assertTrue(output.contains("reason=EVIDENCE_SUPERSEDED"));
+        assertTrue(output.contains("superseded_by=audit#9"));
     }
 
     @Test

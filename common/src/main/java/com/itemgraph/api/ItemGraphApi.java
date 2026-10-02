@@ -5,7 +5,7 @@ import net.minecraft.server.MinecraftServer;
 
 /** Entry point for the preview ItemGraph Java API. */
 public final class ItemGraphApi {
-    public static final ApiVersion API_VERSION = ApiVersion.PREVIEW_1;
+    public static final ApiVersion API_VERSION = ApiVersion.PREVIEW_2;
 
     private ItemGraphApi() {}
 

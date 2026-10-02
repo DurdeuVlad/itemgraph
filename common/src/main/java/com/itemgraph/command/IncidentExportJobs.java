@@ -1,7 +1,9 @@
 package com.itemgraph.command;
 
 import com.itemgraph.query.AuditLookupFilters;
+import java.io.IOException;
 import java.nio.file.Path;
+import java.sql.SQLException;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,11 +47,17 @@ final class IncidentExportJobs {
         JOBS.put(id, job);
         try {
             QueryDispatcher.CancellableDataHandle<IncidentBundleService.ExportResult> handle =
-                    QueryDispatcher.submitCancellableData((connection, cancelled, commit) -> IncidentBundleService.export(
-                            connection, filters, dimension, position.x, position.y, position.z,
-                            IncidentBundleService.MAX_EVIDENCE_RECORDS, profile, exportDirectory, filename,
-                            () -> cancelled.getAsBoolean() || job.cancelled.get(), commit,
-                            completed -> reportProgress(job, completed)));
+                    QueryDispatcher.submitCancellableData((connection, cancelled, commit) -> {
+                        try {
+                            return IncidentBundleService.export(
+                                    connection, filters, dimension, position.x, position.y, position.z,
+                                    IncidentBundleService.MAX_EVIDENCE_RECORDS, profile, exportDirectory, filename,
+                                    () -> cancelled.getAsBoolean() || job.cancelled.get(), commit,
+                                    completed -> reportProgress(job, completed));
+                        } catch (IOException failure) {
+                            throw new SQLException("failed to write the incident bundle", failure);
+                        }
+                    });
             job.handle = handle;
             handle.future().whenComplete((result, failure) -> completeExport(job, result, failure));
             return id;

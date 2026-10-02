@@ -1,5 +1,6 @@
 package com.itemgraph.query;
 
+import com.itemgraph.audit.EventTaxonomy;
 import java.util.List;
 
 /**
@@ -50,10 +51,18 @@ public record TraceResult(
     }
 
     public long observedCount() {
-        return hops.stream().filter(h -> h.kind() == TraceHop.Kind.OBSERVED).count();
+        return hops.stream().filter(h -> h.evidenceClass() == EventTaxonomy.EvidenceClass.OBSERVED).count();
     }
 
     public long inferredCount() {
-        return hops.stream().filter(h -> h.kind() == TraceHop.Kind.INFERRED).count();
+        return hops.stream().filter(h -> h.evidenceClass() == EventTaxonomy.EvidenceClass.INFERRED).count();
+    }
+
+    public long ambiguousCount() {
+        return hops.stream().filter(h -> h.evidenceClass() == EventTaxonomy.EvidenceClass.AMBIGUOUS).count();
+    }
+
+    public long unresolvedCount() {
+        return hops.stream().filter(h -> h.evidenceClass() == EventTaxonomy.EvidenceClass.UNRESOLVED).count();
     }
 }

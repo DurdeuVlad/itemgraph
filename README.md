@@ -69,7 +69,7 @@ available for forensic review and are excluded from current graph queries.
 - **Platforms:** Fabric, NeoForge
 - **Target Minecraft version:** 1.21.1
 - **Primary deployment model:** dedicated server
-- **Preview integration API:** `com.itemgraph.api` `PREVIEW_1` in the main JAR
+- **Preview integration API:** `com.itemgraph.api` `PREVIEW_2` in the main JAR
 - **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 - **Tagline:** *Trace item movement through time.*
 
@@ -196,7 +196,7 @@ Evidence and inference are labelled per line, never once at the top.
 
 ## Preview integration API
 
-Trusted server mods can use `com.itemgraph.api` `PREVIEW_1` to register their own source
+Trusted server mods can use `com.itemgraph.api` `PREVIEW_2` to register their own source
 identity, submit bounded raw observations, and run asynchronous item/player/container
 queries. The API is shipped in this JAR, uses a service-issued `SourceHandle`, and returns
 immutable DTOs plus opaque evidence URIs—not JDBC, schema IDs, mutable Minecraft state, or

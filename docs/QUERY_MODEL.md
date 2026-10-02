@@ -45,7 +45,7 @@ Everything below this heading and above "Not yet implemented" is live.
 /ig lookup <eventType> [limit] [sinceMinutes]
 /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]
 /ig lookup player <playerName> <eventType> [limit] [sinceMinutes]
-/ig lookup filters <filter1> [filter2] [filter3] [filter4] [filter5]
+/ig lookup filters <filter1> ... <filter6>
 /ig page <page> [session]
 ```
 
@@ -70,7 +70,7 @@ names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
 | `sinceMinutes` | long ≥ 1 | unbounded | window is `[now - sinceMinutes, now]`, inclusive; GUI keeps the resolved window constant across pages |
 | `dimension` | resource location | — | required for `/ig gui container`; matches `ig_nodes.level_id` exactly; suggests loaded levels |
 | `x`, `y`, `z` | int | — | block coordinates for `/ig trace container` and `/ig gui container` |
-| `filter` | `name.value` token | — | `/ig lookup filters` accepts action, user, include, exclude, time (`m`, `h`, `d`, `y`), and required radius; at most five tokens |
+| `filter` | `name.value` token | — | `/ig lookup filters` accepts action, user, include, exclude, time (`m`, `h`, `d`, `y`), state (`observed`, `inferred`, `ambiguous`, `unresolved`), and required radius; at most six tokens |
 
 `limit` has no upper bound in the command grammar on purpose. An over-large request is
 **capped, not rejected**: an admin chasing an incident gets the first page of real output
@@ -132,8 +132,9 @@ dimension and position, then dispatches one read-only query on the bounded query
 `ig_item_transformations` with parameterized predicates, fetching at most
 `offset + limit` rows from each source. It merges rows by timestamp descending with a
 stable source/evidence-id tie-breaker before applying the global page offset. The action
-filter is OR within its comma-separated values; action, user, include/exclude, time, and
-radius filters are ANDed. A user value matches either stored name or UUID. Imported rows
+and state filters are OR within their comma-separated values; action, user, include/exclude,
+time, state, and radius filters are ANDed. State predicates run inside each source query
+before its bounded row limit. A user value matches either stored name or UUID. Imported rows
 retain `source_type=GRIEFLOGGER`, and output keeps the original action and prefixed
 `audit#`, `observation#`, or `transformation#` evidence reference. Radius checks require
 non-null coordinates and use the documented cubic bounds. No GriefLogger database is
@@ -339,7 +340,8 @@ matches collide. Lookup does not treat
 `fingerprint_hash` as an input and does not claim that equal fingerprints identify the same
 physical item.
 
-Not implemented: metadata predicates such as enchantment or trim filters, and direct
+Not implemented: metadata predicates such as enchantment or trim filters, absolute UTC
+time predicates, and direct
 `fingerprint:<hash>` syntax. For example, these remain design ideas, not accepted command
 syntax:
 
@@ -354,16 +356,20 @@ fingerprint:<hash>
 Chat output should distinguish:
 
 ```text
-[OBSERVED]      implemented
-[INFERRED]      implemented
-[AMBIGUOUS]     not implemented
-[UNRESOLVED]    not implemented
+[OBSERVED]      directly evidenced; quantity impact is the recorded amount
+[INFERRED]      deterministic reconstruction; quantity impact is the allocated amount
+[AMBIGUOUS]     candidate set shown; quantity impact is zero
+[UNRESOLVED]    stable reason shown; quantity impact is zero
 ```
 
-`[AMBIGUOUS]` and `[UNRESOLVED]` do not yet have separate line prefixes. Correlation
-ambiguity is explained with competing-candidate counts; ambiguous cross-source groups are
-labelled in observation details and cannot contribute independent quantity. An unresolved
-endpoint is rendered as `UNKNOWN`; the output does not invent a destination.
+Trace, `/ig event`, `/ig explain`, unified lookup, GUI details, API preview-2 results, and
+incident bundles use the same four-state vocabulary. Ambiguous source-equivalence rows list
+candidate observation refs prioritized by the alternatives that set the score's nearest-candidate
+gaps, capped at 50 with an explicit truncation
+flag. Unresolved rows show their stable reason code and remain queryable even when their
+disposition excludes them from active flow allocation. Unknown endpoints render as `UNKNOWN`;
+the output does not invent a destination. Unified lookup accepts state filters as
+`state.observed`, `state.inferred`, `state.ambiguous`, or `state.unresolved`.
 
 Implemented line shape for a `/ig trace item` hop:
 
@@ -395,7 +401,10 @@ results to immutable `QueryResult<FlowResult>` DTOs without exposing JDBC, schem
 `NodeRef` internals. Observed observations retain `EvidenceKind.OBSERVATION` and
 `Provenance.OBSERVED`; transformations retain `EvidenceKind.TRANSFORMATION`; inferred
 hops retain `EvidenceKind.INFERRED_EDGE`, `Provenance.INFERRED`, the stored explanation,
-and bounded supporting observation/transformation refs. Evidence is exposed only through
+and bounded supporting observation/transformation refs. Each `FlowHop` also carries
+`evidenceClass`, `reasonCode`, `candidateEvidenceIds`, `candidateEvidenceTruncated`, and
+`quantityImpact`; this DTO contract requires exact API negotiation at `PREVIEW_2`.
+Evidence is exposed only through
 opaque URIs (`itemgraph:observation:<id>`, `itemgraph:transformation:<id>`, and
 `itemgraph:inferred-edge:<id>`). API limits are validated separately but share the
 default `20`, hard cap `100`, `requestedLimit`/`appliedLimit`, and `truncated` contract;

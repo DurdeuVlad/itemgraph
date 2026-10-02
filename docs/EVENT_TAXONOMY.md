@@ -19,7 +19,7 @@ an unknown taxonomy classification, not the `UNRESOLVED` evidence class.
 
 ## Versioning
 
-The taxonomy version is `1.1.0` (`EventTaxonomy.VERSION`) and is independent of
+The taxonomy version is `1.2.0` (`EventTaxonomy.VERSION`) and is independent of
 the ItemGraph mod version and GriefLogger registry version.
 
 - Increment the major taxonomy version when an existing ID is removed, renamed,
@@ -105,6 +105,11 @@ No row should be emitted as a successful effect solely because an attempt
 callback ran. No quantity may be manufactured from an `UNKNOWN` quantity
 definition. An unavailable or ambiguous cause remains unresolved with its
 reason code and supporting evidence IDs.
+
+Issue #44 reason codes are `SOURCE_EQUIVALENCE_AMBIGUOUS`, `UNKNOWN_ENDPOINT`,
+`COMPONENT_DECODE_FAILED`, `CORRELATION_COMPETING_CANDIDATES`, and
+`EVIDENCE_SUPERSEDED`. They classify query results without changing or replacing
+stored raw evidence. Ambiguous and unresolved results allocate zero quantity.
 
 Initial unresolved reason codes are `WORLD_EVENT_API_UNAVAILABLE`,
 `WORLD_EFFECT_PARTIAL`, and `CAUSE_NOT_REPORTED` (#55);

@@ -3,6 +3,7 @@ package com.itemgraph.db;
 import com.itemgraph.db.migration.MigrationRunner;
 import com.itemgraph.db.migration.V5__ContainerFlowTopology;
 import com.itemgraph.db.migration.V20__UnverifiedArmorStandInteractionEvidence;
+import com.itemgraph.db.migration.V21__PersistInferenceCandidates;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.GriefLoggerAdapter;
 import com.itemgraph.ingest.GriefLoggerHistoricalImporter;
@@ -115,6 +116,9 @@ class MariaDbDialectIntegrationTest {
             assertEquals(DatabaseDialect.MYSQL_MARIADB, DatabaseDialect.fromConnection(conn));
             assertEquals(MigrationRunner.LATEST_VERSION,
                     MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
+            new V21__PersistInferenceCandidates().apply(conn, DatabaseDialect.MYSQL_MARIADB);
+            assertEquals("longtext", columnDataType(conn, "ig_inferred_edges", "competing_observation_ids"));
+            assertEquals("bigint", columnDataType(conn, "ig_inferred_edges", "competing_candidates_truncated"));
             // The V5 archive check deletes active observations. Run it before inserting
             // the V20 disposition fixture, which intentionally holds an FK to its row.
             assertPopulatedLegacyObservationArchive(conn);

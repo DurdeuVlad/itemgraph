@@ -93,6 +93,32 @@ class TraceQueryServiceTest extends QueryTestBase {
     }
 
     @Test
+    void inferredTraceHopCarriesPersistedCompetingCandidateIds() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long edgeId = insertEdge(playerA, playerB, fp, 2, now - 2_000, now - 1_000, 0.8125,
+                "competing fixture");
+        try (PreparedStatement statement = conn.prepareStatement("""
+                UPDATE ig_inferred_edges
+                SET competing_observation_ids = '31,29', competing_candidates_truncated = 1
+                WHERE id = ?
+                """)) {
+            statement.setLong(1, edgeId);
+            statement.executeUpdate();
+        }
+
+        TraceResult result = service.trace(conn, fp, QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        TraceHop hop = result.hops().getFirst();
+        assertEquals(com.itemgraph.audit.EventTaxonomy.EvidenceClass.INFERRED, hop.evidenceClass());
+        assertEquals("CORRELATION_COMPETING_CANDIDATES", hop.reasonCode());
+        assertEquals(List.of("observation#31", "observation#29"), hop.candidateEvidenceIds());
+        assertTrue(hop.candidateEvidenceTruncated());
+        assertTrue(QueryFormatter.formatHop(hop).contains("candidates=observation#31,observation#29,…(truncated)"));
+    }
+
+    @Test
     void sessionNetDeltaIsIncludedWhenItsIntervalOverlapsTheTraceWindow() throws Exception {
         long container = insertContainerNode(10, 64, 10);
         long player = insertPlayerNode("AlphaA");
@@ -388,7 +414,7 @@ class TraceQueryServiceTest extends QueryTestBase {
         assertTrue(result.hops().isEmpty());
         assertFalse(result.truncated());
         assertTrue(String.join("\n", QueryFormatter.formatTrace(result))
-                .contains("No observed or inferred movement recorded"));
+                .contains("No observed, inferred, ambiguous, or unresolved evidence recorded"));
     }
 
     // ------------------------------------------------------------------
@@ -617,7 +643,7 @@ class TraceQueryServiceTest extends QueryTestBase {
             }
         }
 
-        assertTrue(out.contains("2 observed hops, 1 inferred hop."), out);
+        assertTrue(out.contains("2 observed, 1 inferred, 0 ambiguous, 0 unresolved result(s)."), out);
         assertTrue(out.contains("/ig explain"), "the output must say how to see the evidence");
     }
 }

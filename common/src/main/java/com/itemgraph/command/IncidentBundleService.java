@@ -104,10 +104,23 @@ public final class IncidentBundleService {
         }
         int limit = Math.max(1, Math.min(requestedLimit, MAX_EVIDENCE_RECORDS));
         Path output = safeOutputPath(exportDirectory, filename);
-        List<UnifiedEvidenceDetail> evidence = new UnifiedEvidenceQueryService().findFiltered(
+        List<UnifiedEvidenceDetail> matchingRows = new UnifiedEvidenceQueryService().findFiltered(
                 connection, filters, dimension, centerX, centerY, centerZ, limit, 0);
+        List<UnifiedEvidenceDetail> evidence = matchingRows.stream()
+                .filter(row -> !"INFERRED".equals(row.source()))
+                .toList();
+        List<EdgeExplanation> linkedEdges = findSelectedEdges(connection, matchingRows, evidence);
+        int edgeCount = Math.min(linkedEdges.size(), MAX_EVIDENCE_RECORDS);
         List<String> payloadHashes = new ArrayList<>(evidence.size());
         EvidenceReferences evidenceReferences = new EvidenceReferences(profile);
+        for (int i = 0; i < evidence.size(); i++) {
+            evidenceReferences.addObserved(evidence.get(i), i + 1);
+        }
+        for (EdgeExplanation edge : linkedEdges.subList(0, edgeCount)) {
+            for (ObservationDetail observation : edge.evidence()) {
+                evidenceReferences.registerSupportingObservation(observation.id());
+            }
+        }
         JsonArray records = new JsonArray();
         String previousHash = GENESIS_HASH;
         for (int i = 0; i < evidence.size(); i++) {
@@ -115,8 +128,8 @@ public final class IncidentBundleService {
                 throw new IOException("export was cancelled");
             }
             UnifiedEvidenceDetail row = evidence.get(i);
-            String evidenceRef = evidenceReferences.addObserved(row, i + 1);
-            JsonObject payload = payload(row, profile, evidenceRef);
+            String evidenceRef = evidenceReferences.observedReference(row, i + 1);
+            JsonObject payload = payload(row, profile, evidenceRef, evidenceReferences);
             String payloadHash = sha256(canonicalJson(payload));
             String chainHash = sha256(previousHash + payloadHash);
             JsonObject record = new JsonObject();
@@ -132,8 +145,6 @@ public final class IncidentBundleService {
             }
         }
 
-        List<EdgeExplanation> linkedEdges = findLinkedEdges(connection, evidence);
-        int edgeCount = Math.min(linkedEdges.size(), MAX_EVIDENCE_RECORDS);
         for (int i = 0; i < edgeCount; i++) {
             if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
                 throw new IOException("export was cancelled");
@@ -391,7 +402,8 @@ public final class IncidentBundleService {
                 "bundle chain and manifest are valid");
     }
 
-    private static JsonObject payload(UnifiedEvidenceDetail row, RedactionProfile profile, String evidenceId) {
+    private static JsonObject payload(UnifiedEvidenceDetail row, RedactionProfile profile, String evidenceId,
+                                      EvidenceReferences references) {
         JsonObject payload = new JsonObject();
         payload.addProperty("record_type", "OBSERVED_EVIDENCE");
         payload.addProperty("source", row.source());
@@ -404,6 +416,23 @@ public final class IncidentBundleService {
         payload.addProperty("action", row.actionType());
         payload.addProperty("evidence_class", row.evidenceClass());
         payload.addProperty("quantity", row.quantity());
+        payload.addProperty("quantity_impact", row.quantityImpact());
+        nullable(payload, "reason_code", row.reasonCode());
+        JsonArray candidates = new JsonArray();
+        for (String candidateId : row.candidateEvidenceIds()) {
+            String reference = candidateId;
+            if (profile == RedactionProfile.REDACTED && candidateId.startsWith("observation#")) {
+                try {
+                    reference = references.candidateReference(Long.parseLong(
+                            candidateId.substring("observation#".length())));
+                } catch (NumberFormatException invalidCandidateId) {
+                    reference = "unresolved_candidate_reference";
+                }
+            }
+            candidates.add(reference);
+        }
+        payload.add("candidate_evidence_ids", candidates);
+        payload.addProperty("candidate_evidence_truncated", row.candidateEvidenceTruncated());
         if (profile == RedactionProfile.FULL) {
             nullable(payload, "dimension", row.levelName());
             nullable(payload, "x", row.x());
@@ -429,7 +458,7 @@ public final class IncidentBundleService {
             throws SQLException {
         Set<Long> observationIds = new TreeSet<>();
         for (UnifiedEvidenceDetail row : evidence) {
-            if (!"OBSERVATION".equals(row.source()) || !row.evidenceId().startsWith("observation#")) {
+            if (!row.evidenceId().startsWith("observation#")) {
                 continue;
             }
             try {
@@ -467,6 +496,29 @@ public final class IncidentBundleService {
         return List.copyOf(edges);
     }
 
+    private static List<EdgeExplanation> findSelectedEdges(Connection connection,
+                                                            List<UnifiedEvidenceDetail> matchingRows,
+                                                            List<UnifiedEvidenceDetail> evidence)
+            throws SQLException {
+        java.util.TreeMap<Long, EdgeExplanation> selected = new java.util.TreeMap<>();
+        for (EdgeExplanation edge : findLinkedEdges(connection, evidence)) {
+            selected.put(edge.id(), edge);
+        }
+        ExplainQueryService explain = new ExplainQueryService();
+        for (UnifiedEvidenceDetail row : matchingRows) {
+            if (!"INFERRED".equals(row.source()) || !row.evidenceId().startsWith("edge#")) {
+                continue;
+            }
+            try {
+                long edgeId = Long.parseLong(row.evidenceId().substring("edge#".length()));
+                explain.findEdge(connection, edgeId).ifPresent(edge -> selected.put(edge.id(), edge));
+            } catch (NumberFormatException invalidId) {
+                // Invalid result identifiers cannot be opened as stored inferred rows.
+            }
+        }
+        return List.copyOf(selected.values());
+    }
+
     private static JsonObject inferredEdgePayload(EdgeExplanation edge, RedactionProfile profile,
                                                  String inferenceId, EvidenceReferences evidenceReferences) {
         JsonObject payload = new JsonObject();
@@ -478,6 +530,27 @@ public final class IncidentBundleService {
         payload.addProperty("time_start_ms", edge.timeStart());
         payload.addProperty("time_end_ms", edge.timeEnd());
         payload.addProperty("confidence", edge.confidence());
+        payload.addProperty("quantity_impact", edge.amount());
+        JsonArray competingCandidates = new JsonArray();
+        for (String candidate : edge.competingCandidateEvidenceIds()) {
+            String reference = candidate;
+            if (profile == RedactionProfile.REDACTED && candidate.startsWith("observation#")) {
+                try {
+                    reference = evidenceReferences.candidateReference(Long.parseLong(
+                            candidate.substring("observation#".length())));
+                } catch (NumberFormatException invalidCandidateId) {
+                    reference = "unresolved_candidate_reference";
+                }
+            }
+            competingCandidates.add(reference);
+        }
+        payload.add("candidate_evidence_ids", competingCandidates);
+        payload.addProperty("candidate_evidence_truncated", edge.competingCandidatesTruncated());
+        if (!edge.competingCandidateEvidenceIds().isEmpty()) {
+            payload.addProperty("reason_code", "CORRELATION_COMPETING_CANDIDATES");
+        } else {
+            payload.add("reason_code", null);
+        }
         payload.add("origin", node(edge.from(), profile, evidenceReferences));
         payload.add("destination", node(edge.to(), profile, evidenceReferences));
 
@@ -553,8 +626,28 @@ public final class IncidentBundleService {
                 profile == RedactionProfile.FULL ? observation.sourceEventId() : null);
         payload.addProperty("timestamp_ms", observation.timestampMs());
         payload.addProperty("action", observation.actionType());
-        payload.addProperty("evidence_class", observation.kindLabel());
+        payload.addProperty("evidence_class", observation.evidenceClass().name());
         payload.addProperty("quantity", observation.amount());
+        payload.addProperty("quantity_impact", observation.quantityImpact());
+        nullable(payload, "reason_code", observation.reasonCode());
+        JsonArray candidateEvidence = new JsonArray();
+        if (observation.sourceGroup() != null) {
+            for (String candidateId : observation.sourceGroup().candidateEvidenceIds()) {
+                String reference = candidateId;
+                if (profile == RedactionProfile.REDACTED && candidateId.startsWith("observation#")) {
+                    try {
+                    reference = references.candidateReference(Long.parseLong(
+                                candidateId.substring("observation#".length())));
+                    } catch (NumberFormatException invalidCandidateId) {
+                        reference = "unresolved_candidate_reference";
+                    }
+                }
+                candidateEvidence.add(reference);
+            }
+        }
+        payload.add("candidate_evidence_ids", candidateEvidence);
+        payload.addProperty("candidate_evidence_truncated", observation.sourceGroup() != null
+                && observation.sourceGroup().candidatesTruncated());
         payload.add("origin", node(observation.origin(), profile, references));
         payload.add("destination", node(observation.destination(), profile, references));
         JsonObject fingerprint = new JsonObject();
@@ -638,9 +731,12 @@ public final class IncidentBundleService {
     private static final class EvidenceReferences {
         private final RedactionProfile profile;
         private final Map<Long, String> observationIds = new HashMap<>();
+        private final Map<Long, String> supportingObservationIds = new HashMap<>();
         private final Map<Long, String> nodeIds = new HashMap<>();
         private final Map<Long, String> fingerprintIds = new HashMap<>();
         private int nextSupportReference = 1;
+        private final Map<Long, String> externalCandidateIds = new HashMap<>();
+        private int nextExternalCandidateReference = 1;
         private int nextNodeReference = 1;
         private int nextFingerprintReference = 1;
 
@@ -653,7 +749,7 @@ public final class IncidentBundleService {
                 return row.evidenceId();
             }
             String reference = "evidence#" + ordinal;
-            if ("OBSERVATION".equals(row.source()) && row.evidenceId().startsWith("observation#")) {
+            if (row.evidenceId().startsWith("observation#")) {
                 try {
                     observationIds.put(Long.parseLong(
                             row.evidenceId().substring("observation#".length())), reference);
@@ -664,6 +760,21 @@ public final class IncidentBundleService {
             return reference;
         }
 
+        private String observedReference(UnifiedEvidenceDetail row, int ordinal) {
+            if (profile == RedactionProfile.FULL) {
+                return row.evidenceId();
+            }
+            if (row.evidenceId().startsWith("observation#")) {
+                try {
+                    return observationIds.getOrDefault(Long.parseLong(
+                            row.evidenceId().substring("observation#".length())), "evidence#" + ordinal);
+                } catch (NumberFormatException ignored) {
+                    // Preserve the raw row under its local ordinal if its key is malformed.
+                }
+            }
+            return "evidence#" + ordinal;
+        }
+
         private String inferenceReference(int ordinal, long edgeId) {
             return profile == RedactionProfile.FULL ? "edge#" + edgeId : "inference#" + ordinal;
         }
@@ -672,8 +783,35 @@ public final class IncidentBundleService {
             if (profile == RedactionProfile.FULL) {
                 return "observation#" + observationId;
             }
-            return observationIds.computeIfAbsent(observationId,
+            String includedReference = observationIds.get(observationId);
+            if (includedReference != null) {
+                return includedReference;
+            }
+            return registerSupportingObservation(observationId);
+        }
+
+        private String registerSupportingObservation(long observationId) {
+            if (profile == RedactionProfile.FULL) {
+                return "observation#" + observationId;
+            }
+            return supportingObservationIds.computeIfAbsent(observationId,
                     ignored -> "support#" + nextSupportReference++);
+        }
+
+        private String candidateReference(long observationId) {
+            if (profile == RedactionProfile.FULL) {
+                return "observation#" + observationId;
+            }
+            String includedReference = observationIds.get(observationId);
+            if (includedReference != null) {
+                return includedReference;
+            }
+            String supportingReference = supportingObservationIds.get(observationId);
+            if (supportingReference != null) {
+                return supportingReference;
+            }
+            return externalCandidateIds.computeIfAbsent(observationId,
+                    ignored -> "external-candidate#" + nextExternalCandidateReference++);
         }
 
         private String nodeReference(long nodeId) {

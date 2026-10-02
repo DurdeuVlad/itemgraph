@@ -29,7 +29,9 @@ public final class EventQueryService {
                 if (!rs.next()) {
                     return Optional.empty();
                 }
-                return Optional.of(ObservationQueries.map(rs));
+                ObservationDetail observation = ObservationQueries.map(rs);
+                return Optional.of(ObservationQueries.withAmbiguousCandidates(conn, java.util.List.of(observation))
+                        .get(0));
             }
         }
     }

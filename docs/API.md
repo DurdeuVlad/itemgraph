@@ -1,8 +1,8 @@
 # ItemGraph preview API contract
 
-Status: **implemented for issue #12** — preview boundary; no stable-API guarantee.
+Status: **implemented through issue #44** — preview boundary; no stable-API guarantee.
 Package: `com.itemgraph.api`
-API version: **`PREVIEW_1`**
+API version: **`PREVIEW_2`**
 Minecraft: **1.21.1**
 Loaders: **NeoForge and Fabric**
 Minimum Java: **21**
@@ -48,9 +48,10 @@ accepting impossible evidence.
 
 ## Version and preview policy
 
-`ItemGraphApi.API_VERSION` is `ApiVersion.PREVIEW_1`. It is separate from `mod_version`
-(`0.3.2` at the time of writing). `PREVIEW_1` is the first public boundary and may change
-incompatibly before ItemGraph 1.0.
+`ItemGraphApi.API_VERSION` is `ApiVersion.PREVIEW_2`. It is separate from `mod_version`
+(`0.3.2` at the time of writing). PREVIEW_2 adds evidence class, reason, competing candidate
+references, candidate truncation, and quantity impact to each `FlowHop`. PREVIEW_1 consumers
+must renegotiate and update before calling this runtime.
 
 Policy:
 
@@ -108,7 +109,7 @@ Before calling `ItemGraphApi.get(server)` or making any service call, a consumer
 compare its source-controlled required API number with the runtime:
 
 ```java
-private static final int REQUIRED_ITEMGRAPH_API_VERSION = 1;
+private static final int REQUIRED_ITEMGRAPH_API_VERSION = 2;
 
 ApiCompatibility compatibility =
         ItemGraphApi.negotiate(REQUIRED_ITEMGRAPH_API_VERSION);
@@ -126,7 +127,7 @@ are shared.
 
 ## Public signatures
 
-The following signatures are the implemented `PREVIEW_1` contract. Any breaking change
+The following signatures are the implemented `PREVIEW_2` contract. Any breaking change
 must increment the preview API number and be named in `CHANGELOG.md` and this document.
 
 ### Entry point and lifecycle
@@ -138,7 +139,7 @@ import java.util.Optional;
 import net.minecraft.server.MinecraftServer;
 
 public final class ItemGraphApi {
-    public static final ApiVersion API_VERSION = ApiVersion.PREVIEW_1;
+    public static final ApiVersion API_VERSION = ApiVersion.PREVIEW_2;
 
     private ItemGraphApi() {}
 
@@ -162,12 +163,13 @@ public record ApiCompatibility(
 }
 
 public enum ApiVersion {
-    PREVIEW_1;
+    PREVIEW_1,
+    PREVIEW_2;
 
     public int number();      // 1
     public String channel();  // "preview"
     public boolean preview(); // true
-    public String label();    // "preview-1"
+    public String label();    // "preview-1" or "preview-2"
 }
 ```
 
@@ -628,7 +630,12 @@ public record FlowHop(
         String detail,
         String explanation,              // stored explanation for INFERRED, otherwise null
         java.util.List<EvidenceRef> supportingEvidence,
-        boolean supportingEvidenceTruncated) {
+        boolean supportingEvidenceTruncated,
+        com.itemgraph.audit.EventTaxonomy.EvidenceClass evidenceClass,
+        String reasonCode,
+        java.util.List<String> candidateEvidenceIds,
+        boolean candidateEvidenceTruncated,
+        int quantityImpact) {
 }
 ```
 
@@ -639,7 +646,9 @@ foreign key. `supportingEvidence` is empty for `OBSERVED` hops and non-empty for
 `INFERRED` hops; it carries the evidence the correlation engine cited, up to the existing
 50-row explanation bound. `supportingEvidenceTruncated` is true when more cited rows were
 left out. `confidence` is the deterministic stored score, never an invented AI
-confidence.
+confidence. `candidateEvidenceIds` contains persisted competing observation references for
+an inferred edge or source-group candidates for an ambiguous observation. `quantityImpact` is
+zero for ambiguous or unresolved evidence and equals the claimed amount for an inferred edge.
 
 `EndpointDescriptor.stableKey` values are:
 

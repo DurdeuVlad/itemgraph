@@ -94,11 +94,13 @@ public final class QueryFormatter {
             String supersession = event.supersedingEventId() == null ? ""
                     : " superseded_by=audit#" + event.supersedingEventId()
                     + " reason=" + event.supersessionReason();
-            lines.add(PREFIX + "[OBSERVED] audit#" + event.id() + " " + event.eventType()
+            String evidenceClass = event.supersedingEventId() == null ? "OBSERVED" : "UNRESOLVED";
+            String reason = event.supersedingEventId() == null ? "" : " reason=EVIDENCE_SUPERSEDED";
+            lines.add(PREFIX + "[" + evidenceClass + "] audit#" + event.id() + " " + event.eventType()
                     + " actor=" + actor + " at " + event.levelName()
                     + " [" + formatCoordinate(event.x()) + ", "
                     + formatCoordinate(event.y()) + ", " + formatCoordinate(event.z()) + "]"
-                    + " time=" + formatTime(event.timestampMs()) + subject + detail + supersession);
+                    + " time=" + formatTime(event.timestampMs()) + subject + detail + reason + supersession);
         }
         return lines;
     }
@@ -119,13 +121,18 @@ public final class QueryFormatter {
                 location += " [" + formatCoordinate(row.x()) + ", "
                         + formatCoordinate(row.y()) + ", " + formatCoordinate(row.z()) + "]";
             }
-            String quantity = row.quantity() == 0 ? "" : " quantity=" + row.quantity();
+            String quantity = row.quantity() == 0 ? "" : " quantity=" + row.quantity()
+                    + (row.quantityImpact() == row.quantity() ? "" : " quantity_impact=" + row.quantityImpact());
             String subject = row.subjectId() == null ? "" : " subject=" + row.subjectId();
             String detail = row.detail() == null ? "" : " detail=" + escapeDetail(row.detail());
+            String reason = row.reasonCode() == null ? "" : " reason=" + row.reasonCode();
+            String candidates = row.candidateEvidenceIds().isEmpty() ? ""
+                    : " candidates=" + String.join(",", row.candidateEvidenceIds())
+                        + (row.candidateEvidenceTruncated() ? ",…(truncated)" : "");
             lines.add(PREFIX + "[" + row.evidenceClass() + "] " + row.source() + " "
                     + row.evidenceId() + " " + row.actionType()
                     + " actor=" + actor + " at " + location
-                    + " time=" + formatTime(row.timestampMs()) + quantity + subject + detail);
+                    + " time=" + formatTime(row.timestampMs()) + quantity + subject + reason + candidates + detail);
         }
         return lines;
     }
@@ -204,9 +211,12 @@ public final class QueryFormatter {
         lines.add(indent + "source:      " + obs.sourceType()
                 + (obs.sourceEventId() != null ? " event#" + obs.sourceEventId() : " (no source event id)"));
         lines.add(indent + "action:      " + obs.actionType() + "  amount: " + obs.amount() + "x");
+        lines.add(indent + "evidence:    " + obs.evidenceClass().name()
+                + (obs.reasonCode() == null ? "" : " reason=" + obs.reasonCode()));
+        lines.add(indent + "quantity:    impact=" + obs.quantityImpact()
+                + (obs.quantityImpact() == obs.amount() ? "" : " of reported=" + obs.amount()));
         if (obs.dispositionReason() != null) {
-            lines.add(indent + "evidence:    excluded from current item flow; " + obs.dispositionReason());
-            lines.add(indent + "quantity:    historical callback amount is not proof of a transfer");
+            lines.add(indent + "disposition: excluded from current item flow; " + obs.dispositionReason());
         }
         lines.add(indent + "item:        " + obs.fingerprint().describeFull());
         lines.add(indent + "origin:      " + node(obs.origin()));
@@ -221,7 +231,10 @@ public final class QueryFormatter {
                         + "; role=" + group.memberRole() + "; canonical observation #" + group.canonicalObservationId());
             } else {
                 lines.add(indent + "source group: ambiguous #" + group.id()
-                        + "; no independent quantity capacity; " + group.explanation());
+                        + "; no independent quantity capacity; candidates="
+                        + String.join(",", group.candidateEvidenceIds())
+                        + (group.candidatesTruncated() ? " (truncated)" : "")
+                        + "; " + group.explanation());
             }
         }
         lines.add(indent + "correlated:  " + (obs.correlatedAtMs() == null
@@ -260,6 +273,10 @@ public final class QueryFormatter {
         lines.add("  confidence:  " + formatConfidence(edge.confidence()));
         lines.add("  inferred at: " + formatTime(edge.createdAtMs()));
         lines.add("  why:         " + (edge.explanation() == null ? "(no explanation stored)" : edge.explanation()));
+        if (!edge.competingCandidateEvidenceIds().isEmpty()) {
+            lines.add("  competing candidates: " + String.join(",", edge.competingCandidateEvidenceIds())
+                    + (edge.competingCandidatesTruncated() ? " (truncated)" : ""));
+        }
 
         if (edge.evidence().isEmpty()) {
             lines.add("  supporting evidence: NONE RECORDED - this edge cites no observations and cannot be justified.");
@@ -298,7 +315,7 @@ public final class QueryFormatter {
                 + (result.limitWasCapped() ? " (capped from " + result.requestedLimit() + ")" : ""));
 
         if (result.hops().isEmpty()) {
-            lines.add("  No observed or inferred movement recorded for "
+            lines.add("  No observed, inferred, ambiguous, or unresolved evidence recorded for "
                     + (result.fingerprint() != null ? "this fingerprint" : result.targetDescription())
                     + " in that window.");
             return lines;
@@ -314,8 +331,8 @@ public final class QueryFormatter {
             lines.add("  Session net container deltas are interval measurements; intra-session order is unknown, and zero-net activity is not represented.");
         }
 
-        lines.add("  " + result.observedCount() + " observed hop" + (result.observedCount() == 1 ? "" : "s")
-                + ", " + result.inferredCount() + " inferred hop" + (result.inferredCount() == 1 ? "" : "s") + ".");
+        lines.add("  " + result.observedCount() + " observed, " + result.inferredCount() + " inferred, "
+                + result.ambiguousCount() + " ambiguous, " + result.unresolvedCount() + " unresolved result(s).");
         if (result.truncated()) {
             lines.add("  TRUNCATED at " + result.appliedLimit()
                     + " hops - more movement matched. Narrow the window or raise the limit (max "
@@ -337,9 +354,13 @@ public final class QueryFormatter {
     }
 
     public static String formatHop(TraceHop hop, boolean showItem) {
-        String label = hop.kind() == TraceHop.Kind.OBSERVED
-                ? "[OBSERVED]"
-                : "[INFERRED conf=" + formatConfidence(hop.confidence()) + "]";
+        String label = switch (hop.evidenceClass()) {
+            case OBSERVED -> "[OBSERVED]";
+            case INFERRED -> "[INFERRED conf=" + formatConfidence(hop.confidence())
+                    + (hop.reasonCode() == null ? "" : " reason=" + hop.reasonCode()) + "]";
+            case AMBIGUOUS -> "[AMBIGUOUS reason=" + hop.reasonCode() + "]";
+            case UNRESOLVED -> "[UNRESOLVED reason=" + hop.reasonCode() + "]";
+        };
 
         String reference = switch (hop.source()) {
             case OBSERVATION -> "(observation#" + hop.refId() + " " + hop.detail() + ")";
@@ -350,12 +371,18 @@ public final class QueryFormatter {
         String itemSuffix = (showItem && hop.item() != null && hop.item().resolved())
                 ? " [" + hop.item().describe() + "]"
                 : "";
+        String candidates = hop.candidateEvidenceIds().isEmpty() ? ""
+                : " candidates=" + String.join(",", hop.candidateEvidenceIds())
+                    + (hop.candidateEvidenceTruncated() ? ",…(truncated)" : "");
 
         String time = hop.endMs() > hop.timestampMs()
                 ? "during [" + formatTime(hop.timestampMs()) + " -> " + formatTime(hop.endMs()) + "]"
                 : "at " + formatTime(hop.timestampMs());
+        String quantity = hop.quantityImpact() == hop.amount()
+                ? hop.amount() + "x"
+                : "reported=" + hop.amount() + "x quantity_impact=" + hop.quantityImpact();
         return label + " " + nodeShort(hop.origin()) + " -> " + nodeShort(hop.destination())
-                + " : " + hop.amount() + "x" + itemSuffix + " " + time + " " + reference;
+                + " : " + quantity + itemSuffix + " " + time + " " + reference + candidates;
     }
 
     public static String traceNoSuchFingerprint(long fingerprintId) {

@@ -142,5 +142,8 @@ jobs:
       - name: Reject invalid NeoForge server configuration before database startup
         run: python3 tools/test_neoforge_invalid_config_startup.py
 
+      - name: Build loader JAR inputs for independent API consumer fixtures
+        run: ./gradlew :neoforge:jar :fabric:remapJar --no-daemon --max-workers=1
+
       - name: Run independent preview API consumers on both loaders
         run: ./gradlew :examples:api-consumer:runServer :examples:api-consumer-fabric:runServer --no-daemon --max-workers=1

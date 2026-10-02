@@ -81,6 +81,11 @@ redacted payload also retains privacy-safe structured scoring factors parsed
 from the stored explanation: allocation and residual quantities, correlation
 window, candidate counts, competing-candidate time gaps, and confidence
 multipliers. Names, coordinates, and UUIDs are not copied into these fields.
+Candidate IDs use bundle-local `evidence#N` references when included as top-level
+records and `support#N` when included inside an inferred-edge payload. Otherwise
+the redacted payload uses `external-candidate#N`, an opaque reference to an
+observation outside the bundle with no observation payload included. Full
+exports retain exact `observation#ID` candidate references.
 
 The full profile includes the stored explanation and exact identity/location
 fields. The explanation is read from the persisted inference row; it is never

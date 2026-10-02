@@ -5,6 +5,9 @@ plugins {
 version = '0.1.0'
 group = 'com.example'
 
+def apiConsumerServerDir = layout.buildDirectory.dir('api-consumer-fabric-server').get().asFile
+def apiConsumerResultFile = new File(apiConsumerServerDir, 'result.txt')
+
 base {
     archivesName = 'itemgraph-api-consumer-fabric'
 }
@@ -22,10 +25,8 @@ loom {
     runs {
         server {
             server()
-            runDir rootProject.layout.buildDirectory.dir('api-consumer-fabric-server').get().asFile.absolutePath
-            systemProperties.put('itemgraph.api.consumer.result',
-                    rootProject.layout.buildDirectory.file('api-consumer-fabric-server/result.txt')
-                    .get().asFile.absolutePath)
+            runDir apiConsumerServerDir.absolutePath
+            property 'itemgraph.api.consumer.result', apiConsumerResultFile.absolutePath
         }
     }
     mods {
@@ -49,15 +50,12 @@ tasks.named('processResources', ProcessResources) {
 tasks.named('runServer') {
     dependsOn ':fabric:remapJar'
     doFirst {
-        def directory = rootProject.layout.buildDirectory.dir('api-consumer-fabric-server').get().asFile
-        directory.mkdirs()
-        new File(directory, 'eula.txt').setText('eula=true\n', 'UTF-8')
-        new File(directory, 'result.txt').delete()
+        apiConsumerServerDir.mkdirs()
+        new File(apiConsumerServerDir, 'eula.txt').setText('eula=true\n', 'UTF-8')
+        apiConsumerResultFile.delete()
     }
     doLast {
-        def result = rootProject.layout.buildDirectory.file('api-consumer-fabric-server/result.txt')
-                .get().asFile
-        if (!result.isFile() || !result.getText('UTF-8').startsWith('PASS:')) {
+        if (!apiConsumerResultFile.isFile() || !apiConsumerResultFile.getText('UTF-8').startsWith('PASS:')) {
             throw new GradleException('Fabric API consumer fixture did not complete successfully')
         }
     }

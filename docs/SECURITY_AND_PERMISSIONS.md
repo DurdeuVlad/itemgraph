@@ -157,7 +157,7 @@ container's contents and does not relax any GUI permission checks.
 
 ## Preview API boundary
 
-`docs/API.md` implements a `com.itemgraph.api` `PREVIEW_1` Java boundary for installed
+`docs/API.md` implements a `com.itemgraph.api` `PREVIEW_2` Java boundary for installed
 server mods, not a player-facing permission grant. Trusted consumers may submit direct
 observations and read full flow results, but they remain responsible for checking the
 receiving player's permissions before displaying player UUIDs, coordinates, hidden
@@ -165,7 +165,7 @@ inventories, or custom metadata. `SourceHandle` is a final service-issued capabi
 to the server/service generation, so a caller cannot implement or reuse a forged handle.
 Registration validates that the claimed `modId` exists in `ModList` and logs the claim
 prominently; Java cannot cryptographically prove which loaded mod called the method, so the
-PREVIEW_1 trust boundary still requires consumers to pass their own ID. API persistence writes only raw
+PREVIEW_2 trust boundary still requires consumers to pass their own ID. API persistence writes only raw
 `EXTERNAL_API` observations and the source registry in ItemGraph's own database; it does
 not expose JDBC, schema objects, GriefLogger access, mutable Minecraft state, or
 caller-provided inferred edges/confidence.

@@ -36,6 +36,8 @@ public final class ExplainQueryService {
                    e.confidence AS e_confidence,
                    e.explanation AS e_explanation,
                    e.created_at AS e_created_at,
+                   e.competing_observation_ids AS e_competing_observation_ids,
+                   e.competing_candidates_truncated AS e_competing_candidates_truncated,
                    e.from_node_id AS origin_id,
                    origin.node_type AS origin_type,
                    origin.custom_label AS origin_label,
@@ -113,7 +115,10 @@ public final class ExplainQueryService {
                         rs.getLong("e_created_at"),
                         evidence,
                         truncated,
-                        rs.getString("e_edge_state")
+                        rs.getString("e_edge_state"),
+                        EdgeExplanation.parseCompetingCandidateIds(
+                                rs.getString("e_competing_observation_ids")),
+                        rs.getInt("e_competing_candidates_truncated") != 0
                 ));
             }
         }
@@ -130,6 +135,6 @@ public final class ExplainQueryService {
                 }
             }
         }
-        return evidence;
+        return ObservationQueries.withAmbiguousCandidates(conn, evidence);
     }
 }

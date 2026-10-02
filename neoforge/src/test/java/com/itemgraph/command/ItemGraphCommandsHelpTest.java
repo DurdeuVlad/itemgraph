@@ -118,7 +118,7 @@ class ItemGraphCommandsHelpTest {
                 "ItemGraph exposes its two named roots without GriefLogger command aliases");
         CommandNode<CommandSourceStack> root = dispatcher.getRoot().getChild("itemgraph");
         assertNotNull(root);
-        assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect"),
+        assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect", "export"),
                 root.getChildren().stream().map(CommandNode::getName).collect(Collectors.toSet()));
         assertEquals(Set.of("now", "history"), childNames(root, "ingest"));
         assertEquals(Set.of("item", "player", "container"), childNames(root, "trace"));
@@ -453,11 +453,12 @@ class ItemGraphCommandsHelpTest {
         assertEquals(List.of("Alex"), parsed.playerNames());
         assertEquals(List.of("minecraft:diamond_ore"), parsed.includeSubjects());
         assertEquals(50.0, parsed.radiusBlocks());
-        AuditLookupFilters fiveFilters = AuditLookupFilters.parse(
-                "action.break_block user.Alex include.stone time.1h radius.50", 10_000_000L);
-        assertEquals(List.of("BREAK_BLOCK"), fiveFilters.eventTypes());
-        assertEquals(List.of("Alex"), fiveFilters.playerNames());
-        assertEquals(List.of("minecraft:stone"), fiveFilters.includeSubjects());
+        AuditLookupFilters sixFilters = AuditLookupFilters.parse(
+                "action.break_block user.Alex include.stone time.1h radius.50 state.unresolved", 10_000_000L);
+        assertEquals(List.of("BREAK_BLOCK"), sixFilters.eventTypes());
+        assertEquals(List.of("Alex"), sixFilters.playerNames());
+        assertEquals(List.of("minecraft:stone"), sixFilters.includeSubjects());
+        assertEquals(List.of("UNRESOLVED"), sixFilters.evidenceClasses());
         assertEquals(List.of("PROJECTILE_SPAWN_ACCEPTED"),
                 AuditLookupFilters.parse("action.projectile_spawn_accepted radius.10", 10_000_000L)
                         .eventTypes());
@@ -483,8 +484,8 @@ class ItemGraphCommandsHelpTest {
                 new InvalidLookup("action.break_block a.join radius.10", "filter 'action' may be used once"),
                 new InvalidLookup("include.stone exclude.dirt radius.10",
                         "include and exclude filters cannot be combined"),
-                new InvalidLookup("action.break_block user.Alex include.stone time.1h radius.10 exclude.dirt",
-                        "at most 5 filters are allowed"));
+                new InvalidLookup("action.break_block user.Alex include.stone time.1h radius.10 state.observed action.join",
+                        "at most 6 filters are allowed"));
 
         for (String root : List.of("ig", "itemgraph")) {
             for (String lookupPrefix : List.of(root + " lookup ", root + " lookup filters ")) {

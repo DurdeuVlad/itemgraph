@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "1.1.0";
+    public static final String VERSION = "1.2.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -130,6 +130,16 @@ public final class EventTaxonomy {
     private static final LoaderSupport HISTORICAL_ONLY = new LoaderSupport(LoaderStatus.HISTORICAL_ONLY,
             "NO_NATIVE_WRITER_HISTORICAL_QUERY_ONLY");
     private static final List<ReasonCode> UNRESOLVED_REASON_CODES = List.of(
+            new ReasonCode("SOURCE_EQUIVALENCE_AMBIGUOUS", 44,
+                    "Several source rows remain possible matches; the group has no canonical allocation."),
+            new ReasonCode("UNKNOWN_ENDPOINT", 44,
+                    "The raw row does not identify a resolvable source or destination endpoint."),
+            new ReasonCode("COMPONENT_DECODE_FAILED", 44,
+                    "The raw item component payload is retained but could not be decoded."),
+            new ReasonCode("CORRELATION_COMPETING_CANDIDATES", 44,
+                    "More than one compatible movement candidate prevents deterministic allocation."),
+            new ReasonCode("EVIDENCE_SUPERSEDED", 44,
+                    "The retained evidence is superseded for active flow claims by linked evidence."),
             new ReasonCode("WORLD_EVENT_API_UNAVAILABLE", 55,
                     "The loader exposes no authoritative callback for this world event."),
             new ReasonCode("WORLD_EFFECT_PARTIAL", 55,

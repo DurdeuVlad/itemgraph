@@ -19,5 +19,11 @@ plugins {
 
 rootProject.name = 'itemgraph'
 
-include 'core', 'common', 'fabric', 'neoforge',
-        'examples:api-consumer', 'examples:api-consumer-fabric'
+include 'core', 'common', 'fabric', 'neoforge'
+
+// These binary consumer fixtures intentionally compile against built mod JARs.
+// Keep them out of unrelated unit-test configuration, and include them when a
+// caller explicitly runs a fixture task after preparing its loader JAR input.
+if (gradle.startParameter.taskNames.any { it.startsWith(':examples:') || it.startsWith('examples:') }) {
+    include 'examples:api-consumer', 'examples:api-consumer-fabric'
+}

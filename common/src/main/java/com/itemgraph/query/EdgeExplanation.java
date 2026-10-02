@@ -41,7 +41,9 @@ public record EdgeExplanation(
         long createdAtMs,
         List<ObservationDetail> evidence,
         boolean evidenceTruncated,
-        String edgeState
+        String edgeState,
+        List<String> competingCandidateEvidenceIds,
+        boolean competingCandidatesTruncated
 ) {
 
     public EdgeExplanation(
@@ -59,11 +61,32 @@ public record EdgeExplanation(
             boolean evidenceTruncated
     ) {
         this(id, from, to, fingerprint, amount, timeStart, timeEnd, confidence, explanation,
-                createdAtMs, evidence, evidenceTruncated, "ACTIVE");
+                createdAtMs, evidence, evidenceTruncated, "ACTIVE", List.of(), false);
+    }
+
+    public EdgeExplanation(long id, NodeRef from, NodeRef to, FingerprintRef fingerprint,
+                           int amount, long timeStart, long timeEnd, double confidence,
+                           String explanation, long createdAtMs, List<ObservationDetail> evidence,
+                           boolean evidenceTruncated, String edgeState) {
+        this(id, from, to, fingerprint, amount, timeStart, timeEnd, confidence, explanation,
+                createdAtMs, evidence, evidenceTruncated, edgeState, List.of(), false);
     }
 
     public EdgeExplanation {
         evidence = List.copyOf(evidence);
+        competingCandidateEvidenceIds = List.copyOf(competingCandidateEvidenceIds == null
+                ? List.of() : competingCandidateEvidenceIds);
+    }
+
+    public static List<String> parseCompetingCandidateIds(String stored) {
+        if (stored == null || stored.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(stored.split(","))
+                .map(String::trim)
+                .filter(value -> value.matches("[1-9][0-9]*"))
+                .map(value -> "observation#" + value)
+                .toList();
     }
 
     /** Always {@code INFERRED}. See the class javadoc. */

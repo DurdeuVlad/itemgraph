@@ -1,7 +1,15 @@
 package com.itemgraph.query;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collection;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 
 /**
  * The one SQL projection every observation-reading query uses.
@@ -22,6 +30,8 @@ import java.sql.SQLException;
  * listing is far more dangerous than an ugly one.
  */
 final class ObservationQueries {
+
+    private static final int MAX_CANDIDATE_IDS_PER_GROUP = 50;
 
     private ObservationQueries() {}
 
@@ -70,7 +80,8 @@ final class ObservationQueries {
                    o.fingerprint_id AS o_fingerprint_id,
                    f.item_id AS fp_item_id,
                    f.custom_name AS fp_custom_name,
-                   f.fingerprint_hash AS fp_hash
+                   f.fingerprint_hash AS fp_hash,
+                   f.component_summary AS fp_component_summary
             FROM ig_observations o
             LEFT JOIN ig_nodes origin ON origin.id = o.node_id
             LEFT JOIN ig_nodes dest ON dest.id = o.target_node_id
@@ -93,7 +104,9 @@ final class ObservationQueries {
         String itemId = rs.getString("fp_item_id");
         FingerprintRef fingerprint = itemId == null
                 ? FingerprintRef.missing(fingerprintId)
-                : new FingerprintRef(fingerprintId, itemId, rs.getString("fp_custom_name"), rs.getString("fp_hash"));
+                : new FingerprintRef(fingerprintId, itemId, rs.getString("fp_custom_name"), rs.getString("fp_hash"),
+                    rs.getString("fp_component_summary") != null
+                            && rs.getString("fp_component_summary").contains("component_decode=UNRESOLVED"));
 
         long sourceEventId = rs.getLong("o_source_event_id");
         Long sourceEvent = rs.wasNull() ? null : sourceEventId;
@@ -139,6 +152,68 @@ final class ObservationQueries {
                 sourceGroup,
                 rs.getString("o_disposition_reason")
         );
+    }
+
+    /**
+     * Loads a bounded, deterministic candidate prefix for each ambiguous group in a result
+     * page. The extra row marks truncation; candidates remain evidence references and are
+     * never quantity allocations.
+     */
+    static List<ObservationDetail> withAmbiguousCandidates(Connection conn,
+                                                            List<ObservationDetail> observations)
+            throws SQLException {
+        LinkedHashSet<Long> groupIds = new LinkedHashSet<>();
+        for (ObservationDetail observation : observations) {
+            ObservationDetail.SourceGroup group = observation.sourceGroup();
+            if (group != null && "AMBIGUOUS".equals(group.state())) {
+                groupIds.add(group.id());
+            }
+        }
+        Map<Long, CandidateSet> candidatesByGroup = candidateEvidenceForGroups(conn, groupIds);
+        return observations.stream().map(observation -> {
+            ObservationDetail.SourceGroup group = observation.sourceGroup();
+            if (group == null || !"AMBIGUOUS".equals(group.state())) {
+                return observation;
+            }
+            CandidateSet candidates = candidatesByGroup.get(group.id());
+            return candidates == null ? observation
+                    : observation.withCandidateEvidenceIds(candidates.ids(), candidates.truncated());
+        }).toList();
+    }
+
+    static Map<Long, CandidateSet> candidateEvidenceForGroups(Connection conn, Collection<Long> groupIds)
+            throws SQLException {
+        Map<Long, CandidateSet> candidatesByGroup = new LinkedHashMap<>();
+        try (PreparedStatement statement = conn.prepareStatement("""
+                SELECT observation_id FROM ig_observation_group_members
+                WHERE group_id = ? AND member_role = 'CANDIDATE'
+                ORDER BY observation_id ASC LIMIT ?
+                """)) {
+            for (long groupId : groupIds) {
+                statement.setLong(1, groupId);
+                statement.setInt(2, MAX_CANDIDATE_IDS_PER_GROUP + 1);
+                List<String> candidates = new ArrayList<>();
+                boolean truncated = false;
+                try (ResultSet result = statement.executeQuery()) {
+                    while (result.next()) {
+                        if (candidates.size() == MAX_CANDIDATE_IDS_PER_GROUP) {
+                            truncated = true;
+                            break;
+                        }
+                        long observationId = result.getLong(1);
+                        candidates.add("observation#" + observationId);
+                    }
+                }
+                candidatesByGroup.put(groupId, new CandidateSet(candidates, truncated));
+            }
+        }
+        return candidatesByGroup;
+    }
+
+    record CandidateSet(List<String> ids, boolean truncated) {
+        CandidateSet {
+            ids = List.copyOf(ids);
+        }
     }
 
     /**

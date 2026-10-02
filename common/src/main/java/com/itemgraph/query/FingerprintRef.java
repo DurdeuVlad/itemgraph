@@ -13,11 +13,16 @@ package com.itemgraph.query;
  * @param customName      custom name if the item carried one, else null
  * @param fingerprintHash deterministic canonical-metadata hash
  */
-public record FingerprintRef(long id, String itemId, String customName, String fingerprintHash) {
+public record FingerprintRef(long id, String itemId, String customName, String fingerprintHash,
+                             boolean componentDecodeFailed) {
+
+    public FingerprintRef(long id, String itemId, String customName, String fingerprintHash) {
+        this(id, itemId, customName, fingerprintHash, false);
+    }
 
     /** A fingerprint id with no corresponding row (dangling reference). */
     public static FingerprintRef missing(long id) {
-        return new FingerprintRef(id, null, null, null);
+        return new FingerprintRef(id, null, null, null, false);
     }
 
     public boolean resolved() {

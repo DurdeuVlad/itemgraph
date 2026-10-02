@@ -287,7 +287,7 @@ the existing GriefLogger database remain out of scope for writes.
 ## M7 — Preview integration API
 
 Issue #9 defined the maintainer-approved public contract in `docs/API.md`; issue #12
-implements it as `com.itemgraph.api` `PREVIEW_1`, shipped in the main ItemGraph JAR and
+implements it as `com.itemgraph.api` `PREVIEW_2`, shipped in the main ItemGraph JAR and
 consumed by trusted NeoForge mods through local-JAR `compileOnly` plus a runtime
 `itemgraph` mod dependency.
 
@@ -410,7 +410,7 @@ including accepted projectile-spawn evidence.
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
   bounded native audit evidence; `/ig lookup near` adds exact dimension and
   bounded radius filters.
-- `/ig lookup filters <filter1> ... <filter5>` implements the published
+- `/ig lookup filters <filter1> ... <filter6>` implements the published
   GriefLogger `name.value` vocabulary for action, user, include, exclude, time,
   and required radius filters. `UnifiedEvidenceQueryService` merges native audit,
   item observations, transformations, and normalized historical `GRIEFLOGGER`
