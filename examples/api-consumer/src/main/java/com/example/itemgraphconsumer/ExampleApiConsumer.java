@@ -4,6 +4,7 @@ import com.itemgraph.api.ApiCompatibility;
 import com.itemgraph.api.DirectObservation;
 import com.itemgraph.api.RegistrationStatus;
 import com.itemgraph.api.SubmissionStatus;
+import com.itemgraph.api.SubmissionResult;
 import com.itemgraph.api.QueryStatus;
 import com.itemgraph.api.ExternalInventoryEndpoint;
 import com.itemgraph.api.ItemGraphApi;
@@ -54,15 +55,16 @@ public final class ExampleApiConsumer {
                                 SourceRegistration.of(MOD_ID, "ItemGraph API Consumer Example"))
                         .thenCompose(registration -> {
                             if (registration.source() == null) {
-                                return CompletableFuture.failedFuture(new IllegalStateException(
+                                return CompletableFuture.<RegisteredSubmission>failedFuture(new IllegalStateException(
                                         "source registration returned " + registration.status()));
                             }
                             if (registration.status() != RegistrationStatus.REGISTERED
                                     && registration.status() != RegistrationStatus.UNCHANGED
                                     && registration.status() != RegistrationStatus.UPDATED) {
-                                return CompletableFuture.failedFuture(new IllegalStateException(
+                                return CompletableFuture.<RegisteredSubmission>failedFuture(new IllegalStateException(
                                         "source registration returned " + registration.status()));
                             }
+                            String sourceModId = registration.source().modId();
                             DirectObservation observation = new DirectObservation(
                                     STABLE_FIXTURE_EVENT_ID,
                                     System.currentTimeMillis(),
@@ -79,11 +81,13 @@ public final class ExampleApiConsumer {
                                     null,
                                     null,
                                     Map.of("fixture", "server-started"));
-                            return service.submitObservation(registration.source(), observation);
+                            return service.submitObservation(registration.source(), observation)
+                                    .thenApply(submission -> new RegisteredSubmission(sourceModId, submission));
                         })
-                        .thenCompose(submission -> {
+                        .thenCompose(registeredSubmission -> {
+                            SubmissionResult submission = registeredSubmission.submission();
                             if (submission.status() != SubmissionStatus.PERSISTED) {
-                                return CompletableFuture.failedFuture(new IllegalStateException(
+                                return CompletableFuture.<String>failedFuture(new IllegalStateException(
                                         "fixture evidence returned " + submission.status()));
                             }
                             return service.traceItem(
@@ -106,14 +110,15 @@ public final class ExampleApiConsumer {
                                             throw new IllegalStateException(
                                                     "observed fixture hop has invalid PREVIEW_2 state fields");
                                         }
-                                        return "source=" + registration.source().modId()
+                                        return "source=" + registeredSubmission.sourceModId()
                                                 + ", event=" + STABLE_FIXTURE_EVENT_ID
                                                 + ", submission=" + submission.status()
                                                 + ", query=" + query.status();
                                     });
                         })
-                        .whenComplete((result, failure) -> finish(server, failure == null,
-                                failure == null ? result : failure.toString())),
+                        .whenComplete((result, failure) -> finish(server, failure == null && result != null,
+                                failure == null ? (result == null ? "API consumer returned no result" : result)
+                                        : failure.toString())),
                 () -> finish(server, false, "ItemGraph service is not available"));
     }
 
@@ -134,4 +139,6 @@ public final class ExampleApiConsumer {
             server.halt(false);
         });
     }
+
+    private record RegisteredSubmission(String sourceModId, SubmissionResult submission) { }
 }
