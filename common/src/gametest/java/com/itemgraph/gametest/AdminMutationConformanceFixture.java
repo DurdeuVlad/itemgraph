@@ -42,8 +42,10 @@ public final class AdminMutationConformanceFixture {
         var doubleSlab = slab.defaultBlockState().setValue(
                 net.minecraft.world.level.block.SlabBlock.TYPE,
                 net.minecraft.world.level.block.state.properties.SlabType.DOUBLE);
+        helper.assertTrue(AdminMutationCapture.isCreativePlacedBlockChange(bottomSlab, doubleSlab, slab, true),
+                "a slab merge at the clicked placement position must count as a block placement");
         helper.assertFalse(AdminMutationCapture.isCreativePlacedBlockChange(bottomSlab, doubleSlab, slab),
-                "same-block state changes such as slab merging must have identical placement classification");
+                "same-type state changes away from the clicked placement position must not count as placement");
         InternalObservationService service = InternalObservationService.getInstance();
         long enqueuedBefore = service.getTotalEnqueued();
         long persistedBefore = service.getTotalPersisted();
@@ -138,6 +140,25 @@ public final class AdminMutationConformanceFixture {
                         .is(net.minecraft.world.level.block.Blocks.STONE),
                 "creative block placement must change the world at the clicked target; result=" + placementResult
                         + " target=" + placedBlock + " player=" + player.position());
+        BlockPos slabMergePos = helper.absolutePos(new BlockPos(24, 1, 2));
+        var worldBottomSlab = net.minecraft.world.level.block.Blocks.STONE_SLAB.defaultBlockState().setValue(
+                net.minecraft.world.level.block.SlabBlock.TYPE,
+                net.minecraft.world.level.block.state.properties.SlabType.BOTTOM);
+        helper.assertTrue(helper.getLevel().setBlock(slabMergePos, worldBottomSlab, 3),
+                "could not place the bottom-slab merge fixture");
+        BlockHitResult slabMergeHit = new BlockHitResult(Vec3.atCenterOf(slabMergePos), Direction.UP,
+                slabMergePos, false);
+        player.teleportTo(slabMergePos.getX() - 2.5, slabMergePos.getY(), slabMergePos.getZ() + 0.5);
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STONE_SLAB));
+        net.minecraft.world.InteractionResult slabMergeResult = player.gameMode.useItemOn(player,
+                helper.getLevel(), player.getItemInHand(InteractionHand.MAIN_HAND),
+                InteractionHand.MAIN_HAND, slabMergeHit);
+        player.setItemInHand(InteractionHand.MAIN_HAND, originalMainHand);
+        helper.assertTrue(slabMergeResult.consumesAction()
+                        && helper.getLevel().getBlockState(slabMergePos).getValue(
+                        net.minecraft.world.level.block.SlabBlock.TYPE)
+                        == net.minecraft.world.level.block.state.properties.SlabType.DOUBLE,
+                "creative placement onto a bottom slab must merge it into a double slab; result=" + slabMergeResult);
         BlockPos creativeBreakPos = helper.absolutePos(new BlockPos(3, 1, 2));
         helper.assertTrue(helper.getLevel().setBlock(creativeBreakPos,
                         net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(), 3),
@@ -187,7 +208,7 @@ public final class AdminMutationConformanceFixture {
                 .thenExecute(() -> {
             helper.assertTrue(service.getTotalDropped() == droppedBefore,
                     "issue #33 evidence must not be rejected during the live replay");
-            MutationIds mutationIds = assertCommandEvents(helper, watermark.auditId(), playerUuid);
+            MutationIds mutationIds = assertCommandEvents(helper, watermark.auditId(), playerUuid, slabMergePos);
             assertItemDeltas(helper, watermark.observationId(), playerUuid, mutationIds);
             assertTransformations(helper, watermark.transformationId(), mutationIds);
             assertCreativeTransformations(helper, watermark.transformationId(), mutationIds);
@@ -197,9 +218,10 @@ public final class AdminMutationConformanceFixture {
                 .thenSucceed();
     }
 
-    private static MutationIds assertCommandEvents(GameTestHelper helper, long watermark, String playerUuid) {
+    private static MutationIds assertCommandEvents(GameTestHelper helper, long watermark, String playerUuid,
+                                                   BlockPos expectedSlabMergePos) {
         String sql = """
-                SELECT event_type, subject_id, detail, raw_data
+                SELECT event_type, subject_id, detail, raw_data, x, y, z
                 FROM ig_audit_events
                 WHERE id > ? AND player_uuid = ?
                   AND event_type IN ('ADMIN_ITEM_COMMAND_ATTEMPT', 'ADMIN_ITEM_COMMAND_EFFECT',
@@ -218,7 +240,8 @@ public final class AdminMutationConformanceFixture {
                 while (result.next()) {
                     byte[] raw = result.getBytes("raw_data");
                     rows.add(new AuditRow(result.getString("event_type"), result.getString("subject_id"),
-                            result.getString("detail"), raw == null ? "" : new String(raw, StandardCharsets.UTF_8)));
+                            result.getString("detail"), raw == null ? "" : new String(raw, StandardCharsets.UTF_8),
+                            result.getDouble("x"), result.getDouble("y"), result.getDouble("z")));
                 }
             }
         } catch (SQLException failure) {
@@ -239,6 +262,7 @@ public final class AdminMutationConformanceFixture {
         int unchangedCreativeAttempts = 0;
         int confirmedCreativeBreaks = 0;
         int observedCreativePlacements = 0;
+        int observedSlabMerges = 0;
         int invalidItemFailures = 0;
         for (AuditRow row : rows) {
             JsonObject payload = row.rawData().isBlank()
@@ -335,6 +359,13 @@ public final class AdminMutationConformanceFixture {
                                         || payload.get("cause_status").getAsString().equals("fabric_block_item_after_state_diff")),
                                 "creative block placement must retain an authoritative completed-state result");
                         observedCreativePlacements++;
+                        if ("minecraft:stone_slab".equals(row.subjectId())) {
+                            helper.assertTrue(row.x() == expectedSlabMergePos.getX()
+                                            && row.y() == expectedSlabMergePos.getY()
+                                            && row.z() == expectedSlabMergePos.getZ(),
+                                    "slab merge evidence must identify the clicked slab position");
+                            observedSlabMerges++;
+                        }
                     } else {
                         helper.fail("unexpected creative block action " + payload.get("action").getAsString());
                     }
@@ -355,8 +386,8 @@ public final class AdminMutationConformanceFixture {
                 "changed, unchanged, and ground-drop creative packets must have distinct outcomes");
         helper.assertTrue(confirmedCreativeBreaks == 1,
                 "creative block break must have one durable confirmed result on both loaders");
-        helper.assertTrue(observedCreativePlacements == 1,
-                "creative block placement must have one durable callback result on both loaders");
+        helper.assertTrue(observedCreativePlacements == 2 && observedSlabMerges == 1,
+                "ordinary placement and same-block slab merge must each have one durable result on both loaders");
         helper.assertTrue(creativeAttempts.size() == 3,
                 "each creative slot packet must have its own mutation ID");
         return new MutationIds(commandAttempts, creativeAttempts.keySet());
@@ -619,7 +650,8 @@ public final class AdminMutationConformanceFixture {
     private record Watermark(long observationId, long auditId, long transformationId) { }
     private record MutationIds(Map<String, Attempt> commands, Set<String> creative) { }
     private record Attempt(String mutationId, String root) { }
-    private record AuditRow(String eventType, String subjectId, String detail, String rawData) { }
+    private record AuditRow(String eventType, String subjectId, String detail, String rawData,
+                            double x, double y, double z) { }
     private record ItemDelta(String action, int amount, String sourceType, String targetType,
                              String itemId, String rawData, String sourceOwner, String targetOwner) { }
 }

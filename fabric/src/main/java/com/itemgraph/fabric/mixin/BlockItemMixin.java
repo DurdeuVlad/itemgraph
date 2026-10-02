@@ -75,7 +75,8 @@ public abstract class BlockItemMixin {
             }
             for (Map.Entry<BlockPos, BlockState> entry : before.entrySet()) {
                 BlockState after = level.getBlockState(entry.getKey());
-                if (AdminMutationCapture.isCreativePlacedBlockChange(entry.getValue(), after, item.getBlock())) {
+                if (AdminMutationCapture.isCreativePlacedBlockChange(entry.getValue(), after, item.getBlock(),
+                        entry.getKey().equals(context.getClickedPos()))) {
                     AdminMutationCapture.recordCreativeBlockUnresolvedSafely(player, "place",
                             BuiltInRegistries.BLOCK.getKey(after.getBlock()).toString(), entry.getKey(), causeStatus);
                 }

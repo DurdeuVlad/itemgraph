@@ -447,11 +447,20 @@ public final class AdminMutationCapture {
         }
     }
 
-    /** Shared loader predicate: a placement changes into this block only when its prior type differed. */
+    /** Shared loader predicate for a changed block cell produced by a completed placement. */
     public static boolean isCreativePlacedBlockChange(BlockState before, BlockState after, Block placedBlock) {
+        return isCreativePlacedBlockChange(before, after, placedBlock, false);
+    }
+
+    /**
+     * Same-type state changes count only at the clicked placement position. This captures slab merges
+     * without treating nearby same-type neighbor updates as additional creative placements.
+     */
+    public static boolean isCreativePlacedBlockChange(BlockState before, BlockState after, Block placedBlock,
+                                                        boolean clickedPosition) {
         return before != null && after != null && placedBlock != null
-                && after.getBlock() == placedBlock && before.getBlock() != placedBlock
-                && !after.equals(before);
+                && after.getBlock() == placedBlock && !after.equals(before)
+                && (before.getBlock() != placedBlock || clickedPosition);
     }
 
     public static void recordCreativeBlockCaptureFailureSafely(String stage, Throwable failure) {
