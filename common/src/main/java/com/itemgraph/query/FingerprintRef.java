@@ -14,15 +14,20 @@ package com.itemgraph.query;
  * @param fingerprintHash deterministic canonical-metadata hash
  */
 public record FingerprintRef(long id, String itemId, String customName, String fingerprintHash,
-                             boolean componentDecodeFailed) {
+                             boolean componentDecodeFailed, boolean componentIndexUnresolved) {
 
     public FingerprintRef(long id, String itemId, String customName, String fingerprintHash) {
-        this(id, itemId, customName, fingerprintHash, false);
+        this(id, itemId, customName, fingerprintHash, false, false);
+    }
+
+    public FingerprintRef(long id, String itemId, String customName, String fingerprintHash,
+                         boolean componentDecodeFailed) {
+        this(id, itemId, customName, fingerprintHash, componentDecodeFailed, false);
     }
 
     /** A fingerprint id with no corresponding row (dangling reference). */
     public static FingerprintRef missing(long id) {
-        return new FingerprintRef(id, null, null, null, false);
+        return new FingerprintRef(id, null, null, null, false, false);
     }
 
     public boolean resolved() {

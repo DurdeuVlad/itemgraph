@@ -151,6 +151,9 @@ final class ItemGraphServiceImpl implements ItemGraphService {
     public CompletableFuture<QueryResult> traceItem(ItemQuery query, QueryOptions options) {
         options = options == null ? QueryOptions.defaults() : options;
         String invalid = ApiValidation.validateOptions(options);
+        if (invalid == null) {
+            invalid = ApiValidation.validateMetadataPredicates(query == null ? null : query.metadataPredicates());
+        }
         if (invalid != null) {
             return completedQuery(QueryStatus.INVALID_INPUT, "INVALID_QUERY", invalid);
         }
@@ -180,7 +183,8 @@ final class ItemGraphServiceImpl implements ItemGraphService {
                     "the ItemGraph database is not connected");
         }
         ItemQuery effectiveQuery = query.itemId() != null
-                ? ItemQuery.itemId(ResourceLocation.tryParse(query.itemId()).toString())
+                ? new ItemQuery(ResourceLocation.tryParse(query.itemId()).toString(), null, null,
+                query.metadataPredicates())
                 : query;
         CompletableFuture<ApiQueryBridge.ApiTraceResponse> response;
         try {
@@ -272,7 +276,8 @@ final class ItemGraphServiceImpl implements ItemGraphService {
                 .toList();
         return new FlowResult("ambiguous target", items, endpoints, List.of(),
                 window(response.window()), response.requestedLimit(),
-                Math.min(QueryOptions.MAX_LIMIT, response.requestedLimit()), false);
+                Math.min(QueryOptions.MAX_LIMIT, response.requestedLimit()), false,
+                response.normalizedPredicate(), response.metadataMatchUnconfirmed());
     }
 
     private FlowResult flow(ApiQueryBridge.ApiTraceResponse response) {
@@ -283,7 +288,7 @@ final class ItemGraphServiceImpl implements ItemGraphService {
         }
         return new FlowResult(result.targetDescription(), List.of(), List.of(), hops,
                 window(result.window()), result.requestedLimit(), result.appliedLimit(),
-                result.truncated());
+                result.truncated(), response.normalizedPredicate(), response.metadataMatchUnconfirmed());
     }
 
     private FlowHop flowHop(TraceHop hop, EdgeExplanation explanation) {
@@ -601,15 +606,18 @@ final class ItemGraphServiceImpl implements ItemGraphService {
             select.setString(1, hash);
             try (ResultSet rs = select.executeQuery()) {
                 if (rs.next()) {
-                    return rs.getLong(1);
+                    long fingerprintId = rs.getLong(1);
+                    persistExternalComponentIndex(conn, fingerprintId, normalizedItemId, hash,
+                            effectiveCustomName, components);
+                    return fingerprintId;
                 }
             }
         }
 
         try (PreparedStatement insert = conn.prepareStatement("""
                 INSERT INTO ig_item_fingerprints
-                    (item_id, fingerprint_hash, custom_name, rarity, component_summary)
-                VALUES (?, ?, ?, ?, ?)
+                    (item_id, fingerprint_hash, custom_name, rarity, component_summary, component_index_state)
+                VALUES (?, ?, ?, ?, ?, 'PARTIAL')
                 """, Statement.RETURN_GENERATED_KEYS)) {
             insert.setString(1, normalizedItemId);
             insert.setString(2, hash);
@@ -619,11 +627,23 @@ final class ItemGraphServiceImpl implements ItemGraphService {
             insert.executeUpdate();
             try (ResultSet keys = insert.getGeneratedKeys()) {
                 if (keys.next()) {
-                    return keys.getLong(1);
+                    long fingerprintId = keys.getLong(1);
+                    persistExternalComponentIndex(conn, fingerprintId, normalizedItemId, hash,
+                            effectiveCustomName, components);
+                    return fingerprintId;
                 }
             }
         }
         throw new SQLException("failed to persist item fingerprint");
+    }
+
+    private void persistExternalComponentIndex(Connection conn, long fingerprintId, String itemId,
+                                               String hash, String customName,
+                                               Map<String, String> components) throws SQLException {
+        com.itemgraph.canon.CanonicalItem partial = new com.itemgraph.canon.CanonicalItem(
+                itemId, hash, customName, components.get("minecraft:rarity"),
+                componentSummary(components), Map.of(), "PARTIAL");
+        com.itemgraph.canon.FingerprintComponentIndex.persist(conn, fingerprintId, partial);
     }
 
     private String canonicalPayload(String itemId, String customName,

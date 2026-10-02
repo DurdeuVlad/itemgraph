@@ -1674,15 +1674,17 @@ public class InternalObservationService {
             pstmt.setString(1, canonical.fingerprintHash());
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
-                    return rs.getLong(1);
+                    long id = rs.getLong(1);
+                    com.itemgraph.canon.FingerprintComponentIndex.persist(conn, id, canonical);
+                    return id;
                 }
             }
         }
 
         String insertSql = """
             INSERT INTO ig_item_fingerprints (
-                item_id, fingerprint_hash, custom_name, rarity, component_summary
-            ) VALUES (?, ?, ?, ?, ?)
+                item_id, fingerprint_hash, custom_name, rarity, component_summary, component_index_state
+            ) VALUES (?, ?, ?, ?, ?, ?)
         """;
         try (PreparedStatement pstmt = conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
             pstmt.setString(1, canonical.itemId());
@@ -1690,10 +1692,13 @@ public class InternalObservationService {
             pstmt.setString(3, canonical.customName());
             pstmt.setString(4, canonical.rarity());
             pstmt.setString(5, canonical.componentSummary());
+            pstmt.setString(6, canonical.componentIndexState());
             pstmt.executeUpdate();
             try (ResultSet keys = pstmt.getGeneratedKeys()) {
                 if (keys.next()) {
-                    return keys.getLong(1);
+                    long id = keys.getLong(1);
+                    com.itemgraph.canon.FingerprintComponentIndex.persist(conn, id, canonical);
+                    return id;
                 }
             }
         }

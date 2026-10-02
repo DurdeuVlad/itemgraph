@@ -668,6 +668,7 @@ public class IngestionService {
 
         Long cached = fingerprintCache.get(hash);
         if (cached != null) {
+            com.itemgraph.canon.FingerprintComponentIndex.persist(conn, cached, canonical);
             return cached;
         }
 
@@ -678,23 +679,28 @@ public class IngestionService {
                 if (rs.next()) {
                     long id = rs.getLong("id");
                     fingerprintCache.put(hash, id);
+                    com.itemgraph.canon.FingerprintComponentIndex.persist(conn, id, canonical);
                     return id;
                 }
             }
         }
 
-        String insertSql = "INSERT OR IGNORE INTO ig_item_fingerprints (item_id, fingerprint_hash, custom_name, rarity, component_summary) VALUES (?, ?, ?, ?, ?)";
+        String insertSql = "INSERT OR IGNORE INTO ig_item_fingerprints "
+                + "(item_id, fingerprint_hash, custom_name, rarity, component_summary, component_index_state) "
+                + "VALUES (?, ?, ?, ?, ?, ?)";
         try (PreparedStatement pstmt = conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
             pstmt.setString(1, itemId);
             pstmt.setString(2, hash);
             pstmt.setString(3, canonical.customName());
             pstmt.setString(4, canonical.rarity());
             pstmt.setString(5, canonical.componentSummary());
+            pstmt.setString(6, canonical.componentIndexState());
             pstmt.executeUpdate();
             try (ResultSet keys = pstmt.getGeneratedKeys()) {
                 if (keys.next()) {
                     long id = keys.getLong(1);
                     fingerprintCache.put(hash, id);
+                    com.itemgraph.canon.FingerprintComponentIndex.persist(conn, id, canonical);
                     return id;
                 }
             }
@@ -707,6 +713,7 @@ public class IngestionService {
                 if (rs.next()) {
                     long id = rs.getLong("id");
                     fingerprintCache.put(hash, id);
+                    com.itemgraph.canon.FingerprintComponentIndex.persist(conn, id, canonical);
                     return id;
                 }
             }

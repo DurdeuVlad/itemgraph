@@ -67,14 +67,18 @@ class ItemCanonicalizerTest {
                 "minecraft:diamond_sword", malformedPatch, registryAccess);
         CanonicalItem withoutPatch = ItemCanonicalizer.canonicalize(
                 "minecraft:diamond_sword", null, registryAccess);
+        CanonicalItem otherMalformed = ItemCanonicalizer.canonicalize(
+                "minecraft:diamond_sword", HexFormat.of().parseHex("0500000005"), registryAccess);
 
         String rawHash = ItemCanonicalizer.sha256Hex(malformedPatch);
         assertNotEquals(withoutPatch.fingerprintHash(), fallback.fingerprintHash());
-        assertEquals(ItemCanonicalizer.sha256Hex(
-                "id=minecraft:diamond_sword;opaque_data_sha256=" + rawHash), fallback.fingerprintHash());
+        assertNotEquals(fallback.fingerprintHash(), otherMalformed.fingerprintHash(),
+                "different opaque patches must not collapse to one partial fingerprint");
         assertNull(fallback.customName());
         assertTrue(fallback.componentSummary().contains("component_decode=UNRESOLVED"));
         assertTrue(fallback.componentSummary().contains(rawHash));
+        assertEquals("PARTIAL", fallback.componentIndexState());
+        assertFalse(fallback.searchableComponents().containsKey("minecraft:custom_name#plain_text"));
     }
 
     @Test
@@ -106,6 +110,21 @@ class ItemCanonicalizerTest {
         assertEquals(2, snapshot.amount());
         assertEquals(canonical.customName(), snapshot.customName());
         assertEquals(components, snapshot.components());
+    }
+
+    @Test
+    void canonicalStackBuildsPersistentSearchIndexAndReadableAliases() {
+        ItemStack stack = new ItemStack(Items.IRON_SWORD, 1);
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal("Old Reliable"));
+        stack.set(DataComponents.DAMAGE, 42);
+
+        CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(stack);
+
+        assertEquals("COMPLETE", canonical.componentIndexState());
+        assertEquals("42", canonical.searchableComponents().get("minecraft:damage"));
+        assertEquals("\"Old Reliable\"",
+                canonical.searchableComponents().get("minecraft:custom_name#plain_text"));
+        assertTrue(canonical.searchableComponents().containsKey("minecraft:custom_name"));
     }
 
     @Test
@@ -190,5 +209,17 @@ class ItemCanonicalizerTest {
         assertNull(item.customName());
         assertTrue(item.componentSummary().contains("component_decode=UNRESOLVED"));
         assertTrue(item.componentSummary().contains(ItemCanonicalizer.sha256Hex(withTrailingByte)));
+    }
+
+    @Test
+    void overLimitPatchStaysOpaqueWithoutDataComponentDecoding() {
+        byte[] oversizedPatch = new byte[1_048_577];
+
+        CanonicalItem item = ItemCanonicalizer.canonicalize(
+                "minecraft:diamond_sword", oversizedPatch, registryAccess);
+
+        assertEquals("PARTIAL", item.componentIndexState());
+        assertTrue(item.componentSummary().contains("component_decode=UNRESOLVED"));
+        assertTrue(item.componentSummary().contains(ItemCanonicalizer.sha256Hex(oversizedPatch)));
     }
 }
