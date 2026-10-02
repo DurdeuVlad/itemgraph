@@ -239,6 +239,7 @@ class MariaDbDialectIntegrationTest {
     private static void assertIncidentBundleExportIsPortable(Connection conn, Path tempDir) throws Exception {
         long timestamp = System.currentTimeMillis();
         String uniqueId = Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
+        long sourceEventId = ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
         String itemId = "itemgraph:incident_export_" + uniqueId;
         UUID playerUuid = UUID.randomUUID();
         long playerId;
@@ -264,7 +265,7 @@ class MariaDbDialectIntegrationTest {
                     node_id, fingerprint_id, action_type, amount)
                 VALUES ('INCIDENT_EXPORT_TEST', ?, ?, ?, ?, 'DROP_ITEM', 1)
                 """)) {
-            observation.setString(1, uniqueId);
+            observation.setLong(1, sourceEventId);
             observation.setLong(2, timestamp);
             observation.setLong(3, playerId);
             observation.setLong(4, fingerprintId);
