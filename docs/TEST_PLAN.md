@@ -429,6 +429,43 @@ not exercise real adapters or the moderator command lookup. An idle baseline and
 staging-derived latency/memory budgets remain open; CI timings are measurements,
 not production budgets.
 
+The performance reports snapshot process-wide metrics. Each queue GameTest now
+stops and drains the prior worker, clears its counters, and restarts it before
+measuring; each GameTest has its own batch. The validator requires the enqueue
+sample count to equal this scenario's attempted-event count, and each network
+report's query sample count to equal its 20 completed lookups. This catches
+metrics accidentally carried in from another test. Reports still contain a
+single run per scenario; their latency and heap fields are diagnostic rather
+than statistical regression baselines. `heap_used_bytes` is a point-in-time
+snapshot, not peak memory or allocation rate. The latency histogram reports
+coarse upper-bound buckets, so it cannot support narrow p95 regression gates.
+
+Two redacted CI artifacts show why those limits matter. Runs
+[36944915206](https://github.com/DurdeuVlad/itemgraph/actions/runs/36944915206)
+and [37011138142](https://github.com/DurdeuVlad/itemgraph/actions/runs/37011138142)
+used the same pinned 8,000-event NeoForge burst, but the reported slowest
+server-thread batch was 12.85 ms and 20.40 ms, respectively. Their NeoForge
+MySQL query average was 30.82 ms and 42.04 ms, with histogram p95 upper bounds
+of 50 ms and 100 ms. The first artifact also counted 8,025 enqueue samples for
+8,000 events in the NeoForge queue report and 36 for 32 events in the Fabric
+queue report; these mismatches exposed cross-test metric contamination. The
+GameTests and validator now isolate and reject that condition.
+
+GitHub documents each standard hosted runner job as a new virtual machine
+(public `ubuntu-latest`: 4 CPUs and 16 GB RAM; [runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)),
+so consecutive CI runs do not share a calibrated machine. [Google Benchmark's
+guide](https://github.com/google/benchmark/blob/main/docs/user_guide.md) uses
+warmups, repeated runs, and random interleaving, with [statistical
+comparison](https://github.com/google/benchmark/blob/main/docs/tools.md) to
+separate performance change from machine noise. [OpenJDK JMH](https://github.com/openjdk/jmh)
+recommends a standalone harness setup for more reliable JVM measurements. These
+practices support repeated, environment-matched staging runs for ItemGraph.
+They do not supply ItemGraph's production budgets. Until those measurements
+exist, CI gates the established 50 ms
+server-thread ceiling, exact queue bounds, durability/loss accounting, and
+existing 5-second query deadline; it does not invent persistence, correlation,
+or memory budgets.
+
 ### Consolidated local validation (2026-10-02)
 
 - One Gradle invocation ran `:neoforge:test`, `:neoforge:runGameTestServer`,

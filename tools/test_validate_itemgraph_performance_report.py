@@ -136,6 +136,12 @@ class PerformanceReportValidationTest(unittest.TestCase):
         with self.assertRaises(ReportError):
             validate_report(candidate)
 
+    def test_rejects_enqueue_samples_from_another_scenario(self) -> None:
+        candidate = report("neoforge", "queue_burst", 8_000)
+        candidate["latency"]["enqueue"]["count"] += 25
+        with self.assertRaisesRegex(ReportError, "attempted events"):
+            validate_report(candidate)
+
     def test_directory_requires_complete_seven_report_artifact_set(self) -> None:
         scenarios = [
             ("itemgraph-neoforge-queue_burst.json", report("neoforge", "queue_burst", 8_000)),
@@ -204,6 +210,12 @@ class PerformanceReportValidationTest(unittest.TestCase):
         candidate = report("neoforge", "backend_mysql_matrix", 512)
         candidate["latency"]["query"]["count"] = 0
         with self.assertRaises(ReportError):
+            validate_report(candidate)
+
+    def test_rejects_network_backend_report_with_cumulative_lookup_samples(self) -> None:
+        candidate = report("neoforge", "backend_mysql_matrix", 512)
+        candidate["latency"]["query"]["count"] += 20
+        with self.assertRaisesRegex(ReportError, "successful read-only lookups"):
             validate_report(candidate)
 
     def test_rejects_network_backend_report_without_proven_lookup_overlap(self) -> None:

@@ -110,8 +110,11 @@ def validate_report(report: Any) -> dict[str, Any]:
         elif _integer(bound, f"latency.{metric_name}.p95_upper_bound_ns") > 10_000_000_000:
             raise ReportError(f"latency.{metric_name} percentile bound exceeds its declared histogram range")
 
-    if latency["enqueue"]["count"] < accepted or latency["persistence_commit"]["count"] == 0:
-        raise ReportError("queue benchmark is missing enqueue or persistence latency samples")
+    expected_enqueue_samples = workload.get("attempted_events", accepted)
+    if latency["enqueue"]["count"] != expected_enqueue_samples:
+        raise ReportError("enqueue latency samples do not match this scenario's attempted events")
+    if latency["persistence_commit"]["count"] == 0:
+        raise ReportError("queue benchmark is missing persistence latency samples")
 
     persistence = _object(value["persistence"], "persistence", {
         "persisted_items", "failed_batches", "largest_batch",
@@ -184,7 +187,8 @@ def validate_report(report: Any) -> dict[str, Any]:
             raise ReportError("network backend matrix must include 171 synthetic modded-inventory events")
         _integer(workload.get("enqueue_total_ns"), "workload.enqueue_total_ns", 1)
         _integer(workload.get("elapsed_ms"), "workload.elapsed_ms")
-        if latency["query"]["count"] != 20 or latency["query"]["failed"] != 0:
+        if (latency["query"]["count"] != workload["concurrent_lookups"]
+                or latency["query"]["failed"] != 0):
             raise ReportError("network backend matrix must report 20 successful read-only lookups")
         if expected_flavor not in {"mysql", "mariadb"}:
             raise ReportError("network backend scenario must identify MySQL or MariaDB")

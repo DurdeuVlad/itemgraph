@@ -30,6 +30,9 @@ public final class OperationalQueueGameTests implements FabricGameTest {
     @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zz_itemgraph_queue_flush", timeoutTicks = 300_000)
     public void endServerTickFlushPersistsAcceptedAuditEvents(GameTestHelper helper) {
         InternalObservationService service = InternalObservationService.getInstance();
+        service.stop();
+        service.clear();
+        service.start();
         String detailPrefix = "issue30-fabric-queue:" + UUID.randomUUID() + ":";
         long persistedBefore = service.getTotalPersisted();
         long droppedBefore = service.getTotalDropped();

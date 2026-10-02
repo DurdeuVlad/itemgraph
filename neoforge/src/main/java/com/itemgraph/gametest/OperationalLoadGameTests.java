@@ -28,11 +28,14 @@ public final class OperationalLoadGameTests {
 
     private OperationalLoadGameTests() { }
 
-    @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 300_000)
+    @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zz_itemgraph_queue_burst",
+            timeoutTicks = 300_000)
     public static void nativeAuditQueueBurstPersistsOnWorkerWithoutBlockingServerThread(GameTestHelper helper) {
         helper.assertFalse(ModList.get().isLoaded("grieflogger"),
                 "The isolated operational probe must run without GriefLogger installed");
         InternalObservationService observations = InternalObservationService.getInstance();
+        observations.stop();
+        observations.clear();
         observations.start();
         String detailPrefix = "issue30-load-probe:" + UUID.randomUUID() + ":";
         var server = helper.getLevel().getServer();
