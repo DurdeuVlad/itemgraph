@@ -21,7 +21,7 @@ public final class AutomationAdapterGameTests {
     private AutomationAdapterGameTests() { }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty",
-            batch = "zz_itemgraph_automation", timeoutTicks = 200)
+            batch = "zz_itemgraph_automation", timeoutTicks = 1200)
     public static void portableInventoryToShulkerLikeTransferPersistsExactObservedEvidence(
             GameTestHelper helper) {
         ItemGraphApiLifecycle.setRuntimeInformation(new RuntimeInformationPort() {

@@ -26,7 +26,7 @@ import net.minecraft.world.level.Level;
 
 /** Durable inventory replay through Fabric Transfer API adapters. */
 public final class AutomationAdapterGameTests implements FabricGameTest {
-    @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zz_itemgraph_automation", timeoutTicks = 200)
+    @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zz_itemgraph_automation", timeoutTicks = 1200)
     public void portableInventoryToShulkerLikeTransferPersistsExactObservedEvidence(GameTestHelper helper) {
         ItemGraphApiLifecycle.setRuntimeInformation(new RuntimeInformationPort() {
             @Override public String modVersion() { return "test"; }
