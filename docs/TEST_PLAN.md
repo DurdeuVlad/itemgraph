@@ -1008,7 +1008,8 @@ The concentrated #33 validation batch covers both loader mixin configs and the
 shared capture service in one paired GameTest run:
 
 - NeoForge and Fabric live GameTests execute permission-denied `/give`, nested
-  `/execute ... give`,
+  `/execute ... give`, nested `/execute as` with an entity different from the
+  original player issuer, and `/item ... from block` source-copy commands,
   partial and zero-match `/clear`, invalid-item `/item`,
   `/item replace entity`, changed and unchanged creative inventory slots,
   creative block placement and destruction, accepted negative-slot creative drops, and
@@ -1030,9 +1031,13 @@ shared capture service in one paired GameTest run:
 - creative inventory evidence records `cause=creative_inventory_packet` and
   `cause_status=undifferentiated`; it does not guess clone versus pick-block;
 - `/item replace block` records the exact created quantity at the selected
-  container slot, while `/item replace` on a non-player entity emits a private
-  unresolved before/after record with that entity's UUID and explicit
-  `empty=true` state when the prior slot was empty;
+  container slot, `/item ... from block/entity` records the copied-from endpoint
+  and exact source stack without decrementing it, while `/item replace` on a
+  non-player entity emits a private unresolved before/after record with that
+  entity's UUID and explicit `empty=true` state when the prior slot was empty;
+- nested `/execute as` keeps the original issuer in `actor_uuid` and
+  `actor_name`, then records a differing effective actor in separate execution
+  context fields;
 - explicit level-zero permission denial and a nested non-item `/execute run`
   command remain distinct from successful item mutations; the invalid-item
   command retains its attempt and failed outcome without a quantity delta; unit

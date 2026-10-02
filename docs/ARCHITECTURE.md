@@ -32,7 +32,8 @@ GriefLogger's documented command-attempt behavior and avoids inventing a success
 Issue #33 adds a separate staff-private evidence path at vanilla's item mutation
 boundaries. Both loaders hook `GiveCommand.giveItem`,
 `ClearInventoryCommands.clearInventory`, the four `ItemCommands` block/entity
-set/modify methods, and `ServerGamePacketListenerImpl.handleSetCreativeModeSlot`.
+set/modify methods, the `getBlockItem` and `getEntityItem` source readers used by
+`/item ... from`, and `ServerGamePacketListenerImpl.handleSetCreativeModeSlot`.
 The hooks snapshot only the addressed player inventory or selected block/entity
 slots, then compare canonical item fingerprints and stack counts after the method
 returns. `/give` additionally records only accepted overflow item entities. A
@@ -53,11 +54,15 @@ Both adapters use invocation-local snapshots, so nested modded placements do
 not overwrite their callers' state.
 The typed command attempt carries the mutation event ID; confirmed slot deltas
 and the completion outcome reuse that ID, while the outcome also records the
-attempt event ID. A positive command return without a captured delta and an
-exception after a captured mutation are unresolved outcomes. Generic command
-history suppresses `/execute` text to avoid retaining nested item-command arguments.
-Vanilla item commands require permission level 2; the command source's effective
-level-2 check is recorded as the permission outcome before execution.
+attempt event ID. `/item ... from block/entity` records the copied-from endpoint,
+slot, and canonical stack on the target evidence; a copy leaves the source slot
+unchanged and the target delta remains explicit creation. Nested `/execute as`
+records the original command issuer in actor fields and a differing effective
+entity in separate execution-context fields. A positive command return without
+a captured delta and an exception after a captured mutation are unresolved
+outcomes. Generic command history suppresses `/execute` text to avoid retaining
+nested item-command arguments. Vanilla item commands require permission level 2;
+the root attempt records the issuer's permission outcome before execution.
 NeoForge-only inventory hooks remain an explicit platform coverage boundary in
 `docs/GRIEFLOGGER_PARITY.md`; Fabric `BlockItemMixin` captures completed BlockItem
 placements, `LivingEntityMixin` captures completed eat/drink uses, `ItemStackMixin` captures

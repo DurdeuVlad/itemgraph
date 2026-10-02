@@ -16,15 +16,20 @@ The project follows a simple pre-1.0 development changelog model.
   distributable jar is built.
 
 - **Issue #33 administrative item evidence:** both loaders capture `/give`,
+<<<<<<< HEAD
   `/clear`, `/item` slot mutations, creative inventory slot changes, accepted
   `/give` overflow, and negative-slot creative drops at vanilla mutation
   boundaries. Creative block placement and destruction store authoritative
   `CREATIVE_BLOCK_RESULT` events and explicitly report zero player-inventory
-  quantity delta. Attempts, outcomes, and observed deltas share mutation IDs;
-  `/item modify` and creative slot replacements persist canonical transformations
-  and conserve quantity. The implementation leaves clone versus pick-block
-  undifferentiated, records empty slots as unresolved before/after evidence,
-  keeps staff activity private, suppresses raw item-command and `/execute`
+  quantity delta. Paired GameTests cover creative placement and destruction plus
+  linked invalid-item failure outcomes. Attempts, outcomes, and observed deltas
+  share mutation IDs; `/item modify` and creative slot replacements persist canonical
+  transformations and conserve quantity. `/item ... from block/entity` evidence
+  retains the copied-from slot and stack without treating a copy as source removal.
+  Nested `/execute as` outcomes keep the original issuer as actor and store a differing
+  effective entity as execution-context evidence. The implementation leaves clone
+  versus pick-block undifferentiated, records empty slots as unresolved before/after
+  evidence, keeps staff activity private, suppresses raw item-command and `/execute`
   arguments, and contains capture exceptions without changing vanilla results.
   Version remains 0.3.2; no distributable jar is built.
 
