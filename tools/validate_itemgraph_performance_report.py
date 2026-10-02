@@ -122,6 +122,10 @@ def validate_report(report: Any) -> dict[str, Any]:
         raise ReportError("persistence metrics contradict the durable queue workload")
     if latency["persistence_commit"]["failed"] != persistence["failed_batches"]:
         raise ReportError("persistence latency failures disagree with the failed-batch counter")
+    if accepted > 0 and persistence["largest_batch"] == 0:
+        raise ReportError("positive persistence workload has no recorded batch size")
+    if persistence["largest_batch"] > queue["max_batch_size"]:
+        raise ReportError("largest persistence batch exceeds the configured maximum batch size")
 
     components = _object(value["components"], "components", {
         "decode_failure_cache_insertions", "negative_cache_hits",
@@ -158,9 +162,6 @@ def validate_report(report: Any) -> dict[str, Any]:
             raise ReportError("shutdown_saturation must record exactly one over-capacity submission")
         if queue["peak_depth"] != queue["capacity_per_type"] or queue["rejected_items"] != 1:
             raise ReportError("shutdown_saturation must fill the bounded audit queue and record its rejection")
-        if persistence["largest_batch"] > queue["max_batch_size"]:
-            raise ReportError("shutdown drain exceeded the configured maximum persistence batch size")
-
     network_scenarios = {"backend_mariadb_matrix", "backend_mysql_matrix",
                          "backend_fabric_mariadb_matrix", "backend_fabric_mysql_matrix"}
     if value["scenario"] in network_scenarios:

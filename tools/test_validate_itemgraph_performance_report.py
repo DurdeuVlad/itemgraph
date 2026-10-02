@@ -83,7 +83,7 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
         "persistence": {
             "persisted_items": accepted,
             "failed_batches": 0,
-            "largest_batch": 100 if shutdown_saturation else accepted,
+            "largest_batch": min(accepted, 100 if shutdown_saturation else 1_000),
         },
         "components": {"decode_failure_cache_insertions": 0, "negative_cache_hits": 0},
         "memory": {"heap_used_bytes": 1, "heap_max_bytes": -1},
@@ -162,6 +162,30 @@ class PerformanceReportValidationTest(unittest.TestCase):
         candidate = report("neoforge", "shutdown_saturation", 10_000)
         candidate["workload"]["durable_rows"] = 9_999
         with self.assertRaises(ReportError):
+            validate_report(candidate)
+
+    def test_rejects_persistence_batch_over_configured_cap_for_every_scenario(self) -> None:
+        scenarios = (
+            ("neoforge", "queue_burst", 8_000),
+            ("fabric", "queue_flush_durability", 32),
+            ("neoforge", "backend_mariadb_matrix", 512),
+            ("neoforge", "backend_mysql_matrix", 512),
+            ("fabric", "backend_fabric_mariadb_matrix", 512),
+            ("fabric", "backend_fabric_mysql_matrix", 512),
+            ("neoforge", "shutdown_saturation", 10_000),
+        )
+        for loader, scenario, accepted in scenarios:
+            with self.subTest(scenario=scenario):
+                candidate = report(loader, scenario, accepted)
+                candidate["queue"]["max_batch_size"] = 10
+                candidate["persistence"]["largest_batch"] = 11
+                with self.assertRaisesRegex(ReportError, "largest persistence batch"):
+                    validate_report(candidate)
+
+    def test_rejects_missing_persistence_batch_size_for_accepted_events(self) -> None:
+        candidate = report("fabric", "queue_flush_durability", 32)
+        candidate["persistence"]["largest_batch"] = 0
+        with self.assertRaisesRegex(ReportError, "no recorded batch size"):
             validate_report(candidate)
 
     def test_accepts_mysql_and_mariadb_backend_matrix_reports_on_both_loaders(self) -> None:
