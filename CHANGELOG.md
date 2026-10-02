@@ -14,7 +14,8 @@ The project follows a simple pre-1.0 development changelog model.
   serialization stays explicitly unresolved. Metadata filter entry points require
   permission level 4. The preview Java API advances to PREVIEW_3 with item metadata selectors
   and absolute query windows. Local validation passed 614 unit tests and 8 required GameTests
-  on each loader; MySQL/MariaDB result parity and measured #32 latency budgets remain pending.
+  on each loader. SQLite cursor parity passed locally; the equivalent MySQL/MariaDB fixture is
+  in CI, and measured #32 latency budgets remain pending.
   No version bump or distributable JAR was created.
 
 - **Issue #37 bounded incident bundles:** added `/ig export`, level-4 `/ig export full`,

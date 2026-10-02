@@ -1126,11 +1126,14 @@ The 2026-10-02 local batch on NeoForge 21.1.248 and Fabric Loader 0.16.9 /
 Minecraft 1.21.1 passed 614 loader unit tests (8 skipped) and all 8 required
 GameTests on each loader. Coverage includes metadata predicate parsing and SQL
 binding, API PREVIEW_3 validation, UTC boundary conversion, command/GUI permission
-gates, the v22 component-index migration, and both loader command trees. No
-MariaDB/MySQL endpoints were configured, so their ordered-result/page parity and
-index explain-plan checks were not run. The #32 measured latency budgets and
-high-cardinality staging benchmark remain acceptance blockers; this local run
-does not close #45 or M9. No distributable JAR was built.
+gates, the v22 component-index migration, and both loader command trees. A SQLite
+integration fixture now verifies exact custom-name resolution, absolute-window
+boundaries, and forward/backward keyset cursors over actual query rows. The same
+fixture is wired into the MySQL/MariaDB CI contract; the endpoint tests were skipped
+locally because no database endpoints were configured. Index explain-plan checks,
+the #32 measured latency budgets, and high-cardinality staging benchmarks remain
+acceptance blockers; this local run does not close #45 or M9. No distributable JAR
+was built.
 
 ## M9 issue #37: incident bundle acceptance matrix
 

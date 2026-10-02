@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -284,6 +285,73 @@ class TraceQueryServiceTest extends QueryTestBase {
         assertTrue(previous.hasNext());
         assertEquals(full.hops().stream().map(TraceQueryServiceTest::stableKey).toList(), pagedKeys);
         assertEquals(48, new java.util.HashSet<>(pagedKeys).size(), "every table row appears exactly once");
+    }
+
+    @Test
+    void metadataAndAbsoluteWindowFiltersResolveBeforeStableKeysetPaging() throws Exception {
+        long player = insertPlayerNode("Issue45MetadataPaging");
+        long ground = insertGroundNode(21, 64, 21);
+        String itemId = "itemgraph:issue45_relic";
+        long matchingFingerprint = insertFingerprint(itemId, "issue45-matching", "Old Reliable");
+        long otherFingerprint = insertFingerprint(itemId, "issue45-other", "Different Relic");
+        markFingerprintComponentsComplete(matchingFingerprint, otherFingerprint);
+        indexComponent(matchingFingerprint, "minecraft:custom_name#plain_text", "\"Old Reliable\"");
+
+        long base = 1_700_000_000_000L;
+        long before = insertObservation(base + 1_000, player, ground, matchingFingerprint, "DROP_ITEM", 1);
+        long firstInside = insertObservation(base + 2_000, player, ground, matchingFingerprint, "DROP_ITEM", 1);
+        long secondInside = insertObservation(base + 3_000, player, ground, matchingFingerprint, "DROP_ITEM", 1);
+        long after = insertObservation(base + 4_000, player, ground, matchingFingerprint, "DROP_ITEM", 1);
+        List<ItemMetadataPredicate> predicates = AuditLookupFilters.parse(
+                "radius.1 name.\"Old Reliable\"", base).itemPredicates();
+        QueryWindow window = new QueryWindow(base + 1_500, base + 3_500);
+
+        TracePage first = service.traceItemPage(conn, itemId, predicates, 1, window,
+                null, TracePage.Direction.FORWARD);
+        TracePage second = service.traceItemPage(conn, itemId, predicates, 1, window,
+                first.nextCursor(), TracePage.Direction.FORWARD);
+        TracePage previous = service.traceItemPage(conn, itemId, predicates, 1, window,
+                second.previousCursor(), TracePage.Direction.BACKWARD);
+
+        assertEquals(TracePage.Resolution.RESOLVED, first.resolution());
+        assertEquals(matchingFingerprint, first.fingerprint().id());
+        assertFalse(first.fingerprint().componentIndexUnresolved());
+        assertEquals(List.of(firstInside), first.hops().stream().map(TraceHop::refId).toList());
+        assertEquals(List.of(secondInside), second.hops().stream().map(TraceHop::refId).toList());
+        assertEquals(List.of(firstInside), previous.hops().stream().map(TraceHop::refId).toList());
+        assertTrue(first.hasNext());
+        assertFalse(second.hasNext());
+        assertTrue(second.hasPrevious());
+        assertEquals(base + 2_000, first.nextCursor().timestampMs());
+        assertEquals(base + 3_000, second.previousCursor().timestampMs());
+        assertFalse(List.of(first, second).stream().flatMap(page -> page.hops().stream())
+                .map(TraceHop::refId).toList().contains(before));
+        assertFalse(List.of(first, second).stream().flatMap(page -> page.hops().stream())
+                .map(TraceHop::refId).toList().contains(after));
+        assertNotEquals(otherFingerprint, first.fingerprint().id());
+    }
+
+    private void markFingerprintComponentsComplete(long... fingerprintIds) throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement(
+                "UPDATE ig_item_fingerprints SET component_index_state = 'COMPLETE' WHERE id = ?")) {
+            for (long fingerprintId : fingerprintIds) {
+                statement.setLong(1, fingerprintId);
+                statement.executeUpdate();
+            }
+        }
+    }
+
+    private void indexComponent(long fingerprintId, String componentId, String value) throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_fingerprint_components (fingerprint_id, component_id, value_hash, canonical_value)
+                VALUES (?, ?, ?, ?)
+                """)) {
+            statement.setLong(1, fingerprintId);
+            statement.setString(2, componentId);
+            statement.setString(3, com.itemgraph.canon.ItemCanonicalizer.sha256Hex(value));
+            statement.setString(4, value);
+            statement.executeUpdate();
+        }
     }
 
     @Test
