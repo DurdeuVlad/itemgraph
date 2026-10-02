@@ -17,7 +17,7 @@ dependencies {
     mappings loom.officialMojangMappings()
     modImplementation "net.fabricmc:fabric-loader:${rootProject.fabric_loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.fabric_api_version}"
-    modImplementation files(rootProject.layout.buildDirectory.file(
+    modCompileOnly files(rootProject.layout.buildDirectory.file(
             "libs/itemgraph-${rootProject.mod_version}-fabric.jar"))
 }
 
@@ -56,6 +56,15 @@ tasks.named('runServer') {
     doFirst {
         apiConsumerServerDir.mkdirs()
         new File(apiConsumerServerDir, 'eula.txt').setText('eula=true\n', 'UTF-8')
+        def itemgraphJar = rootProject.layout.buildDirectory.file(
+                "libs/itemgraph-${rootProject.mod_version}-fabric.jar").get().asFile
+        if (!itemgraphJar.isFile()) {
+            throw new GradleException("Fabric API fixture is missing ItemGraph test jar: ${itemgraphJar}")
+        }
+        def modsDirectory = new File(apiConsumerServerDir, 'mods')
+        modsDirectory.mkdirs()
+        java.nio.file.Files.copy(itemgraphJar.toPath(), new File(modsDirectory, 'itemgraph-test.jar').toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
         apiConsumerResultFile.delete()
     }
     doLast {
