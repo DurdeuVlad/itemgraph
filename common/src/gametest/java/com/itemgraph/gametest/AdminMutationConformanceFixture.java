@@ -95,6 +95,11 @@ public final class AdminMutationConformanceFixture {
         helper.assertTrue(targetStand.getItemBySlot(EquipmentSlot.MAINHAND).is(Items.APPLE),
                 "/item replace must apply to a selected non-player entity slot");
         commands.performPrefixedCommand(commandSource,
+                "execute as @e[type=minecraft:armor_stand,tag=" + targetStandTag
+                        + ",limit=1] run item replace entity @s weapon.offhand with minecraft:carrot");
+        helper.assertTrue(targetStand.getItemBySlot(EquipmentSlot.OFFHAND).is(Items.CARROT),
+                "nested /execute as must apply the item mutation to its effective entity");
+        commands.performPrefixedCommand(commandSource,
                 "item modify entity @s armor.head "
                         + "{function:\"minecraft:set_components\",components:{\"minecraft:damage\":1}}");
         helper.assertValueEqual(1, player.getInventory().getItem(39).get(net.minecraft.core.component.DataComponents.DAMAGE),
@@ -117,6 +122,31 @@ public final class AdminMutationConformanceFixture {
                         net.minecraft.world.level.block.entity.BlockEntityType.CHEST)
                         .map(chest -> chest.getItem(0).is(Items.EMERALD) && chest.getItem(0).getCount() == 3)
                         .orElse(false), "/item replace must set the selected block-container slot");
+        BlockPos copyTargetPos = helper.absolutePos(new BlockPos(4, 1, 2));
+        helper.getLevel().setBlock(copyTargetPos,
+                net.minecraft.world.level.block.Blocks.CHEST.defaultBlockState(), 3);
+        var copyTarget = helper.getLevel().getBlockEntity(copyTargetPos,
+                net.minecraft.world.level.block.entity.BlockEntityType.CHEST);
+        helper.assertTrue(copyTarget.isPresent(), "could not create the /item from target container fixture");
+        copyTarget.orElseThrow().setItem(0, ItemStack.EMPTY);
+        commands.performPrefixedCommand(commandSource, "item replace block " + copyTargetPos.getX() + " "
+                + copyTargetPos.getY() + " " + copyTargetPos.getZ() + " container.0 from block "
+                + containerPos.getX() + " " + containerPos.getY() + " " + containerPos.getZ() + " container.0");
+        helper.assertTrue(helper.getLevel().getBlockEntity(containerPos,
+                        net.minecraft.world.level.block.entity.BlockEntityType.CHEST)
+                        .map(chest -> chest.getItem(0).is(Items.EMERALD) && chest.getItem(0).getCount() == 3)
+                        .orElse(false)
+                        && helper.getLevel().getBlockEntity(copyTargetPos,
+                        net.minecraft.world.level.block.entity.BlockEntityType.CHEST)
+                        .map(chest -> chest.getItem(0).is(Items.EMERALD) && chest.getItem(0).getCount() == 3)
+                        .orElse(false),
+                "/item from block must preserve its source and copy the exact selected stack to the target");
+        commands.performPrefixedCommand(commandSource,
+                "item replace entity @s weapon.offhand from entity @e[type=minecraft:armor_stand,tag="
+                        + targetStandTag + ",limit=1] weapon.mainhand");
+        helper.assertTrue(player.getItemBySlot(EquipmentSlot.OFFHAND).is(Items.APPLE)
+                        && targetStand.getItemBySlot(EquipmentSlot.MAINHAND).is(Items.APPLE),
+                "/item from entity must preserve its source and copy the exact selected stack to the target");
 
         player.setGameMode(GameType.CREATIVE);
         helper.assertTrue(player.isCreative(), "GameTest player must be in creative mode for slot packet tests");
@@ -208,8 +238,10 @@ public final class AdminMutationConformanceFixture {
                 .thenExecute(() -> {
             helper.assertTrue(service.getTotalDropped() == droppedBefore,
                     "issue #33 evidence must not be rejected during the live replay");
-            MutationIds mutationIds = assertCommandEvents(helper, watermark.auditId(), playerUuid, slabMergePos);
-            assertItemDeltas(helper, watermark.observationId(), playerUuid, mutationIds);
+            MutationIds mutationIds = assertCommandEvents(helper, watermark.auditId(), playerUuid, slabMergePos,
+                    targetStand.getUUID().toString());
+            assertItemDeltas(helper, watermark.observationId(), playerUuid, mutationIds, containerPos,
+                    targetStand.getUUID().toString());
             assertTransformations(helper, watermark.transformationId(), mutationIds);
             assertCreativeTransformations(helper, watermark.transformationId(), mutationIds);
             assertRawCommandHistorySuppressesItemCommands(helper, watermark.auditId(), playerUuid);
@@ -219,7 +251,8 @@ public final class AdminMutationConformanceFixture {
     }
 
     private static MutationIds assertCommandEvents(GameTestHelper helper, long watermark, String playerUuid,
-                                                   BlockPos expectedSlabMergePos) {
+                                                   BlockPos expectedSlabMergePos,
+                                                   String expectedExecutionEntityUuid) {
         String sql = """
                 SELECT event_type, subject_id, detail, raw_data, x, y, z
                 FROM ig_audit_events
@@ -264,6 +297,7 @@ public final class AdminMutationConformanceFixture {
         int observedCreativePlacements = 0;
         int observedSlabMerges = 0;
         int invalidItemFailures = 0;
+        int executionContextEvidence = 0;
         for (AuditRow row : rows) {
             JsonObject payload = row.rawData().isBlank()
                     ? new JsonObject() : JsonParser.parseString(row.rawData()).getAsJsonObject();
@@ -313,8 +347,20 @@ public final class AdminMutationConformanceFixture {
                         helper.assertTrue(row.detail().contains("endpoint=unresolved")
                                         && before != null && after != null
                                         && before.get("empty").getAsBoolean()
-                                        && after.get("item_id").getAsString().equals("minecraft:apple"),
+                                        && Set.of("minecraft:apple", "minecraft:carrot")
+                                        .contains(after.get("item_id").getAsString()),
                                 "non-player entity slot mutations must retain exact unresolved before/after evidence");
+                        if (payload.has("execution_context_actor_kind")) {
+                            helper.assertTrue("player".equals(payload.get("actor_kind").getAsString())
+                                            && playerUuid.equals(payload.get("actor_uuid").getAsString())
+                                            && "entity".equals(payload.get("execution_context_actor_kind").getAsString())
+                                            && expectedExecutionEntityUuid.equals(
+                                                    payload.get("execution_context_actor_uuid").getAsString())
+                                            && "minecraft:armor_stand".equals(
+                                                    payload.get("execution_context_entity_type").getAsString()),
+                                    "nested /execute as must retain the original player issuer and separate effective entity context");
+                            executionContextEvidence++;
+                        }
                         unresolvedEntitySlots++;
                     } else {
                         helper.assertTrue(row.detail().contains("command_reported_effect_without_captured_delta"),
@@ -373,15 +419,17 @@ public final class AdminMutationConformanceFixture {
                 default -> helper.fail("unexpected issue #33 audit event " + row.eventType());
             }
         }
-        helper.assertTrue(giveAttempts == 4 && clearAttempts == 3 && itemAttempts == 6,
+        helper.assertTrue(giveAttempts == 4 && clearAttempts == 3 && itemAttempts == 9,
                 "denied, invalid-item, nested, overflow, clear, and item commands must retain typed attempts");
         helper.assertTrue(invalidItemAttemptEvents.size() == 1 && invalidItemFailures == 1,
                 "invalid item parse must link exactly one failed outcome to its typed attempt");
-        helper.assertTrue(effects == 9 && failures == 3 && unresolvedEntitySlots == 1
+        helper.assertTrue(effects == 12 && failures == 3 && unresolvedEntitySlots == 2
                         && unresolvedNoDeltaResults == 1,
                 "confirmed, permission-denied, and failed command outcomes must remain distinct; observed effects="
                         + effects + " failures=" + failures + " unresolvedEntitySlots=" + unresolvedEntitySlots
                         + " unresolvedNoDeltaResults=" + unresolvedNoDeltaResults);
+        helper.assertTrue(executionContextEvidence == 1,
+                "nested /execute as evidence must preserve exactly one original issuer and effective actor pair");
         helper.assertTrue(creativeEffects == 2 && unchangedCreativeAttempts == 1,
                 "changed, unchanged, and ground-drop creative packets must have distinct outcomes");
         helper.assertTrue(confirmedCreativeBreaks == 1,
@@ -394,7 +442,8 @@ public final class AdminMutationConformanceFixture {
     }
 
     private static void assertItemDeltas(GameTestHelper helper, long watermark, String playerUuid,
-                                         MutationIds mutationIds) {
+                                         MutationIds mutationIds, BlockPos copySourcePos,
+                                         String copySourceEntityUuid) {
         String sql = """
                 SELECT obs.action_type, obs.amount, source.node_type AS source_type,
                        target.node_type AS target_type, fingerprint.item_id, obs.raw_data,
@@ -426,7 +475,7 @@ public final class AdminMutationConformanceFixture {
             throw new IllegalStateException("Could not read issue #33 item deltas", failure);
         }
 
-        helper.assertTrue(rows.size() == 9, "issue #33 must persist exactly nine quantity deltas");
+        helper.assertTrue(rows.size() == 11, "issue #33 must persist exactly eleven quantity deltas");
         helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
                         && row.amount() == 5 && row.itemId().equals("minecraft:diamond")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
@@ -447,6 +496,35 @@ public final class AdminMutationConformanceFixture {
                         && row.amount() == 3 && row.itemId().equals("minecraft:emerald")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("CONTAINER")),
                 "/item replace block must persist the exact container creation");
+        helper.assertTrue(rows.stream().anyMatch(row -> {
+                    if (!row.action().equals("ADMIN_ITEM_CREATE") || row.amount() != 3
+                            || !row.itemId().equals("minecraft:emerald")
+                            || !row.targetType().equals("CONTAINER")) return false;
+                    JsonObject payload = JsonParser.parseString(row.rawData()).getAsJsonObject();
+                    if (!payload.has("copy_source")) return false;
+                    JsonObject copySource = payload.getAsJsonObject("copy_source");
+                    JsonObject copiedStack = copySource.getAsJsonObject("slots").getAsJsonObject("slot:0");
+                    return "container".equals(copySource.get("kind").getAsString())
+                            && copySource.get("x").getAsInt() == copySourcePos.getX()
+                            && copySource.get("y").getAsInt() == copySourcePos.getY()
+                            && copySource.get("z").getAsInt() == copySourcePos.getZ()
+                            && "minecraft:emerald".equals(copiedStack.get("item_id").getAsString())
+                            && copiedStack.get("count").getAsInt() == 3;
+                }),
+                "/item from block must retain the source endpoint, slot, item, and quantity with copy evidence");
+        helper.assertTrue(rows.stream().anyMatch(row -> {
+                    if (!row.action().equals("ADMIN_ITEM_CREATE") || row.amount() != 1
+                            || !row.itemId().equals("minecraft:apple") || !row.targetType().equals("PLAYER")) return false;
+                    JsonObject payload = JsonParser.parseString(row.rawData()).getAsJsonObject();
+                    if (!payload.has("copy_source")) return false;
+                    JsonObject copySource = payload.getAsJsonObject("copy_source");
+                    JsonObject copiedStack = copySource.getAsJsonObject("slots").getAsJsonObject("slot:98");
+                    return "entity".equals(copySource.get("kind").getAsString())
+                            && copySourceEntityUuid.equals(copySource.get("entity_uuid").getAsString())
+                            && "minecraft:apple".equals(copiedStack.get("item_id").getAsString())
+                            && copiedStack.get("count").getAsInt() == 1;
+                }),
+                "/item from entity must retain the source entity UUID, slot, item, and quantity with copy evidence");
         helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
                         && row.amount() == 1 && row.itemId().equals("minecraft:iron_helmet")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),

@@ -37,6 +37,7 @@ public final class AdminMutationCapture {
     private static final AtomicLong CAPTURE_FAILURE_DIAGNOSTICS = new AtomicLong();
     private static final ThreadLocal<Deque<MutationScope>> SCOPES = new ThreadLocal<>();
     private static final ThreadLocal<PendingCommand> PENDING_COMMAND = new ThreadLocal<>();
+    private static final ThreadLocal<Endpoint> PENDING_ITEM_COPY_SOURCE = new ThreadLocal<>();
     private static final ThreadLocal<Deque<PendingCreativeBlockBreak>> CREATIVE_BLOCK_BREAKS = new ThreadLocal<>();
 
     private AdminMutationCapture() { }
@@ -54,8 +55,10 @@ public final class AdminMutationCapture {
                             ServerPlayer player, Entity entity, Container container,
                             Map<String, StackState> slots) { }
 
-    private record PendingCommand(String root, String actorUuid, String attemptEventId,
-                                  String mutationEventId, boolean nestedExecute, boolean attemptPersisted) { }
+    private record PendingCommand(String root, String actorUuid, String actorName, String actorKind,
+                                  String actorEntityUuid,
+                                  Boolean actorPermission, String attemptEventId, String mutationEventId,
+                                  boolean nestedExecute, boolean attemptPersisted) { }
 
     private record PendingCreativeBlockBreak(ServerPlayer player, String subjectId, BlockPos position,
                                              String level, String eventId) { }
@@ -67,6 +70,13 @@ public final class AdminMutationCapture {
         private final ServerPlayer creativePlayer;
         private final String parentEventId;
         private final String commandAttemptEventId;
+        private final boolean hasCommandActor;
+        private final String commandActorUuid;
+        private final String commandActorName;
+        private final String commandActorKind;
+        private final String commandActorEntityUuid;
+        private final Boolean commandActorPermission;
+        private final Endpoint copySource;
         private final List<Endpoint> endpoints;
         private final List<ItemEntity> acceptedDrops = new ArrayList<>();
         private int rejectedEvidence;
@@ -75,6 +85,14 @@ public final class AdminMutationCapture {
         private MutationScope(String operation, String sourceKind, CommandSourceStack source,
                               ServerPlayer creativePlayer, List<Endpoint> endpoints,
                               String parentEventId, String commandAttemptEventId) {
+            this(operation, sourceKind, source, creativePlayer, endpoints, parentEventId,
+                    commandAttemptEventId, null, PENDING_ITEM_COPY_SOURCE.get());
+        }
+
+        private MutationScope(String operation, String sourceKind, CommandSourceStack source,
+                              ServerPlayer creativePlayer, List<Endpoint> endpoints,
+                              String parentEventId, String commandAttemptEventId,
+                              PendingCommand command, Endpoint copySource) {
             this.operation = operation;
             this.sourceKind = sourceKind;
             this.source = source;
@@ -82,6 +100,13 @@ public final class AdminMutationCapture {
             this.endpoints = endpoints;
             this.parentEventId = parentEventId;
             this.commandAttemptEventId = commandAttemptEventId;
+            this.hasCommandActor = command != null;
+            this.commandActorUuid = command == null ? null : command.actorUuid();
+            this.commandActorName = command == null ? null : command.actorName();
+            this.commandActorKind = command == null ? null : command.actorKind();
+            this.commandActorEntityUuid = command == null ? null : command.actorEntityUuid();
+            this.commandActorPermission = command == null ? null : command.actorPermission();
+            this.copySource = copySource;
         }
     }
 
@@ -118,7 +143,7 @@ public final class AdminMutationCapture {
                                               List<Endpoint> endpoints, PendingCommand pending) {
         MutationScope scope = new MutationScope(operation, "admin_command", source, null, endpoints,
                 pending == null ? UUID.randomUUID().toString() : pending.mutationEventId(),
-                pending == null ? null : pending.attemptEventId());
+                pending == null ? null : pending.attemptEventId(), pending, PENDING_ITEM_COPY_SOURCE.get());
         if (pending != null && !pending.attemptPersisted()) {
             scope.incompleteReason = "command_attempt_queue_rejected";
         }
@@ -249,6 +274,38 @@ public final class AdminMutationCapture {
         beginSafely(operation, () -> beginEntityItemCommand(source, operation, targets, slot));
     }
 
+    /** Retains the authoritative source slot for vanilla `/item ... from block` copies until the target mutator runs. */
+    public static void recordBlockCopySourceSafely(CommandSourceStack source, BlockPos position, int slot) {
+        try {
+            PendingCommand pending = PENDING_COMMAND.get();
+            if (pending == null || !"item".equals(pending.root()) || source == null || position == null) return;
+            ServerLevel level = source.getLevel();
+            Container container = level.getBlockEntity(position) instanceof Container found ? found : null;
+            if (container == null) return;
+            PENDING_ITEM_COPY_SOURCE.set(snapshotContainer(container, level.dimension().location().toString(),
+                    position, Map.of(slot, "slot:" + slot)));
+        } catch (Throwable failure) {
+            recordCaptureFailure("source_snapshot", "item", failure);
+        }
+    }
+
+    /** Retains the authoritative source slot for vanilla `/item ... from entity` copies until the target mutator runs. */
+    public static void recordEntityCopySourceSafely(Entity entity, int slot) {
+        try {
+            PendingCommand pending = PENDING_COMMAND.get();
+            if (pending == null || !"item".equals(pending.root()) || entity == null
+                    || entity.level().isClientSide()) return;
+            ItemStack value = entity.getSlot(slot).get();
+            String level = entity.level().dimension().location().toString();
+            ServerPlayer player = entity instanceof ServerPlayer serverPlayer ? serverPlayer : null;
+            PENDING_ITEM_COPY_SOURCE.set(snapshotEntitySlot(player == null ? "entity" : "player_slot", level,
+                    entity.getX(), entity.getY(), entity.getZ(), player, entity,
+                    slotMap("slot:" + slot, state(value))));
+        } catch (Throwable failure) {
+            recordCaptureFailure("source_snapshot", "item", failure);
+        }
+    }
+
     public static boolean isGiveInProgress() {
         Deque<MutationScope> scopes = SCOPES.get();
         return scopes != null && scopes.stream().anyMatch(scope -> "give".equals(scope.operation));
@@ -298,7 +355,11 @@ public final class AdminMutationCapture {
     public static void finishCurrent(boolean completed, int result) {
         MutationScope scope = pop();
         if (scope == null) return;
-        finish(scope, completed, result);
+        try {
+            finish(scope, completed, result);
+        } finally {
+            PENDING_ITEM_COPY_SOURCE.remove();
+        }
     }
 
     /** Capture completion must never change a vanilla command or packet result. */
@@ -314,7 +375,11 @@ public final class AdminMutationCapture {
     public static void failCurrent(String reason) {
         MutationScope scope = pop();
         if (scope == null) return;
-        finish(scope, false, 0, reason);
+        try {
+            finish(scope, false, 0, reason);
+        } finally {
+            PENDING_ITEM_COPY_SOURCE.remove();
+        }
     }
 
     /** Preserve the original vanilla exception if recording its failure also fails. */
@@ -357,6 +422,7 @@ public final class AdminMutationCapture {
     /** Called from both loader command-dispatch wrappers so nested /execute context cannot leak to a later command. */
     public static void finishCommandDispatch() {
         PENDING_COMMAND.remove();
+        PENDING_ITEM_COPY_SOURCE.remove();
     }
 
     /** Records a typed attempt without retaining selector expressions or raw command arguments. */
@@ -382,6 +448,8 @@ public final class AdminMutationCapture {
         if (!Boolean.FALSE.equals(attempt.permissionGranted())
                 && !attempt.cancelled() && !attempt.parseFailed()) {
             PENDING_COMMAND.set(new PendingCommand(mutationRoot, actorUuid(attempt.source()),
+                    actorName(attempt.source()), actorKind(attempt.source()), entityUuid(attempt.source()),
+                    attempt.permissionGranted(),
                     eventId, mutationEventId, nestedExecute, attemptPersisted));
         }
         if (Boolean.FALSE.equals(attempt.permissionGranted()) || attempt.cancelled() || attempt.parseFailed()) {
@@ -892,6 +960,13 @@ public final class AdminMutationCapture {
     private static boolean recordEvent(CommandSourceStack source, String eventType, String subject,
                                        String detail, String eventId, String mutationEventId,
                                        String parentEventId, String attemptEventId) {
+        return recordEvent(source, eventType, subject, detail, eventId, mutationEventId,
+                parentEventId, attemptEventId, null);
+    }
+
+    private static boolean recordEvent(CommandSourceStack source, String eventType, String subject,
+                                       String detail, String eventId, String mutationEventId,
+                                       String parentEventId, String attemptEventId, MutationScope scope) {
         if (source == null) return false;
         var position = source.getPosition();
         var level = source.getLevel();
@@ -903,9 +978,16 @@ public final class AdminMutationCapture {
         raw.addProperty("evidence", eventType.toLowerCase(java.util.Locale.ROOT));
         raw.addProperty("subject", bounded(subject));
         raw.addProperty("detail", bounded(detail));
-        raw.addProperty("has_operator_permission", source.hasPermission(2));
-        raw.addProperty("actor_kind", source.getEntity() instanceof ServerPlayer ? "player"
-                : source.getEntity() == null ? "server_or_console" : "entity");
+        raw.addProperty("has_operator_permission", scope != null && scope.commandActorPermission != null
+                ? scope.commandActorPermission : source.hasPermission(2));
+        raw.addProperty("actor_kind", scope == null ? actorKind(source) : scopeActorKind(scope));
+        raw.addProperty("actor_uuid", scope == null ? actorUuid(source) : scopeActorUuid(scope));
+        raw.addProperty("actor_name", scope == null ? actorName(source) : scopeActorName(scope));
+        addCommandEntityIdentity(raw, source, scope);
+        addExecutionContext(raw, scope);
+        if (scope != null && scope.copySource != null) {
+            raw.add("copy_source", endpointEvidenceJson(scope.copySource));
+        }
         raw.addProperty("staff_private", true);
         raw.addProperty("location_resolved", level != null && position != null);
         String levelName = level == null ? null : level.dimension().location().toString();
@@ -913,7 +995,9 @@ public final class AdminMutationCapture {
         double y = position == null ? 0.0 : position.y();
         double z = position == null ? 0.0 : position.z();
         return InternalObservationService.getInstance().submitAuditEvent(new InternalObservationService.InternalAuditEvent(
-                System.currentTimeMillis(), eventType, actorUuid(source), actorName(source),
+                System.currentTimeMillis(), eventType,
+                scope == null ? actorUuid(source) : scopeActorUuid(scope),
+                scope == null ? actorName(source) : scopeActorName(scope),
                 levelName, x, y, z,
                 bounded(subject), bounded(detail), raw.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 InternalObservationService.sourceEventIdForUuid(eventId), eventId, List.of()));
@@ -943,7 +1027,7 @@ public final class AdminMutationCapture {
     private static void recordScopedOutcome(MutationScope scope, String eventType, String subject, String detail) {
         String eventId = UUID.randomUUID().toString();
         if (!recordEvent(scope.source, eventType, subject, detail, eventId,
-                scope.parentEventId, scope.parentEventId, scope.commandAttemptEventId)) {
+                scope.parentEventId, scope.parentEventId, scope.commandAttemptEventId, scope)) {
             reportUnpersistedOutcome(eventType, eventId);
         }
     }
@@ -981,16 +1065,67 @@ public final class AdminMutationCapture {
         }
         raw.addProperty("outcome", outcome);
         raw.addProperty("source", scope.sourceKind);
-        raw.addProperty("actor_kind", scope.source == null ? "player"
-                : scope.source.getEntity() instanceof ServerPlayer ? "player"
-                : scope.source.getEntity() == null ? "server_or_console" : "entity");
+        raw.addProperty("actor_kind", scopeActorKind(scope));
         raw.addProperty("actor_uuid", scopeActorUuid(scope));
         raw.addProperty("actor_name", scopeActorName(scope));
-        raw.addProperty("has_operator_permission", scope.source == null
-                ? scope.creativePlayer.createCommandSourceStack().hasPermission(2)
-                : scope.source.hasPermission(2));
+        addCommandEntityIdentity(raw, scope.source, scope);
+        raw.addProperty("has_operator_permission", scope.commandActorPermission != null
+                ? scope.commandActorPermission : scope.source == null
+                    ? scope.creativePlayer.createCommandSourceStack().hasPermission(2)
+                    : scope.source.hasPermission(2));
+        addExecutionContext(raw, scope);
+        if (scope.copySource != null) raw.add("copy_source", endpointEvidenceJson(scope.copySource));
         raw.addProperty("staff_private", true);
         return raw;
+    }
+
+    private static JsonObject endpointEvidenceJson(Endpoint endpoint) {
+        JsonObject value = new JsonObject();
+        value.addProperty("kind", endpoint.kind());
+        value.addProperty("level", endpoint.level());
+        value.addProperty("x", endpoint.x());
+        value.addProperty("y", endpoint.y());
+        value.addProperty("z", endpoint.z());
+        if (endpoint.entity() != null) {
+            value.addProperty("entity_uuid", endpoint.entity().getUUID().toString());
+            value.addProperty("entity_type", BuiltInRegistries.ENTITY_TYPE.getKey(endpoint.entity().getType()).toString());
+        }
+        JsonObject slots = new JsonObject();
+        endpoint.slots().forEach((slot, stack) -> {
+            JsonObject item = new JsonObject();
+            addStack(item, "stack", stack);
+            slots.add(slot, item.get("stack"));
+        });
+        value.add("slots", slots);
+        return value;
+    }
+
+    private static void addExecutionContext(JsonObject raw, MutationScope scope) {
+        if (scope == null || !scope.hasCommandActor) return;
+        Entity effectiveEntity = scope.source.getEntity();
+        String effectiveActorUuid = effectiveEntity == null ? null : effectiveEntity.getUUID().toString();
+        String effectiveActorName = effectiveEntity instanceof ServerPlayer player
+                ? player.getGameProfile().getName()
+                : effectiveEntity == null ? null : effectiveEntity.getName().getString();
+        if (Objects.equals(scope.commandActorKind, actorKind(scope.source))
+                && Objects.equals(scope.commandActorEntityUuid, effectiveActorUuid)) return;
+        raw.addProperty("execution_context_actor_kind", actorKind(scope.source));
+        if (effectiveActorUuid == null) raw.add("execution_context_actor_uuid", com.google.gson.JsonNull.INSTANCE);
+        else raw.addProperty("execution_context_actor_uuid", effectiveActorUuid);
+        if (effectiveActorName == null) raw.add("execution_context_actor_name", com.google.gson.JsonNull.INSTANCE);
+        else raw.addProperty("execution_context_actor_name", effectiveActorName);
+        if (effectiveEntity != null && !(effectiveEntity instanceof ServerPlayer)) {
+            raw.addProperty("execution_context_entity_type",
+                    BuiltInRegistries.ENTITY_TYPE.getKey(effectiveEntity.getType()).toString());
+        }
+        raw.addProperty("execution_context_has_operator_permission", scope.source.hasPermission(2));
+    }
+
+    private static void addCommandEntityIdentity(JsonObject raw, CommandSourceStack source, MutationScope scope) {
+        String kind = scope == null ? actorKind(source) : scopeActorKind(scope);
+        if (!"entity".equals(kind)) return;
+        String uuid = scope == null ? entityUuid(source) : scope.commandActorEntityUuid;
+        if (uuid != null) raw.addProperty("actor_entity_uuid", uuid);
     }
 
     private static void addStack(JsonObject target, String key, StackState state) {
@@ -1016,12 +1151,28 @@ public final class AdminMutationCapture {
                 ? player.getGameProfile().getName() : null;
     }
 
+    private static String entityUuid(CommandSourceStack source) {
+        return source == null || source.getEntity() == null ? null : source.getEntity().getUUID().toString();
+    }
+
+    private static String actorKind(CommandSourceStack source) {
+        return source != null && source.getEntity() instanceof ServerPlayer ? "player"
+                : source == null || source.getEntity() == null ? "server_or_console" : "entity";
+    }
+
+    private static String scopeActorKind(MutationScope scope) {
+        if (scope.hasCommandActor) return scope.commandActorKind;
+        return scope.source == null ? "player" : actorKind(scope.source);
+    }
+
     private static String scopeActorUuid(MutationScope scope) {
+        if (scope.hasCommandActor) return scope.commandActorUuid;
         return scope.source == null && scope.creativePlayer != null
                 ? scope.creativePlayer.getUUID().toString() : actorUuid(scope.source);
     }
 
     private static String scopeActorName(MutationScope scope) {
+        if (scope.hasCommandActor) return scope.commandActorName;
         return scope.source == null && scope.creativePlayer != null
                 ? scope.creativePlayer.getGameProfile().getName() : actorName(scope.source);
     }

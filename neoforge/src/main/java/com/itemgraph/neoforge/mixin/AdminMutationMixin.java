@@ -65,6 +65,22 @@ abstract class AdminClearMutationMixin {
 
 @Mixin(ItemCommands.class)
 abstract class AdminItemMutationMixin {
+    @WrapMethod(method = "getBlockItem")
+    private static ItemStack itemgraph$captureBlockCopySource(CommandSourceStack source, BlockPos pos, int slot,
+            Operation<ItemStack> original) throws Throwable {
+        ItemStack result = original.call(source, pos, slot);
+        AdminMutationCapture.recordBlockCopySourceSafely(source, pos, slot);
+        return result;
+    }
+
+    @WrapMethod(method = "getEntityItem")
+    private static ItemStack itemgraph$captureEntityCopySource(Entity source, int slot,
+            Operation<ItemStack> original) throws Throwable {
+        ItemStack result = original.call(source, slot);
+        AdminMutationCapture.recordEntityCopySourceSafely(source, slot);
+        return result;
+    }
+
     @WrapMethod(method = "setBlockItem")
     private static int itemgraph$captureSetBlock(CommandSourceStack source, BlockPos pos, int slot,
             ItemStack stack, Operation<Integer> original) throws Throwable {

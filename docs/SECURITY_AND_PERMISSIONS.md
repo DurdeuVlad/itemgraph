@@ -127,6 +127,11 @@ Generic command history also suppresses `/execute` text because it can contain a
 nested item mutation and private selectors or item arguments.
 Confirmed inventory deltas include item fingerprints, quantities, slot identifiers,
 and affected entity identifiers where needed to explain the observed mutation.
+For nested `/execute as`, `actor_uuid` and `actor_name` identify the original
+command issuer; a differing effective entity is retained separately as
+`execution_context_actor_*`. `/item ... from block/entity` records the copied-from
+endpoint and exact stack in staff-private evidence without implying that the source
+slot lost quantity.
 Keep `ADMIN_ITEM_COMMAND_*`, `CREATIVE_SLOT_*`, `CREATIVE_BLOCK_*`,
 `ADMIN_ITEM_*`, and `CREATIVE_ITEM_*` restricted to the audit permission. Do not
 surface these rows in player-facing flow views. A pre-execution loader callback is

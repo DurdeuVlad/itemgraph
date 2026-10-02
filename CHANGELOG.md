@@ -26,6 +26,10 @@ The project follows a simple pre-1.0 development changelog model.
   failure outcomes.
   Attempts, outcomes, and observed deltas share mutation IDs; `/item modify` and
   creative slot replacements persist canonical transformations and conserve quantity.
+  `/item ... from block/entity` evidence also retains the exact copied-from slot and
+  stack without treating a copy as removal from the source. Nested `/execute as`
+  outcomes keep the original command issuer as the actor and store a differing
+  effective entity as separate execution-context evidence.
   Creative packet evidence identifies its source as an undifferentiated inventory
   packet rather than guessing clone or pick-block. Empty slots are explicit in
   unresolved before/after records. Staff activity is private, and raw item-command
