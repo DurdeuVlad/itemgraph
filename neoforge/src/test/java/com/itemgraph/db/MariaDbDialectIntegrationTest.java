@@ -8,6 +8,10 @@ import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.GriefLoggerAdapter;
 import com.itemgraph.ingest.GriefLoggerHistoricalImporter;
 import com.itemgraph.query.AuditLookupFilters;
+import com.itemgraph.query.QueryWindow;
+import com.itemgraph.query.TraceHop;
+import com.itemgraph.query.TracePage;
+import com.itemgraph.query.TraceQueryService;
 import com.itemgraph.query.UnifiedEvidenceQueryService;
 import com.itemgraph.command.IncidentBundleService;
 import org.junit.jupiter.api.Test;
@@ -235,6 +239,101 @@ class MariaDbDialectIntegrationTest {
 
             assertHistoricalImportAndLookup(endpoint, conn, tempDir);
             assertIncidentBundleExportIsPortable(conn, tempDir);
+            assertMetadataTimeCursorPagesArePortable(conn);
+        }
+    }
+
+    private static void assertMetadataTimeCursorPagesArePortable(Connection conn) throws Exception {
+        String fixture = UUID.randomUUID().toString().replace("-", "");
+        String itemId = "itemgraph:issue45_" + fixture;
+        String sourceType = "ISSUE45_FILTER_" + fixture;
+        UUID owner = UUID.randomUUID();
+        long playerId;
+        try (PreparedStatement node = conn.prepareStatement(
+                "INSERT INTO ig_nodes (node_type, owner_uuid, level_id) VALUES ('PLAYER', ?, 'minecraft:overworld')",
+                Statement.RETURN_GENERATED_KEYS)) {
+            node.setString(1, owner.toString());
+            node.executeUpdate();
+            playerId = generatedKey(node);
+        }
+        long matchingFingerprint = insertIssue45Fingerprint(conn, itemId, "Old Reliable", fixture + "-match");
+        insertIssue45Fingerprint(conn, itemId, "Different Relic", fixture + "-other");
+        String componentValue = "\"Old Reliable\"";
+        try (PreparedStatement component = conn.prepareStatement("""
+                INSERT INTO ig_fingerprint_components
+                    (fingerprint_id, component_id, value_hash, canonical_value)
+                VALUES (?, 'minecraft:custom_name#plain_text', ?, ?)
+                """)) {
+            component.setLong(1, matchingFingerprint);
+            component.setString(2, com.itemgraph.canon.ItemCanonicalizer.sha256Hex(componentValue));
+            component.setString(3, componentValue);
+            component.executeUpdate();
+        }
+
+        long base = 1_700_000_000_000L;
+        long before = insertIssue45Observation(conn, sourceType, 1, base + 1_000, playerId, matchingFingerprint);
+        long firstInside = insertIssue45Observation(conn, sourceType, 2, base + 2_000, playerId, matchingFingerprint);
+        long secondInside = insertIssue45Observation(conn, sourceType, 3, base + 3_000, playerId, matchingFingerprint);
+        long after = insertIssue45Observation(conn, sourceType, 4, base + 4_000, playerId, matchingFingerprint);
+        var predicates = AuditLookupFilters.parse("radius.1 name.\"Old Reliable\"", base).itemPredicates();
+        QueryWindow window = new QueryWindow(base + 1_500, base + 3_500);
+        TraceQueryService service = new TraceQueryService();
+        TracePage first = service.traceItemPage(conn, itemId, predicates, 1, window,
+                null, TracePage.Direction.FORWARD);
+        TracePage second = service.traceItemPage(conn, itemId, predicates, 1, window,
+                first.nextCursor(), TracePage.Direction.FORWARD);
+        TracePage previous = service.traceItemPage(conn, itemId, predicates, 1, window,
+                second.previousCursor(), TracePage.Direction.BACKWARD);
+
+        assertEquals(TracePage.Resolution.RESOLVED, first.resolution());
+        assertEquals(matchingFingerprint, first.fingerprint().id());
+        assertFalse(first.fingerprint().componentIndexUnresolved());
+        assertEquals(List.of(firstInside), first.hops().stream().map(TraceHop::refId).toList());
+        assertEquals(List.of(secondInside), second.hops().stream().map(TraceHop::refId).toList());
+        assertEquals(List.of(firstInside), previous.hops().stream().map(TraceHop::refId).toList());
+        assertTrue(first.hasNext());
+        assertFalse(second.hasNext());
+        assertTrue(second.hasPrevious());
+        assertEquals(base + 2_000, first.nextCursor().timestampMs());
+        assertEquals(base + 3_000, second.previousCursor().timestampMs());
+        assertFalse(List.of(first, second).stream().flatMap(page -> page.hops().stream())
+                .map(TraceHop::refId).toList().contains(before));
+        assertFalse(List.of(first, second).stream().flatMap(page -> page.hops().stream())
+                .map(TraceHop::refId).toList().contains(after));
+    }
+
+    private static long insertIssue45Fingerprint(Connection conn, String itemId, String name, String hashSalt)
+            throws Exception {
+        long id;
+        try (PreparedStatement fingerprint = conn.prepareStatement("""
+                INSERT INTO ig_item_fingerprints
+                    (item_id, fingerprint_hash, custom_name, component_index_state)
+                VALUES (?, ?, ?, 'COMPLETE')
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            fingerprint.setString(1, itemId);
+            fingerprint.setString(2, com.itemgraph.canon.ItemCanonicalizer.sha256Hex(hashSalt));
+            fingerprint.setString(3, name);
+            fingerprint.executeUpdate();
+            id = generatedKey(fingerprint);
+        }
+        return id;
+    }
+
+    private static long insertIssue45Observation(Connection conn, String sourceType, long sourceEventId,
+                                                 long timestamp, long playerId, long fingerprintId)
+            throws Exception {
+        try (PreparedStatement observation = conn.prepareStatement("""
+                INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms,
+                    node_id, fingerprint_id, action_type, amount)
+                VALUES (?, ?, ?, ?, ?, 'DROP_ITEM', 1)
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            observation.setString(1, sourceType);
+            observation.setLong(2, sourceEventId);
+            observation.setLong(3, timestamp);
+            observation.setLong(4, playerId);
+            observation.setLong(5, fingerprintId);
+            observation.executeUpdate();
+            return generatedKey(observation);
         }
     }
 
