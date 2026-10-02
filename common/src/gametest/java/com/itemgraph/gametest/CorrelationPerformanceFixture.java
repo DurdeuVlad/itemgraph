@@ -7,6 +7,7 @@ import com.itemgraph.ingest.IngestionService;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.metrics.OperationalMetrics;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.server.MinecraftServer;
 
 import java.sql.SQLException;
 import java.nio.charset.StandardCharsets;
@@ -14,6 +15,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Cross-loader, SQLite-backed correlation throughput probe. */
 public final class CorrelationPerformanceFixture {
@@ -22,19 +26,26 @@ public final class CorrelationPerformanceFixture {
     private static final int OBSERVATION_COUNT = PAIRS_PER_PASS * PASS_COUNT * 2;
     private static final long SOURCE_EVENT_FLOOR = 91_000_000_000L;
     private static final long CLOSED_WINDOW_AGE_MS = TimeUnit.MINUTES.toMillis(10);
+    private static final long COMPLETION_DEADLINE_NANOS = TimeUnit.MINUTES.toNanos(3);
+    private static final long CLEANUP_GRACE_NANOS = TimeUnit.SECONDS.toNanos(15);
     private static final String SOURCE_PLAYER_UUID = "10000000-0000-4000-8000-000000000001";
     private static final String DESTINATION_PLAYER_UUID = "10000000-0000-4000-8000-000000000002";
     private record DurableSnapshot(long observations, long finalizedObservations, long edges,
                                    long edgeUnits, long sourceAllocatedUnits, long destinationAllocatedUnits,
                                    long sourceAllocationMismatches, long destinationAllocationMismatches) { }
+    private record Completion(String failure) { }
 
     private CorrelationPerformanceFixture() { }
 
     public static void run(GameTestHelper helper, String loader) {
         var server = helper.getLevel().getServer();
         Probe probe = new Probe(helper, loader);
+        helper.runAfterDelay(1, probe::completeOnGameTestTick);
         CompletableFuture.runAsync(probe::prepare)
                 .whenComplete((ignored, failure) -> server.execute(() -> {
+                    if (probe.failureCleanupStarted.get()) {
+                        return;
+                    }
                     if (failure != null) {
                         probe.fail("could not prepare isolated correlation workload", failure);
                         return;
@@ -45,10 +56,14 @@ public final class CorrelationPerformanceFixture {
 
     private static final class Probe {
         private final GameTestHelper helper;
+        private final MinecraftServer server;
         private final String loader;
         private final InternalObservationService observations = InternalObservationService.getInstance();
         private final IngestionService ingestion = IngestionService.getInstance();
         private final long startedNanos = System.nanoTime();
+        private final AtomicReference<Completion> completion = new AtomicReference<>();
+        private final AtomicBoolean failureCleanupStarted = new AtomicBoolean();
+        private final AtomicLong failureCleanupStartedNanos = new AtomicLong();
         private final String runIdentity = UUID.randomUUID().toString();
         private final long sourceEventBase = SOURCE_EVENT_FLOOR
                 + (UUID.randomUUID().getLeastSignificantBits() & 0x0000ffffffffffffL);
@@ -59,6 +74,7 @@ public final class CorrelationPerformanceFixture {
 
         private Probe(GameTestHelper helper, String loader) {
             this.helper = helper;
+            this.server = helper.getLevel().getServer();
             this.loader = loader;
         }
 
@@ -73,33 +89,43 @@ public final class CorrelationPerformanceFixture {
         }
 
         private void schedulePass(int passNumber) {
-            helper.getLevel().getServer().execute(() -> submitPass(passNumber));
+            server.execute(() -> submitPass(passNumber));
         }
 
         private void submitPass(int passNumber) {
-            long passStart = (long) (passNumber - 1) * PAIRS_PER_PASS;
-            for (int offset = 0; offset < PAIRS_PER_PASS; offset++) {
-                int pair = Math.toIntExact(passStart + offset);
-                long timestamp = System.currentTimeMillis() - CLOSED_WINDOW_AGE_MS + pair * 2L;
-                CanonicalItem item = benchmarkItem(runIdentity, pair);
-                String entityUuid = UUID.nameUUIDFromBytes(
-                        ("itemgraph-correlation-performance:" + runIdentity + ":" + pair)
-                                .getBytes(java.nio.charset.StandardCharsets.UTF_8))
-                        .toString();
-                var drop = observation(pair * 2L, timestamp, "DROP_ITEM", SOURCE_PLAYER_UUID,
-                        "Correlation Probe Source", item, entityUuid, sourceEventBase);
-                var pickup = observation(pair * 2L + 1L, timestamp + 1L, "PICKUP_ITEM", DESTINATION_PLAYER_UUID,
-                        "Correlation Probe Destination", item, entityUuid, sourceEventBase);
-                helper.assertTrue(observations.submit(drop), "correlation probe queue rejected drop " + pair);
-                helper.assertTrue(observations.submit(pickup), "correlation probe queue rejected pickup " + pair);
+            if (failureCleanupStarted.get()) {
+                return;
             }
-            nextPair += PAIRS_PER_PASS;
-            awaitPersisted(passNumber, System.nanoTime() + TimeUnit.SECONDS.toNanos(30));
+            try {
+                long passStart = (long) (passNumber - 1) * PAIRS_PER_PASS;
+                for (int offset = 0; offset < PAIRS_PER_PASS; offset++) {
+                    int pair = Math.toIntExact(passStart + offset);
+                    long timestamp = System.currentTimeMillis() - CLOSED_WINDOW_AGE_MS + pair * 2L;
+                    CanonicalItem item = benchmarkItem(runIdentity, pair);
+                    String entityUuid = UUID.nameUUIDFromBytes(
+                            ("itemgraph-correlation-performance:" + runIdentity + ":" + pair)
+                                    .getBytes(StandardCharsets.UTF_8))
+                            .toString();
+                    var drop = observation(pair * 2L, timestamp, "DROP_ITEM", SOURCE_PLAYER_UUID,
+                            "Correlation Probe Source", item, entityUuid, sourceEventBase);
+                    var pickup = observation(pair * 2L + 1L, timestamp + 1L, "PICKUP_ITEM", DESTINATION_PLAYER_UUID,
+                            "Correlation Probe Destination", item, entityUuid, sourceEventBase);
+                    helper.assertTrue(observations.submit(drop), "correlation probe queue rejected drop " + pair);
+                    helper.assertTrue(observations.submit(pickup), "correlation probe queue rejected pickup " + pair);
+                }
+                nextPair += PAIRS_PER_PASS;
+                awaitPersisted(passNumber, System.nanoTime() + TimeUnit.SECONDS.toNanos(30));
+            } catch (Throwable failure) {
+                fail("could not submit correlation probe pass " + passNumber, failure);
+            }
         }
 
         private void awaitPersisted(int passNumber, long deadlineNanos) {
             CompletableFuture.delayedExecutor(50, TimeUnit.MILLISECONDS).execute(() ->
-                    helper.getLevel().getServer().execute(() -> {
+                    server.execute(() -> {
+                if (failureCleanupStarted.get()) {
+                    return;
+                }
                 if (observations.getTotalPersisted() >= nextPair * 2L
                         && observations.getQueueSize() == 0) {
                     persistedRows = observations.getTotalPersisted();
@@ -109,7 +135,10 @@ public final class CorrelationPerformanceFixture {
                         return;
                     }
                     CompletableFuture.supplyAsync(ingestion::runCorrelation)
-                            .whenComplete((result, failure) -> helper.getLevel().getServer().execute(() -> {
+                            .whenComplete((result, failure) -> server.execute(() -> {
+                                if (failureCleanupStarted.get()) {
+                                    return;
+                                }
                                 if (failure != null) {
                                     fail("correlation pass threw", failure);
                                     return;
@@ -148,7 +177,10 @@ public final class CorrelationPerformanceFixture {
                 } catch (SQLException failure) {
                     throw new IllegalStateException("Could not read the durable correlation probe rows", failure);
                 }
-            }).whenComplete((rowCount, failure) -> helper.getLevel().getServer().execute(() -> {
+            }).whenComplete((rowCount, failure) -> server.execute(() -> {
+                if (failureCleanupStarted.get()) {
+                    return;
+                }
                 if (failure != null) {
                     fail("correlation ledger read failed", failure);
                     return;
@@ -201,28 +233,58 @@ public final class CorrelationPerformanceFixture {
             CompletableFuture.runAsync(() -> {
                 observations.start();
                 ingestion.start();
-            }).whenComplete((ignored, failure) -> helper.getLevel().getServer().execute(() -> {
-                if (failure != null) {
-                    helper.fail("could not restart ItemGraph workers after correlation probe: " + failure);
-                } else {
-                    helper.succeed();
+            }).whenComplete((ignored, failure) -> {
+                if (failureCleanupStarted.get()) {
+                    return;
                 }
-            }));
+                completion.compareAndSet(null, failure == null
+                        ? new Completion(null)
+                        : new Completion("could not restart ItemGraph workers after correlation probe: " + failure));
+            });
         }
 
         private void fail(String message, Throwable failure) {
+            if (completion.get() != null || !failureCleanupStarted.compareAndSet(false, true)) {
+                return;
+            }
+            failureCleanupStartedNanos.set(System.nanoTime());
             CompletableFuture.runAsync(() -> {
                 observations.stop();
                 observations.clear();
                 observations.start();
                 ingestion.start();
-            }).whenComplete((ignored, cleanupFailure) -> helper.getLevel().getServer().execute(() -> {
+            }).whenComplete((ignored, cleanupFailure) -> server.execute(() -> {
                 String detail = failure == null ? message : message + ": " + failure;
                 if (cleanupFailure != null) {
                     detail += "; worker restart failed: " + cleanupFailure;
                 }
-                helper.fail(detail);
+                completion.compareAndSet(null, new Completion(detail));
             }));
+        }
+
+        private void completeOnGameTestTick() {
+            Completion result = completion.get();
+            if (result == null) {
+                if (System.nanoTime() - startedNanos >= COMPLETION_DEADLINE_NANOS) {
+                    if (failureCleanupStarted.get()) {
+                        if (System.nanoTime() - failureCleanupStartedNanos.get() >= CLEANUP_GRACE_NANOS) {
+                            helper.fail("correlation probe worker cleanup exceeded its 15-second grace period");
+                            return;
+                        }
+                    } else {
+                        fail("correlation probe exceeded its three-minute completion deadline", null);
+                    }
+                }
+                helper.runAfterDelay(1, this::completeOnGameTestTick);
+            } else if (result.failure() == null) {
+                if (System.nanoTime() - startedNanos >= COMPLETION_DEADLINE_NANOS) {
+                    helper.fail("correlation probe completed after its three-minute deadline");
+                } else {
+                    helper.succeed();
+                }
+            } else {
+                helper.fail(result.failure());
+            }
         }
 
         private DurableSnapshot readDurableSnapshot() throws SQLException {
