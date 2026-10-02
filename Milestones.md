@@ -1,7 +1,7 @@
 # ItemGraph Milestones
 
 Document status: active
-Last reviewed: 2026-10-01
+Last reviewed: 2026-10-02
 Owner: Vlad Durdeu
 
 Milestones describe outcomes and proof, not a list of implementation chores.
@@ -265,6 +265,17 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   production budget, so PR #120 remains draft and numeric thresholds remain unset until
   maintainers choose a production-safe target from observed evidence. Its performance
   acceptance is not complete merely because the report harness passes.
+- Batch research checkpoint (2026-10-02): the existing GitHub milestone #5 remains the
+  correct M9 boundary; its 12 open issues are #32–#37, #44–#45, and #55–#58, with no
+  additional feature gap found in the pinned `1.2.10-1.21.1` GriefLogger compatibility
+  profile. Keep the accepted execution order and do not create a duplicate milestone.
+  CoreProtect documents command, inventory, item, container, and block lookups as distinct
+  action families; ItemGraph therefore records administrative causes separately from
+  command-attempt text and only emits quantity evidence at a confirmed mutation boundary.
+  NeoForge 1.21.1 `CommandEvent` is cancellable and fires after parse but before execution,
+  so it cannot prove successful effects. The local/CI M9 evidence is still not a
+  staging-derived production budget; PR #120 stays draft until that gate is resolved.
+  Visible-client inspector clicks remain explicitly unverified per the maintainer decision.
 
 ## M10: Native-only cutover and release hardening
 

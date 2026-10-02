@@ -4,8 +4,10 @@ import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.BlockInspectionTargets;
+import com.itemgraph.audit.AdminMutationCapture;
 import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.neoforge.mixin.BucketItemAccessor;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
@@ -27,6 +29,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -67,17 +70,29 @@ public final class NativeAuditEventListener {
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onCommand(CommandEvent event) {
-        if (event.isCanceled()) {
-            return;
-        }
         var parse = event.getParseResults();
-        if (parse == null || parse.getContext() == null || parse.getContext().getSource() == null
-                || !(parse.getContext().getSource().getEntity() instanceof ServerPlayer player)) {
+        if (parse == null || parse.getContext() == null || parse.getContext().getSource() == null) {
             return;
         }
         String command = parse.getReader().getString();
+        var source = parse.getContext().getSource();
+        AdminMutationCapture.recordCommandAttemptSafely(new AdminMutationCapture.ParseResultsAdapter(
+                source, command, source.hasPermission(2), event.isCanceled(),
+                !parse.getExceptions().isEmpty(), commandNodeNames(parse)));
+        if (AdminMutationCapture.shouldSuppressRawCommand(command)) return;
+        if (event.isCanceled() || !(source.getEntity() instanceof ServerPlayer player)) return;
         submit("COMMAND_ATTEMPT", player, player.level(), player.blockPosition(),
                 null, bounded(command));
+    }
+
+    private static List<String> commandNodeNames(com.mojang.brigadier.ParseResults<CommandSourceStack> parse) {
+        List<String> names = new ArrayList<>();
+        var context = parse.getContext();
+        while (context != null) {
+            context.getNodes().forEach(node -> names.add(node.getNode().getName()));
+            context = context.getChild();
+        }
+        return List.copyOf(names);
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
@@ -86,6 +101,7 @@ public final class NativeAuditEventListener {
                 || !(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
+        AdminMutationCapture.beginCreativeBlockBreakSafely(player, blockId(event.getState()), event.getPos());
         List<AuditEventQueryService.ExactPosition> supersessionPositions = BlockInspectionTargets
                 .resolveBlockPositions(level, event.getPos(), event.getState()).stream()
                 .map(pos -> new AuditEventQueryService.ExactPosition(pos.getX(), pos.getY(), pos.getZ()))

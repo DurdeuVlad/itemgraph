@@ -1,5 +1,6 @@
 package com.itemgraph.listener;
 
+import com.itemgraph.audit.AdminMutationCapture;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.tracker.ItemEntityTracker;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -130,6 +131,9 @@ public class ItemEntityEventListener {
         Player player = event.getPlayer();
         ItemEntity itemEntity = event.getEntity();
         if (player == null || itemEntity == null || player.level().isClientSide()) {
+            return;
+        }
+        if (AdminMutationCapture.isItemGraphManagedDropInProgress()) {
             return;
         }
         // A canceled toss removes the item from inventory but never adds the entity to the world.

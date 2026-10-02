@@ -161,6 +161,10 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                 "ItemGraph queues must be empty after the worker stops and flushes");
         helper.assertValueEqual(droppedBefore, observations.getTotalDropped(),
                 "the interactions must not lose evidence to a full or failed queue");
+        // Fabric GameTests share one server lifecycle across batches. Restore the
+        // process-wide service after proving stop-and-flush so later fixtures can
+        // exercise their own evidence paths on the same test server.
+        observations.start();
 
         String playerUuid = player.getUUID().toString();
         String playerName = player.getGameProfile().getName();

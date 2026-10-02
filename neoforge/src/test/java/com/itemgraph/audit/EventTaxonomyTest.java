@@ -17,6 +17,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EventTaxonomyTest {
     @Test
+    void itemCommandPrivacyRecognizesBrigadierWhitespaceAndOnlyVanillaRoots() {
+        assertTrue(AdminMutationCapture.isItemCommand("/give\t@p minecraft:diamond 1"));
+        assertTrue(AdminMutationCapture.isItemCommand("/minecraft:give @p minecraft:diamond 1"));
+        assertFalse(AdminMutationCapture.isItemCommand("/othermod:give @p mod:item 1"));
+        assertTrue(AdminMutationCapture.shouldSuppressRawCommand(
+                "/execute\tas @a run give @s minecraft:diamond 64"));
+        assertTrue(AdminMutationCapture.shouldSuppressRawCommand(
+                "/minecraft:execute as @a run minecraft:give @s minecraft:diamond 64"));
+        assertFalse(AdminMutationCapture.shouldSuppressRawCommand("/othermod:give @p mod:item 1"));
+    }
+
+    @Test
     void definitionsAreUniquePerSurfaceAndContainCompleteVersionedContracts() {
         Set<String> keys = new HashSet<>();
         for (EventTaxonomy.Definition definition : EventTaxonomy.definitions()) {
@@ -124,5 +136,33 @@ class EventTaxonomyTest {
                 EventTaxonomy.find("KILL_ENTITY", Surface.AUDIT_EVENT).orElseThrow().actor());
         assertEquals(LoaderStatus.HISTORICAL_ONLY,
                 EventTaxonomy.find("INTERACT_BLOCK", Surface.AUDIT_EVENT).orElseThrow().fabric().status());
+    }
+
+    @Test
+    void administrativeAndCreativeItemEvidenceIsStaffPrivateAndQueryable() {
+        for (String id : new String[] {"ADMIN_ITEM_COMMAND_ATTEMPT", "ADMIN_ITEM_COMMAND_EFFECT",
+                "ADMIN_ITEM_COMMAND_FAILURE", "ADMIN_ITEM_COMMAND_UNRESOLVED", "CREATIVE_SLOT_ATTEMPT", "CREATIVE_SLOT_EFFECT",
+                "CREATIVE_BLOCK_ATTEMPT", "CREATIVE_BLOCK_RESULT", "CREATIVE_BLOCK_UNRESOLVED"}) {
+            EventTaxonomy.Definition event = EventTaxonomy.find(id, Surface.AUDIT_EVENT).orElseThrow();
+            assertEquals(33, event.ownerIssue());
+            assertEquals(EventTaxonomy.PrivacyClass.STAFF_ACTIVITY, event.privacy());
+            assertTrue(event.queryableOn(EventTaxonomy.Loader.FABRIC));
+            assertTrue(event.queryableOn(EventTaxonomy.Loader.NEOFORGE));
+        }
+        assertEquals(EventTaxonomy.SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                EventTaxonomy.find("CREATIVE_BLOCK_RESULT", Surface.AUDIT_EVENT).orElseThrow()
+                        .sourceReliability());
+        assertEquals(EventTaxonomy.EvidenceClass.UNRESOLVED,
+                EventTaxonomy.find("CREATIVE_BLOCK_UNRESOLVED", Surface.AUDIT_EVENT).orElseThrow()
+                        .evidenceClass());
+        for (String id : new String[] {"ADMIN_ITEM_CREATE", "ADMIN_ITEM_REMOVE",
+                "CREATIVE_ITEM_CREATE", "CREATIVE_ITEM_REMOVE"}) {
+            EventTaxonomy.Definition event = EventTaxonomy.find(id, Surface.ITEM_OBSERVATION).orElseThrow();
+            assertEquals(33, event.ownerIssue());
+            assertEquals(EventTaxonomy.PrivacyClass.STAFF_ACTIVITY, event.privacy());
+            assertEquals(QuantitySemantics.SIGNED_DELTA, event.quantity());
+        }
+        assertTrue(EventTaxonomy.find("ADMIN_ITEM_TRANSFORM", Surface.TRANSFORMATION).isPresent());
+        assertTrue(EventTaxonomy.find("CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION).isPresent());
     }
 }

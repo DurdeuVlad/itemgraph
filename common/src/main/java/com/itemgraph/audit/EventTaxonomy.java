@@ -37,7 +37,7 @@ public final class EventTaxonomy {
     }
     public enum QuantitySemantics { NONE, SIGNED_DELTA, INPUT_OUTPUT, UNKNOWN }
     public enum ActorStatus { PLAYER, ENTITY, WORLD, UNKNOWN }
-    public enum PrivacyClass { PUBLIC_WORLD_EVENT, PLAYER_ACTIVITY, SENSITIVE_LOCATION }
+    public enum PrivacyClass { PUBLIC_WORLD_EVENT, PLAYER_ACTIVITY, STAFF_ACTIVITY, SENSITIVE_LOCATION }
     public enum LoaderStatus { IMPLEMENTED, HISTORICAL_ONLY, PLANNED, UNSUPPORTED }
     public enum Loader { FABRIC, NEOFORGE }
 
@@ -210,6 +210,33 @@ public final class EventTaxonomy {
                 ActorStatus.PLAYER, PrivacyClass.PLAYER_ACTIVITY, 24, "COMMAND");
         audit(entries, "COMMAND_EXECUTED", "command", SourceReliability.AUTHORITATIVE_GAME_RESULT,
                 ActorStatus.PLAYER, PrivacyClass.PLAYER_ACTIVITY, 24, HISTORICAL_ONLY);
+        audit(entries, "ADMIN_ITEM_COMMAND_ATTEMPT", "admin_item_command",
+                SourceReliability.GAME_CALLBACK_ATTEMPT, ActorStatus.UNKNOWN,
+                PrivacyClass.STAFF_ACTIVITY, 33);
+        audit(entries, "ADMIN_ITEM_COMMAND_EFFECT", "admin_item_command",
+                SourceReliability.AUTHORITATIVE_GAME_RESULT, ActorStatus.UNKNOWN,
+                PrivacyClass.STAFF_ACTIVITY, 33);
+        audit(entries, "ADMIN_ITEM_COMMAND_FAILURE", "admin_item_command",
+                SourceReliability.AUTHORITATIVE_GAME_RESULT, ActorStatus.UNKNOWN,
+                PrivacyClass.STAFF_ACTIVITY, 33);
+        audit(entries, "ADMIN_ITEM_COMMAND_UNRESOLVED", "admin_item_command",
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE, ActorStatus.UNKNOWN,
+                PrivacyClass.STAFF_ACTIVITY, 33);
+        audit(entries, "CREATIVE_SLOT_ATTEMPT", "creative_inventory",
+                SourceReliability.GAME_CALLBACK_ATTEMPT, ActorStatus.PLAYER,
+                PrivacyClass.STAFF_ACTIVITY, 33);
+        audit(entries, "CREATIVE_SLOT_EFFECT", "creative_inventory",
+                SourceReliability.AUTHORITATIVE_GAME_RESULT, ActorStatus.PLAYER,
+                PrivacyClass.STAFF_ACTIVITY, 33);
+        audit(entries, "CREATIVE_BLOCK_ATTEMPT", "creative_world_action",
+                SourceReliability.GAME_CALLBACK_ATTEMPT, ActorStatus.PLAYER,
+                PrivacyClass.STAFF_ACTIVITY, 33);
+        audit(entries, "CREATIVE_BLOCK_RESULT", "creative_world_action",
+                SourceReliability.AUTHORITATIVE_GAME_RESULT, ActorStatus.PLAYER,
+                PrivacyClass.STAFF_ACTIVITY, 33);
+        audit(entries, "CREATIVE_BLOCK_UNRESOLVED", "creative_world_action", EvidenceClass.UNRESOLVED,
+                SourceReliability.UNRESOLVED_CAUSE, ActorStatus.PLAYER,
+                PrivacyClass.STAFF_ACTIVITY, 33);
         audit(entries, "PLACE_BLOCK", "block_action", SourceReliability.GAME_CALLBACK_ATTEMPT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "BREAK_BLOCK", "block_action", SourceReliability.GAME_CALLBACK_ATTEMPT,
@@ -265,6 +292,24 @@ public final class EventTaxonomy {
         action(entries, "DEATH_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 56, "entity_lifecycle");
         action(entries, "ADD_ITEM_ENDER", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 76, "ender_inventory");
         action(entries, "REMOVE_ITEM_ENDER", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 76, "ender_inventory");
+        action(entries, "ADMIN_ITEM_CREATE", Surface.ITEM_OBSERVATION,
+                QuantitySemantics.SIGNED_DELTA, 33, "admin_inventory",
+                ActorStatus.UNKNOWN, PrivacyClass.STAFF_ACTIVITY);
+        action(entries, "ADMIN_ITEM_REMOVE", Surface.ITEM_OBSERVATION,
+                QuantitySemantics.SIGNED_DELTA, 33, "admin_inventory",
+                ActorStatus.UNKNOWN, PrivacyClass.STAFF_ACTIVITY);
+        action(entries, "CREATIVE_ITEM_CREATE", Surface.ITEM_OBSERVATION,
+                QuantitySemantics.SIGNED_DELTA, 33, "creative_inventory",
+                ActorStatus.PLAYER, PrivacyClass.STAFF_ACTIVITY);
+        action(entries, "CREATIVE_ITEM_REMOVE", Surface.ITEM_OBSERVATION,
+                QuantitySemantics.SIGNED_DELTA, 33, "creative_inventory",
+                ActorStatus.PLAYER, PrivacyClass.STAFF_ACTIVITY);
+        action(entries, "ADMIN_ITEM_TRANSFORM", Surface.TRANSFORMATION,
+                QuantitySemantics.INPUT_OUTPUT, 33, "admin_inventory",
+                ActorStatus.UNKNOWN, PrivacyClass.STAFF_ACTIVITY);
+        action(entries, "CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION,
+                QuantitySemantics.INPUT_OUTPUT, 33, "creative_inventory",
+                ActorStatus.PLAYER, PrivacyClass.STAFF_ACTIVITY);
 
         // Planned child-issue entries are intentionally not exposed as supported
         // lookup actions until loader adapters and reproducible fixtures exist.
@@ -326,11 +371,24 @@ public final class EventTaxonomy {
     private static void action(List<Definition> entries, String id, Surface surface,
                                QuantitySemantics quantity, int ownerIssue,
                                String family, String... aliases) {
+        action(entries, id, surface, quantity, ownerIssue, family,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, aliases);
+    }
+
+    private static void action(List<Definition> entries, String id, Surface surface,
+                               QuantitySemantics quantity, int ownerIssue, String family,
+                               ActorStatus actor, PrivacyClass privacy) {
+        action(entries, id, surface, quantity, ownerIssue, family, actor, privacy, new String[0]);
+    }
+
+    private static void action(List<Definition> entries, String id, Surface surface,
+                               QuantitySemantics quantity, int ownerIssue, String family,
+                               ActorStatus actor, PrivacyClass privacy, String... aliases) {
         add(entries, id, family, surface, EvidenceClass.OBSERVED,
                 SourceReliability.DIRECT_STATE_DELTA,
                 surface == Surface.TRANSFORMATION ? EndpointSemantics.INPUTS_AND_OUTPUTS
                         : EndpointSemantics.SOURCE_AND_DESTINATION,
-                quantity, ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
+                quantity, actor, privacy,
                 IMPLEMENTED, IMPLEMENTED, ownerIssue, aliases);
     }
 
@@ -348,6 +406,7 @@ public final class EventTaxonomy {
     private static EndpointSemantics auditEndpoints(String family) {
         return switch (family) {
             case "player_session", "chat", "command" -> EndpointSemantics.PLAYER_CONTEXT;
+            case "admin_item_command", "creative_inventory" -> EndpointSemantics.UNKNOWN;
             case "entity_interaction", "entity_lifecycle", "projectile" -> EndpointSemantics.ACTOR_AND_TARGET;
             default -> EndpointSemantics.WORLD_LOCATION;
         };

@@ -1035,3 +1035,79 @@ They validate the shared taxonomy contract; they do not prove loader event captu
 database persistence of new event families, or runtime parity. Those checks
 belong to the child issue fixtures and the consolidated M9 acceptance pass.
 
+# Issue #33 administrative item capture batch
+
+The concentrated #33 validation batch covers both loader mixin configs and the
+shared capture service in one paired GameTest run:
+
+- NeoForge and Fabric live GameTests execute permission-denied `/give`, nested
+  `/execute ... give`,
+  partial and zero-match `/clear`, invalid-item `/item`,
+  `/item replace entity`, changed and unchanged creative inventory slots,
+  creative block placement and destruction, accepted negative-slot creative drops, and
+  accepted `/give` overflow;
+- each live fixture verifies the persisted source and destination node types,
+  exact signed quantities, distinct successful/failed outcomes, attempt/effect
+  mutation-ID linkage, explicit `staff_private` payloads, and sanitized command
+  payloads after the local evidence queues drain;
+- `/item replace` snapshots the selected entity equipment slot and stores its
+  exact canonical item delta;
+- `/item modify` records a component transformation with the exact before/after
+  fingerprints, unchanged quantity, and shared attempt mutation ID; repeating
+  the same modifier with a positive command result and no new delta is recorded
+  as unresolved;
+- `/clear` includes crafting-grid slots in its before/after snapshot and records
+  the exact signed removal when a crafting slot matches;
+- replacing three remaining diamonds with four iron ingots records a three-item
+  creative transformation and one explicit creative creation, preserving count;
+- creative inventory evidence records `cause=creative_inventory_packet` and
+  `cause_status=undifferentiated`; it does not guess clone versus pick-block;
+- `/item replace block` records the exact created quantity at the selected
+  container slot, while `/item replace` on a non-player entity emits a private
+  unresolved before/after record with that entity's UUID and explicit
+  `empty=true` state when the prior slot was empty;
+- explicit level-zero permission denial and a nested non-item `/execute run`
+  command remain distinct from successful item mutations; the invalid-item
+  command retains its attempt and failed outcome without a quantity delta; unit
+  coverage checks direct namespaced root recognition and privacy filtering;
+- accepted overflow and negative-slot creative drops each produce one
+  `UNKNOWN -> GROUND` observation and no duplicate `DROP_ITEM` observation;
+- a shared `mutation_event_id` links each attempt, its quantity deltas, and its
+  completion outcome; every completion also references the attempt event ID;
+- Fabric and NeoForge mixin JSON each names every issue #33 injection class.
+
+The shared fixture verifies that creative block placement is observed on both
+loaders and that creative block destruction produces one persisted
+`CREATIVE_BLOCK_RESULT` with `confirmed_success` on both loaders. The event
+stores `player_inventory_quantity_delta=0`: vanilla creative placement leaves
+the held stack unchanged and creative destruction does not drop the block, so
+the world mutation is audit evidence and does not create an item-flow quantity
+row. Placement results are emitted after the changed block state is confirmed;
+Fabric and NeoForge compare bounded before/after states after `BlockItem.place`
+returns. NeoForge's cancellable `BlockEvent.EntityPlaceEvent` cannot by itself
+establish completion. Both adapters use the same predicate and ignore same-block
+state changes such as slab merging; the shared fixture checks this case. Each
+placement call keeps its own before-state map, including nested modded calls.
+If placement throws after changing a block, that cell is preserved as
+`CREATIVE_BLOCK_UNRESOLVED`. Exceptions after the break callback are
+`CREATIVE_BLOCK_UNRESOLVED`. Fabric obtains the break result from
+`PlayerBlockBreakEvents.AFTER`. NeoForge's `BlockEvent.BreakEvent` is a
+pre-mutation callback, so a narrowly scoped `ServerPlayerGameMode.destroyBlock`
+wrapper pairs the callback with the vanilla return value. Fabric's test mod
+descriptor registers the admin fixture explicitly so CI executes it.
+
+The current capture wrappers preserve vanilla return values and original
+exceptions if ItemGraph fails while recording the result. This behavior is
+guarded by `finishCurrentSafely` and `failCurrentSafely`; no injected failure
+GameTest currently proves the post-mutation capture-failure path. Creative
+placement records the placed block observed after the placement callback. The
+server-side creative slot packet does not distinguish clone or pick-block from
+other slot updates; both loaders therefore record the exact slot delta with
+`cause_status=undifferentiated`, without claiming which client action caused it.
+This source limitation is explicit in the evidence and does not weaken quantity
+capture.
+
+Run the loader test suites and GameTest suites once after the whole #33
+implementation batch, then run the full M9 CI matrix after milestone work is
+complete. Do not build distributable artifacts unless the mod version is bumped.
+

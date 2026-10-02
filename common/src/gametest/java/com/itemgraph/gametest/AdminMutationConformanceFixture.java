@@ -1,0 +1,625 @@
+package com.itemgraph.gametest;
+
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.itemgraph.audit.AdminMutationCapture;
+import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.ingest.InternalObservationService;
+import net.minecraft.commands.Commands;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.protocol.game.ServerboundSetCreativeModeSlotPacket;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+
+import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/** Cross-loader live contract for issue #33 command and creative-slot capture. */
+public final class AdminMutationConformanceFixture {
+    private AdminMutationConformanceFixture() { }
+
+    public static void run(GameTestHelper helper, ServerPlayer player) {
+        var slab = net.minecraft.world.level.block.Blocks.STONE_SLAB;
+        var bottomSlab = slab.defaultBlockState().setValue(
+                net.minecraft.world.level.block.SlabBlock.TYPE,
+                net.minecraft.world.level.block.state.properties.SlabType.BOTTOM);
+        var doubleSlab = slab.defaultBlockState().setValue(
+                net.minecraft.world.level.block.SlabBlock.TYPE,
+                net.minecraft.world.level.block.state.properties.SlabType.DOUBLE);
+        helper.assertFalse(AdminMutationCapture.isCreativePlacedBlockChange(bottomSlab, doubleSlab, slab),
+                "same-block state changes such as slab merging must have identical placement classification");
+        InternalObservationService service = InternalObservationService.getInstance();
+        long enqueuedBefore = service.getTotalEnqueued();
+        long persistedBefore = service.getTotalPersisted();
+        long droppedBefore = service.getTotalDropped();
+        Watermark watermark = watermark();
+
+        Commands commands = helper.getLevel().getServer().getCommands();
+        var commandSource = player.createCommandSourceStack().withPermission(2);
+        commands.performPrefixedCommand(player.createCommandSourceStack().withPermission(0),
+                "give @s minecraft:emerald 1");
+        helper.assertTrue(inventoryCount(player, Items.EMERALD) == 0,
+                "a permission-denied /give must not change the player's inventory");
+        commands.performPrefixedCommand(commandSource, "give @s minecraft:diamond 5");
+        helper.assertTrue(inventoryCount(player, Items.DIAMOND) == 5,
+                "successful /give must add exactly five diamonds to its target");
+        commands.performPrefixedCommand(commandSource, "clear @s minecraft:diamond 2");
+        helper.assertTrue(inventoryCount(player, Items.DIAMOND) == 3,
+                "partial /clear must remove exactly two diamonds");
+        player.inventoryMenu.getCraftSlots().setItem(0, new ItemStack(Items.EMERALD));
+        commands.performPrefixedCommand(commandSource, "clear @s minecraft:emerald");
+        helper.assertTrue(player.inventoryMenu.getCraftSlots().getItem(0).isEmpty(),
+                "/clear must include the player's crafting slots in its exact removal snapshot");
+        commands.performPrefixedCommand(commandSource, "clear @s minecraft:lapis_lazuli");
+        helper.assertTrue(inventoryCount(player, Items.LAPIS_LAZULI) == 0,
+                "a zero-match /clear must not create an item");
+        commands.performPrefixedCommand(commandSource,
+                "execute as @s run give @s minecraft:gold_ingot 2");
+        helper.assertTrue(inventoryCount(player, Items.GOLD_INGOT) == 2,
+                "nested namespaced /give must create exactly two gold ingots");
+        commands.performPrefixedCommand(commandSource, "execute as @s run say give @s minecraft:emerald 1");
+        helper.assertTrue(inventoryCount(player, Items.EMERALD) == 0,
+                "a non-item command after /execute run must not be classified as an item mutation");
+        commands.performPrefixedCommand(commandSource,
+                "item replace entity @s armor.head with minecraft:iron_helmet");
+        helper.assertTrue(player.getInventory().getItem(39).is(Items.IRON_HELMET),
+                "/item replace must set the selected entity equipment slot");
+        ArmorStand targetStand = EntityType.ARMOR_STAND.create(helper.getLevel());
+        helper.assertTrue(targetStand != null, "could not create the non-player entity fixture");
+        String targetStandTag = "itemgraph_issue33_" + targetStand.getUUID().toString().replace("-", "");
+        targetStand.addTag(targetStandTag);
+        targetStand.moveTo(player.getX() + 1.0, player.getY(), player.getZ(), player.getYRot(), 0.0F);
+        helper.assertTrue(helper.getLevel().addFreshEntity(targetStand),
+                "could not add the non-player entity fixture");
+        commands.performPrefixedCommand(commandSource,
+                "item replace entity @e[type=minecraft:armor_stand,tag=" + targetStandTag + ",limit=1] "
+                        + "weapon.mainhand with minecraft:apple");
+        helper.assertTrue(targetStand.getItemBySlot(EquipmentSlot.MAINHAND).is(Items.APPLE),
+                "/item replace must apply to a selected non-player entity slot");
+        commands.performPrefixedCommand(commandSource,
+                "item modify entity @s armor.head "
+                        + "{function:\"minecraft:set_components\",components:{\"minecraft:damage\":1}}");
+        helper.assertValueEqual(1, player.getInventory().getItem(39).get(net.minecraft.core.component.DataComponents.DAMAGE),
+                "/item modify must apply a component-changing item function");
+        commands.performPrefixedCommand(commandSource,
+                "item replace entity @s armor.head with itemgraph:missing_item_for_issue_33");
+        helper.assertTrue(player.getInventory().getItem(39).is(Items.IRON_HELMET)
+                        && player.getInventory().getItem(39).get(net.minecraft.core.component.DataComponents.DAMAGE) == 1,
+                "an invalid item identifier must leave the target slot unchanged");
+        commands.performPrefixedCommand(commandSource,
+                "item modify entity @s armor.head "
+                        + "{function:\"minecraft:set_components\",components:{\"minecraft:damage\":1}}");
+        BlockPos containerPos = helper.absolutePos(new BlockPos(2, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(containerPos,
+                        net.minecraft.world.level.block.Blocks.CHEST.defaultBlockState(), 3),
+                "could not place the block-container fixture");
+        commands.performPrefixedCommand(commandSource, "item replace block " + containerPos.getX() + " "
+                + containerPos.getY() + " " + containerPos.getZ() + " container.0 with minecraft:emerald 3");
+        helper.assertTrue(helper.getLevel().getBlockEntity(containerPos,
+                        net.minecraft.world.level.block.entity.BlockEntityType.CHEST)
+                        .map(chest -> chest.getItem(0).is(Items.EMERALD) && chest.getItem(0).getCount() == 3)
+                        .orElse(false), "/item replace must set the selected block-container slot");
+
+        player.setGameMode(GameType.CREATIVE);
+        helper.assertTrue(player.isCreative(), "GameTest player must be in creative mode for slot packet tests");
+        BlockPos placementSupport = helper.absolutePos(new BlockPos(20, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(placementSupport,
+                        net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(), 3),
+                "could not place the creative block-placement support fixture");
+        BlockHitResult placementHit = new BlockHitResult(Vec3.atCenterOf(placementSupport), Direction.UP,
+                placementSupport, false);
+        player.teleportTo(placementSupport.getX() - 2.5, placementSupport.getY(),
+                placementSupport.getZ() + 0.5);
+        ItemStack originalMainHand = player.getItemInHand(InteractionHand.MAIN_HAND).copy();
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STONE));
+        net.minecraft.world.InteractionResult placementResult = player.gameMode.useItemOn(player,
+                helper.getLevel(), player.getItemInHand(InteractionHand.MAIN_HAND),
+                InteractionHand.MAIN_HAND, placementHit);
+        player.setItemInHand(InteractionHand.MAIN_HAND, originalMainHand);
+        BlockPos placedBlock = placementSupport.above();
+        helper.assertTrue(placementResult.consumesAction()
+                        && helper.getLevel().getBlockState(placedBlock)
+                        .is(net.minecraft.world.level.block.Blocks.STONE),
+                "creative block placement must change the world at the clicked target; result=" + placementResult
+                        + " target=" + placedBlock + " player=" + player.position());
+        BlockPos creativeBreakPos = helper.absolutePos(new BlockPos(3, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(creativeBreakPos,
+                        net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(), 3),
+                "could not place the creative block-break fixture");
+        helper.assertTrue(player.gameMode.destroyBlock(creativeBreakPos)
+                        && helper.getLevel().getBlockState(creativeBreakPos).isAir(),
+                "creative block-break fixture must remove the block and return success");
+        // The player menu's hotbar starts at slot 36; packet slot 1 is the crafting grid.
+        var creativePacket = new ServerboundSetCreativeModeSlotPacket(36, new ItemStack(Items.IRON_INGOT, 4));
+        player.connection.handleSetCreativeModeSlot(creativePacket);
+        helper.assertTrue(player.getInventory().getItem(0).is(Items.IRON_INGOT)
+                        && player.getInventory().getItem(0).getCount() == 4,
+                "accepted creative-slot packet must set the addressed inventory slot");
+        player.connection.handleSetCreativeModeSlot(creativePacket);
+        var creativeDrop = new ServerboundSetCreativeModeSlotPacket(-1,
+                new ItemStack(Items.GOLD_NUGGET, 3));
+        player.connection.handleSetCreativeModeSlot(creativeDrop);
+
+        // Force GiveCommand through its accepted overflow path after recording normal inventory deltas.
+        player.setGameMode(GameType.SURVIVAL);
+        for (int slot = 0; slot < 36; slot++) {
+            player.getInventory().setItem(slot, new ItemStack(Items.DIAMOND_SWORD));
+        }
+        player.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
+        player.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
+        player.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
+        player.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.IRON_BOOTS));
+        player.getInventory().setItem(40, new ItemStack(Items.SHIELD));
+        int emptyInventorySlots = 0;
+        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
+            if (player.getInventory().getItem(slot).isEmpty()) emptyInventorySlots++;
+        }
+        helper.assertValueEqual(0, emptyInventorySlots,
+                "accepted /give overflow replay must begin with all 41 inventory slots occupied by valid items");
+        commands.performPrefixedCommand(commandSource, "give @s minecraft:amethyst_shard 7");
+
+        String playerUuid = player.getUUID().toString();
+        helper.startSequence()
+                .thenWaitUntil(() -> {
+                    long enqueuedDelta = service.getTotalEnqueued() - enqueuedBefore;
+                    long completedDelta = service.getTotalPersisted() - persistedBefore
+                            + service.getTotalDropped() - droppedBefore;
+                    helper.assertTrue(service.getQueueSize() == 0 && completedDelta >= enqueuedDelta,
+                            "issue #33 accepted evidence did not drain: queued=" + service.getQueueSize()
+                                    + " enqueued=" + enqueuedDelta + " completed=" + completedDelta);
+                })
+                .thenExecute(() -> {
+            helper.assertTrue(service.getTotalDropped() == droppedBefore,
+                    "issue #33 evidence must not be rejected during the live replay");
+            MutationIds mutationIds = assertCommandEvents(helper, watermark.auditId(), playerUuid);
+            assertItemDeltas(helper, watermark.observationId(), playerUuid, mutationIds);
+            assertTransformations(helper, watermark.transformationId(), mutationIds);
+            assertCreativeTransformations(helper, watermark.transformationId(), mutationIds);
+            assertRawCommandHistorySuppressesItemCommands(helper, watermark.auditId(), playerUuid);
+            assertManagedDropsAreNotDuplicated(helper, watermark.observationId(), playerUuid);
+                })
+                .thenSucceed();
+    }
+
+    private static MutationIds assertCommandEvents(GameTestHelper helper, long watermark, String playerUuid) {
+        String sql = """
+                SELECT event_type, subject_id, detail, raw_data
+                FROM ig_audit_events
+                WHERE id > ? AND player_uuid = ?
+                  AND event_type IN ('ADMIN_ITEM_COMMAND_ATTEMPT', 'ADMIN_ITEM_COMMAND_EFFECT',
+                                     'ADMIN_ITEM_COMMAND_FAILURE', 'ADMIN_ITEM_COMMAND_UNRESOLVED',
+                                     'CREATIVE_SLOT_ATTEMPT',
+                         'CREATIVE_SLOT_EFFECT', 'CREATIVE_BLOCK_ATTEMPT',
+                         'CREATIVE_BLOCK_RESULT', 'CREATIVE_BLOCK_UNRESOLVED')
+                ORDER BY id
+                """;
+        List<AuditRow> rows = new ArrayList<>();
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, watermark);
+            statement.setString(2, playerUuid);
+            try (var result = statement.executeQuery()) {
+                while (result.next()) {
+                    byte[] raw = result.getBytes("raw_data");
+                    rows.add(new AuditRow(result.getString("event_type"), result.getString("subject_id"),
+                            result.getString("detail"), raw == null ? "" : new String(raw, StandardCharsets.UTF_8)));
+                }
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not read issue #33 audit evidence", failure);
+        }
+
+        Map<String, Attempt> commandAttempts = new HashMap<>();
+        Map<String, String> creativeAttempts = new HashMap<>();
+        Set<String> invalidItemAttemptEvents = new java.util.HashSet<>();
+        int giveAttempts = 0;
+        int clearAttempts = 0;
+        int itemAttempts = 0;
+        int effects = 0;
+        int failures = 0;
+        int unresolvedEntitySlots = 0;
+        int unresolvedNoDeltaResults = 0;
+        int creativeEffects = 0;
+        int unchangedCreativeAttempts = 0;
+        int confirmedCreativeBreaks = 0;
+        int observedCreativePlacements = 0;
+        int invalidItemFailures = 0;
+        for (AuditRow row : rows) {
+            JsonObject payload = row.rawData().isBlank()
+                    ? new JsonObject() : JsonParser.parseString(row.rawData()).getAsJsonObject();
+            helper.assertTrue(payload.has("staff_private") && payload.get("staff_private").getAsBoolean(),
+                    "administrative and creative audit evidence must be explicitly staff-private");
+            switch (row.eventType()) {
+                case "ADMIN_ITEM_COMMAND_ATTEMPT" -> {
+                    String mutationId = payload.get("mutation_event_id").getAsString();
+                    commandAttempts.put(payload.get("event_id").getAsString(),
+                            new Attempt(mutationId, row.subjectId()));
+                    if ("item".equals(row.subjectId())
+                            && payload.get("detail").getAsString().contains("outcome=parse_failed")) {
+                        invalidItemAttemptEvents.add(payload.get("event_id").getAsString());
+                    }
+                    helper.assertTrue(!row.rawData().contains("@s")
+                                    && !row.rawData().contains("minecraft:")
+                                    && !row.rawData().contains("execute"),
+                            "admin command attempt payload must omit selectors and item arguments");
+                    if ("give".equals(row.subjectId())) giveAttempts++;
+                    if ("clear".equals(row.subjectId())) clearAttempts++;
+                    if ("item".equals(row.subjectId())) itemAttempts++;
+                }
+                case "ADMIN_ITEM_COMMAND_EFFECT", "ADMIN_ITEM_COMMAND_FAILURE" -> {
+                    Attempt attempt = commandAttempts.get(payload.get("command_attempt_event_id").getAsString());
+                    helper.assertTrue(attempt != null,
+                            "command completion must reference its durable attempt event");
+                    helper.assertTrue(attempt.mutationId().equals(payload.get("mutation_event_id").getAsString())
+                                    && attempt.root().equals(row.subjectId()),
+                            "command completion must reuse the matching attempt mutation ID and command root");
+                    String linkedAttempt = payload.get("command_attempt_event_id").getAsString();
+                    if (invalidItemAttemptEvents.contains(linkedAttempt)) {
+                        helper.assertTrue("ADMIN_ITEM_COMMAND_FAILURE".equals(row.eventType()),
+                                "invalid-item command must not emit a successful effect");
+                        invalidItemFailures++;
+                    }
+                    if ("ADMIN_ITEM_COMMAND_EFFECT".equals(row.eventType())) effects++;
+                    else failures++;
+                }
+                case "ADMIN_ITEM_COMMAND_UNRESOLVED" -> {
+                    Attempt attempt = commandAttempts.get(payload.get("command_attempt_event_id").getAsString());
+                    helper.assertTrue(attempt != null
+                                    && attempt.mutationId().equals(payload.get("mutation_event_id").getAsString()),
+                            "unresolved command evidence must reuse its command attempt and mutation IDs");
+                    if (payload.has("target_entity")) {
+                        JsonObject before = payload.getAsJsonObject("before");
+                        JsonObject after = payload.getAsJsonObject("after");
+                        helper.assertTrue(row.detail().contains("endpoint=unresolved")
+                                        && before != null && after != null
+                                        && before.get("empty").getAsBoolean()
+                                        && after.get("item_id").getAsString().equals("minecraft:apple"),
+                                "non-player entity slot mutations must retain exact unresolved before/after evidence");
+                        unresolvedEntitySlots++;
+                    } else {
+                        helper.assertTrue(row.detail().contains("command_reported_effect_without_captured_delta"),
+                                "a positive command result without a captured change must remain unresolved");
+                        unresolvedNoDeltaResults++;
+                    }
+                }
+                case "CREATIVE_SLOT_EFFECT" -> {
+                    creativeEffects++;
+                    helper.assertTrue(payload.get("detail").getAsString()
+                                    .contains("cause=creative_inventory_packet cause_status=undifferentiated"),
+                            "creative slot effects must state that server-visible cause is undifferentiated");
+                    helper.assertTrue("attempt".equals(creativeAttempts.get(
+                                    payload.get("mutation_event_id").getAsString())),
+                            "creative completion must reuse its changed slot attempt mutation ID");
+                }
+                case "CREATIVE_SLOT_ATTEMPT" -> {
+                    helper.assertTrue(payload.get("detail").getAsString()
+                                    .contains("cause=creative_inventory_packet cause_status=undifferentiated"),
+                            "creative slot attempts must state that server-visible cause is undifferentiated");
+                    String outcome = row.detail().contains("unchanged_or_rejected")
+                            ? "unchanged_or_rejected" : "attempt";
+                    creativeAttempts.put(payload.get("mutation_event_id").getAsString(), outcome);
+                    if ("unchanged_or_rejected".equals(outcome)) unchangedCreativeAttempts++;
+                }
+                case "CREATIVE_BLOCK_ATTEMPT", "CREATIVE_BLOCK_RESULT", "CREATIVE_BLOCK_UNRESOLVED" -> {
+                    helper.assertTrue(payload.has("player_inventory_quantity_delta")
+                                    && payload.get("player_inventory_quantity_delta").getAsInt() == 0
+                                    && payload.has("mutation_event_id"),
+                            "creative block events must store exact zero inventory delta and a mutation ID");
+                    if ("break".equals(payload.get("action").getAsString())) {
+                        helper.assertTrue(row.eventType().equals("CREATIVE_BLOCK_RESULT")
+                                        && payload.get("outcome").getAsString().equals("confirmed_success")
+                                        && (payload.get("cause_status").getAsString().equals("server_player_game_mode_result")
+                                        || payload.get("cause_status").getAsString().equals("fabric_player_block_break_after")),
+                                "creative block destruction must persist an authoritative success result");
+                        confirmedCreativeBreaks++;
+                    } else if ("place".equals(payload.get("action").getAsString())) {
+                        helper.assertTrue(row.eventType().equals("CREATIVE_BLOCK_RESULT")
+                                        && payload.get("outcome").getAsString().equals("confirmed_success")
+                                        && (payload.get("cause_status").getAsString().equals("neoforge_block_item_place_return")
+                                        || payload.get("cause_status").getAsString().equals("fabric_block_item_after_state_diff")),
+                                "creative block placement must retain an authoritative completed-state result");
+                        observedCreativePlacements++;
+                    } else {
+                        helper.fail("unexpected creative block action " + payload.get("action").getAsString());
+                    }
+                }
+                default -> helper.fail("unexpected issue #33 audit event " + row.eventType());
+            }
+        }
+        helper.assertTrue(giveAttempts == 4 && clearAttempts == 3 && itemAttempts == 6,
+                "denied, invalid-item, nested, overflow, clear, and item commands must retain typed attempts");
+        helper.assertTrue(invalidItemAttemptEvents.size() == 1 && invalidItemFailures == 1,
+                "invalid item parse must link exactly one failed outcome to its typed attempt");
+        helper.assertTrue(effects == 9 && failures == 3 && unresolvedEntitySlots == 1
+                        && unresolvedNoDeltaResults == 1,
+                "confirmed, permission-denied, and failed command outcomes must remain distinct; observed effects="
+                        + effects + " failures=" + failures + " unresolvedEntitySlots=" + unresolvedEntitySlots
+                        + " unresolvedNoDeltaResults=" + unresolvedNoDeltaResults);
+        helper.assertTrue(creativeEffects == 2 && unchangedCreativeAttempts == 1,
+                "changed, unchanged, and ground-drop creative packets must have distinct outcomes");
+        helper.assertTrue(confirmedCreativeBreaks == 1,
+                "creative block break must have one durable confirmed result on both loaders");
+        helper.assertTrue(observedCreativePlacements == 1,
+                "creative block placement must have one durable callback result on both loaders");
+        helper.assertTrue(creativeAttempts.size() == 3,
+                "each creative slot packet must have its own mutation ID");
+        return new MutationIds(commandAttempts, creativeAttempts.keySet());
+    }
+
+    private static void assertItemDeltas(GameTestHelper helper, long watermark, String playerUuid,
+                                         MutationIds mutationIds) {
+        String sql = """
+                SELECT obs.action_type, obs.amount, source.node_type AS source_type,
+                       target.node_type AS target_type, fingerprint.item_id, obs.raw_data,
+                       source.owner_uuid AS source_owner, target.owner_uuid AS target_owner
+                FROM ig_observations obs
+                JOIN ig_nodes source ON source.id = obs.node_id
+                JOIN ig_nodes target ON target.id = obs.target_node_id
+                JOIN ig_item_fingerprints fingerprint ON fingerprint.id = obs.fingerprint_id
+                WHERE obs.id > ?
+                  AND obs.source_type = 'ITEMGRAPH_INTERNAL'
+                  AND obs.action_type IN ('ADMIN_ITEM_CREATE', 'ADMIN_ITEM_REMOVE', 'CREATIVE_ITEM_CREATE')
+                ORDER BY obs.id
+                """;
+        List<ItemDelta> rows = new ArrayList<>();
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, watermark);
+            try (var result = statement.executeQuery()) {
+                while (result.next()) {
+                    byte[] raw = result.getBytes("raw_data");
+                    rows.add(new ItemDelta(result.getString("action_type"), result.getInt("amount"),
+                            result.getString("source_type"), result.getString("target_type"),
+                            result.getString("item_id"),
+                            raw == null ? "" : new String(raw, StandardCharsets.UTF_8),
+                            result.getString("source_owner"), result.getString("target_owner")));
+                }
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not read issue #33 item deltas", failure);
+        }
+
+        helper.assertTrue(rows.size() == 9, "issue #33 must persist exactly nine quantity deltas");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
+                        && row.amount() == 5 && row.itemId().equals("minecraft:diamond")
+                        && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
+                "/give must persist the exact five-diamond player creation");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_REMOVE")
+                        && row.amount() == 2 && row.itemId().equals("minecraft:diamond")
+                        && row.sourceType().equals("PLAYER") && row.targetType().equals("UNKNOWN")),
+                "/clear must persist the exact two-diamond player removal");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_REMOVE")
+                        && row.amount() == 1 && row.itemId().equals("minecraft:emerald")
+                        && row.sourceType().equals("PLAYER") && row.targetType().equals("UNKNOWN")),
+                "/clear must persist the exact crafting-slot emerald removal");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
+                        && row.amount() == 2 && row.itemId().equals("minecraft:gold_ingot")
+                        && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
+                "nested /execute give must persist its exact gold-ingot creation");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
+                        && row.amount() == 3 && row.itemId().equals("minecraft:emerald")
+                        && row.sourceType().equals("UNKNOWN") && row.targetType().equals("CONTAINER")),
+                "/item replace block must persist the exact container creation");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
+                        && row.amount() == 1 && row.itemId().equals("minecraft:iron_helmet")
+                        && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
+                "/item replace must persist the exact equipment-slot creation");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("CREATIVE_ITEM_CREATE")
+                        && row.amount() == 1 && row.itemId().equals("minecraft:iron_ingot")
+                        && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
+                "creative slot replacement must persist the one new ingot after matching transformed quantity");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("CREATIVE_ITEM_CREATE")
+                        && row.amount() == 3 && row.itemId().equals("minecraft:gold_nugget")
+                        && row.sourceType().equals("UNKNOWN") && row.targetType().equals("GROUND")),
+                "accepted negative-slot creative packet must persist one exact ground creation");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
+                        && row.amount() == 7 && row.itemId().equals("minecraft:amethyst_shard")
+                        && row.sourceType().equals("UNKNOWN") && row.targetType().equals("GROUND")),
+                "accepted /give overflow must persist one exact ground creation");
+        for (ItemDelta row : rows) {
+            JsonObject payload = JsonParser.parseString(row.rawData()).getAsJsonObject();
+            helper.assertTrue(payload.has("mutation_event_id") && payload.has("event_id"),
+                    "quantity evidence must carry mutation and evidence IDs");
+            String mutationId = payload.get("mutation_event_id").getAsString();
+            boolean actorIsEndpoint = playerUuid.equals(row.sourceOwner()) || playerUuid.equals(row.targetOwner())
+                    || payload.has("actor_uuid") && playerUuid.equals(payload.get("actor_uuid").getAsString());
+            helper.assertTrue(actorIsEndpoint, "quantity evidence must retain the acting player endpoint");
+            helper.assertTrue(payload.has("staff_private") && payload.get("staff_private").getAsBoolean(),
+                    "administrative quantity evidence must be explicitly staff-private");
+            if (payload.has("operation") && "creative_slot".equals(payload.get("operation").getAsString())) {
+                helper.assertTrue("creative_inventory_packet".equals(payload.get("cause").getAsString())
+                                && "undifferentiated".equals(payload.get("cause_status").getAsString()),
+                        "creative quantity evidence must preserve its unknown action subtype");
+                helper.assertTrue(mutationIds.creative().contains(mutationId),
+                        "creative quantity evidence must reuse its creative attempt mutation ID");
+                helper.assertTrue(!payload.has("command_attempt_event_id"),
+                        "creative quantity evidence must not link to an unrelated command attempt");
+            } else {
+                String attemptId = payload.get("command_attempt_event_id").getAsString();
+                Attempt attempt = mutationIds.commands().get(attemptId);
+                helper.assertTrue(attempt != null && attempt.mutationId().equals(mutationId)
+                                && attempt.root().equals(payload.get("operation").getAsString()),
+                        "quantity evidence must reuse the matching command root and attempt mutation ID");
+            }
+        }
+    }
+
+    private static void assertManagedDropsAreNotDuplicated(GameTestHelper helper, long watermark,
+                                                            String playerUuid) {
+        String sql = """
+                SELECT COUNT(*)
+                FROM ig_observations obs
+                JOIN ig_nodes source ON source.id = obs.node_id
+                JOIN ig_item_fingerprints fingerprint ON fingerprint.id = obs.fingerprint_id
+                WHERE obs.id > ? AND source.owner_uuid = ? AND obs.action_type = 'DROP_ITEM'
+                  AND fingerprint.item_id IN ('minecraft:gold_nugget', 'minecraft:amethyst_shard')
+                """;
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, watermark);
+            statement.setString(2, playerUuid);
+            try (var result = statement.executeQuery()) {
+                if (!result.next()) throw new SQLException("Missing duplicate-drop count");
+                helper.assertTrue(result.getInt(1) == 0,
+                        "ItemGraph-managed creative and /give drops must not also persist as ordinary DROP_ITEM");
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not verify issue #33 managed drop de-duplication", failure);
+        }
+    }
+
+    private static void assertTransformations(GameTestHelper helper, long watermark, MutationIds mutationIds) {
+        String sql = """
+                SELECT transformation.transformation_type, transformation.quantity, transformation.details,
+                       source.item_id AS source_item, source.fingerprint_hash AS source_hash,
+                       result.item_id AS result_item, result.fingerprint_hash AS result_hash
+                FROM ig_item_transformations transformation
+                JOIN ig_item_fingerprints source ON source.id = transformation.source_fingerprint_id
+                JOIN ig_item_fingerprints result ON result.id = transformation.result_fingerprint_id
+                WHERE transformation.id > ? AND transformation.transformation_type = 'ADMIN_ITEM_TRANSFORM'
+                ORDER BY transformation.id
+                """;
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, watermark);
+            try (var result = statement.executeQuery()) {
+                helper.assertTrue(result.next(),
+                        "/item modify must persist its exact component transformation");
+                String details = result.getString("details");
+                String attemptId = detailsValue(details, "command_attempt_event_id=");
+                Attempt attempt = mutationIds.commands().get(attemptId);
+                helper.assertTrue(result.getInt("quantity") == 1
+                                && result.getString("source_item").equals("minecraft:iron_helmet")
+                                && result.getString("result_item").equals("minecraft:iron_helmet")
+                                && !result.getString("source_hash").equals(result.getString("result_hash")),
+                        "component transformation must preserve item type and quantity while changing fingerprint");
+                helper.assertTrue(details.contains("cause=item")
+                                && details.contains("mutation_event_id=" + (attempt == null ? "" : attempt.mutationId()))
+                                && attempt != null && "item".equals(attempt.root()),
+                        "component transformation must link its cause and shared attempt mutation ID");
+                helper.assertTrue(!result.next(),
+                        "repeating the same /item modify must not persist a duplicate transformation");
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not verify issue #33 item transformations", failure);
+        }
+    }
+
+    private static void assertCreativeTransformations(GameTestHelper helper, long watermark,
+                                                       MutationIds mutationIds) {
+        String sql = """
+                SELECT transformation.quantity, transformation.details,
+                       source.item_id AS source_item, result.item_id AS result_item
+                FROM ig_item_transformations transformation
+                JOIN ig_item_fingerprints source ON source.id = transformation.source_fingerprint_id
+                JOIN ig_item_fingerprints result ON result.id = transformation.result_fingerprint_id
+                WHERE transformation.id > ?
+                  AND transformation.transformation_type = 'CREATIVE_ITEM_TRANSFORM'
+                ORDER BY transformation.id
+                """;
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, watermark);
+            try (var result = statement.executeQuery()) {
+                helper.assertTrue(result.next(),
+                        "creative replacement of a matching stack must persist its exact transformation");
+                String details = result.getString("details");
+                String mutationId = detailsValue(details, "mutation_event_id=");
+                helper.assertTrue(result.getInt("quantity") == 3
+                                && result.getString("source_item").equals("minecraft:diamond")
+                                && result.getString("result_item").equals("minecraft:iron_ingot")
+                                && details.contains("cause=creative_slot")
+                                && mutationIds.creative().contains(mutationId),
+                        "creative transformation must conserve three items and link its slot mutation ID");
+                helper.assertTrue(!result.next(),
+                        "the fixture must produce exactly one creative item transformation");
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not verify issue #33 creative transformations", failure);
+        }
+    }
+
+    private static String detailsValue(String details, String prefix) {
+        if (details == null) return "";
+        for (String part : details.split(" ")) {
+            if (part.startsWith(prefix)) return part.substring(prefix.length());
+        }
+        return "";
+    }
+
+    private static void assertRawCommandHistorySuppressesItemCommands(GameTestHelper helper, long watermark,
+                                                                      String playerUuid) {
+        String sql = """
+                SELECT COUNT(*) FROM ig_audit_events
+                WHERE id > ? AND player_uuid = ? AND event_type = 'COMMAND_ATTEMPT'
+                """;
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, watermark);
+            statement.setString(2, playerUuid);
+            try (var result = statement.executeQuery()) {
+                if (!result.next()) throw new SQLException("Missing generic-command count");
+                helper.assertTrue(result.getInt(1) == 0,
+                        "item commands and nested /execute text must be absent from generic command history");
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not verify issue #33 command privacy", failure);
+        }
+    }
+
+    private static Watermark watermark() {
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.createStatement()) {
+            long observations;
+            try (var result = statement.executeQuery("SELECT COALESCE(MAX(id), 0) FROM ig_observations")) {
+                if (!result.next()) throw new SQLException("Missing ItemGraph observation watermark");
+                observations = result.getLong(1);
+            }
+            long audit;
+            try (var result = statement.executeQuery("SELECT COALESCE(MAX(id), 0) FROM ig_audit_events")) {
+                if (!result.next()) throw new SQLException("Missing ItemGraph audit watermark");
+                audit = result.getLong(1);
+            }
+            long transformations;
+            try (var result = statement.executeQuery("SELECT COALESCE(MAX(id), 0) FROM ig_item_transformations")) {
+                if (!result.next()) throw new SQLException("Missing ItemGraph transformation watermark");
+                transformations = result.getLong(1);
+            }
+            return new Watermark(observations, audit, transformations);
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not read issue #33 evidence watermarks", failure);
+        }
+    }
+
+    private static int inventoryCount(ServerPlayer player, Item item) {
+        int count = 0;
+        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.is(item)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private record Watermark(long observationId, long auditId, long transformationId) { }
+    private record MutationIds(Map<String, Attempt> commands, Set<String> creative) { }
+    private record Attempt(String mutationId, String root) { }
+    private record AuditRow(String eventType, String subjectId, String detail, String rawData) { }
+    private record ItemDelta(String action, int amount, String sourceType, String targetType,
+                             String itemId, String rawData, String sourceOwner, String targetOwner) { }
+}

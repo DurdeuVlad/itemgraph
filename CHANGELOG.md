@@ -11,6 +11,26 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #33 administrative item evidence:** both loaders capture `/give`,
+  `/clear`, `/item` slot mutations, creative inventory slot changes, and accepted
+  `/give` overflow and negative-slot creative drops at vanilla mutation boundaries.
+  Creative block placement and destruction store authoritative
+  `CREATIVE_BLOCK_RESULT` events on both loaders; both placement integrations
+  compare state after `BlockItem.place` returns, and NeoForge pairs its
+  pre-mutation break event with `ServerPlayerGameMode.destroyBlock`'s return.
+  Creative block results explicitly report a zero player-inventory quantity delta,
+  since creative placement consumes no held item and creative breaking produces no drop.
+  Paired GameTests cover creative placement and destruction plus linked invalid-item
+  failure outcomes.
+  Attempts, outcomes, and observed deltas share mutation IDs; `/item modify` and
+  creative slot replacements persist canonical transformations and conserve quantity.
+  Creative packet evidence identifies its source as an undifferentiated inventory
+  packet rather than guessing clone or pick-block. Empty slots are explicit in
+  unresolved before/after records. Staff activity is private, and raw item-command
+  or `/execute` arguments are suppressed. Audit capture exceptions are contained
+  so they do not change the vanilla command or packet result. Version remains
+  0.3.2; no distributable jar is built.
+
 - **Issue #35 shared event taxonomy:** introduced the versioned `EventTaxonomy`
   for native audit, item observation, and transformation IDs. Audit command
   types and unified lookup aliases now use the shared registry. Definitions

@@ -28,6 +28,36 @@ completed-consumption, durability-break, transformation-result, and container-in
 NeoForge command callbacks and the Fabric `CommandsMixin` are stored as
 `COMMAND_ATTEMPT` because both hooks run before command execution. This matches
 GriefLogger's documented command-attempt behavior and avoids inventing a success result.
+
+Issue #33 adds a separate staff-private evidence path at vanilla's item mutation
+boundaries. Both loaders hook `GiveCommand.giveItem`,
+`ClearInventoryCommands.clearInventory`, the four `ItemCommands` block/entity
+set/modify methods, and `ServerGamePacketListenerImpl.handleSetCreativeModeSlot`.
+The hooks snapshot only the addressed player inventory or selected block/entity
+slots, then compare canonical item fingerprints and stack counts after the method
+returns. `/give` additionally records only accepted overflow item entities. A
+command callback remains an attempt; slot deltas are authoritative observations.
+For non-player entity slots where ItemGraph has no supported graph endpoint, the
+change is retained as an unresolved staff audit event and does not create a graph
+edge. Fabric records creative destruction from `PlayerBlockBreakEvents.AFTER`.
+NeoForge's `BlockEvent.BreakEvent` runs before block removal, so the NeoForge
+adapter pairs that callback with the boolean returned by
+`ServerPlayerGameMode.destroyBlock`; this narrowly scoped mixin is required to
+record the actual result consistently across loaders.
+Placement is confirmed after `BlockItem.place` returns and bounded before/after
+state snapshots show the placed block. NeoForge's cancellable
+`BlockEvent.EntityPlaceEvent` is not treated as completion because a later
+listener can still cancel it. The NeoForge BlockItem return wrapper mirrors the
+Fabric post-return capture and preserves the original result if capture fails.
+Both adapters use invocation-local snapshots, so nested modded placements do
+not overwrite their callers' state.
+The typed command attempt carries the mutation event ID; confirmed slot deltas
+and the completion outcome reuse that ID, while the outcome also records the
+attempt event ID. A positive command return without a captured delta and an
+exception after a captured mutation are unresolved outcomes. Generic command
+history suppresses `/execute` text to avoid retaining nested item-command arguments.
+Vanilla item commands require permission level 2; the command source's effective
+level-2 check is recorded as the permission outcome before execution.
 NeoForge-only inventory hooks remain an explicit platform coverage boundary in
 `docs/GRIEFLOGGER_PARITY.md`; Fabric `BlockItemMixin` captures completed BlockItem
 placements, `LivingEntityMixin` captures completed eat/drink uses, `ItemStackMixin` captures

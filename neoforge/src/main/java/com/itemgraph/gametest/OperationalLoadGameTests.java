@@ -14,8 +14,8 @@ import java.sql.SQLException;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Development-only operational checks. NeoForge release jar tasks exclude this package. */
 @GameTestHolder("itemgraph")
@@ -28,15 +28,14 @@ public final class OperationalLoadGameTests {
 
     private OperationalLoadGameTests() { }
 
-    @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 300_000)
+    @GameTest(templateNamespace = "itemgraph", template = "empty",
+            batch = "zz_itemgraph_queue_probe", timeoutTicks = 300_000)
     public static void nativeAuditQueueBurstPersistsOnWorkerWithoutBlockingServerThread(GameTestHelper helper) {
         helper.assertFalse(ModList.get().isLoaded("grieflogger"),
                 "The isolated operational probe must run without GriefLogger installed");
         InternalObservationService observations = InternalObservationService.getInstance();
         observations.start();
         String detailPrefix = "issue30-load-probe:" + UUID.randomUUID() + ":";
-        var server = helper.getLevel().getServer();
-
         long persistedBefore = observations.getTotalPersisted();
         long droppedBefore = observations.getTotalDropped();
         AtomicInteger submitted = new AtomicInteger();
@@ -90,19 +89,44 @@ public final class OperationalLoadGameTests {
             });
         }
 
-        CompletableFuture.delayedExecutor(20, TimeUnit.SECONDS).execute(() ->
-                CompletableFuture.supplyAsync(() -> countProbeRows(detailPrefix))
-                        .whenComplete((durableRows, readFailure) -> server.execute(() -> {
-            try {
-                if (readFailure != null) {
-                    throw new IllegalStateException("Could not read durable probe rows off the server thread",
-                            readFailure);
+        AtomicReference<CompletableFuture<Long>> durableRowsRead = new AtomicReference<>();
+        awaitProbeDrain(helper, observations, detailPrefix, submitted, persistedBefore, droppedBefore,
+                acceptedDurationNanos, maxBatchDurationNanos, durableRowsRead, 401);
+    }
+
+    private static void awaitProbeDrain(GameTestHelper helper, InternalObservationService observations,
+                                        String detailPrefix,
+                                        AtomicInteger submitted, long persistedBefore, long droppedBefore,
+                                        long[] acceptedDurationNanos, long[] maxBatchDurationNanos,
+                                        AtomicReference<CompletableFuture<Long>> durableRowsRead, int checkAtTick) {
+        helper.runAtTickTime(checkAtTick, () -> {
+            long persistedDelta = observations.getTotalPersisted() - persistedBefore;
+            long droppedDelta = observations.getTotalDropped() - droppedBefore;
+            int queueRemaining = observations.getQueueSize();
+            if (queueRemaining != 0 || persistedDelta < EVENT_COUNT) {
+                if (checkAtTick >= 280_000) {
+                    helper.fail("Issue #30 load probe did not drain: persisted=" + persistedDelta
+                            + " dropped=" + droppedDelta + " queueRemaining=" + queueRemaining);
+                    return;
                 }
+                awaitProbeDrain(helper, observations, detailPrefix, submitted, persistedBefore,
+                        droppedBefore, acceptedDurationNanos, maxBatchDurationNanos, durableRowsRead,
+                        checkAtTick + 200);
+                return;
+            }
+            if (durableRowsRead.get() == null) {
+                durableRowsRead.set(CompletableFuture.supplyAsync(() -> countProbeRows(detailPrefix)));
+            }
+            if (!durableRowsRead.get().isDone()) {
+                awaitProbeDrain(helper, observations, detailPrefix, submitted, persistedBefore,
+                        droppedBefore, acceptedDurationNanos, maxBatchDurationNanos, durableRowsRead,
+                        checkAtTick + 1);
+                return;
+            }
+            try {
+                long durableRows = durableRowsRead.get().join();
                 helper.assertValueEqual(EVENT_COUNT, submitted.get(),
                         "all scheduled server-thread batches must be submitted");
-                long persistedDelta = observations.getTotalPersisted() - persistedBefore;
-                long droppedDelta = observations.getTotalDropped() - droppedBefore;
-                int queueRemaining = observations.getQueueSize();
                 ItemGraph.LOGGER.info(
                         "Issue #30 local NeoForge probe after worker-drain window: persistedDelta={} "
                                 + "droppedDelta={} queueRemaining={} durableProbeRows={}",
@@ -131,7 +155,7 @@ public final class OperationalLoadGameTests {
             } catch (Throwable failure) {
                 helper.fail("Issue #30 load probe failed: " + failure.getMessage());
             }
-        })));
+        });
     }
 
     private static long countProbeRows(String detailPrefix) {
