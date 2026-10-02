@@ -42,6 +42,8 @@ final class StorageIndexManager {
             index("ig_observations", "idx_obs_entity_uuid", "item_entity_uuid"),
             index("ig_item_transformations", "idx_trans_source_fp", "source_fingerprint_id"),
             index("ig_item_transformations", "idx_trans_result_fp", "result_fingerprint_id"),
+            index("ig_fingerprint_components", "idx_fingerprint_component_value",
+                    "component_id, value_hash, fingerprint_id"),
             index("ig_item_transformations", "idx_trans_player", "player_node_id, timestamp_ms"),
             index("ig_observations", "idx_obs_action_type", "action_type"),
             index("ig_inferred_edges", "idx_edges_state_time", "edge_state, time_start"),

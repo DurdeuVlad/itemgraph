@@ -8,6 +8,7 @@ import com.itemgraph.api.QueryOptions;
 import com.itemgraph.query.EdgeExplanation;
 import com.itemgraph.query.ExplainQueryService;
 import com.itemgraph.query.FingerprintRef;
+import com.itemgraph.query.ItemMetadataSql;
 import com.itemgraph.query.NodeRef;
 import com.itemgraph.query.QueryWindow;
 import com.itemgraph.query.TraceHop;
@@ -44,6 +45,8 @@ public final class ApiQueryBridge {
             TraceResult result,
             QueryWindow window,
             int requestedLimit,
+            String normalizedPredicate,
+            boolean metadataMatchUnconfirmed,
             Map<Long, EdgeExplanation> explanations) {
 
         public ApiTraceResponse {
@@ -59,33 +62,40 @@ public final class ApiQueryBridge {
         return submit(conn -> {
             QueryWindow window = window(options);
             List<FingerprintRef> candidates = resolveFingerprints(conn, query);
+            String normalizedPredicate = query.normalizedPredicate() + " " + options.normalizedTimePredicate();
+            boolean metadataMatchUnconfirmed = candidates.stream().anyMatch(FingerprintRef::componentIndexUnresolved);
             if (candidates.isEmpty()) {
-                return response(Resolution.NOT_FOUND, candidates, List.of(), null, window, options.limit(), Map.of());
+                return response(Resolution.NOT_FOUND, candidates, List.of(), null, window, options.limit(),
+                        normalizedPredicate, false, Map.of());
             }
             if (candidates.size() > 1) {
-                return response(Resolution.AMBIGUOUS, candidates, List.of(), null, window, options.limit(), Map.of());
+                return response(Resolution.AMBIGUOUS, candidates, List.of(), null, window, options.limit(),
+                        normalizedPredicate, metadataMatchUnconfirmed, Map.of());
             }
             TraceResult result = new TraceQueryService().trace(
                     conn, candidates.get(0).id(), options.limit(), window);
             return response(Resolution.RESOLVED, List.of(), List.of(), result, window, options.limit(),
-                    explanations(conn, result));
+                    normalizedPredicate, metadataMatchUnconfirmed, explanations(conn, result));
         });
     }
 
     public static CompletableFuture<ApiTraceResponse> tracePlayer(PlayerQuery query, QueryOptions options) {
         return submit(conn -> {
             QueryWindow window = window(options);
+            String normalizedPredicate = "player." + query.playerUuid() + " " + options.normalizedTimePredicate();
             List<NodeRef> candidates = resolvePlayerUuidNodes(conn, query.playerUuid().toString());
             if (candidates.isEmpty()) {
-                return response(Resolution.NOT_FOUND, List.of(), candidates, null, window, options.limit(), Map.of());
+                return response(Resolution.NOT_FOUND, List.of(), candidates, null, window, options.limit(),
+                        normalizedPredicate, Map.of());
             }
             if (candidates.size() > 1) {
-                return response(Resolution.AMBIGUOUS, List.of(), candidates, null, window, options.limit(), Map.of());
+                return response(Resolution.AMBIGUOUS, List.of(), candidates, null, window, options.limit(),
+                        normalizedPredicate, Map.of());
             }
             TraceResult result = new TraceQueryService().tracePlayerNode(
                     conn, candidates.get(0).id(), options.limit(), window);
             return response(Resolution.RESOLVED, List.of(), List.of(), result, window, options.limit(),
-                    explanations(conn, result));
+                    normalizedPredicate, explanations(conn, result));
         });
     }
 
@@ -93,18 +103,23 @@ public final class ApiQueryBridge {
         return submit(conn -> {
             QueryWindow window = window(options);
             String level = query.level().location().toString();
+            String normalizedPredicate = "container." + level + ":" + query.position().getX() + ","
+                    + query.position().getY() + "," + query.position().getZ() + " "
+                    + options.normalizedTimePredicate();
             List<NodeRef> candidates = new TraceQueryService().resolveContainerNodes(
                     conn, level, query.position().getX(), query.position().getY(), query.position().getZ());
             if (candidates.isEmpty()) {
-                return response(Resolution.NOT_FOUND, List.of(), candidates, null, window, options.limit(), Map.of());
+                return response(Resolution.NOT_FOUND, List.of(), candidates, null, window, options.limit(),
+                        normalizedPredicate, Map.of());
             }
             if (candidates.size() > 1) {
-                return response(Resolution.AMBIGUOUS, List.of(), candidates, null, window, options.limit(), Map.of());
+                return response(Resolution.AMBIGUOUS, List.of(), candidates, null, window, options.limit(),
+                        normalizedPredicate, Map.of());
             }
             TraceResult result = new TraceQueryService().traceContainerNode(
                     conn, candidates.get(0).id(), options.limit(), window);
             return response(Resolution.RESOLVED, List.of(), List.of(), result, window, options.limit(),
-                    explanations(conn, result));
+                    normalizedPredicate, explanations(conn, result));
         });
     }
 
@@ -113,17 +128,20 @@ public final class ApiQueryBridge {
         return submit(conn -> {
             QueryWindow window = window(options);
             String externalKey = inventory.ownerModId() + "/" + inventory.inventoryId();
+            String normalizedPredicate = "external." + externalKey + " " + options.normalizedTimePredicate();
             List<NodeRef> candidates = resolveExternalInventoryNodes(conn, externalKey);
             if (candidates.isEmpty()) {
-                return response(Resolution.NOT_FOUND, List.of(), candidates, null, window, options.limit(), Map.of());
+                return response(Resolution.NOT_FOUND, List.of(), candidates, null, window, options.limit(),
+                        normalizedPredicate, Map.of());
             }
             if (candidates.size() > 1) {
-                return response(Resolution.AMBIGUOUS, List.of(), candidates, null, window, options.limit(), Map.of());
+                return response(Resolution.AMBIGUOUS, List.of(), candidates, null, window, options.limit(),
+                        normalizedPredicate, Map.of());
             }
             TraceResult result = new TraceQueryService().traceNodeId(
                     conn, candidates.get(0).id(), options.limit(), window);
             return response(Resolution.RESOLVED, List.of(), List.of(), result, window, options.limit(),
-                    explanations(conn, result));
+                    normalizedPredicate, explanations(conn, result));
         });
     }
 
@@ -133,6 +151,9 @@ public final class ApiQueryBridge {
     }
 
     private static QueryWindow window(QueryOptions options) {
+        if (options.absoluteWindow() != null) {
+            return new QueryWindow(options.absoluteWindow().sinceMs(), options.absoluteWindow().untilMs());
+        }
         if (options.sinceMinutes() == null) {
             return QueryWindow.unbounded();
         }
@@ -147,7 +168,32 @@ public final class ApiQueryBridge {
                                              int requestedLimit,
                                              Map<Long, EdgeExplanation> explanations) {
         return new ApiTraceResponse(resolution, itemCandidates, endpointCandidates, result,
-                window, requestedLimit, explanations);
+                window, requestedLimit, window.normalizedPredicate(), false, explanations);
+    }
+
+    private static ApiTraceResponse response(Resolution resolution,
+                                             List<FingerprintRef> itemCandidates,
+                                             List<NodeRef> endpointCandidates,
+                                             TraceResult result,
+                                             QueryWindow window,
+                                             int requestedLimit,
+                                             String normalizedPredicate,
+                                             Map<Long, EdgeExplanation> explanations) {
+        return response(resolution, itemCandidates, endpointCandidates, result, window,
+                requestedLimit, normalizedPredicate, false, explanations);
+    }
+
+    private static ApiTraceResponse response(Resolution resolution,
+                                             List<FingerprintRef> itemCandidates,
+                                             List<NodeRef> endpointCandidates,
+                                             TraceResult result,
+                                             QueryWindow window,
+                                             int requestedLimit,
+                                             String normalizedPredicate,
+                                             boolean metadataMatchUnconfirmed,
+                                             Map<Long, EdgeExplanation> explanations) {
+        return new ApiTraceResponse(resolution, itemCandidates, endpointCandidates, result,
+                window, requestedLimit, normalizedPredicate, metadataMatchUnconfirmed, explanations);
     }
 
     private static Map<Long, EdgeExplanation> explanations(Connection conn, TraceResult result)
@@ -182,13 +228,24 @@ public final class ApiQueryBridge {
             value = query.fingerprintHash();
         }
 
-        String sql = "SELECT id, item_id, custom_name, fingerprint_hash FROM ig_item_fingerprints WHERE "
-                + column + " ORDER BY id ASC LIMIT 10";
+        boolean componentPredicate = query.metadataPredicates().stream().anyMatch(predicate ->
+                predicate.kind() != com.itemgraph.query.ItemMetadataPredicate.Kind.ITEM_ID
+                        && predicate.kind() != com.itemgraph.query.ItemMetadataPredicate.Kind.FINGERPRINT);
+        StringBuilder sql = new StringBuilder("SELECT id, item_id, custom_name, fingerprint_hash, component_index_state "
+                + "FROM ig_item_fingerprints WHERE " + column);
+        List<Object> args = new ArrayList<>();
+        args.add(value);
+        if (fuzzyName) {
+            args.add("%" + value + "%");
+        }
+        ItemMetadataSql.append(sql, args, query.metadataPredicates(), "id", "item_id", "fingerprint_hash");
+        sql.append(componentPredicate
+                ? " ORDER BY CASE WHEN component_index_state = 'COMPLETE' THEN 0 ELSE 1 END, id ASC LIMIT 10"
+                : " ORDER BY id ASC LIMIT 10");
         List<FingerprintRef> candidates = new ArrayList<>();
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, value);
-            if (fuzzyName) {
-                pstmt.setString(2, "%" + value + "%");
+        try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+            for (int index = 0; index < args.size(); index++) {
+                pstmt.setString(index + 1, (String) args.get(index));
             }
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
@@ -196,7 +253,8 @@ public final class ApiQueryBridge {
                             rs.getLong("id"),
                             rs.getString("item_id"),
                             rs.getString("custom_name"),
-                            rs.getString("fingerprint_hash")));
+                            rs.getString("fingerprint_hash"), false,
+                            componentPredicate && !"COMPLETE".equals(rs.getString("component_index_state"))));
                 }
             }
         }

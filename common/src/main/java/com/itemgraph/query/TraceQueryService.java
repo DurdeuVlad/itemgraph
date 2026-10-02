@@ -162,8 +162,17 @@ public final class TraceQueryService {
     public TracePage traceItemPage(Connection conn, String itemQuery, int requestedPageSize,
                                    QueryWindow window, TraceCursor cursor, TracePage.Direction direction)
             throws SQLException {
+        return traceItemPage(conn, itemQuery, List.of(), requestedPageSize, window, cursor, direction);
+    }
+
+    public TracePage traceItemPage(Connection conn, String itemQuery,
+                                   List<ItemMetadataPredicate> metadataPredicates,
+                                   int requestedPageSize, QueryWindow window, TraceCursor cursor,
+                                   TracePage.Direction direction) throws SQLException {
         int pageSize = clampPageSize(requestedPageSize);
-        List<FingerprintRef> candidates = resolveFingerprints(conn, itemQuery);
+        List<FingerprintRef> candidates = metadataPredicates == null || metadataPredicates.isEmpty()
+                ? resolveFingerprints(conn, itemQuery)
+                : resolveFingerprints(conn, itemQuery, metadataPredicates);
         if (candidates.isEmpty()) {
             return new TracePage("item '" + itemQuery + "'", TracePage.Resolution.NOT_FOUND,
                     null, null, List.of(), List.of(), List.of(), window, pageSize, null, false, null, false);
@@ -173,7 +182,16 @@ public final class TraceQueryService {
                     null, null, candidates, List.of(), List.of(), window, pageSize, null, false, null, false);
         }
 
-        return fingerprintPage(conn, candidates.get(0), pageSize, window, cursor, direction);
+        TracePage page = fingerprintPage(conn, candidates.get(0), pageSize, window, cursor, direction);
+        return candidates.get(0).componentIndexUnresolved()
+                ? withUnresolvedComponentFilter(page, candidates.get(0)) : page;
+    }
+
+    private static TracePage withUnresolvedComponentFilter(TracePage page, FingerprintRef candidate) {
+        return new TracePage(page.targetDescription() + " [COMPONENT_FILTER_UNRESOLVED: possible candidate, match unconfirmed]",
+                page.resolution(), candidate, page.targetNode(), page.candidates(), page.nodeCandidates(), page.hops(),
+                page.window(), page.pageSize(), page.previousCursor(), page.hasPrevious(),
+                page.nextCursor(), page.hasNext());
     }
 
     public TracePage traceFingerprintPage(Connection conn, long fingerprintId, int requestedPageSize,
@@ -481,6 +499,79 @@ public final class TraceQueryService {
             }
         }
         return new ArrayList<>(results.values());
+    }
+
+    /** Resolves item selectors and exact metadata predicates before applying the candidate limit. */
+    public List<FingerprintRef> resolveFingerprints(Connection conn, String query,
+                                                    List<ItemMetadataPredicate> metadataPredicates)
+            throws SQLException {
+        if (metadataPredicates == null || metadataPredicates.isEmpty()) {
+            return resolveFingerprints(conn, query);
+        }
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        String selector;
+        List<Object> args = new ArrayList<>();
+        if (query.startsWith("id:")) {
+            String idText = query.substring(3);
+            if (!idText.matches("\\d+")) {
+                return List.of();
+            }
+            try {
+                idText = Long.toString(Long.parseLong(idText));
+            } catch (NumberFormatException overflow) {
+                return List.of();
+            }
+            selector = "id = ?";
+            args.add(idText);
+        } else if (query.matches("\\d+")) {
+            Long numericId;
+            try {
+                numericId = Long.parseLong(query);
+            } catch (NumberFormatException overflow) {
+                numericId = null;
+            }
+            selector = numericId == null
+                    ? "(item_id = ? OR item_id LIKE ? OR custom_name = ? OR custom_name LIKE ?)"
+                    : "(id = ? OR item_id = ? OR item_id LIKE ? OR custom_name = ? OR custom_name LIKE ?)";
+            if (numericId != null) {
+                args.add(Long.toString(numericId));
+            }
+            args.add(query);
+            args.add("%" + query + "%");
+            args.add(query);
+            args.add("%" + query + "%");
+        } else {
+            selector = "(item_id = ? OR item_id LIKE ? OR custom_name = ? OR custom_name LIKE ?)";
+            args.add(query);
+            args.add("%" + query + "%");
+            args.add(query);
+            args.add("%" + query + "%");
+        }
+        boolean componentPredicate = metadataPredicates.stream().anyMatch(predicate ->
+                predicate.kind() != ItemMetadataPredicate.Kind.ITEM_ID
+                        && predicate.kind() != ItemMetadataPredicate.Kind.FINGERPRINT);
+        StringBuilder sql = new StringBuilder("SELECT id, item_id, custom_name, fingerprint_hash, component_index_state "
+                + "FROM ig_item_fingerprints WHERE " + selector);
+        ItemMetadataSql.append(sql, args, metadataPredicates, "id", "item_id", "fingerprint_hash");
+        sql.append(componentPredicate
+                ? " ORDER BY CASE WHEN component_index_state = 'COMPLETE' THEN 0 ELSE 1 END, id DESC LIMIT 10"
+                : " ORDER BY id DESC LIMIT 10");
+        List<FingerprintRef> candidates = new ArrayList<>();
+        try (PreparedStatement statement = conn.prepareStatement(sql.toString())) {
+            for (int i = 0; i < args.size(); i++) {
+                statement.setString(i + 1, args.get(i).toString());
+            }
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    candidates.add(new FingerprintRef(rs.getLong("id"), rs.getString("item_id"),
+                            rs.getString("custom_name"), rs.getString("fingerprint_hash"), false,
+                            componentPredicate && !"COMPLETE".equals(rs.getString("component_index_state"))));
+                }
+            }
+        }
+        return List.copyOf(candidates);
     }
 
     private List<TraceHop> loadObservedHops(Connection conn, long fingerprintId, int fetch, QueryWindow window)

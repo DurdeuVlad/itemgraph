@@ -43,6 +43,7 @@ import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.ResourceLocationArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -180,6 +181,14 @@ public final class ItemGraphCommands {
                                                                                         LongArgumentType.getLong(ctx, "sinceMinutes"))))))))))
         );
 
+        root.getChild("trace").addChild(Commands.literal("item-filtered")
+                .requires(source -> source.hasPermission(4))
+                .then(Commands.argument("itemQuery", StringArgumentType.string())
+                        .suggests(ItemGraphCommands::suggestItemIds)
+                        .then(Commands.argument("filters", StringArgumentType.greedyString())
+                                .executes(ItemGraphCommands::traceItemFiltered)))
+                .build());
+
         LiteralCommandNode<CommandSourceStack> gui = Commands.literal("gui")
                 .requires(source -> source.hasPermission(2) && source.getEntity() instanceof ServerPlayer)
                 .then(Commands.literal("item")
@@ -188,6 +197,11 @@ public final class ItemGraphCommands {
                                 .executes(ctx -> guiItem(ctx, null))
                                 .then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
                                         .executes(ctx -> guiItem(ctx, LongArgumentType.getLong(ctx, "sinceMinutes"))))))
+                .then(Commands.literal("item-filtered")
+                        .then(Commands.argument("itemQuery", StringArgumentType.string())
+                                .suggests(ItemGraphCommands::suggestItemIds)
+                                .then(Commands.argument("metadataFilters", StringArgumentType.greedyString())
+                                        .executes(ItemGraphCommands::guiItemFiltered))))
                 .then(Commands.literal("player")
                         .then(Commands.argument("player", StringArgumentType.string())
                                 .suggests(ItemGraphCommands::suggestOnlinePlayers)
@@ -535,6 +549,11 @@ public final class ItemGraphCommands {
             source.sendFailure(Component.literal("[ItemGraph] Invalid incident export: " + invalid.getMessage()));
             return 0;
         }
+        if (!filters.itemPredicates().isEmpty() && !source.hasPermission(4)) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] Item metadata export filters require permission level 4."));
+            return 0;
+        }
 
         var exportDirectory = source.getServer().getWorldPath(LevelResource.ROOT)
                 .resolve("itemgraph").resolve("exports");
@@ -658,25 +677,41 @@ public final class ItemGraphCommands {
         String token = (quoted ? rawToken.substring(1) : rawToken)
                 .toLowerCase(java.util.Locale.ROOT);
         Set<String> usedFilters = usedLookupFilters(remaining.substring(0, tokenStart));
-        if (usedFilters.size() >= 6) {
+        if (usedFilters.size() >= 12) {
             return CompletableFuture.completedFuture(tokenBuilder.build());
         }
         if (!token.contains(".")) {
             boolean hasItemFilter = usedFilters.contains("include") || usedFilters.contains("exclude");
             List<String> suggestions = new java.util.ArrayList<>();
-            for (String filter : List.of("action", "user", "include", "exclude", "time", "radius", "state")) {
-                if (usedFilters.contains(filter)
+            for (String filter : List.of("action", "user", "include", "exclude", "time", "radius", "state",
+                    "after", "before", "between", "item", "fingerprint", "name", "damage", "trim",
+                    "enchantment", "lore", "component")) {
+                boolean repeatable = filter.equals("component") || filter.equals("enchantment");
+                if ((!repeatable && usedFilters.contains(filter))
                         || hasItemFilter && (filter.equals("include") || filter.equals("exclude"))) {
                     continue;
                 }
                 suggestions.add(filter + ".");
-                suggestions.add(filter.substring(0, 1) + ".");
+                String alias = switch (filter) {
+                    case "action" -> "a.";
+                    case "user" -> "u.";
+                    case "include" -> "i.";
+                    case "exclude" -> "e.";
+                    case "time" -> "t.";
+                    case "radius" -> "r.";
+                    case "state" -> "s.";
+                    default -> null;
+                };
+                if (alias != null) {
+                    suggestions.add(alias);
+                }
             }
             return SharedSuggestionProvider.suggest(suggestions, tokenBuilder);
         }
         String name = token.substring(0, token.indexOf('.'));
         String canonicalName = canonicalLookupFilter(name);
-        if (canonicalName == null || usedFilters.contains(canonicalName)
+        boolean repeatable = "component".equals(canonicalName) || "enchantment".equals(canonicalName);
+        if (canonicalName == null || (!repeatable && usedFilters.contains(canonicalName))
                 || (canonicalName.equals("include") && usedFilters.contains("exclude"))
                 || (canonicalName.equals("exclude") && usedFilters.contains("include"))) {
             return CompletableFuture.completedFuture(tokenBuilder.build());
@@ -688,8 +723,18 @@ public final class ItemGraphCommands {
                     .map(ResourceLocation::toString)
                     .toList();
             case "time" -> List.of("5m", "1h", "1d", "1y");
+            case "after", "before" -> List.of(utcMillisecondSuggestion(System.currentTimeMillis()));
+            case "between" -> List.of(utcMillisecondSuggestion(System.currentTimeMillis() - 60_000L)
+                    + "," + utcMillisecondSuggestion(System.currentTimeMillis()));
             case "radius" -> List.of("5", "10", "50");
             case "state" -> List.of("observed", "inferred", "ambiguous", "unresolved");
+            case "item" -> BuiltInRegistries.ITEM.keySet().stream().map(ResourceLocation::toString).toList();
+            case "enchantment" -> ctx.getSource().getServer().registryAccess()
+                    .registryOrThrow(Registries.ENCHANTMENT).keySet().stream()
+                    .map(ResourceLocation::toString).toList();
+            case "component" -> BuiltInRegistries.DATA_COMPONENT_TYPE.keySet().stream()
+                    .map(ResourceLocation::toString).toList();
+            case "damage" -> List.of("0", "1", "10");
             default -> List.of();
         };
         if (canonicalName.equals("user")) {
@@ -707,6 +752,12 @@ public final class ItemGraphCommands {
                 .map(value -> value.toLowerCase(java.util.Locale.ROOT))
                 .forEach(values::add);
         return List.copyOf(values);
+    }
+
+    private static String utcMillisecondSuggestion(long epochMillis) {
+        return java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.ROOT)
+                .withZone(java.time.ZoneOffset.UTC)
+                .format(java.time.Instant.ofEpochMilli(epochMillis));
     }
 
     private static CompletableFuture<Suggestions> suggestFilterValues(
@@ -756,6 +807,8 @@ public final class ItemGraphCommands {
             case "time", "t" -> "time";
             case "radius", "r" -> "radius";
             case "state", "status", "s" -> "state";
+            case "after", "before", "between", "item", "fingerprint", "name", "damage", "trim",
+                    "enchantment", "lore", "component" -> name.toLowerCase(java.util.Locale.ROOT);
             default -> null;
         };
     }
@@ -798,6 +851,52 @@ public final class ItemGraphCommands {
             FingerprintRef fp = candidates.get(0);
             TraceResult result = TRACE_QUERIES.trace(conn, fp.id(), limit, window);
             return QueryDispatcher.QueryOutput.found(QueryFormatter.formatTrace(result));
+        });
+    }
+
+    private static int traceItemFiltered(CommandContext<CommandSourceStack> ctx) {
+        String query = StringArgumentType.getString(ctx, "itemQuery");
+        AuditLookupFilters filters;
+        try {
+            filters = AuditLookupFilters.parse("radius.1 " + StringArgumentType.getString(ctx, "filters"),
+                    System.currentTimeMillis());
+        } catch (IllegalArgumentException invalid) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "[ItemGraph] Invalid item trace filter: " + invalid.getMessage()));
+            return 0;
+        }
+        if (filters.itemPredicates().isEmpty()
+                || !filters.eventTypes().isEmpty() || !filters.playerNames().isEmpty()
+                || !filters.includeSubjects().isEmpty() || !filters.excludeSubjects().isEmpty()
+                || !filters.evidenceClasses().isEmpty() || filters.radiusBlocks() != 1.0) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "[ItemGraph] Filtered item trace requires at least one metadata predicate and accepts only metadata and time filters."));
+            return 0;
+        }
+        return QueryDispatcher.dispatch(ctx.getSource(), "trace item metadata", conn -> {
+            List<FingerprintRef> candidates = TRACE_QUERIES.resolveFingerprints(
+                    conn, query, filters.itemPredicates());
+            if (candidates.isEmpty()) {
+                return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchFingerprint(query));
+            }
+            if (candidates.size() > 1) {
+                return QueryDispatcher.QueryOutput.found(QueryFormatter.formatFingerprintCandidates(query, candidates));
+            }
+            FingerprintRef fingerprint = candidates.get(0);
+            TraceResult result = TRACE_QUERIES.trace(conn, fingerprint.id(), QueryLimits.DEFAULT_LIMIT, filters.window());
+            if (fingerprint.componentIndexUnresolved()) {
+                result = new TraceResult(result.targetDescription()
+                        + " [COMPONENT_FILTER_UNRESOLVED: possible candidate, match unconfirmed]",
+                        result.fingerprint(), result.hops(), result.window(), result.appliedLimit(),
+                        result.requestedLimit(), result.truncated());
+            }
+            List<String> lines = new java.util.ArrayList<>();
+            lines.add("[ItemGraph] Predicate: " + filters.itemPredicates().stream()
+                    .map(com.itemgraph.query.ItemMetadataPredicate::normalizedToken)
+                    .collect(java.util.stream.Collectors.joining(" "))
+                    + " " + filters.window().normalizedPredicate());
+            lines.addAll(QueryFormatter.formatTrace(result));
+            return QueryDispatcher.QueryOutput.found(List.copyOf(lines));
         });
     }
 
@@ -854,6 +953,37 @@ public final class ItemGraphCommands {
     private static int guiItem(CommandContext<CommandSourceStack> ctx, Long sinceMinutes) {
         return FlowBrowserService.openItem(ctx.getSource(),
                 StringArgumentType.getString(ctx, "itemQuery"), sinceMinutes);
+    }
+
+    private static int guiItemFiltered(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        if (!source.hasPermission(4)) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] Item metadata filters require permission level 4."));
+            return 0;
+        }
+        try {
+            AuditLookupFilters filters = AuditLookupFilters.parse(
+                    "radius.1 " + StringArgumentType.getString(ctx, "metadataFilters"),
+                    System.currentTimeMillis());
+            if (filters.itemPredicates().isEmpty()) {
+                source.sendFailure(Component.literal("[ItemGraph] At least one item metadata filter is required."));
+                return 0;
+            }
+            if (!filters.eventTypes().isEmpty() || !filters.playerNames().isEmpty()
+                    || !filters.includeSubjects().isEmpty() || !filters.excludeSubjects().isEmpty()
+                    || !filters.evidenceClasses().isEmpty() || filters.radiusBlocks() != 1.0) {
+                source.sendFailure(Component.literal(
+                        "[ItemGraph] Filtered item GUI accepts only metadata and time filters."));
+                return 0;
+            }
+            return FlowBrowserService.openItem(source, StringArgumentType.getString(ctx, "itemQuery"),
+                    filters.itemPredicates(), filters.window());
+        } catch (IllegalArgumentException invalid) {
+            source.sendFailure(Component.literal("[ItemGraph] Invalid item metadata filter: "
+                    + invalid.getMessage()));
+            return 0;
+        }
     }
 
     private static int guiPlayer(CommandContext<CommandSourceStack> ctx, Long sinceMinutes) {
@@ -996,6 +1126,11 @@ public final class ItemGraphCommands {
             filters = AuditLookupFilters.parse(expression, System.currentTimeMillis());
         } catch (IllegalArgumentException e) {
             source.sendFailure(Component.literal("[ItemGraph] Invalid lookup filter: " + e.getMessage()));
+            return 0;
+        }
+        if (!filters.itemPredicates().isEmpty() && !source.hasPermission(4)) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] Item metadata filters require permission level 4."));
             return 0;
         }
         String levelId = player.level().dimension().location().toString();

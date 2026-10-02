@@ -418,7 +418,7 @@ queue remains bounded and rejects additional requests.
 
 ### Preview mod-integration API worker
 
-`com.itemgraph.api.ItemGraphServiceImpl` exposes the `PREVIEW_2` API from shared code
+`com.itemgraph.api.ItemGraphServiceImpl` exposes the `PREVIEW_3` API from shared code
 packaged in both NeoForge and Fabric mod JARs. Both loader adapters install and stop the
 same `ItemGraphApiLifecycle`; CI consumer mods compile and run against each packaged API.
 Consumers negotiate their required API number before registration; preview versions require

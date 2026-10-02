@@ -1,6 +1,8 @@
 package com.itemgraph.api;
 
 import com.itemgraph.core.port.RuntimeInformationPort;
+import com.itemgraph.query.AuditLookupFilters;
+import com.itemgraph.query.ItemMetadataPredicate;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -203,6 +205,35 @@ final class ApiValidation {
         }
         if (options.sinceMinutes() != null && options.sinceMinutes() < 1) {
             return "sinceMinutes must be null or at least 1";
+        }
+        if (options.sinceMinutes() != null && options.absoluteWindow() != null) {
+            return "sinceMinutes and absoluteWindow are mutually exclusive";
+        }
+        if (options.absoluteWindow() != null && options.absoluteWindow().sinceMs() != null
+                && options.absoluteWindow().untilMs() != null
+                && options.absoluteWindow().sinceMs() > options.absoluteWindow().untilMs()) {
+            return "absoluteWindow start must not be after its end";
+        }
+        return null;
+    }
+
+    static String validateMetadataPredicates(java.util.List<ItemMetadataPredicate> predicates) {
+        if (predicates == null || predicates.size() > 8 || predicates.stream().anyMatch(java.util.Objects::isNull)) {
+            return "metadataPredicates must contain at most 8 non-null predicates";
+        }
+        if (predicates.isEmpty()) {
+            return null;
+        }
+        try {
+            String expression = "radius.1 " + predicates.stream()
+                    .map(ItemMetadataPredicate::normalizedToken)
+                    .collect(java.util.stream.Collectors.joining(" "));
+            AuditLookupFilters parsed = AuditLookupFilters.parse(expression, 0L);
+            if (!parsed.itemPredicates().equals(predicates)) {
+                return "metadataPredicates must be canonical exact predicates";
+            }
+        } catch (IllegalArgumentException invalid) {
+            return "metadataPredicates are invalid: " + invalid.getMessage();
         }
         return null;
     }

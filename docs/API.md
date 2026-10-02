@@ -1,8 +1,8 @@
 # ItemGraph preview API contract
 
-Status: **implemented through issue #44** — preview boundary; no stable-API guarantee.
+Status: **issue #45 implementation in progress** — preview boundary; no stable-API guarantee.
 Package: `com.itemgraph.api`
-API version: **`PREVIEW_2`**
+API version: **`PREVIEW_3`**
 Minecraft: **1.21.1**
 Loaders: **NeoForge and Fabric**
 Minimum Java: **21**
@@ -48,10 +48,11 @@ accepting impossible evidence.
 
 ## Version and preview policy
 
-`ItemGraphApi.API_VERSION` is `ApiVersion.PREVIEW_2`. It is separate from `mod_version`
-(`0.3.2` at the time of writing). PREVIEW_2 adds evidence class, reason, competing candidate
-references, candidate truncation, and quantity impact to each `FlowHop`. PREVIEW_1 consumers
-must renegotiate and update before calling this runtime.
+`ItemGraphApi.API_VERSION` is `ApiVersion.PREVIEW_3`. It is separate from `mod_version`
+(`0.3.2` at the time of writing). PREVIEW_2 added evidence class, reason, competing candidate
+references, candidate truncation, and quantity impact to each `FlowHop`. PREVIEW_3 adds
+item metadata selectors and absolute millisecond `QueryWindow` bounds. PREVIEW_1 and
+PREVIEW_2 consumers must renegotiate and update before calling this runtime.
 
 Policy:
 
@@ -109,7 +110,7 @@ Before calling `ItemGraphApi.get(server)` or making any service call, a consumer
 compare its source-controlled required API number with the runtime:
 
 ```java
-private static final int REQUIRED_ITEMGRAPH_API_VERSION = 2;
+private static final int REQUIRED_ITEMGRAPH_API_VERSION = 3;
 
 ApiCompatibility compatibility =
         ItemGraphApi.negotiate(REQUIRED_ITEMGRAPH_API_VERSION);
@@ -127,7 +128,7 @@ are shared.
 
 ## Public signatures
 
-The following signatures are the implemented `PREVIEW_2` contract. Any breaking change
+The following signatures are the issue #45 `PREVIEW_3` contract. Any breaking change
 must increment the preview API number and be named in `CHANGELOG.md` and this document.
 
 ### Entry point and lifecycle
@@ -139,7 +140,7 @@ import java.util.Optional;
 import net.minecraft.server.MinecraftServer;
 
 public final class ItemGraphApi {
-    public static final ApiVersion API_VERSION = ApiVersion.PREVIEW_2;
+    public static final ApiVersion API_VERSION = ApiVersion.PREVIEW_3;
 
     private ItemGraphApi() {}
 
@@ -164,12 +165,13 @@ public record ApiCompatibility(
 
 public enum ApiVersion {
     PREVIEW_1,
-    PREVIEW_2;
+    PREVIEW_2,
+    PREVIEW_3;
 
     public int number();      // 1
     public String channel();  // "preview"
     public boolean preview(); // true
-    public String label();    // "preview-1" or "preview-2"
+    public String label();    // "preview-1", "preview-2", or "preview-3"
 }
 ```
 
@@ -499,11 +501,13 @@ package com.itemgraph.api;
 public record ItemQuery(
         String itemId,           // nullable
         String customName,       // nullable
-        String fingerprintHash)  // nullable
+        String fingerprintHash,  // nullable
+        java.util.List<com.itemgraph.query.ItemMetadataPredicate> metadataPredicates)
 {
     public static ItemQuery itemId(String itemId);
     public static ItemQuery customName(String customName);
     public static ItemQuery fingerprintHash(String sha256Hex);
+    public ItemQuery withMetadata(java.util.List<com.itemgraph.query.ItemMetadataPredicate> predicates);
 }
 
 public record PlayerQuery(java.util.UUID playerUuid) {}
@@ -514,7 +518,8 @@ public record ContainerQuery(
 
 public record QueryOptions(
         int limit,
-        Long sinceMinutes) {
+        Long sinceMinutes,
+        TimeWindow absoluteWindow) {
 
     public static final int DEFAULT_LIMIT = 20;
     public static final int MAX_LIMIT = 100;
@@ -525,14 +530,21 @@ public record QueryOptions(
 `ItemQuery` requires exactly one selector. `itemId` is an exact registry ID lookup;
 `customName` is a non-blank lookup of at most 256 characters and may be ambiguous;
 `fingerprintHash` is the deterministic canonical metadata hash as a 64-character lowercase
-SHA-256 hex string, not a database row ID.
+SHA-256 hex string, not a database row ID. `metadataPredicates` adds exact ANDed values for
+the `ItemMetadataPredicate` kinds `ITEM_ID`, `FINGERPRINT`, `CUSTOM_NAME`, `DAMAGE`,
+`TRIM`, `ENCHANTMENT`, `LORE`, and `COMPONENT`. Component predicates match the canonical
+persistent-codec JSON value stored by ItemGraph; transient or unencodable component data is
+not guessed. The API query response includes a normalized predicate string.
 `PlayerQuery` uses the durable UUID. `ContainerQuery` uses explicit dimension and block
 coordinates. `traceExternalInventory` uses `(ownerModId, inventoryId)` as identity and
 ignores `lastKnownLocation` for lookup.
 
-`limit < 1` or `sinceMinutes < 1` is invalid input. `limit > 100` is accepted but capped;
+`limit < 1` or `sinceMinutes < 1` is invalid input. `sinceMinutes` and `absoluteWindow`
+cannot be supplied together. `absoluteWindow` uses inclusive epoch-millisecond bounds.
+`limit > 100` is accepted but capped;
 `requestedLimit` preserves what the caller asked and `appliedLimit` records `100`.
-`sinceMinutes == null` means all recorded history. A non-null value is resolved to
+When both time fields are null, the query means all recorded history. A non-null relative
+value is resolved to
 `[acceptance-time - sinceMinutes, acceptance-time]` on the query worker, so returned
 `TimeWindow` values are absolute rather than drifting between calls.
 
@@ -579,9 +591,17 @@ public record FlowResult(
         TimeWindow window,
         int requestedLimit,
         int appliedLimit,
-        boolean truncated) {
+        boolean truncated,
+        String normalizedPredicate,
+        boolean metadataMatchUnconfirmed) {
 }
 ```
+
+`normalizedPredicate` records the exact selector and applied time bounds. The time form is
+`time.all`, `<minutes>m`, or `window[since=<epochMillis|open>,until=<epochMillis|open>]`.
+`metadataMatchUnconfirmed` is true when a candidate may match but its persistent component
+index is missing or incomplete; consumers must present it as a possible candidate rather
+than a confirmed metadata match.
 
 ### Flow DTOs
 

@@ -36,16 +36,18 @@ Everything below this heading and above "Not yet implemented" is live.
 /ig event   <observationId>
 /ig explain <edgeId>
 /ig trace item <query> [limit] [sinceMinutes]
+/ig trace item-filtered <query> <metadata/time filters> (permission level 4)
 /ig trace player <playerName> [limit] [sinceMinutes]
 /ig trace container <x> <y> <z> [limit] [sinceMinutes]
 /ig gui item <query> [sinceMinutes]
+/ig gui item-filtered <query> <metadata/time filters> (permission level 4)
 /ig gui player <playerName> [sinceMinutes]
 /ig gui container <dimension> <x> <y> <z> [sinceMinutes]
 /ig inspect [on|off|status]
 /ig lookup <eventType> [limit] [sinceMinutes]
 /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]
 /ig lookup player <playerName> <eventType> [limit] [sinceMinutes]
-/ig lookup filters <filter1> ... <filter6>
+/ig lookup filters <name.value> ... (maximum 12 filters)
 /ig page <page> [session]
 ```
 
@@ -60,7 +62,7 @@ names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
 
 | Argument | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `topic` | string | overview | one live help topic; `help`, `status`, `audit`, `ingest`, `ingest now`, `event`, `explain`, `trace`, `trace item`, `trace player`, `trace container`, `gui`, `gui item`, `gui player`, `gui container`, or `inspect` |
+| `topic` | string | overview | one live help topic, including `trace item-filtered` and `gui item-filtered` |
 | `observationId` | long ≥ 1 | — | `ig_observations.id` |
 | `edgeId` | long ≥ 1 | — | `ig_inferred_edges.id` |
 | `query` | string | — | registry ID, custom-name text, numeric fingerprint candidate, or quoted `"id:<fingerprintId>"`; suggests registered item IDs |
@@ -70,7 +72,24 @@ names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
 | `sinceMinutes` | long ≥ 1 | unbounded | window is `[now - sinceMinutes, now]`, inclusive; GUI keeps the resolved window constant across pages |
 | `dimension` | resource location | — | required for `/ig gui container`; matches `ig_nodes.level_id` exactly; suggests loaded levels |
 | `x`, `y`, `z` | int | — | block coordinates for `/ig trace container` and `/ig gui container` |
-| `filter` | `name.value` token | — | `/ig lookup filters` accepts action, user, include, exclude, time (`m`, `h`, `d`, `y`), state (`observed`, `inferred`, `ambiguous`, `unresolved`), and required radius; at most six tokens |
+| `filter` | `name.value` token | — | `/ig lookup filters` accepts action, user, include, exclude, relative or absolute time, state, item metadata, and required radius; at most 12 tokens. Item metadata predicates require permission level 4. |
+
+Absolute time tokens use UTC ISO-8601 instants with exactly three fractional digits:
+`after.2026-10-02T12:34:56.789Z`, `before.2026-10-02T12:34:56.789Z`, or
+`between.2026-10-02T12:34:56.789Z,2026-10-03T00:00:00.000Z`. `after` and `before` may
+be combined; `between` cannot be combined with either. Boundaries are strict for `after`
+and `before`, inclusive for `between`, and query rows store integer epoch milliseconds.
+
+Exact metadata tokens are `item.<registry_id>`, `fingerprint.<sha256>`,
+`name."<text>"`, `damage.<integer>`, `trim.<material_id>/<pattern_id>`,
+`enchantment.<registry_id>[:level]`, `lore."<text>"`, and
+`component.<registry_id>=<canonical JSON>`. Component values use persistent-codec JSON,
+canonicalized by sorting object keys while preserving array order. `name` compares the
+plain-text projection derived from the decoded `minecraft:custom_name` component. ItemGraph
+does not infer component values from arbitrary display text or historical GriefLogger
+payloads. A fingerprint whose
+component index is missing or incomplete remains a visibly unresolved candidate. Imported
+GriefLogger/audit rows without a fingerprint link cannot satisfy a rich metadata predicate.
 
 `limit` has no upper bound in the command grammar on purpose. An over-large request is
 **capped, not rejected**: an admin chasing an incident gets the first page of real output
@@ -200,28 +219,28 @@ are authoritative; the implemented surface above documents the current command c
 chosen arbitrarily: chat trace output lists candidates, while the GUI opens a candidate
 selection menu. String matching is exact-or-substring and returns at most 10 candidates.
 
-Intended metadata filters and broader matching remain future work:
+`/ig trace item-filtered` adds exact metadata and time predicates, applying them before the
+candidate cap. `/ig gui item-filtered` applies the same metadata and time predicates before opening
+the candidate or timeline view. Both require permission level 4. A possible candidate with
+an incomplete component index is labeled `COMPONENT_FILTER_UNRESOLVED`; it is not a confirmed
+metadata match.
 
 ```text
 /ig trace item "minecraft:iron_chestplate"
 /ig gui item "minecraft:iron_chestplate"
 ```
 
-With metadata:
+Filtered metadata example:
 
 ```text
-/ig trace item "minecraft:iron_chestplate" name:"Old Reliable"
+/ig trace item-filtered minecraft:iron_chestplate name."Old Reliable" after.2026-10-02T12:34:56.789Z
+/ig gui item-filtered diamond_sword damage.4 enchantment.minecraft:sharpness:5 after.2026-10-02T12:34:56.789Z
 ```
 
-Potential filters:
-
-```text
-since:2d
-after:"2026-09-14 18:00"
-before:"2026-09-15 12:00"
-player:Vlad
-world:minecraft:overworld
-```
+Absolute timestamps require UTC and exactly three fractional digits. `after` and `before`
+are exclusive; `between` is inclusive and takes comma-separated start and end timestamps.
+Relative `time` cannot be combined with absolute bounds. Metadata filters require permission
+level 4.
 
 ### Trace a player
 
@@ -364,7 +383,7 @@ Chat output should distinguish:
 [UNRESOLVED]    stable reason shown; quantity impact is zero
 ```
 
-Trace, `/ig event`, `/ig explain`, unified lookup, GUI details, API preview-2 results, and
+Trace, `/ig event`, `/ig explain`, unified lookup, GUI details, API preview-3 results, and
 incident bundles use the same four-state vocabulary. Ambiguous source-equivalence rows list
 candidate observation refs prioritized by the alternatives that set the score's nearest-candidate
 gaps, capped at 50 with an explicit truncation
@@ -405,7 +424,7 @@ results to immutable `QueryResult<FlowResult>` DTOs without exposing JDBC, schem
 hops retain `EvidenceKind.INFERRED_EDGE`, `Provenance.INFERRED`, the stored explanation,
 and bounded supporting observation/transformation refs. Each `FlowHop` also carries
 `evidenceClass`, `reasonCode`, `candidateEvidenceIds`, `candidateEvidenceTruncated`, and
-`quantityImpact`; this DTO contract requires exact API negotiation at `PREVIEW_2`.
+`quantityImpact`; this DTO contract requires exact API negotiation at `PREVIEW_3`.
 Evidence is exposed only through
 opaque URIs (`itemgraph:observation:<id>`, `itemgraph:transformation:<id>`, and
 `itemgraph:inferred-edge:<id>`). API limits are validated separately but share the

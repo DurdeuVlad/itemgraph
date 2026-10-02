@@ -1,18 +1,24 @@
 package com.itemgraph.canon;
 
+import com.itemgraph.util.CanonicalJson;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.JsonOps;
 import io.netty.buffer.Unpooled;
 import com.itemgraph.metrics.OperationalMetrics;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.component.DataComponentPatch;
+import net.minecraft.core.component.DataComponentMap;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.resources.RegistryOps;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.armortrim.ArmorTrim;
 import net.minecraft.world.item.component.ItemLore;
@@ -30,6 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 
 /**
  * Item canonicalization engine for ItemGraph (Phase 3).
@@ -62,6 +69,10 @@ import java.util.Optional;
  */
 public class ItemCanonicalizer {
     private static final Logger LOGGER = LoggerFactory.getLogger(ItemCanonicalizer.class);
+    private static final int MAX_SEARCHABLE_COMPONENTS = 128;
+    private static final int MAX_SEARCHABLE_COMPONENT_VALUE_CHARS = 16_384;
+    private static final int MAX_SEARCHABLE_COMPONENT_TOTAL_CHARS = 65_536;
+    private static final int MAX_RAW_COMPONENT_PATCH_BYTES = 1_048_576;
     /**
      * A bad historical blob can be referenced by many GriefLogger rows. Keep a
      * bounded registry-aware negative cache so a known failure is not decoded and
@@ -124,25 +135,21 @@ public class ItemCanonicalizer {
         String itemId = resolveRegistryId(rawItemId);
 
         DataComponentPatch patch = DataComponentPatch.EMPTY;
+        String rawPatchHash = null;
         String opaqueDataHash = null;
+        RegistryAccess encodingRegistryAccess = registryAccess == null
+                ? registryAccessOrFallback() : registryAccess;
         if (rawData != null && rawData.length > 0) {
-            RegistryAccess regAccess = registryAccess;
-            if (regAccess == null) {
-                regAccess = activeRegistryAccess;
-            }
-            if (regAccess == null) {
-                try {
-                    regAccess = RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
-                } catch (Throwable ignored) {
-                    regAccess = RegistryAccess.EMPTY;
-                }
-            }
+            RegistryAccess regAccess = encodingRegistryAccess;
+            encodingRegistryAccess = regAccess;
 
             String rawDataHash = sha256Hex(rawData);
+            rawPatchHash = rawDataHash;
             OpaqueDecodeKey decodeKey = new OpaqueDecodeKey(regAccess, rawDataHash);
             if (hasOpaqueDecodeFailure(decodeKey)) {
                 OperationalMetrics.getInstance().recordDecodeCacheHit();
-                return extractAndBuild(itemId, patch, null, rawDataHash);
+                return extractAndBuild(itemId, effectiveComponents(itemId, patch, regAccess),
+                        null, rawDataHash, rawDataHash, regAccess);
             }
 
             synchronized (decodeLock(decodeKey)) {
@@ -151,10 +158,14 @@ public class ItemCanonicalizer {
                 // single-flight rather than merely single-log.
                 if (hasOpaqueDecodeFailure(decodeKey)) {
                     OperationalMetrics.getInstance().recordDecodeCacheHit();
-                    return extractAndBuild(itemId, patch, null, rawDataHash);
+                    return extractAndBuild(itemId, effectiveComponents(itemId, patch, regAccess),
+                            null, rawDataHash, rawDataHash, regAccess);
                 }
                 RegistryFriendlyByteBuf buf = null;
                 try {
+                    if (rawData.length > MAX_RAW_COMPONENT_PATCH_BYTES) {
+                        throw new IllegalArgumentException("DataComponentPatch exceeds the 1048576-byte decode limit");
+                    }
                     buf = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(rawData), regAccess);
                     patch = DataComponentPatch.STREAM_CODEC.decode(buf);
                     if (buf.isReadable()) {
@@ -178,7 +189,9 @@ public class ItemCanonicalizer {
             }
         }
 
-        return extractAndBuild(itemId, patch, null, opaqueDataHash);
+        return extractAndBuild(itemId,
+                effectiveComponents(itemId, patch, encodingRegistryAccess), null,
+                rawPatchHash, opaqueDataHash, encodingRegistryAccess);
     }
 
     private static Object decodeLock(OpaqueDecodeKey key) {
@@ -231,7 +244,10 @@ public class ItemCanonicalizer {
      * decoding does not have this requirement, only encoding does).
      */
     public static CanonicalItem canonicalizePatch(String rawItemId, DataComponentPatch patch) {
-        return extractAndBuild(resolveRegistryId(rawItemId), patch);
+        String itemId = resolveRegistryId(rawItemId);
+        return extractAndBuild(itemId, effectiveComponents(itemId,
+                patch == null ? DataComponentPatch.EMPTY : patch, registryAccessOrFallback()),
+                null, null, null, registryAccessOrFallback());
     }
 
     public static CanonicalItem canonicalizeStack(net.minecraft.world.item.ItemStack stack) {
@@ -239,7 +255,7 @@ public class ItemCanonicalizer {
             return new CanonicalItem("minecraft:air", sha256Hex("id=minecraft:air"), null, null, null);
         }
         String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-        return extractAndBuild(itemId, stack.getComponentsPatch());
+        return extractAndBuild(itemId, stack.getComponents(), null, null, null, registryAccessOrFallback());
     }
 
     /** Canonical component strings for the public immutable ItemSnapshot DTO. */
@@ -249,35 +265,94 @@ public class ItemCanonicalizer {
         }
         Map<String, String> components = new LinkedHashMap<>();
         String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-        extractAndBuild(itemId, stack.getComponentsPatch(), components);
+        extractAndBuild(itemId, stack.getComponents(), components, null, null, registryAccessOrFallback());
         return Map.copyOf(components);
     }
 
-    private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch) {
-        return extractAndBuild(itemId, patch, null, null);
+    private static DataComponentMap effectiveComponents(String itemId, DataComponentPatch patch,
+                                                        RegistryAccess registryAccess) {
+        ResourceLocation location = ResourceLocation.tryParse(itemId);
+        if (location == null || !BuiltInRegistries.ITEM.containsKey(location)) {
+            return null;
+        }
+        try {
+            ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.get(location));
+            stack.applyComponents(patch);
+            return stack.getComponents();
+        } catch (RuntimeException failure) {
+            return null;
+        }
     }
 
-    private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch,
-                                                 Map<String, String> components) {
-        return extractAndBuild(itemId, patch, components, null);
+    private static RegistryAccess registryAccessOrFallback() {
+        RegistryAccess registryAccess = activeRegistryAccess;
+        if (registryAccess != null) {
+            return registryAccess;
+        }
+        try {
+            return RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
+        } catch (RuntimeException unavailable) {
+            return RegistryAccess.EMPTY;
+        }
     }
 
-    private static CanonicalItem extractAndBuild(String itemId, DataComponentPatch patch,
-                                                 Map<String, String> components, String opaqueDataHash) {
+    private static CanonicalItem extractAndBuild(String itemId, DataComponentMap componentMap,
+                                                 Map<String, String> components, String rawPatchHash,
+                                                 String opaqueDataHash,
+                                                 RegistryAccess registryAccess) {
         String customName = null;
         List<String> sortedEnchantments = new ArrayList<>();
         Integer damage = null;
         String trimSummary = null;
         List<String> loreLines = new ArrayList<>();
         String rarity = null;
+        Map<String, String> searchableComponents = new TreeMap<>();
+        Map<String, String> fingerprintComponents = new TreeMap<>();
+        boolean componentIndexComplete = opaqueDataHash == null && componentMap != null;
+        int componentCount = 0;
+        int indexedComponentChars = 0;
 
-        if (patch != null && !patch.isEmpty()) {
+        if (componentMap != null && !componentMap.isEmpty()) {
+            for (net.minecraft.core.component.TypedDataComponent<?> entry : componentMap) {
+                net.minecraft.core.component.DataComponentType<?> type = entry.type();
+                ResourceLocation typeId = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type);
+                if (typeId == null) {
+                    componentIndexComplete = false;
+                    continue;
+                }
+                Codec<?> codec = type.codec();
+                if (codec == null || type.isTransient() || registryAccess == null) {
+                    componentIndexComplete = false;
+                    continue;
+                }
+                String canonicalValue = encodeComponent(codec, entry.value(), registryAccess);
+                if (canonicalValue == null) {
+                    componentIndexComplete = false;
+                    continue;
+                }
+                String id = typeId.toString();
+                fingerprintComponents.put(id, canonicalValue.length() <= MAX_SEARCHABLE_COMPONENT_VALUE_CHARS
+                        ? canonicalValue : "sha256:" + sha256Hex(canonicalValue));
+                componentCount++;
+                if (componentCount <= MAX_SEARCHABLE_COMPONENTS
+                        && canonicalValue.length() <= MAX_SEARCHABLE_COMPONENT_VALUE_CHARS
+                        && indexedComponentChars + canonicalValue.length() <= MAX_SEARCHABLE_COMPONENT_TOTAL_CHARS) {
+                    searchableComponents.put(id, canonicalValue);
+                    indexedComponentChars += canonicalValue.length();
+                } else {
+                    componentIndexComplete = false;
+                }
+            }
+
             try {
-                Optional<? extends Component> nameOpt = patch.get(DataComponents.CUSTOM_NAME);
-                if (nameOpt != null && nameOpt.isPresent()) {
-                    String str = nameOpt.get().getString();
+                Component nameValue = componentMap.get(DataComponents.CUSTOM_NAME);
+                if (nameValue != null) {
+                    String str = nameValue.getString();
                     if (!str.isEmpty()) {
                         customName = str;
+                        if (searchableComponents.containsKey("minecraft:custom_name")) {
+                            searchableComponents.put("minecraft:custom_name#plain_text", jsonString(str));
+                        }
                     }
                 }
             } catch (Throwable t) {
@@ -285,9 +360,8 @@ public class ItemCanonicalizer {
             }
 
             try {
-                Optional<? extends ItemEnchantments> enchOpt = patch.get(DataComponents.ENCHANTMENTS);
-                if (enchOpt != null && enchOpt.isPresent() && !enchOpt.get().isEmpty()) {
-                    ItemEnchantments ench = enchOpt.get();
+                ItemEnchantments ench = componentMap.get(DataComponents.ENCHANTMENTS);
+                if (ench != null && !ench.isEmpty()) {
                     for (var entry : ench.entrySet()) {
                         Holder<Enchantment> holder = entry.getKey();
                         int level = entry.getIntValue();
@@ -298,6 +372,10 @@ public class ItemCanonicalizer {
                             enchKey = holder.toString();
                         }
                         sortedEnchantments.add(enchKey + ":" + level);
+                        if (searchableComponents.containsKey("minecraft:enchantments")) {
+                            searchableComponents.put("minecraft:enchantments/" + enchKey,
+                                    Integer.toString(level));
+                        }
                     }
                     Collections.sort(sortedEnchantments);
                 }
@@ -306,18 +384,20 @@ public class ItemCanonicalizer {
             }
 
             try {
-                Optional<? extends Integer> dmgOpt = patch.get(DataComponents.DAMAGE);
-                if (dmgOpt != null && dmgOpt.isPresent()) {
-                    damage = dmgOpt.get();
+                Integer dmg = componentMap.get(DataComponents.DAMAGE);
+                if (dmg != null) {
+                    damage = dmg;
+                    if (searchableComponents.containsKey("minecraft:damage")) {
+                        searchableComponents.put("minecraft:damage", damage.toString());
+                    }
                 }
             } catch (Throwable t) {
                 LOGGER.debug("Could not extract DAMAGE for {}: {}", itemId, t.getMessage());
             }
 
             try {
-                Optional<? extends ArmorTrim> trimOpt = patch.get(DataComponents.TRIM);
-                if (trimOpt != null && trimOpt.isPresent()) {
-                    ArmorTrim trim = trimOpt.get();
+                ArmorTrim trim = componentMap.get(DataComponents.TRIM);
+                if (trim != null) {
                     String material = trim.material().unwrapKey()
                             .map(k -> k.location().toString())
                             .orElseGet(() -> trim.material().getRegisteredName());
@@ -325,17 +405,26 @@ public class ItemCanonicalizer {
                             .map(k -> k.location().toString())
                             .orElseGet(() -> trim.pattern().getRegisteredName());
                     trimSummary = material + "/" + pattern;
+                    if (searchableComponents.containsKey("minecraft:trim")) {
+                        searchableComponents.put("minecraft:trim#material_pattern", jsonString(trimSummary));
+                    }
                 }
             } catch (Throwable t) {
                 LOGGER.debug("Could not extract TRIM for {}: {}", itemId, t.getMessage());
             }
 
             try {
-                Optional<? extends ItemLore> loreOpt = patch.get(DataComponents.LORE);
-                if (loreOpt != null && loreOpt.isPresent()) {
-                    ItemLore lore = loreOpt.get();
+                ItemLore lore = componentMap.get(DataComponents.LORE);
+                if (lore != null) {
+                    int lineIndex = 0;
                     for (Component line : lore.lines()) {
-                        loreLines.add(line.getString());
+                        String plainLine = line.getString();
+                        loreLines.add(plainLine);
+                        if (searchableComponents.containsKey("minecraft:lore")) {
+                            searchableComponents.put("minecraft:lore#plain_text/" + lineIndex,
+                                    jsonString(plainLine));
+                        }
+                        lineIndex++;
                     }
                 }
             } catch (Throwable t) {
@@ -343,9 +432,9 @@ public class ItemCanonicalizer {
             }
 
             try {
-                Optional<? extends Rarity> rarityOpt = patch.get(DataComponents.RARITY);
-                if (rarityOpt != null && rarityOpt.isPresent()) {
-                    rarity = rarityOpt.get().name();
+                Rarity rarityValue = componentMap.get(DataComponents.RARITY);
+                if (rarityValue != null) {
+                    rarity = rarityValue.name();
                 }
             } catch (Throwable t) {
                 LOGGER.debug("Could not extract RARITY for {}: {}", itemId, t.getMessage());
@@ -373,6 +462,23 @@ public class ItemCanonicalizer {
             }
         }
 
+        int storedComponentCount = 0;
+        int storedComponentChars = 0;
+        var componentIterator = searchableComponents.entrySet().iterator();
+        while (componentIterator.hasNext()) {
+            Map.Entry<String, String> component = componentIterator.next();
+            int componentChars = component.getKey().length() + component.getValue().length();
+            if (storedComponentCount >= MAX_SEARCHABLE_COMPONENTS
+                    || component.getValue().length() > MAX_SEARCHABLE_COMPONENT_VALUE_CHARS
+                    || storedComponentChars + componentChars > MAX_SEARCHABLE_COMPONENT_TOTAL_CHARS) {
+                componentIterator.remove();
+                componentIndexComplete = false;
+                continue;
+            }
+            storedComponentCount++;
+            storedComponentChars += componentChars;
+        }
+
         // Deterministic canonical string
         StringBuilder canon = new StringBuilder();
         canon.append("id=").append(itemId);
@@ -394,6 +500,20 @@ public class ItemCanonicalizer {
         if (opaqueDataHash != null) {
             canon.append(";opaque_data_sha256=").append(opaqueDataHash);
         }
+        if (!componentIndexComplete && rawPatchHash != null && opaqueDataHash == null) {
+            // Decoded but partially serializable patches retain a conservative,
+            // byte-derived discriminator so unsupported values cannot collapse
+            // onto another partial fingerprint with the same known fields.
+            canon.append(";partial_patch_sha256=").append(rawPatchHash);
+        }
+        for (Map.Entry<String, String> component : fingerprintComponents.entrySet()) {
+            if (!isLegacyCanonicalComponent(component.getKey())) {
+                canon.append(";component=").append(component.getKey()).append(':').append(component.getValue());
+            }
+        }
+        if (!componentIndexComplete) {
+            canon.append(";component_index=PARTIAL");
+        }
 
         String fingerprintHash = sha256Hex(canon.toString());
 
@@ -405,7 +525,7 @@ public class ItemCanonicalizer {
         if (!sortedEnchantments.isEmpty()) {
             summaryParts.add("enchantments=[" + String.join(", ", sortedEnchantments) + "]");
         }
-        if (damage != null) {
+        if (damage != null && damage > 0) {
             summaryParts.add("damage=" + damage);
         }
         if (trimSummary != null && !trimSummary.isEmpty()) {
@@ -417,9 +537,44 @@ public class ItemCanonicalizer {
         if (opaqueDataHash != null) {
             summaryParts.add("component_decode=UNRESOLVED;raw_data_sha256=" + opaqueDataHash);
         }
+        if (!componentIndexComplete && rawPatchHash != null && opaqueDataHash == null) {
+            summaryParts.add("raw_patch_sha256=" + rawPatchHash);
+        }
+        if (!componentIndexComplete) {
+            summaryParts.add("component_index=PARTIAL");
+        }
         String componentSummary = summaryParts.isEmpty() ? null : String.join("; ", summaryParts);
 
-        return new CanonicalItem(itemId, fingerprintHash, customName, rarity, componentSummary);
+        return new CanonicalItem(itemId, fingerprintHash, customName, rarity, componentSummary,
+                searchableComponents, componentIndexComplete ? "COMPLETE" : "PARTIAL");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String encodeComponent(Codec<?> codec, Object value, RegistryAccess registryAccess) {
+        try {
+            var result = ((Codec<Object>) codec).encodeStart(
+                    RegistryOps.create(JsonOps.INSTANCE, registryAccess), value);
+            return result.result().map(CanonicalJson::encode).orElse(null);
+        } catch (RuntimeException | StackOverflowError failure) {
+            return null;
+        }
+    }
+
+    private static boolean isLegacyCanonicalComponent(String id) {
+        return id.equals("minecraft:custom_name")
+                || id.startsWith("minecraft:custom_name#")
+                || id.equals("minecraft:enchantments")
+                || id.startsWith("minecraft:enchantments/")
+                || id.equals("minecraft:damage")
+                || id.equals("minecraft:trim")
+                || id.startsWith("minecraft:trim#")
+                || id.equals("minecraft:lore")
+                || id.startsWith("minecraft:lore#")
+                || id.equals("minecraft:rarity");
+    }
+
+    private static String jsonString(String value) {
+        return new com.google.gson.JsonPrimitive(value).toString();
     }
 
     public static String normalizeItemId(String materialName) {

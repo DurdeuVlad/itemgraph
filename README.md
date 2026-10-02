@@ -69,7 +69,7 @@ available for forensic review and are excluded from current graph queries.
 - **Platforms:** Fabric, NeoForge
 - **Target Minecraft version:** 1.21.1
 - **Primary deployment model:** dedicated server
-- **Preview integration API:** `com.itemgraph.api` `PREVIEW_2` in the main JAR
+- **Preview integration API:** `com.itemgraph.api` `PREVIEW_3` in the main JAR
 - **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 - **Tagline:** *Trace item movement through time.*
 
@@ -165,9 +165,11 @@ Implemented and available (all require permission level 2):
 /ig event   <observationId>
 /ig explain <edgeId>
 /ig trace item <query> [limit] [sinceMinutes]
+/ig trace item-filtered <query> <metadata/time filters> (permission level 4)
 /ig trace player <playerName> [limit] [sinceMinutes]
 /ig trace container <x> <y> <z> [limit] [sinceMinutes]
 /ig gui item <query> [sinceMinutes]
+/ig gui item-filtered <query> <metadata/time filters> (permission level 4)
 /ig gui player <playerName> [sinceMinutes]
 /ig gui container <dimension> <x> <y> <z> [sinceMinutes]
 /ig inspect [on|off|status]
@@ -177,6 +179,7 @@ Implemented and available (all require permission level 2):
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
 - `/ig export`: writes a bounded, redacted incident bundle to `<world>/itemgraph/exports`; full identity/location data requires permission level 4. `/ig export verify` checks its SHA-256 manifest and chain, and `/ig export cancel` cancels an active job. See [incident bundle format and limits](docs/INCIDENT_BUNDLES.md).
 - `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows the chronological timeline, including transformations (`[TRANSFORMATION <type> <- <source>]`).
+- `/ig trace item-filtered` and `/ig gui item-filtered`: apply exact item metadata predicates and UTC or relative time bounds before candidate limits. Metadata filters require permission level 4. Incomplete component indexes are labeled as possible candidates, never confirmed matches.
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
 - `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.
 - `/ig gui`: opens the same item/player/container timelines in a vanilla six-row chest menu. Each page has at most 45 timeline entries; entries distinguish observed from inferred movement, and selecting one opens evidence details. Ambiguous item matches and duplicate player/container nodes require candidate selection rather than silently choosing a target. The menu is permission-level 2, uses no custom client screen or packet, and rejects inventory-movement actions.
@@ -196,7 +199,7 @@ Evidence and inference are labelled per line, never once at the top.
 
 ## Preview integration API
 
-Trusted server mods can use `com.itemgraph.api` `PREVIEW_2` to register their own source
+Trusted server mods can use `com.itemgraph.api` `PREVIEW_3` to register their own source
 identity, submit bounded raw observations, and run asynchronous item/player/container
 queries. The API is shipped in this JAR, uses a service-issued `SourceHandle`, and returns
 immutable DTOs plus opaque evidence URIs—not JDBC, schema IDs, mutable Minecraft state, or

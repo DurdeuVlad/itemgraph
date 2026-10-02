@@ -3,7 +3,7 @@
   "id": "itemgraph_api_consumer_fabric",
   "version": "0.1.0",
   "name": "ItemGraph Fabric API Consumer Example",
-  "description": "Loads as an independent Fabric mod and exercises ItemGraph PREVIEW_2 from the public API.",
+  "description": "Loads as an independent Fabric mod and exercises ItemGraph PREVIEW_3 from the public API.",
   "environment": "server",
   "entrypoints": {
     "main": [

@@ -30,6 +30,52 @@ of creating a duplicate milestone.
 - [NeoForge 1.21.1 capabilities](https://docs.neoforged.net/docs/1.21.1/inventories/capabilities/)
 - [NeoForge 1.21.1 loot tables](https://docs.neoforged.net/docs/1.21.1/resources/server/loottables/)
 - [NeoForge 1.21.1 global loot modifiers](https://docs.neoforged.net/docs/1.21.1/resources/server/loottables/glm/)
+- [NeoForge 1.21.1 data components](https://docs.neoforged.net/docs/1.21.1/items/datacomponents/)
+
+## #45 query contract decision
+
+- Preserve the existing `name.value` vocabulary and add `after.<UTC instant>`,
+  `before.<UTC instant>`, and `between.<UTC instant>,<UTC instant>`. Instants
+  require a trailing `Z` and exactly three fractional digits. `after` and
+  `before` are exclusive; `between` is inclusive at both ends. `after` and
+  `before` may be combined for a bounded open interval; `between` cannot be
+  combined with either. `time.<duration>` is mutually exclusive with all
+  absolute-time tokens. Reject reversed or empty intervals.
+- Metadata predicates use exact matching by default: `item.<registry id>`,
+  `fingerprint.<64 lowercase hex>`, `name.<quoted text>`, `damage.<nonnegative
+  integer>`, `trim.<material>/<pattern>`, `enchantment.<registry id>[:level]`,
+  `lore.<quoted text>`, and `component.<registry id>=<canonical JSON value>`.
+  `component` values must be canonical JSON, not Java `toString()` output.
+- The tokenizer accepts a quoted value inside a token and escapes `\\` and
+  `\"`; commas in multi-value filters remain separators only outside quotes.
+  Keep a hard token limit and a 4 KiB total normalized-predicate limit.
+- Any item-metadata predicate requires permission level 4 on player-facing
+  commands and exports. This prevents low-privilege query results from revealing
+  hidden inventory matches. The API is a trusted server-mod boundary, not a
+  player authorization boundary: callers remain responsible for checking their
+  initiating actor's permissions before showing results, as documented in
+  `docs/SECURITY_AND_PERMISSIONS.md`. API query DTOs must carry the normalized
+  predicate for auditability and must not return arbitrary component payloads.
+  Do not add actor authorization to the API unless the API also receives a
+  verifiable actor identity and permission context; the current API has neither.
+- NeoForge documents components as typed keys in a `DataComponentMap` and
+  provides codecs for persistent values. Use registered component IDs plus
+  registry-aware codecs for canonical values; reject or return explicit
+  unresolved metadata for non-persistent components, codec failures, and opaque
+  legacy patches. Never derive filter values from `toString()` or label equal
+  component values as physical-item identity.
+- Store searchable values in ItemGraph's own normalized index with component-key
+  and value hashes for bounded indexed lookup, then compare the full canonical
+  values after the hash match. Keep values internal, preserve unresolved-index
+  status for older rows, and require predicates to run before source limits and
+  keyset pagination.
+- The existing API `ItemQuery` resolves one item target and traces its history;
+  it is not a general evidence search API. Add typed metadata predicates to
+  `ItemQuery` and absolute bounds to `QueryOptions`, preserving the old
+  constructors. Return the normalized selector and time bounds with the result,
+  and retain exact preview negotiation. Do not overload `customName` with
+  substring semantics or place
+  predicate JSON in `FlowHop` evidence details.
 
 ## Delivery batches
 

@@ -188,8 +188,10 @@ class MariaDbDialectIntegrationTest {
             StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, true);
             assertTrue(hasIndex(conn, "ig_observations", "idx_obs_time_fp"));
             assertTrue(hasIndex(conn, "ig_grieflogger_lookup", "idx_gl_lookup_subject"));
+            assertTrue(hasIndex(conn, "ig_fingerprint_components", "idx_fingerprint_component_value"));
             StorageIndexManager.apply(conn, DatabaseDialect.MYSQL_MARIADB, false);
             assertFalse(hasIndex(conn, "ig_grieflogger_lookup", "idx_gl_lookup_subject"));
+            assertFalse(hasIndex(conn, "ig_fingerprint_components", "idx_fingerprint_component_value"));
             assertTrue(hasIndex(conn, "ig_observations", "idx_obs_bridge_lookup"),
                     "the sole index supporting the node_id foreign key must remain present after re-disable");
             assertTrue(hasIndex(conn, "ig_observations", "idx_obs_source_unique"));
