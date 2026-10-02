@@ -289,6 +289,8 @@ public final class EventTaxonomy {
                 27, "item_flow", "consume");
         action(entries, "HOPPER_INSERT", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
         action(entries, "HOPPER_EXTRACT", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
+        action(entries, "DISPENSER_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
+        action(entries, "DROPPER_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
         action(entries, "DEATH_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 56, "entity_lifecycle");
         action(entries, "ADD_ITEM_ENDER", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 76, "ender_inventory");
         action(entries, "REMOVE_ITEM_ENDER", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 76, "ender_inventory");

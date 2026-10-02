@@ -50,7 +50,11 @@ The project follows a simple pre-1.0 development changelog model.
   movement evidence. Explicit `QUEUE_FULL` responses retry the same event identity at
   most three times through a 128-entry bounded worker queue; other outcomes are not
   replayed. This is in-memory retry only, and pending retries can be interrupted by
-  process shutdown. Automatic interception of arbitrary modded inventories remains
+  process shutdown. Vanilla hopper transfers emit bounded endpoint-unknown net deltas
+  on NeoForge; both loaders also record accepted default-behavior dispenser/dropper
+  outputs with source, item, amount, ground endpoint, and entity UUID. Snapshot bounds
+  use overflow-safe arithmetic, and unreadable prior hopper snapshots suppress paired
+  deltas. Automatic interception of arbitrary modded inventories remains
   unsupported until a supported integration is exercised; no version bump or
   distributable JAR was produced.
 

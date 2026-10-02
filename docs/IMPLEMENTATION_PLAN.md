@@ -360,6 +360,19 @@ including accepted projectile-spawn evidence.
 - Fabric `HopperBlockEntityMixin` captures successful vanilla hopper transfers as
   endpoint-unknown `HOPPER_INSERT`/`HOPPER_EXTRACT` net deltas, preserving quantity
   without attributing automation to a player.
+- NeoForge captures the same successful vanilla hopper deltas through a narrow
+  `HopperBlockEntity.tryMoveItems` mixin. It snapshots at most seven neighboring
+  positions and 512 total slots, then emits only canonical net changes. This hook
+  is separate from NeoForge's capability wrapper because vanilla hopper code can
+  mutate `Container` without calling `IItemHandler`.
+- Both loaders wrap `DispenserBlock.dispenseFrom` and the separate `DropperBlock`
+  override to bind the source position, then observe `Level.addFreshEntity` only
+  inside `DefaultDispenseItemBehavior.spawnItem`.
+  Accepted `ItemEntity` results become `DISPENSER_DROP`/`DROPPER_DROP` rows with the
+  exact item fingerprint, count, and entity UUID. Projectiles, buckets, custom dispense
+  paths, and rejected world insertion are omitted. The pinned Fabric Transfer API and
+  NeoForge 21.1 capability APIs expose per-storage operations but no global callback;
+  explicit integration adapters remain the supported path for arbitrary modded storage.
 - Issue 34 adds an opt-in cross-loader adapter contract: `AutomationEndpoint` provides
   opaque restart-stable external inventory identity, and
   `AutomationTransferAdapter.reportCommittedTransfer` records exact committed amounts,

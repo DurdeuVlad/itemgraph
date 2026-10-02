@@ -674,6 +674,12 @@ face in its endpoint ID, preserves the delegate's return value, and leaves the o
 UNKNOWN. The wrapper is opt-in; ItemGraph does not globally replace arbitrary mod
 capability providers.
 
+Both loaders also record vanilla hopper net deltas and default-behavior dispenser/dropper
+item entities after the world accepts them. Dispenser/dropper rows keep the source block,
+ground endpoint, item fingerprint, quantity, and item-entity UUID. These native hooks do
+not discover arbitrary modded inventory calls; mod integrations must use the adapter
+contract above.
+
 Automation observations retry only an explicit `QUEUE_FULL` response up to three times,
 reusing the same immutable observation and source event ID so persistence deduplication
 remains effective. Retries use one daemon worker and a 128-entry pending queue with 50,
