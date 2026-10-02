@@ -54,19 +54,25 @@ class NetworkBackendPerformanceIntegrationTest {
 
     private static final class CommandProbe {
         private final CommandSourceStack source;
+        private final String expectedDetailPrefix;
         private volatile long startedNanos;
         private final AtomicInteger evidenceLines = new AtomicInteger();
         private final AtomicBoolean completed = new AtomicBoolean();
         private volatile long finishedNanos;
         private volatile boolean failed;
 
-        private CommandProbe(CommandSourceStack source) {
+        private CommandProbe(CommandSourceStack source, String expectedDetailPrefix) {
             this.source = source;
+            this.expectedDetailPrefix = expectedDetailPrefix;
         }
 
         private void successfulMessage(String renderedLine, ThreadLocal<CommandProbe> callbackProbe) {
             callbackProbe.set(this);
-            if (renderedLine.contains("[OBSERVED]")) {
+            // Synthetic benchmark action names are intentionally absent from the
+            // production taxonomy, so lookup correctly labels them UNCLASSIFIED.
+            // Match this run's unique raw audit detail instead of assuming a class.
+            if (renderedLine.contains("audit#")
+                    && renderedLine.contains("detail=" + expectedDetailPrefix)) {
                 evidenceLines.incrementAndGet();
             }
         }
@@ -234,7 +240,7 @@ class NetworkBackendPerformanceIntegrationTest {
                     assertSame(modeledServerThread, Thread.currentThread(),
                             "Brigadier parsing and player position reads must stay on the modeled server thread");
                     for (int command = 0; command < LOOKUP_THREADS * REGISTERED_COMMANDS_PER_THREAD; command++) {
-                        CommandProbe probe = newCommandProbe(commandServer, callbackProbeContext);
+                        CommandProbe probe = newCommandProbe(commandServer, callbackProbeContext, prefix);
                         commandProbes.add(probe);
                         probe.startedNanos = System.nanoTime();
                         int accepted = commandDispatcher.execute("ig lookup radius.20", probe.source);
@@ -300,7 +306,7 @@ class NetworkBackendPerformanceIntegrationTest {
             for (CommandProbe probe : commandProbes) {
                 assertTrue(probe.completed.get(), "every registered lookup must complete its server-thread callback");
                 assertTrue(probe.evidenceLines.get() > 0,
-                        "registered radius lookup must return at least one observed evidence line");
+                        "registered radius lookup must return a matching synthetic audit row");
                 if (probe.failed) {
                     commandCallbackFailures.increment();
                 }
@@ -385,18 +391,18 @@ class NetworkBackendPerformanceIntegrationTest {
     }
 
     private static CommandProbe newCommandProbe(MinecraftServer server,
-                                                ThreadLocal<CommandProbe> callbackProbeContext) {
+                                                ThreadLocal<CommandProbe> callbackProbeContext,
+                                                String expectedDetailPrefix) {
         CommandSourceStack source = mock(CommandSourceStack.class);
         ServerPlayer player = mock(ServerPlayer.class);
         ServerLevel level = mock(ServerLevel.class);
-        CommandProbe probe = new CommandProbe(source);
+        CommandProbe probe = new CommandProbe(source, expectedDetailPrefix);
         when(source.getServer()).thenReturn(server);
         when(source.getEntity()).thenReturn(player);
         when(source.hasPermission(2)).thenReturn(true);
         when(player.hasDisconnected()).thenReturn(false);
         when(player.level()).thenReturn(level);
-        // Near the synthetic event cluster so /ig lookup returns representative
-        // observed audit rows through the user-facing alias.
+        // Near the synthetic event cluster so /ig lookup returns benchmark audit rows.
         when(player.getX()).thenReturn(32.0);
         when(player.getY()).thenReturn(64.0);
         when(player.getZ()).thenReturn(0.0);
