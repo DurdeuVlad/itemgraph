@@ -635,6 +635,49 @@ ItemGraph JDBC connection.
   coalesced UNKNOWN-caller evidence; if the queue is still full, the retry is counted as
   dropped and never attributed to a player. `/ig status` exposes both counters.
 
+### Modded automation adapter boundary (Issue 34)
+- `AutomationEndpoint.blockInventory` creates a durable opaque external-inventory ID
+  from owner mod ID, dimension, block position, slot policy, and exposed side. The ID
+  remains stable across restart and does not publish coordinates as the endpoint
+  identifier. `lastKnownLocation` is null by default.
+- `AutomationTransferAdapter.reportCommittedTransfer` accepts both endpoint identities,
+  exact native requested/moved amounts, source event ID, source mod ID, and slot indexes.
+  It rejects impossible quantities (`movedAmount > requestedAmount`) and suppresses
+  simulations, rollbacks, and zero movement. Partial committed operations record only
+  the accepted quantity as `TRANSFER_ITEM`; evidence contains both slot policies, sides,
+  automation mod ID, and transfer ID. Integrations call it only after the outermost
+  transaction commits.
+- This adapter is opt-in. Fabric Transfer API 5.4.4 exposes per-storage insert/extract
+  methods and nested transaction commit/rollback, but no global callback for all third-party
+  storage calls. NeoForge 21.1 capabilities register per block or block entity type;
+  `IItemHandler` has a per-call `simulate` flag but no caller identity. ItemGraph therefore
+  does not claim automatic interception of arbitrary modded inventories. Existing native
+  NeoForge wrappers cover the vanilla providers listed above; Fabric's native hopper hook
+  covers vanilla `Container` implementations.
+- Fabric integrations can use `FabricTransferStorageAdapter` to wrap a `Storage<ItemVariant>`
+  (or one `SlottedStorage` slot). It delegates reads and transfer results unchanged, keeps
+  a bounded per-thread transaction journal, applies nested rollback, and submits endpoint
+  deltas only from Fabric's outermost commit callback. Because a single storage wrapper
+  cannot observe the opposite storage or transfer caller, its remote endpoint remains
+  UNKNOWN; the shared `AutomationTransferAdapter` supports integrations that observe
+  both ends directly. If a transaction exceeds 64 distinct item/direction deltas or
+  262,144 units for one delta, ItemGraph omits the whole transaction's evidence and logs
+  a bounded warning counter; it never persists a partial transaction as complete.
+- NeoForge integrations can use `NeoForgeItemHandlerAdapter` to wrap an `IItemHandler`.
+  It preserves delegate results, ignores `simulate=true`, records exact insert/extract
+  quantities by slot, and leaves the caller/opposite endpoint UNKNOWN unless the
+  integration submits a paired observation through the shared API. Its storage identity
+  includes the queried face and slot.
+- A confirmed `QUEUE_FULL` from the public API receives at most three retries with the
+  same source event ID and immutable observation. One daemon worker and a 128-entry
+  pending queue bound retry memory; other statuses are not retried. Retries are
+  in-memory only and can be interrupted by process shutdown.
+- If an integration cannot identify the opposite endpoint or stable slot policy, it must
+  preserve an UNKNOWN endpoint or omit the observation. It must not infer a player from
+  proximity or report simulated/rolled-back movement as observed.
+- API references: [Fabric Transfer API item storage](https://wiki.fabricmc.net/tutorial%3Atransfer-api_item_storage)
+  and [NeoForge 1.21.1 capabilities](https://docs.neoforged.net/docs/1.21.1/inventories/capabilities/).
+
 ### Player container transfers (Issue 3)
 - Player GUI clicks mutate the menu's `Container` directly
   (`AbstractContainerMenu.moveItemStackTo`); they never traverse `IItemHandler`, so
