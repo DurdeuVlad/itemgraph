@@ -12,7 +12,8 @@ The project follows a simple pre-1.0 development changelog model.
   observed evidence rows and 100 linked inferred edges, preserve GriefLogger source and
   raw-payload hashes when available, default to deterministic redaction, and chain canonical
   JSON payload hashes with SHA-256. Verification checks record hashes, ordering, counts,
-  manifest, and final chain hash. Jobs use the bounded query worker, reject filename
+  manifest, final chain hash, strict UTF-8, duplicate JSON keys at every nesting level,
+  and JSON depth up to 64. Jobs use the bounded query worker, reject filename
   collisions, and cap output at 4 MiB. Format and unkeyed-hash limitations are documented
   in `docs/INCIDENT_BUNDLES.md`. M9 batch verification is pending; ItemGraph remains 0.3.2
   and no distributable JAR is built.

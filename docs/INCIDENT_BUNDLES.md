@@ -46,6 +46,10 @@ exports of the same incident are not byte-for-byte identical. The verifier check
 hash, payload hashes, predecessor links, record order, declared record types
 and counts, chain hashes, and final hash. It reports malformed, modified,
 reordered, missing, and extra records as invalid.
+The verifier first decodes strict UTF-8 and parses the complete JSON structure
+with duplicate-key rejection at every object depth and a maximum nesting depth
+of 64. This prevents different JSON consumers from assigning different values
+to the same hashed payload and bounds parser recursion for malformed bundles.
 
 These hashes detect later changes when the manifest or final hash is retained
 in a trusted place. They do not authenticate who created a bundle: an editor

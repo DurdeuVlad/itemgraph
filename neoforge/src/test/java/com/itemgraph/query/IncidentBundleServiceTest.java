@@ -200,6 +200,42 @@ class IncidentBundleServiceTest extends QueryTestBase {
     }
 
     @Test
+    void verifierRejectsDuplicateKeysBeforeParsingBundle() throws Exception {
+        Path exports = tempDir.resolve("duplicate-key");
+        Files.createDirectories(exports);
+        String validBundle = minimalBundle().toString();
+        String evidenceId = "\"evidence_id\":\"observation#1\"";
+        assertTrue(validBundle.contains(evidenceId));
+        String duplicateEvidenceId = validBundle.replace(evidenceId,
+                "\"evidence_id\":\"observation#999\"," + evidenceId);
+        Files.writeString(exports.resolve("duplicate.json"), duplicateEvidenceId);
+
+        IncidentBundleService.VerificationResult result = IncidentBundleService.verify(exports, "duplicate.json");
+        assertFalse(result.valid());
+
+        byte[] invalidUtf8 = validBundle.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        int finalEvidenceIdByte = validBundle.indexOf("observation#1") + "observation#1".length() - 1;
+        invalidUtf8[finalEvidenceIdByte] = (byte) 0xFF;
+        Files.write(exports.resolve("invalid-utf8.json"), invalidUtf8);
+        assertFalse(IncidentBundleService.verify(exports, "invalid-utf8.json").valid());
+
+        String tooDeep = "[".repeat(65) + "null" + "]".repeat(65);
+        Files.writeString(exports.resolve("too-deep.json"), tooDeep);
+        IncidentBundleService.VerificationResult depthResult =
+                IncidentBundleService.verify(exports, "too-deep.json");
+        assertFalse(depthResult.valid());
+
+        String atDepthLimit = "[".repeat(64) + "null" + "]".repeat(64);
+        Files.writeString(exports.resolve("at-depth-limit.json"), atDepthLimit);
+        IncidentBundleService.VerificationResult boundaryResult =
+                IncidentBundleService.verify(exports, "at-depth-limit.json");
+        assertEquals("bundle root must be a JSON object", boundaryResult.message());
+
+        Files.writeString(exports.resolve("trailing-content.json"), validBundle + "{}");
+        assertFalse(IncidentBundleService.verify(exports, "trailing-content.json").valid());
+    }
+
+    @Test
     void rejectsUnsafeNamesAndHonorsCancellation() {
         assertEquals("case-1.json", IncidentBundleService.normalizeFilename("case-1"));
         assertThrows(IllegalArgumentException.class,

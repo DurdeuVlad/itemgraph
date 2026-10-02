@@ -6,6 +6,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import com.itemgraph.query.AuditLookupFilters;
 import com.itemgraph.query.EdgeExplanation;
 import com.itemgraph.query.ExplainQueryService;
@@ -16,7 +18,11 @@ import com.itemgraph.query.UnifiedEvidenceQueryService;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.StringReader;
 import java.io.Writer;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
@@ -32,12 +38,13 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.HashMap;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -55,6 +62,7 @@ public final class IncidentBundleService {
     public static final int MAX_RECORDS = 200;
     public static final long MAX_BUNDLE_BYTES = 4L * 1024 * 1024;
     private static final int MAX_FILENAME_LENGTH = 48;
+    private static final int MAX_JSON_DEPTH = 64;
     private static final String GENESIS_HASH = "0".repeat(64);
     private static final Logger LOGGER = LoggerFactory.getLogger(IncidentBundleService.class);
     private static final Pattern SCORE_FACTORS = Pattern.compile(
@@ -304,7 +312,9 @@ public final class IncidentBundleService {
             if (bytes.length > MAX_BUNDLE_BYTES) {
                 return invalid("bundle exceeds the " + MAX_BUNDLE_BYTES + " byte verification limit");
             }
-            JsonElement parsed = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8));
+            String json = decodeUtf8Strictly(bytes);
+            rejectDuplicateObjectKeys(json);
+            JsonElement parsed = JsonParser.parseString(json);
             if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
                 throw new IOException("verification was cancelled");
             }
@@ -943,6 +953,63 @@ public final class IncidentBundleService {
 
     private static VerificationResult invalid(String message) {
         return new VerificationResult(false, 0, null, message);
+    }
+
+    private static void rejectDuplicateObjectKeys(String json) {
+        try (JsonReader reader = new JsonReader(new StringReader(json))) {
+            reader.setLenient(false);
+            consumeJsonValue(reader, 0);
+            if (reader.peek() != JsonToken.END_DOCUMENT) {
+                throw new IllegalArgumentException("trailing content after JSON value");
+            }
+        } catch (IOException malformedJson) {
+            throw new IllegalArgumentException("malformed JSON", malformedJson);
+        }
+    }
+
+    private static String decodeUtf8Strictly(byte[] bytes) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+        } catch (CharacterCodingException malformedUtf8) {
+            throw new IllegalArgumentException("bundle is not valid UTF-8", malformedUtf8);
+        }
+    }
+
+    private static void consumeJsonValue(JsonReader reader, int depth) throws IOException {
+        JsonToken token = reader.peek();
+        if ((token == JsonToken.BEGIN_OBJECT || token == JsonToken.BEGIN_ARRAY)
+                && depth >= MAX_JSON_DEPTH) {
+            throw new IllegalArgumentException("JSON nesting exceeds the verification limit");
+        }
+        switch (token) {
+            case BEGIN_OBJECT -> {
+                reader.beginObject();
+                Set<String> names = new HashSet<>();
+                while (reader.hasNext()) {
+                    String name = reader.nextName();
+                    if (!names.add(name)) {
+                        throw new IllegalArgumentException("duplicate JSON object key: " + name);
+                    }
+                    consumeJsonValue(reader, depth + 1);
+                }
+                reader.endObject();
+            }
+            case BEGIN_ARRAY -> {
+                reader.beginArray();
+                while (reader.hasNext()) {
+                    consumeJsonValue(reader, depth + 1);
+                }
+                reader.endArray();
+            }
+            case STRING, NUMBER -> reader.nextString();
+            case BOOLEAN -> reader.nextBoolean();
+            case NULL -> reader.nextNull();
+            default -> throw new IllegalArgumentException("unexpected JSON token in bundle");
+        }
     }
 
     private static String string(JsonObject object, String key) {
