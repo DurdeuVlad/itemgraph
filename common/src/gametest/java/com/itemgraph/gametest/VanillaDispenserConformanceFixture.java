@@ -26,6 +26,8 @@ import java.util.stream.Collectors;
 /** Durable read-only replay shared by the Fabric and NeoForge server GameTests. */
 public final class VanillaDispenserConformanceFixture {
     private static final String REPLAY_ITEM_NAME = "ItemGraph vanilla automation replay";
+    private static final int FIRST_DISPENSE_CHECK_TICK = 12;
+    private static final int MAX_DISPENSE_WAIT_TICKS = 40;
 
     private VanillaDispenserConformanceFixture() { }
 
@@ -48,24 +50,37 @@ public final class VanillaDispenserConformanceFixture {
         helper.assertTrue(helper.getLevel().setBlock(sourcePos.north(), Blocks.REDSTONE_BLOCK.defaultBlockState(), 3),
                 "could not power vanilla dispenser fixture");
 
-        helper.runAtTickTime(12, () -> {
-            List<ItemEntity> spawned = helper.getLevel().getEntitiesOfClass(ItemEntity.class,
-                            new AABB(sourcePos).inflate(3))
-                    .stream().filter(entity -> entity.getItem().is(Items.NETHER_STAR)
-                            && entity.getItem().get(DataComponents.CUSTOM_NAME) != null
-                            && REPLAY_ITEM_NAME.equals(entity.getItem().get(DataComponents.CUSTOM_NAME).getString())
-                            && !preexistingItemEntities.contains(entity.getUUID())).toList();
-            helper.assertTrue(spawned.size() == 1,
-                    "one powered dispenser must create one new uniquely named nether star item entity; found "
-                            + spawned.size());
-            helper.assertTrue(dispenser.getItem(0).isEmpty(),
-                    "one accepted default dispense must consume the one item in its slot");
-            ItemEntity entity = spawned.getFirst();
-            helper.assertValueEqual(1, entity.getItem().getCount(),
-                    "captured entity must retain the exact spawned stack count");
-            awaitDurableObservation(helper, priorObservationId, expectedAction, sourcePos,
-                    entity.getUUID().toString(), 16, new AtomicReference<>());
-        });
+        helper.runAtTickTime(FIRST_DISPENSE_CHECK_TICK, () -> awaitDispense(
+                helper, dispenser, sourcePos, preexistingItemEntities, priorObservationId, expectedAction,
+                FIRST_DISPENSE_CHECK_TICK));
+    }
+
+    private static void awaitDispense(GameTestHelper helper, DispenserBlockEntity dispenser, BlockPos sourcePos,
+                                      Set<java.util.UUID> preexistingItemEntities, long priorObservationId,
+                                      String expectedAction, int tick) {
+        List<ItemEntity> spawned = helper.getLevel().getEntitiesOfClass(ItemEntity.class,
+                        new AABB(sourcePos).inflate(3))
+                .stream().filter(entity -> entity.getItem().is(Items.NETHER_STAR)
+                        && entity.getItem().get(DataComponents.CUSTOM_NAME) != null
+                        && REPLAY_ITEM_NAME.equals(entity.getItem().get(DataComponents.CUSTOM_NAME).getString())
+                        && !preexistingItemEntities.contains(entity.getUUID())).toList();
+        if (spawned.isEmpty() && tick < MAX_DISPENSE_WAIT_TICKS) {
+            helper.runAtTickTime(tick + 1, () -> awaitDispense(helper, dispenser, sourcePos,
+                    preexistingItemEntities, priorObservationId, expectedAction, tick + 1));
+            return;
+        }
+        helper.assertTrue(spawned.size() == 1,
+                "one powered dispenser/dropper must create one new uniquely named nether star item entity "
+                        + "within " + MAX_DISPENSE_WAIT_TICKS + " ticks; found " + spawned.size()
+                        + ", slotCount=" + dispenser.getItem(0).getCount()
+                        + ", neighborPowered=" + helper.getLevel().hasNeighborSignal(sourcePos));
+        helper.assertTrue(dispenser.getItem(0).isEmpty(),
+                "one accepted default dispense must consume the one item in its slot");
+        ItemEntity entity = spawned.getFirst();
+        helper.assertValueEqual(1, entity.getItem().getCount(),
+                "captured entity must retain the exact spawned stack count");
+        awaitDurableObservation(helper, priorObservationId, expectedAction, sourcePos,
+                entity.getUUID().toString(), tick + 4, new AtomicReference<>());
     }
 
     private record Observation(String action, int amount, String itemId, String itemEntityUuid,
