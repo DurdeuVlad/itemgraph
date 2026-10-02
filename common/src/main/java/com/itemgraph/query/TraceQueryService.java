@@ -523,7 +523,7 @@ public final class TraceQueryService {
             } catch (NumberFormatException overflow) {
                 return List.of();
             }
-            selector = "id = ?";
+            selector = "f.id = ?";
             args.add(idText);
         } else if (query.matches("\\d+")) {
             Long numericId;
@@ -533,8 +533,8 @@ public final class TraceQueryService {
                 numericId = null;
             }
             selector = numericId == null
-                    ? "(item_id = ? OR item_id LIKE ? OR custom_name = ? OR custom_name LIKE ?)"
-                    : "(id = ? OR item_id = ? OR item_id LIKE ? OR custom_name = ? OR custom_name LIKE ?)";
+                    ? "(f.item_id = ? OR f.item_id LIKE ? OR f.custom_name = ? OR f.custom_name LIKE ?)"
+                    : "(f.id = ? OR f.item_id = ? OR f.item_id LIKE ? OR f.custom_name = ? OR f.custom_name LIKE ?)";
             if (numericId != null) {
                 args.add(Long.toString(numericId));
             }
@@ -543,7 +543,7 @@ public final class TraceQueryService {
             args.add(query);
             args.add("%" + query + "%");
         } else {
-            selector = "(item_id = ? OR item_id LIKE ? OR custom_name = ? OR custom_name LIKE ?)";
+            selector = "(f.item_id = ? OR f.item_id LIKE ? OR f.custom_name = ? OR f.custom_name LIKE ?)";
             args.add(query);
             args.add("%" + query + "%");
             args.add(query);
@@ -552,12 +552,12 @@ public final class TraceQueryService {
         boolean componentPredicate = metadataPredicates.stream().anyMatch(predicate ->
                 predicate.kind() != ItemMetadataPredicate.Kind.ITEM_ID
                         && predicate.kind() != ItemMetadataPredicate.Kind.FINGERPRINT);
-        StringBuilder sql = new StringBuilder("SELECT id, item_id, custom_name, fingerprint_hash, component_index_state "
-                + "FROM ig_item_fingerprints WHERE " + selector);
-        ItemMetadataSql.append(sql, args, metadataPredicates, "id", "item_id", "fingerprint_hash");
+        StringBuilder sql = new StringBuilder("SELECT f.id, f.item_id, f.custom_name, f.fingerprint_hash, f.component_index_state "
+                + "FROM ig_item_fingerprints f WHERE " + selector);
+        ItemMetadataSql.append(sql, args, metadataPredicates, "f.id", "f.item_id", "f.fingerprint_hash");
         sql.append(componentPredicate
-                ? " ORDER BY CASE WHEN component_index_state = 'COMPLETE' THEN 0 ELSE 1 END, id DESC LIMIT 10"
-                : " ORDER BY id DESC LIMIT 10");
+                ? " ORDER BY CASE WHEN f.component_index_state = 'COMPLETE' THEN 0 ELSE 1 END, f.id DESC LIMIT 10"
+                : " ORDER BY f.id DESC LIMIT 10");
         List<FingerprintRef> candidates = new ArrayList<>();
         try (PreparedStatement statement = conn.prepareStatement(sql.toString())) {
             for (int i = 0; i < args.size(); i++) {
