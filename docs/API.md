@@ -644,6 +644,17 @@ block coordinates, slot policy, and side. This is stable across restart and hide
 coordinate from the endpoint key. Use distinct slot policies such as `slot:3` or
 `aggregate` when the native storage does not expose a stable slot model.
 
+Portable and other non-world-backed inventories use
+`AutomationEndpoint.externalInventory(ownerModId, inventoryId, displayName, slotPolicy,
+side)`. The integration must supply an opaque inventory ID that remains stable for that
+inventory across restart; ItemGraph does not derive identity from the `ItemStack` or assign
+an ItemGraph UUID to each item. Keep player identity and private inventory contents out of
+the ID. The location is always omitted. The NeoForge
+`NeoForgeItemHandlerAdapter` also accepts an `ExternalInventoryEndpoint` for portable item
+capabilities such as a backpack's `Capabilities.ItemHandler.ITEM`; it applies the actual
+slot policy to each captured delta. The Fabric `FabricTransferStorageAdapter` already
+accepts the equivalent `AutomationEndpoint` and wraps `Storage<ItemVariant>`.
+
 `AutomationTransferAdapter.reportCommittedTransfer(...)` creates a `TRANSFER_ITEM`
 observation only when the native operation committed, was not a simulation, and moved a
 positive amount. It rejects `movedAmount > requestedAmount`, copies the item's canonical
@@ -671,8 +682,10 @@ NeoForge consumers may wrap `net.neoforged.neoforge.items.IItemHandler` with
 `com.itemgraph.neoforge.automation.NeoForgeItemHandlerAdapter`. It records the exact
 remainder/extraction delta only when `simulate=false`, uses the actual slot and queried
 face in its endpoint ID, preserves the delegate's return value, and leaves the other end
-UNKNOWN. The wrapper is opt-in; ItemGraph does not globally replace arbitrary mod
-capability providers.
+UNKNOWN. For portable `Capabilities.ItemHandler.ITEM` providers, integrations pass the
+stable opaque `ExternalInventoryEndpoint` they own; the adapter adds the actual slot and
+side without deriving a permanent identity from the backpack `ItemStack`. The wrapper is
+opt-in; ItemGraph does not globally replace arbitrary mod capability providers.
 
 Both loaders also record vanilla hopper net deltas and default-behavior dispenser/dropper
 item entities after the world accepts them. Dispenser/dropper rows keep the source block,

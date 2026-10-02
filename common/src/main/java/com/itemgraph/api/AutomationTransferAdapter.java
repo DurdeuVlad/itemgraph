@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -21,11 +22,22 @@ import net.minecraft.world.level.Level;
  */
 public final class AutomationTransferAdapter {
     private static final int MAX_QUEUE_FULL_RETRIES = 3;
-    private static final int MAX_PENDING_RETRIES = 128;
+    static final int MAX_PENDING_RETRIES = 128;
     private static final long RETRY_BACKOFF_MILLIS = 50;
     private static final ThreadPoolExecutor RETRY_EXECUTOR = createRetryExecutor();
+    private static volatile Executor retryExecutor = RETRY_EXECUTOR;
 
     private AutomationTransferAdapter() {
+    }
+
+    /** Package-scoped test seam; integrations cannot replace the bounded production executor. */
+    static Executor setRetryExecutorForTesting(Executor replacement) {
+        if (replacement == null) {
+            throw new IllegalArgumentException("retry executor is required");
+        }
+        Executor previous = retryExecutor;
+        retryExecutor = replacement;
+        return previous;
     }
 
     private static ThreadPoolExecutor createRetryExecutor() {
@@ -213,7 +225,7 @@ public final class AutomationTransferAdapter {
             return;
         }
         try {
-            RETRY_EXECUTOR.execute(() -> {
+            retryExecutor.execute(() -> {
                 try {
                     TimeUnit.MILLISECONDS.sleep(RETRY_BACKOFF_MILLIS * retryNumber);
                     submitOnce(service, source, observation).whenComplete((submission, failure) -> {

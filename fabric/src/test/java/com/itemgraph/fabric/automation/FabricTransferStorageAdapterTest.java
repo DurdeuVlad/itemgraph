@@ -131,6 +131,25 @@ class FabricTransferStorageAdapterTest {
     }
 
     @Test
+    void portableItemStorageKeepsOpaqueModOwnedEndpointIdentity() {
+        AutomationEndpoint portable = AutomationEndpoint.externalInventory(
+                "backpack_mod", "portable-storage:owner-token-7", "Backpack", "slot:2", "item");
+        FabricTransferStorageAdapter adapter = adapter(portable, 5, 0);
+        try (Transaction transaction = Transaction.openOuter()) {
+            assertEquals(5, adapter.insert(namedDiamond("portable"), 12, transaction));
+            transaction.commit();
+        }
+
+        DirectObservation observation = captureObservation();
+        assertEquals(portable.reference(), observation.destination());
+        assertEquals("portable-storage:owner-token-7",
+                ((com.itemgraph.api.ExternalInventoryEndpoint) observation.destination()).inventoryId());
+        assertEquals("slot:2", observation.attributes().get("endpoint_slot_policy"));
+        assertEquals("item", observation.attributes().get("endpoint_side"));
+        assertEquals("UNKNOWN", observation.origin().kind().name());
+    }
+
+    @Test
     void rejectedTransferAndOverflowProduceNoPartialSuccessRows() {
         FabricTransferStorageAdapter rejected = adapter(0, 0);
         ItemVariant diamond = namedDiamond("rejected");
@@ -150,6 +169,10 @@ class FabricTransferStorageAdapterTest {
     }
 
     private FabricTransferStorageAdapter adapter(long inserted, long extracted) {
+        return adapter(endpoint, inserted, extracted);
+    }
+
+    private FabricTransferStorageAdapter adapter(AutomationEndpoint target, long inserted, long extracted) {
         Storage<ItemVariant> delegate = new Storage<>() {
             @Override
             public long insert(ItemVariant resource, long maxAmount,
@@ -168,7 +191,7 @@ class FabricTransferStorageAdapterTest {
                 return java.util.Collections.emptyIterator();
             }
         };
-        return new FabricTransferStorageAdapter(delegate, service, source, endpoint, Level.OVERWORLD,
+        return new FabricTransferStorageAdapter(delegate, service, source, target, Level.OVERWORLD,
                 "pipe_mod", 2);
     }
 

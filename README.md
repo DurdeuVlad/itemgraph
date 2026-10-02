@@ -8,6 +8,12 @@ Its purpose is to reconstruct plausible item-type and stack-quantity movement ac
 
 **ItemGraph runs independently of GriefLogger.** Native capture, storage, reconstruction, and native queries require neither the GriefLogger jar nor its database. A separate read-only migration bridge can import legacy evidence when explicitly enabled. Native replacement coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
 
+ItemGraph records vanilla hopper, dispenser, and dropper movement on both loaders.
+Other mods can opt into exact transfer evidence through the Fabric Transfer API or
+NeoForge `IItemHandler` adapter documented in [the Java API guide](docs/API.md).
+Portable inventories must provide a stable opaque inventory ID. Arbitrary third-party
+inventory calls are not globally intercepted; the owning mod must integrate the adapter.
+
 Each loader has a standard build and a GriefLogger-compatible build. For GriefLogger
 `1.2.10-1.21.1`, install the artifact ending in
 `-<loader>-grieflogger-compatible.jar`; it omits only ItemGraph's SQLite dependency,
