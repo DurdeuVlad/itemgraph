@@ -393,8 +393,13 @@ ItemGraph matches both: `CompletableFuture` + `whenComplete` + `getServer().exec
 with the same liveness guards. The only deliberate deviation is the executor — the mods
 above spawn a thread per invocation, whereas ItemGraph uses one shared single-threaded
 executor with at most 64 waiting queries. This serializes read-only JDBC work and returns
-an explicit queue-full failure instead of growing pending work without bound. Every statement
-receives a five-second JDBC query timeout and is tracked so dispatcher cancellation can call
+an explicit queue-full failure instead of growing pending work without bound. Player and API
+queries have a five-second total deadline; each JDBC statement receives the same five-second
+timeout. Bounded incident export and verification jobs have a separate two-minute total
+deadline. Export JDBC statements receive a matching two-minute timeout, allowing the bounded
+100-evidence-row/100-edge export to finish on slower databases; verification uses that deadline
+for its bounded file reads. Owner/operator cancellation and server shutdown cancel either class
+immediately. Statements are tracked so dispatcher cancellation can call
 `Statement.cancel()`. SQLite additionally uses Xerial's cross-thread database interrupt on the
 dedicated connection and a per-connection `ProgressHandler` to abort during VM execution,
 covering the attach-to-statement race. SQLite documents
@@ -406,10 +411,10 @@ the RCON response buffer immediately afterward. Entity-less server-thread source
 receive a synchronous “query accepted” response; completed query lines are written to the
 server log instead of a response buffer that has already been returned.
 
-Player-originated queries have the same five-second per-statement timeout and cancellation
-behavior, but no total wall-clock deadline across a callback that executes several statements.
-A JDBC driver that does not honor statement timeout or cancellation can still occupy the single
-worker; the 64-entry queue remains bounded and rejects additional requests.
+Player-originated queries use the same five-second total deadline and per-statement timeout.
+Incident job deadlines are total across all statements and file work. A JDBC driver that does
+not honor statement timeout or cancellation can still occupy the single worker; the 64-entry
+queue remains bounded and rejects additional requests.
 
 ### Preview mod-integration API worker
 

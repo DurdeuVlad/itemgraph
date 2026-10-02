@@ -75,8 +75,10 @@ import java.util.function.BiConsumer;
  * incident query that answers a minute later, or not until the current cycle finishes.
  * A separate single-threaded executor keeps command latency independent of the
  * background pipeline. Its bounded queue serializes admin queries without opening an
- * unbounded number of JDBC readers or accumulating unbounded pending work. Each statement
- * receives the five-second timeout and is registered for cancellation; SQLite additionally
+ * unbounded number of JDBC readers or accumulating unbounded pending work. Ordinary query
+ * statements receive a five-second JDBC timeout; player and API queries also have a five-second
+ * total deadline. Incident jobs have a separate two-minute total and per-statement bound. Every
+ * statement is registered for cancellation; SQLite additionally
  * uses its progress handler and cross-thread interrupt support.
  */
 public final class QueryDispatcher {
@@ -276,8 +278,14 @@ public final class QueryDispatcher {
 
     /** Submits bounded database work and returns a handle that cancels active JDBC statements. */
     static <T> CancellableDataHandle<T> submitCancellableData(CancellableDataQuery<T> query) {
-        QueryCancellation cancellation = new QueryCancellation();
-        ScheduledFuture<?> timeout = schedulePlayerTimeout(cancellation);
+        return submitCancellableData(query, PLAYER_QUERY_TIMEOUT_MS);
+    }
+
+    /** Submits bounded database work with a separately bounded deadline for long-running jobs. */
+    static <T> CancellableDataHandle<T> submitCancellableData(CancellableDataQuery<T> query,
+                                                              long timeoutMillis) {
+        QueryCancellation cancellation = new QueryCancellation(timeoutMillis);
+        ScheduledFuture<?> timeout = scheduleTimeout(cancellation, timeoutMillis);
         CompletableFuture<T> future;
         try {
             future = CompletableFuture.supplyAsync(
@@ -297,8 +305,14 @@ public final class QueryDispatcher {
 
     /** Submits bounded worker work that does not require an ItemGraph database connection. */
     static <T> CancellableDataHandle<T> submitCancellableTask(CancellableTask<T> task) {
-        QueryCancellation cancellation = new QueryCancellation();
-        ScheduledFuture<?> timeout = schedulePlayerTimeout(cancellation);
+        return submitCancellableTask(task, PLAYER_QUERY_TIMEOUT_MS);
+    }
+
+    /** Submits bounded worker work with a separately bounded deadline for long-running jobs. */
+    static <T> CancellableDataHandle<T> submitCancellableTask(CancellableTask<T> task,
+                                                              long timeoutMillis) {
+        QueryCancellation cancellation = new QueryCancellation(timeoutMillis);
+        ScheduledFuture<?> timeout = scheduleTimeout(cancellation, timeoutMillis);
         CompletableFuture<T> future;
         try {
             future = CompletableFuture.supplyAsync(() -> {
@@ -592,8 +606,11 @@ public final class QueryDispatcher {
     }
 
     private static ScheduledFuture<?> schedulePlayerTimeout(QueryCancellation cancellation) {
-        return queryTimeoutExecutor().schedule(cancellation::cancel,
-                PLAYER_QUERY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        return scheduleTimeout(cancellation, PLAYER_QUERY_TIMEOUT_MS);
+    }
+
+    private static ScheduledFuture<?> scheduleTimeout(QueryCancellation cancellation, long timeoutMillis) {
+        return queryTimeoutExecutor().schedule(cancellation::cancel, timeoutMillis, TimeUnit.MILLISECONDS);
     }
 
     private static void cancelTimeout(ScheduledFuture<?> timeout) {
@@ -670,10 +687,23 @@ public final class QueryDispatcher {
     }
 
     static final class QueryCancellation {
+        private final int statementTimeoutSeconds;
         private SQLiteConnection activeConnection;
         private volatile boolean cancelled;
         private boolean finished;
         private final Set<Statement> activeStatements = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+        QueryCancellation() {
+            this(PLAYER_QUERY_TIMEOUT_MS);
+        }
+
+        QueryCancellation(long timeoutMillis) {
+            if (timeoutMillis <= 0) {
+                throw new IllegalArgumentException("query timeout must be positive");
+            }
+            long seconds = timeoutMillis / 1_000L + (timeoutMillis % 1_000L == 0 ? 0 : 1);
+            statementTimeoutSeconds = Math.toIntExact(seconds);
+        }
 
         boolean isCancelled() {
             return cancelled;
@@ -722,7 +752,7 @@ public final class QueryDispatcher {
 
         private Statement instrument(Statement statement) {
             try {
-                statement.setQueryTimeout((int) TimeUnit.MILLISECONDS.toSeconds(PLAYER_QUERY_TIMEOUT_MS));
+                statement.setQueryTimeout(statementTimeoutSeconds);
             } catch (SQLException | AbstractMethodError unsupported) {
                 LOGGER.debug("JDBC driver {} does not support statement timeouts",
                         statement.getClass().getName());

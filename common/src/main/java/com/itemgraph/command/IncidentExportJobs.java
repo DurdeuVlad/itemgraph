@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 final class IncidentExportJobs {
     private static final Logger LOGGER = LoggerFactory.getLogger(IncidentExportJobs.class);
     private static final int MAX_ACTIVE_JOBS = 4;
+    static final long JOB_TIMEOUT_MS = 120_000L;
     private static final AtomicInteger ACTIVE_JOBS = new AtomicInteger();
     private static final AtomicLong NEXT_ID = new AtomicLong();
     private static final ConcurrentHashMap<String, Job> JOBS = new ConcurrentHashMap<>();
@@ -57,7 +58,7 @@ final class IncidentExportJobs {
                         } catch (IOException failure) {
                             throw new SQLException("failed to write the incident bundle", failure);
                         }
-                    });
+                    }, JOB_TIMEOUT_MS);
             job.handle = handle;
             handle.future().whenComplete((result, failure) -> completeExport(job, result, failure));
             return id;
@@ -83,7 +84,7 @@ final class IncidentExportJobs {
                     QueryDispatcher.submitCancellableTask(cancelled ->
                             IncidentBundleService.verify(exportDirectory, filename,
                                     () -> cancelled.getAsBoolean() || job.cancelled.get()
-                                            || Thread.currentThread().isInterrupted()));
+                                            || Thread.currentThread().isInterrupted()), JOB_TIMEOUT_MS);
             job.handle = handle;
             handle.future().whenComplete((result, failure) -> completeVerification(job, result, failure));
             return id;

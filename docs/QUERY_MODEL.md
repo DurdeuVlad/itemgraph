@@ -112,9 +112,11 @@ A player command returns success as soon as the query is *accepted*; the answer 
 tick or two later. Entity-less commands dispatched on the server thread, including vanilla
 RCON, receive an acceptance message and write completed results to the server log because the
 RCON response buffer is returned with the command. Entity-less off-thread callers can receive
-results synchronously within the five-second buffer timeout. Player queries have a five-second
-SQLite cancellation deadline as well: the progress handler interrupts a selective scan so
-the single query worker cannot be monopolized by one lookup.
+results synchronously within the five-second buffer timeout. Player and API queries have a
+five-second cancellation deadline; the SQLite progress handler interrupts a selective scan so
+the single query worker cannot be monopolized by one lookup. Bounded incident export and
+verification jobs use a separate two-minute deadline, with the same explicit owner/operator
+cancellation and server-shutdown paths.
 
 `/ig inspect` changes only per-player volatile state and returns immediately. Left-click
 and right-click requests use the bounded query worker and open the same exact-position

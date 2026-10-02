@@ -805,4 +805,24 @@ class QueryDispatcherTest {
         assertTrue(handle.future().isDone(), "shutdown must finish the accepted cancellable task");
         assertTrue(cancellationObserved.get(), "the task must observe cancellation before worker shutdown returns");
     }
+
+    @Test
+    void incidentJobCanCompleteAfterTheOrdinaryFiveSecondQueryDeadline(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("long-incident-job.db"));
+        long startedAt = System.nanoTime();
+        QueryDispatcher.CancellableDataHandle<String> handle = QueryDispatcher.submitCancellableData(
+                (connection, cancelled, commit) -> {
+                    try {
+                        TimeUnit.MILLISECONDS.sleep(5_250);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new SQLException("incident job test interrupted", interrupted);
+                    }
+                    return "complete";
+                }, IncidentExportJobs.JOB_TIMEOUT_MS);
+
+        assertEquals("complete", handle.future().get(10, TimeUnit.SECONDS));
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt) > 5_000,
+                "the regression case must outlast the normal five-second query deadline");
+    }
 }

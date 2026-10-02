@@ -1138,6 +1138,11 @@ Run once with the consolidated M9 verification batch:
     concurrent same-filename exports (exactly one may commit), existing-file
     collision, invalid filename, missing file, disk write failure,
   cancellation before query, cancellation during query, and server shutdown.
+- Verify the ordinary five-second query timeout remains unchanged, while a
+  bounded export/verification job uses a separate 120-second total deadline and
+  export SQL uses a 120-second JDBC statement timeout. A worker fixture must
+  successfully finish after 5.25 seconds; owner/operator cancellation and server
+  shutdown must still cancel it.
 - Assert permission-level-2 export is redacted, permission-level-2 full export
   is denied, permission-level-4 full export succeeds, and cancellation is
   limited to the owner or level-4 operator.
@@ -1153,7 +1158,10 @@ exports remain available at permission level 2, full exports require level 4
 through both `/itemgraph` and `/ig`, and only the owner or a level-4 operator
 passes the cancellation authorization policy. `QueryDispatcherTest` verifies
 an active cancellable worker observes cancellation and terminates on dispatcher
-shutdown; both loader server-stop callbacks are the source-level integration
+shutdown. `incidentJobCanCompleteAfterTheOrdinaryFiveSecondQueryDeadline`
+keeps an accepted database worker active for 5.25 seconds and asserts successful
+completion under the 120-second job deadline; `QueryCancellationJdbcTest` asserts
+the JDBC statement receives 120 seconds. Both loader server-stop callbacks are the source-level integration
 entry points. A CI-only MariaDB/MySQL integration fixture exports and verifies
 a redacted bundle from each disposable backend. The expanded-batch command and
 result are recorded in the PR. No staging or production run is claimed.
