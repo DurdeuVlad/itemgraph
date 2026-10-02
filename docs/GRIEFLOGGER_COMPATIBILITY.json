@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "compatibility_version": "m8.12.0",
+  "compatibility_version": "m8.13.0",
   "mod_id": "itemgraph",
   "supported_commands": ["/ig", "/itemgraph"],
   "unsupported_aliases": ["/gl", "/grieflogger"],
