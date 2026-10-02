@@ -39,6 +39,13 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             "queue_remaining": 0,
             "concurrent_lookups": 20,
             "overlapping_lookups": 20,
+            "registered_lookup_commands": 20,
+            "registered_lookup_callbacks_completed": 20,
+            "registered_lookup_callbacks_failed": 0,
+            "registered_lookup_callbacks_completed_during_submissions": 1,
+            "registered_lookup_dispatch_callback_total_ns": 20_000,
+            "registered_lookup_dispatch_callback_max_ns": 1_000,
+            "registered_lookup_dispatch_callback_p95_ns": 950,
             "automation_events": 170,
             "modded_inventory_events": 171,
             "enqueue_total_ns": 20_000_000,
@@ -85,7 +92,7 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             name: {
                 "count": attempted if name == "enqueue" else (
                     5 if correlation_burst and name == "correlation" else (
-                        1 if name == "persistence_commit" else 20 if backend_matrix and name == "query" else 0)),
+                        1 if name == "persistence_commit" else 40 if backend_matrix and name == "query" else 0)),
                 "failed": 1 if shutdown_saturation and name == "enqueue" else 0,
                 "average_us": 0,
                 "max_ns": 0,
@@ -199,7 +206,14 @@ class PerformanceReportValidationTest(unittest.TestCase):
                 validate_directory(directory)
     def test_accepts_shutdown_saturation_report_with_one_explicit_rejection(self) -> None:
         candidate = report("neoforge", "shutdown_saturation", 10_000)
+        candidate["workload"]["elapsed_ms"] = 999
         self.assertEqual("shutdown_saturation", validate_report(candidate)["scenario"])
+
+    def test_rejects_shutdown_saturation_at_or_over_one_second(self) -> None:
+        candidate = report("neoforge", "shutdown_saturation", 10_000)
+        candidate["workload"]["elapsed_ms"] = 1_000
+        with self.assertRaisesRegex(ReportError, "1,000 ms healthy-SQLite drain regression budget"):
+            validate_report(candidate)
 
     def test_accepts_cross_loader_correlation_reports_with_five_measured_passes(self) -> None:
         for loader in ("neoforge", "fabric"):
@@ -272,13 +286,38 @@ class PerformanceReportValidationTest(unittest.TestCase):
     def test_rejects_network_backend_report_with_cumulative_lookup_samples(self) -> None:
         candidate = report("neoforge", "backend_mysql_matrix", 512)
         candidate["latency"]["query"]["count"] += 20
-        with self.assertRaisesRegex(ReportError, "successful read-only lookups"):
+        with self.assertRaisesRegex(ReportError, "raw-SQL and registered lookup"):
             validate_report(candidate)
 
     def test_rejects_network_backend_report_without_proven_lookup_overlap(self) -> None:
         candidate = report("neoforge", "backend_mysql_matrix", 512)
         candidate["workload"]["overlapping_lookups"] = 0
         with self.assertRaises(ReportError):
+            validate_report(candidate)
+
+    def test_rejects_network_backend_report_with_missing_registered_lookup_callback(self) -> None:
+        candidate = report("neoforge", "backend_mysql_matrix", 512)
+        candidate["workload"]["registered_lookup_callbacks_completed"] = 19
+        with self.assertRaisesRegex(ReportError, "registered lookup command count"):
+            validate_report(candidate)
+
+    def test_rejects_network_backend_report_with_failed_registered_lookup_callback(self) -> None:
+        candidate = report("fabric", "backend_fabric_mariadb_matrix", 512)
+        candidate["workload"]["registered_lookup_callbacks_failed"] = 1
+        with self.assertRaisesRegex(ReportError, "registered lookup command count"):
+            validate_report(candidate)
+
+    def test_rejects_network_backend_report_without_callback_completed_during_submissions(self) -> None:
+        candidate = report("neoforge", "backend_mariadb_matrix", 512)
+        candidate["workload"]["registered_lookup_callbacks_completed_during_submissions"] = 0
+        with self.assertRaisesRegex(
+                ReportError, "registered_lookup_callbacks_completed_during_submissions must be an integer >= 1"):
+            validate_report(candidate)
+
+    def test_rejects_network_backend_report_with_inconsistent_registered_lookup_latency(self) -> None:
+        candidate = report("fabric", "backend_fabric_mysql_matrix", 512)
+        candidate["workload"]["registered_lookup_dispatch_callback_p95_ns"] = 1_001
+        with self.assertRaisesRegex(ReportError, "aggregate callback latency"):
             validate_report(candidate)
 
 

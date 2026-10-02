@@ -9,6 +9,7 @@ The project follows a simple pre-1.0 development changelog model.
 ### Fixed
 
 - **Issue #32 shutdown durability:** submission admission closes atomically with the final queue drain; submissions after stop are rejected and counted. Loader shutdown waits for the GriefLogger importer executor to terminate before database close. Shutdown write failures with uncertain commit status are reported as unknown outcomes instead of definite drops. Regression tests cover submit/stop races and importer worker termination.
+- **Issue #32 performance evidence:** correlation failures returned as result values now increment the failure counter. The MySQL and MariaDB CI probes now execute 20 registered `/ig lookup` commands alongside 20 raw-JDBC readers and 512 submitted events on both loaders, recording callback completion and p95/max latency. CI also enforces a 1,000 ms drain regression budget for the healthy NeoForge SQLite 10,000-event saturation fixture, based on five repeated local measurements; stalled JDBC work can still extend shutdown while accepted evidence drains.
 
 ### Added
 

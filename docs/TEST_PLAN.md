@@ -420,24 +420,33 @@ rejection accounting, and the complete artifact set. CI uploads the validated
 
 The nine-report set covers NeoForge SQLite burst (8,000 events), Fabric SQLite
 flush (32 events), NeoForge and Fabric each against disposable MySQL and MariaDB
-(512 synthetic events and 20 concurrent read-only ledger lookups per backend),
+(512 synthetic events, 20 concurrent raw-JDBC ledger lookups, and 20 registered
+`/ig lookup radius.20` command queries per backend),
 NeoForge shutdown saturation (10,000 accepted audit events, one explicitly
 rejected over-capacity submission, worker-owned bounded drain, and exact durable
 row verification), and a cross-loader SQLite correlation workload (500 accepted
 observations, five passes over 50 drop/pickup pairs each, and 250 quantity-
 conserving inferred edges). The correlation reports verify durable source rows,
 finalized observations, edge totals, and source/destination allocation totals.
-The network probes require a measured query/submission overlap and include
-labeled synthetic automation and modded-inventory events. They do not exercise
-real adapters or the moderator command lookup. An idle baseline and staging-
-derived latency/memory budgets remain open; CI timings are measurements, not
-production budgets.
+The network probes require both raw-JDBC and registered command-query overlap
+with event submissions and include labeled synthetic automation and
+modded-inventory events. The command workload runs Brigadier parsing, the shared
+`ItemGraphCommands` lookup handler, JDBC query dispatch, and queued result
+delivery with mocked Minecraft server/player objects. It returns matching
+synthetic audit rows and reports redacted completion, failure, overlap, total,
+maximum, and p95 dispatch-to-callback latency. This measures the application
+lookup path on disposable CI databases; it does not measure live-client delivery,
+real server tick impact, or third-party adapter behavior. An idle baseline,
+adapter-specific load, and staging-derived latency/memory budgets remain open;
+CI timings are measurements, not production budgets.
 
 The performance reports snapshot process-wide metrics. Each queue GameTest now
 stops and drains the prior worker, clears its counters, and restarts it before
 measuring; each GameTest has its own batch. The validator requires the enqueue
 sample count to equal this scenario's attempted-event count, and each network
-report's query sample count to equal its 20 completed lookups. Correlation reports
+report's query sample count to equal its 20 raw-JDBC plus 20 registered command
+lookups. It requires all 20 command callbacks to complete successfully and at
+least one callback to finish while submissions continue. Correlation reports
 must contain exactly five successful passes and the expected durable quantity
 allocations. This catches metrics accidentally carried in from another test.
 Reports still contain one CI run per scenario; their latency and heap fields are
@@ -470,9 +479,9 @@ They do not supply ItemGraph's production budgets. Until those measurements
 exist, CI gates the established 50 ms server-thread submission ceiling, exact
 queue bounds, durability/loss accounting, and report-shape/workload invariants.
 The separate five-second application command-query cancellation deadline is not
-a threshold for the concurrent raw-JDBC benchmark; that fixture currently uses
-a 30-second test wait. CI does not invent persistence, correlation, query, or
-memory budgets.
+a measured command-latency budget; the CI fixture uses a 30-second callback
+completion wait. CI does not invent persistence, correlation, query, or memory
+budgets.
 
 ### Consolidated local validation (2026-10-02)
 
@@ -494,6 +503,43 @@ memory budgets.
   remain unverified locally.
 - These runs use ItemGraph 0.3.2 and build no distributable mod jar. They are
   isolated SQLite checks and do not establish staging latency or memory budgets.
+
+### Consolidated local validation (2026-10-03)
+
+- `:neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`
+  completed successfully without packaging a distributable mod JAR. JUnit XML
+  reports 471 NeoForge tests and 67 Fabric tests, with zero failures/errors;
+  six NeoForge and two Fabric tests were skipped. The four MySQL/MariaDB
+  performance probes are intentionally GitHub Actions-only, so their registered
+  command path still requires the next hosted CI run for runtime evidence.
+- `python -B tools/test_validate_itemgraph_performance_report.py` passed all 28
+  cases, including the registered command callback count, overlap, and latency
+  invariants; `git diff --check` passed. The command report records aggregates
+  only, with no player identity or evidence detail.
+
+### Measured local performance profile
+
+- Environment: Windows 11 x64, OpenJDK 21.0.12.1, Minecraft 1.21.1,
+  NeoForge 21.1.248, ItemGraph only, and a fresh temporary SQLite database and
+  GameTest directory for every sample. GriefLogger was absent.
+- Five separate `:neoforge:runGameTestServer` runs passed all four registered
+  GameTests. The 8,000-event burst persisted exactly 8,000 rows with zero drops
+  on each run. The slowest measured server-thread producer batch ranged from
+  3.95 ms to 5.39 ms; the existing 50 ms guard passed each run.
+- Five separate
+  `:neoforge:test --tests com.itemgraph.ingest.InternalObservationServiceTest.saturatedQueueDrainsOnWorkerDuringShutdownAndReportsExplicitRejection`
+  executions were forced with `--rerun-tasks` so Gradle did not reuse a cached
+  test result. Each accepted 10,000 audit records, rejected one extra record,
+  persisted all 10,000 accepted rows, and emptied the queue. Measured graceful
+  drain times were 626, 627, 650, 647, and 666 ms; batches remained capped at
+  100 records.
+- The shutdown report is a single elapsed-time sample per run, not a worst-case
+  driver-stall test. The 1,000 ms CI threshold is a regression budget for this
+  exact healthy SQLite fixture, derived from the 666 ms maximum observed across
+  five local repetitions and checked against hosted CI. It does not bound a
+  stalled database operation or establish production/staging latency or memory
+  budgets. The server continues waiting for active writes to finish to preserve
+  accepted evidence.
 
 Measure:
 

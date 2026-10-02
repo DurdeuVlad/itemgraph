@@ -22,6 +22,10 @@ WORKLOAD_FIELDS = {
     "dropped_counter_delta", "durable_rows", "queue_remaining",
     "max_server_thread_batch_ns", "end_tick_callbacks", "flush_every_ticks",
     "enqueue_total_ns", "concurrent_lookups", "overlapping_lookups",
+    "registered_lookup_commands", "registered_lookup_callbacks_completed",
+    "registered_lookup_callbacks_failed", "registered_lookup_callbacks_completed_during_submissions",
+    "registered_lookup_dispatch_callback_total_ns", "registered_lookup_dispatch_callback_max_ns",
+    "registered_lookup_dispatch_callback_p95_ns",
     "automation_events", "modded_inventory_events", "elapsed_ms", "attempted_events",
     "correlation_pairs", "correlation_passes", "correlation_edges",
 }
@@ -31,6 +35,7 @@ QUEUE_FIELDS = {
 }
 LATENCY_FIELDS = {"count", "failed", "average_us", "max_ns", "p95_upper_bound_ns", "p95_over_10s"}
 LATENCY_METRICS = {"enqueue", "persistence_commit", "query", "correlation"}
+SHUTDOWN_SATURATION_BUDGET_MS = 1_000
 
 
 class ReportError(ValueError):
@@ -170,6 +175,10 @@ def validate_report(report: Any) -> dict[str, Any]:
             raise ReportError("shutdown_saturation must record exactly one over-capacity submission")
         if queue["peak_depth"] != queue["capacity_per_type"] or queue["rejected_items"] != 1:
             raise ReportError("shutdown_saturation must fill the bounded audit queue and record its rejection")
+        if _integer(workload.get("elapsed_ms"), "workload.elapsed_ms") >= SHUTDOWN_SATURATION_BUDGET_MS:
+            raise ReportError(
+                "shutdown_saturation exceeded the 1,000 ms healthy-SQLite drain regression budget"
+            )
     if value["scenario"] == "correlation_burst":
         if value["loader"] not in LOADERS or value["backend"] != "sqlite" or accepted != 500:
             raise ReportError("correlation_burst must be the pinned 500-observation SQLite workload on either loader")
@@ -204,9 +213,34 @@ def validate_report(report: Any) -> dict[str, Any]:
             raise ReportError("network backend matrix must include 171 synthetic modded-inventory events")
         _integer(workload.get("enqueue_total_ns"), "workload.enqueue_total_ns", 1)
         _integer(workload.get("elapsed_ms"), "workload.elapsed_ms")
-        if (latency["query"]["count"] != workload["concurrent_lookups"]
+        registered_commands = _integer(
+            workload.get("registered_lookup_commands"), "workload.registered_lookup_commands", 1)
+        callbacks_completed = _integer(
+            workload.get("registered_lookup_callbacks_completed"),
+            "workload.registered_lookup_callbacks_completed")
+        callbacks_failed = _integer(
+            workload.get("registered_lookup_callbacks_failed"),
+            "workload.registered_lookup_callbacks_failed")
+        callbacks_during_submissions = _integer(
+            workload.get("registered_lookup_callbacks_completed_during_submissions"),
+            "workload.registered_lookup_callbacks_completed_during_submissions", 1)
+        callback_total_ns = _integer(
+            workload.get("registered_lookup_dispatch_callback_total_ns"),
+            "workload.registered_lookup_dispatch_callback_total_ns", 1)
+        callback_max_ns = _integer(
+            workload.get("registered_lookup_dispatch_callback_max_ns"),
+            "workload.registered_lookup_dispatch_callback_max_ns", 1)
+        callback_p95_ns = _integer(
+            workload.get("registered_lookup_dispatch_callback_p95_ns"),
+            "workload.registered_lookup_dispatch_callback_p95_ns", 1)
+        if (registered_commands != 20 or callbacks_completed != registered_commands
+                or callbacks_failed != 0 or callbacks_during_submissions > registered_commands):
+            raise ReportError("registered lookup command count, callback completion, or failure count is inconsistent")
+        if callback_total_ns < callback_max_ns or callback_p95_ns > callback_max_ns:
+            raise ReportError("registered lookup aggregate callback latency fields are inconsistent")
+        if (latency["query"]["count"] != workload["concurrent_lookups"] + registered_commands
                 or latency["query"]["failed"] != 0):
-            raise ReportError("network backend matrix must report 20 successful read-only lookups")
+            raise ReportError("network backend matrix must report every successful raw-SQL and registered lookup query")
         if expected_flavor not in {"mysql", "mariadb"}:
             raise ReportError("network backend scenario must identify MySQL or MariaDB")
 

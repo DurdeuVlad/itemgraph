@@ -72,7 +72,15 @@ If the queue fills while re-queuing, or a producer submits after shutdown closes
 admission, the dropped count is incremented and the server log reports evidence
 loss. During server shutdown, ItemGraph waits for active worker and importer writes
 to finish before it flushes the queues and closes the database. There is no hard
-deadline for this wait: a stalled JDBC operation can delay shutdown. Failures before transaction start and failures followed by confirmed rollback count as
+deadline for this wait: a stalled JDBC operation can delay shutdown. For the
+healthy local SQLite saturation profile, five isolated NeoForge runs drained a
+full 10,000-event audit queue in 626–666 ms. CI enforces a 1,000 ms regression
+budget for that exact workload (`max_batch_size=100`, one explicit over-capacity
+rejection, all accepted rows durable). This is a deterministic fixture budget,
+not a production latency claim or a hard timeout; the worker still waits for
+durability if a JDBC operation stalls. The measured profile and limits are in
+the [performance test plan](TEST_PLAN.md#measured-local-performance-profile).
+Failures before transaction start and failures followed by confirmed rollback count as
 definite loss. If commit and rollback both leave the durable result uncertain, ItemGraph
 increments the separate persistence-outcome-unknown count. `database_connection_timeout_ms`
 limits connection establishment, not an already-running write.
@@ -110,10 +118,12 @@ returns. No database operation runs in the loader lifecycle callback.
 
 The NeoForge and Fabric server-thread submission limits remain 50 ms per probe
 and are enforced by CI. These are operational safeguards, not staging-derived
-production budgets. Actual modded-inventory adapters, moderator command lookup,
-an idle baseline, and staging latency/memory budgets remain unverified. The
-queue remains capped at 10,000 entries per queue, flush cadence remains 1–100
-ticks, and SQL batches remain capped at 1,000 records.
+production budgets. CI exercises the registered `/ig lookup` handler against
+disposable MySQL and MariaDB databases with mocked server/player objects; live
+client delivery, real server tick impact, actual modded-inventory adapters, an
+idle baseline, and staging latency/memory budgets remain unverified. The queue
+remains capped at 10,000 entries per queue, flush cadence remains 1–100 ticks,
+and SQL batches remain capped at 1,000 records.
 
 ## Secret-safe status
 
