@@ -1,6 +1,9 @@
 package com.itemgraph.query;
 
+import com.itemgraph.audit.EventTaxonomy;
+
 import java.util.Comparator;
+import java.util.List;
 
 /**
  * One hop in a reconstructed item timeline.
@@ -38,7 +41,12 @@ public record TraceHop(
         Double confidence,
         String detail,
         FingerprintRef item,
-        Source source
+        Source source,
+        EventTaxonomy.EvidenceClass evidenceClass,
+        String reasonCode,
+        List<String> candidateEvidenceIds,
+        boolean candidateEvidenceTruncated,
+        int quantityImpact
 ) {
 
     public enum Kind {
@@ -52,6 +60,32 @@ public record TraceHop(
         OBSERVATION,
         TRANSFORMATION,
         INFERRED_EDGE
+    }
+
+    public TraceHop {
+        candidateEvidenceIds = candidateEvidenceIds == null ? List.of() : List.copyOf(candidateEvidenceIds);
+        if (evidenceClass == null) {
+            throw new IllegalArgumentException("evidence class is required");
+        }
+        if ((evidenceClass == EventTaxonomy.EvidenceClass.AMBIGUOUS
+                || evidenceClass == EventTaxonomy.EvidenceClass.UNRESOLVED) && quantityImpact != 0) {
+            throw new IllegalArgumentException("ambiguous and unresolved hops cannot allocate quantity");
+        }
+        if ((evidenceClass == EventTaxonomy.EvidenceClass.AMBIGUOUS
+                || evidenceClass == EventTaxonomy.EvidenceClass.UNRESOLVED)
+                && (reasonCode == null || reasonCode.isBlank())) {
+            throw new IllegalArgumentException("ambiguous and unresolved hops require a reason code");
+        }
+    }
+
+    /** Source-compatible constructor for observed and inferred rows created by existing callers. */
+    public TraceHop(Kind kind, long refId, NodeRef origin, NodeRef destination,
+                    int amount, long timestampMs, long endMs, Double confidence,
+                    String detail, FingerprintRef item, Source source) {
+        this(kind, refId, origin, destination, amount, timestampMs, endMs, confidence, detail, item, source,
+                kind == Kind.INFERRED ? EventTaxonomy.EvidenceClass.INFERRED
+                        : EventTaxonomy.EvidenceClass.OBSERVED,
+                null, List.of(), false, amount);
     }
 
     public TraceHop(
@@ -111,6 +145,7 @@ public record TraceHop(
         } else if ("queue_overflow_recovery".equals(obs.captureType())) {
             detail += " [queue overflow recovery]";
         }
+        EventTaxonomy.EvidenceClass evidenceClass = obs.evidenceClass();
         return new TraceHop(
                 Kind.OBSERVED,
                 obs.id(),
@@ -121,7 +156,13 @@ public record TraceHop(
                 obs.timestampEndMs() == null ? obs.timestampMs() : obs.timestampEndMs(),
                 null,
                 detail,
-                obs.fingerprint()
+                obs.fingerprint(),
+                Source.OBSERVATION,
+                evidenceClass,
+                obs.reasonCode(),
+                obs.sourceGroup() == null ? List.of() : obs.sourceGroup().candidateEvidenceIds(),
+                obs.sourceGroup() != null && obs.sourceGroup().candidatesTruncated(),
+                obs.quantityImpact()
         );
     }
 
@@ -136,7 +177,13 @@ public record TraceHop(
                 edge.timeEnd(),
                 edge.confidence(),
                 "inferred transfer spanning " + QueryFormatter.formatDuration(edge.spanMs()),
-                edge.fingerprint()
+                edge.fingerprint(),
+                Source.INFERRED_EDGE,
+                EventTaxonomy.EvidenceClass.INFERRED,
+                edge.competingCandidatesReasonCode(),
+                edge.competingCandidateEvidenceIds(),
+                edge.competingCandidatesTruncated(),
+                edge.amount()
         );
     }
 }

@@ -40,7 +40,8 @@ class UnifiedEvidenceQueryServiceTest {
     @Test
     void mergesAuditObservationTransformationAndImportedEvidenceInStableOrder() throws Exception {
         audit("BREAK_BLOCK", 1_000L, "minecraft:stone");
-        observation("ITEMGRAPH_INTERNAL", 2_000L, "DROP_ITEM", stoneFingerprint, 3);
+        observationWithRaw("ITEMGRAPH_INTERNAL", 2_000L, "DROP_ITEM", stoneFingerprint, 3,
+                "{\"event\":\"drop\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         transformation("CRAFT", 3_000L);
         observationFromGround("GRIEFLOGGER", 4_000L, "PICKUP_ITEM", stoneFingerprint, 3);
 
@@ -57,6 +58,9 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals("observation#2", rows.get(0).evidenceId());
         assertEquals("OBSERVED", rows.get(0).evidenceClass());
         assertEquals("Alex", rows.get(0).playerName());
+        assertEquals(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest("{\"event\":\"drop\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8))),
+                rows.get(2).sourcePayloadSha256());
     }
 
     @Test
@@ -72,6 +76,233 @@ class UnifiedEvidenceQueryServiceTest {
                 rows.stream().map(UnifiedEvidenceDetail::actionType).toList());
         assertEquals(List.of("UNRESOLVED", EventTaxonomy.UNCLASSIFIED_EVIDENCE),
                 rows.stream().map(UnifiedEvidenceDetail::evidenceClass).toList());
+    }
+
+    @Test
+    void stateFilterNamesDanglingTransformationFingerprintSeparatelyFromMissingEndpoint() throws Exception {
+        long unknownEndpoint = node("UNKNOWN", 11, 64, 10, "unknown endpoint", null);
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations
+                    (transformation_type, player_node_id, source_fingerprint_id,
+                     result_fingerprint_id, quantity, timestamp_ms, details)
+                VALUES ('CRAFTING', ?, 9998, ?, 4, 2_000, 'missing source fingerprint fixture'),
+                       ('CRAFTING', ?, ?, ?, 2, 2_000, 'missing player endpoint fixture'),
+                       ('CRAFTING', ?, 9999, ?, 1, 2_000, 'missing both endpoint and fingerprint fixture')
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.setLong(2, resultFingerprint);
+            statement.setLong(3, unknownEndpoint);
+            statement.setLong(4, stoneFingerprint);
+            statement.setLong(5, resultFingerprint);
+            statement.setLong(6, unknownEndpoint);
+            statement.setLong(7, resultFingerprint);
+            statement.executeUpdate();
+        }
+
+        AuditLookupFilters unresolved = AuditLookupFilters.parse(
+                "state.unresolved radius.100", 10_000L);
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(
+                conn, unresolved, "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(3, rows.size());
+        UnifiedEvidenceDetail missingFingerprint = rows.stream()
+                .filter(row -> row.detail().contains("missing source fingerprint fixture"))
+                .findFirst().orElseThrow();
+        UnifiedEvidenceDetail missingEndpoint = rows.stream()
+                .filter(row -> row.detail().contains("missing player endpoint fixture"))
+                .findFirst().orElseThrow();
+        assertEquals("UNRESOLVED", missingFingerprint.evidenceClass());
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", missingFingerprint.reasonCode());
+        assertEquals(4, missingFingerprint.quantity());
+        assertEquals(0, missingFingerprint.quantityImpact());
+        assertEquals("UNKNOWN_ENDPOINT", missingEndpoint.reasonCode());
+        assertEquals(0, missingEndpoint.quantityImpact());
+        UnifiedEvidenceDetail missingBoth = rows.stream()
+                .filter(row -> row.detail().contains("missing both endpoint and fingerprint fixture"))
+                .findFirst().orElseThrow();
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", missingBoth.reasonCode());
+        assertEquals(0, missingBoth.quantityImpact());
+        assertTrue(service.findFiltered(conn, AuditLookupFilters.parse(
+                        "state.observed radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0).isEmpty());
+    }
+
+    @Test
+    void unresolvedDispositionRemainsVisibleInFilteredLookupWithZeroQuantityImpact() throws Exception {
+        observation("ITEMGRAPH_INTERNAL", 2_000L, "EQUIP_ARMOR_STAND", stoneFingerprint, 1);
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observation_dispositions
+                    (observation_id, reason_code, detail, created_at_ms)
+                VALUES (1, 'PRE_USE_ARMOR_STAND_TRANSFER_UNVERIFIED', 'fixture', 2_001)
+                """)) {
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.unresolved radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, rows.size());
+        assertEquals("observation#1", rows.get(0).evidenceId());
+        assertEquals("UNRESOLVED", rows.get(0).evidenceClass());
+        assertEquals("PRE_USE_ARMOR_STAND_TRANSFER_UNVERIFIED", rows.get(0).reasonCode());
+        assertEquals(0, rows.get(0).quantityImpact());
+    }
+
+    @Test
+    void danglingObservationFingerprintIsVisibleAsUnresolvedWithoutAllocatingQuantity() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observations
+                    (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id,
+                     action_type, amount, raw_data)
+                VALUES ('ITEMGRAPH_INTERNAL', 2_000, ?, ?, 999_991, 'DROP_ITEM', 8, '{}')
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.setLong(2, groundNode);
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> unresolved = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.unresolved radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, unresolved.size());
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", unresolved.getFirst().reasonCode());
+        assertEquals(8, unresolved.getFirst().quantity());
+        assertEquals(0, unresolved.getFirst().quantityImpact());
+        assertTrue(service.findFiltered(conn, AuditLookupFilters.parse("state.observed radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0).isEmpty());
+    }
+
+    @Test
+    void danglingFingerprintTakesPrecedenceWhenObservationAlsoHasAmbiguousSourceGroup() throws Exception {
+        observation("ITEMGRAPH_INTERNAL", 2_000L, "DROP_ITEM", 999_992, 6);
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observation_groups (state, match_basis, explanation, created_at_ms)
+                VALUES ('AMBIGUOUS', 'fixture', 'two unresolved source candidates', 2_001)
+                """, java.sql.Statement.RETURN_GENERATED_KEYS)) {
+            statement.executeUpdate();
+            try (var keys = statement.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                try (PreparedStatement member = conn.prepareStatement("""
+                        INSERT INTO ig_observation_group_members (group_id, observation_id, member_role)
+                        VALUES (?, 1, 'CANDIDATE')
+                        """)) {
+                    member.setLong(1, keys.getLong(1));
+                    member.executeUpdate();
+                }
+            }
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.unresolved radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, rows.size());
+        assertEquals("UNRESOLVED", rows.getFirst().evidenceClass());
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", rows.getFirst().reasonCode());
+        assertEquals(0, rows.getFirst().quantityImpact());
+    }
+
+    @Test
+    void ambiguousSourceGroupReturnsSortedCandidateEvidenceWithoutAllocatingQuantity() throws Exception {
+        observation("GRIEFLOGGER", 2_000L, "PICKUP_ITEM", stoneFingerprint, 1);
+        observationFromGround("ITEMGRAPH_INTERNAL", 2_001L, "PICKUP_ITEM", stoneFingerprint, 1);
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observation_groups (state, match_basis, explanation, created_at_ms)
+                VALUES ('AMBIGUOUS', 'fixture', 'competing source rows', 2_002)
+                """, PreparedStatement.RETURN_GENERATED_KEYS)) {
+            statement.executeUpdate();
+            try (var keys = statement.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                long groupId = keys.getLong(1);
+                try (PreparedStatement member = conn.prepareStatement("""
+                        INSERT INTO ig_observation_group_members (group_id, observation_id, member_role)
+                        VALUES (?, ?, 'CANDIDATE')
+                        """)) {
+                    member.setLong(1, groupId);
+                    member.setLong(2, 2);
+                    member.executeUpdate();
+                    member.setLong(1, groupId);
+                    member.setLong(2, 1);
+                    member.executeUpdate();
+                }
+            }
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.ambiguous radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(2, rows.size());
+        for (UnifiedEvidenceDetail row : rows) {
+            assertEquals("AMBIGUOUS", row.evidenceClass());
+            assertEquals("SOURCE_EQUIVALENCE_AMBIGUOUS", row.reasonCode());
+            assertEquals(List.of("observation#1", "observation#2"), row.candidateEvidenceIds());
+            assertEquals(0, row.quantityImpact());
+        }
+    }
+
+    @Test
+    void inferredStateLookupReturnsPersistedConfidenceCandidatesAndQuantityImpact() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_inferred_edges
+                    (from_node_id, to_node_id, fingerprint_id, amount, time_start, time_end,
+                     confidence, explanation, created_at, competing_observation_ids,
+                     competing_candidates_truncated)
+                VALUES (?, ?, ?, 3, 1_000, 2_000, 0.8125, 'scored fixture', 2_100, '17,21', 1)
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.setLong(2, groundNode);
+            statement.setLong(3, stoneFingerprint);
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.inferred radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, rows.size());
+        UnifiedEvidenceDetail edge = rows.get(0);
+        assertEquals("edge#1", edge.evidenceId());
+        assertEquals("INFERRED", edge.source());
+        assertEquals("INFERRED", edge.evidenceClass());
+        assertEquals("CORRELATION_COMPETING_CANDIDATES", edge.reasonCode());
+        assertEquals(List.of("observation#17", "observation#21"), edge.candidateEvidenceIds());
+        assertTrue(edge.candidateEvidenceTruncated());
+        assertEquals(3, edge.quantityImpact());
+        assertTrue(edge.detail().contains("confidence=0.8125"));
+    }
+
+    @Test
+    void inferredLookupDistinguishesLegacyUnavailableCandidatesFromKnownEmptySet() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_inferred_edges
+                    (from_node_id, to_node_id, fingerprint_id, amount, time_start, time_end,
+                     confidence, explanation, created_at, competing_observation_ids,
+                     competing_candidates_truncated)
+                VALUES (?, ?, ?, 1, 1_000, 2_000, 0.8, 'legacy unknown set', 2_100, NULL, 0),
+                       (?, ?, ?, 1, 1_001, 2_001, 0.8, 'known empty set', 2_101, '', 0)
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.setLong(2, groundNode);
+            statement.setLong(3, stoneFingerprint);
+            statement.setLong(4, playerNode);
+            statement.setLong(5, groundNode);
+            statement.setLong(6, stoneFingerprint);
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.inferred radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        UnifiedEvidenceDetail legacy = rows.stream().filter(row -> row.detail().contains("legacy unknown set"))
+                .findFirst().orElseThrow();
+        UnifiedEvidenceDetail knownEmpty = rows.stream().filter(row -> row.detail().contains("known empty set"))
+                .findFirst().orElseThrow();
+        assertEquals("CORRELATION_CANDIDATES_UNAVAILABLE", legacy.reasonCode());
+        assertNull(knownEmpty.reasonCode());
     }
 
     @Test
@@ -250,6 +481,8 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals(1, rows.size());
         assertEquals("audit#1", rows.get(0).evidenceId());
         assertEquals("SHOOT_ITEM", rows.get(0).actionType());
+        assertEquals(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(projectionIdentity)), rows.get(0).sourcePayloadSha256());
     }
 
     @Test
@@ -300,17 +533,22 @@ class UnifiedEvidenceQueryServiceTest {
                 conn, filters, "minecraft:overworld", 10, 64, 10, 100, 0);
 
         assertEquals(3, rows.size());
-        assertTrue(rows.stream().allMatch(row -> row.evidenceClass().equals("OBSERVED")));
+        assertTrue(rows.stream().anyMatch(row -> "CHAT_MESSAGE".equals(row.actionType())),
+                "exclusion should retain audit evidence with no item subject");
+        assertTrue(rows.stream().anyMatch(row -> row.evidenceId().startsWith("observation#")),
+                "exclusion should retain item evidence whose fingerprint is unresolved");
+        assertTrue(rows.stream().anyMatch(row -> row.evidenceId().startsWith("transformation#")),
+                "exclusion should retain transformation evidence whose fingerprints are unresolved");
     }
 
     @Test
     void mergesNormalizedHistoricalGriefLoggerRowsWithProvenance() throws Exception {
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_grieflogger_lookup
-                    (source_sha256, table_name, source_key, timestamp_ms, level_name,
+                    (source_sha256, raw_byte_hash, table_name, source_key, timestamp_ms, level_name,
                      x, y, z, player_name, player_uuid, action_type, quantity,
                      subject_id, detail, evidence_class, unresolved_reason)
-                VALUES ('source-hash', 'items', 'pk:42', 5_000, 'minecraft:overworld',
+                VALUES ('source-hash', 'raw-payload-hash', 'items', 'pk:42', 5_000, 'minecraft:overworld',
                         10, 64, 10, 'Alex', 'uuid-alex', 'DROP_ITEM', 2,
                         'minecraft:stone', 'source=GRIEFLOGGER table=items key=pk:42',
                         'UNRESOLVED', 'opaque_binary_field')
@@ -329,6 +567,10 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals("DROP_ITEM", rows.get(0).actionType());
         assertEquals("minecraft:stone", rows.get(0).subjectId());
         assertEquals("UNRESOLVED", rows.get(0).evidenceClass());
+        assertEquals("source-hash", rows.get(0).sourceSha256());
+        assertEquals("raw-payload-hash", rows.get(0).sourcePayloadSha256());
+        assertEquals("items", rows.get(0).orderingTableName());
+        assertEquals("pk:42", rows.get(0).orderingSourceKey());
         assertTrue(rows.get(0).detail().contains("table=items"));
     }
 
@@ -542,6 +784,25 @@ class UnifiedEvidenceQueryServiceTest {
             statement.setLong(4, resultFingerprint);
             statement.setLong(5, timestamp);
             statement.executeUpdate();
+        }
+    }
+
+    private long node(String type, int x, int y, int z, String label, String ownerUuid) throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_nodes (node_type, level_id, x, y, z, custom_label, owner_uuid)
+                VALUES (?, 'minecraft:overworld', ?, ?, ?, ?, ?)
+                """, java.sql.Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, type);
+            statement.setInt(2, x);
+            statement.setInt(3, y);
+            statement.setInt(4, z);
+            statement.setString(5, label);
+            statement.setString(6, ownerUuid);
+            statement.executeUpdate();
+            try (var keys = statement.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                return keys.getLong(1);
+            }
         }
     }
 }

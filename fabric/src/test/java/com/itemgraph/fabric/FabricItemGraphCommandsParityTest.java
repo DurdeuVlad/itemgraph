@@ -284,11 +284,12 @@ class FabricItemGraphCommandsParityTest {
         assertEquals(List.of("Alex"), parsed.playerNames());
         assertEquals(List.of("minecraft:diamond_ore"), parsed.includeSubjects());
         assertEquals(50.0, parsed.radiusBlocks());
-        AuditLookupFilters fiveFilters = AuditLookupFilters.parse(
-                "action.break_block user.Alex include.stone time.1h radius.50", 10_000_000L);
-        assertEquals(List.of("BREAK_BLOCK"), fiveFilters.eventTypes());
-        assertEquals(List.of("Alex"), fiveFilters.playerNames());
-        assertEquals(List.of("minecraft:stone"), fiveFilters.includeSubjects());
+        AuditLookupFilters sixFilters = AuditLookupFilters.parse(
+                "action.break_block user.Alex include.stone time.1h radius.50 state.unresolved", 10_000_000L);
+        assertEquals(List.of("BREAK_BLOCK"), sixFilters.eventTypes());
+        assertEquals(List.of("Alex"), sixFilters.playerNames());
+        assertEquals(List.of("minecraft:stone"), sixFilters.includeSubjects());
+        assertEquals(List.of("UNRESOLVED"), sixFilters.evidenceClasses());
         assertEquals(List.of("PROJECTILE_SPAWN_ACCEPTED"),
                 AuditLookupFilters.parse("action.projectile_spawn_accepted radius.10", 10_000_000L)
                         .eventTypes());
@@ -300,7 +301,7 @@ class FabricItemGraphCommandsParityTest {
                 () -> AuditLookupFilters.parse(
                         "action.break_block user.Alex time.1h include.stone exclude.dirt radius.50",
                         10_000_000L),
-                "a lookup is limited to five filters");
+                "a lookup is limited to six filters");
         assertThrows(IllegalArgumentException.class,
                 () -> AuditLookupFilters.parse("include.stone exclude.dirt radius.50", 10_000_000L),
                 "include and exclude are mutually exclusive");
@@ -317,8 +318,8 @@ class FabricItemGraphCommandsParityTest {
                 new InvalidLookup("action.break_block a.join radius.10", "filter 'action' may be used once"),
                 new InvalidLookup("include.stone exclude.dirt radius.10",
                         "include and exclude filters cannot be combined"),
-                new InvalidLookup("action.break_block user.Alex include.stone time.1h radius.10 exclude.dirt",
-                        "at most 5 filters are allowed"));
+                new InvalidLookup("action.break_block user.Alex include.stone time.1h radius.10 state.observed action.join",
+                        "at most 6 filters are allowed"));
 
         for (String root : List.of("ig", "itemgraph")) {
             for (String lookupPrefix : List.of(root + " lookup ", root + " lookup filters ")) {
@@ -351,6 +352,7 @@ class FabricItemGraphCommandsParityTest {
         assertSuggestions(dispatcher, source, "itemgraph lookup u.", "Alex", "Steve");
         assertSuggestions(dispatcher, source, "itemgraph lookup include.", "minecraft:stone");
         assertSuggestions(dispatcher, source, "itemgraph lookup exclude.", "minecraft:stone");
+        assertSuggestions(dispatcher, source, "itemgraph lookup state.", "observed", "inferred", "ambiguous", "unresolved");
         assertSuggestions(dispatcher, source, "itemgraph lookup action.break_block,",
                 "place_block", "join");
         assertSuggestions(dispatcher, source, "itemgraph lookup \"action.break_block,",
@@ -363,8 +365,8 @@ class FabricItemGraphCommandsParityTest {
                         .noneMatch(value -> value.startsWith("exclude.")),
                 "exclude must not be suggested after include");
         assertTrue(suggestions(dispatcher, source,
-                "itemgraph lookup action.join user.Alex include.stone time.1h radius.50 ").isEmpty(),
-                "no sixth filter is suggested");
+                "itemgraph lookup action.join user.Alex include.stone time.1h radius.50 state.unresolved ").isEmpty(),
+                "all six applicable filter names have been used or conflict with another filter");
     }
 
     private static CommandDispatcher<CommandSourceStack> dispatcher() {

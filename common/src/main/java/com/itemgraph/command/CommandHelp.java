@@ -13,7 +13,7 @@ final class CommandHelp {
 
     static final List<String> TOPIC_NAMES = List.of(
             "help", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain",
-            "lookup", "lookup player", "lookup filters",
+            "lookup", "lookup player", "lookup filters", "export", "export verify", "export cancel",
             "page",
             "trace", "trace item", "trace player", "trace container",
             "gui", "gui item", "gui player", "gui container", "inspect");
@@ -28,12 +28,16 @@ final class CommandHelp {
                 "[ItemGraph] /ig help [topic] — show all commands or one topic.",
                 "[ItemGraph] /ig status — show mod, GriefLogger, database, ingestion, and inference state.",
                 "[ItemGraph] /ig audit — verify ItemGraph database invariants asynchronously.",
+                "[ItemGraph] /ig export <filename> <filters> — write a redacted, bounded, hash-chained incident bundle.",
+                "[ItemGraph] /ig export full <filename> <filters> — write a full-detail bundle (permission level 4).",
+                "[ItemGraph] /ig export verify <filename> — verify a bundle's manifest and evidence chain.",
+                "[ItemGraph] /ig export cancel <jobId> — cancel an active export or verification job.",
                 "[ItemGraph] /ig page <page> — continue the issuing player's active lookup session.",
                 "[ItemGraph] /ig lookup <eventType> [limit] [sinceMinutes] — query native audit events.",
                 "[ItemGraph] /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes] — bound results to a location.",
                 "[ItemGraph] /ig lookup page <page> <eventType> [limit] [sinceMinutes] — continue a bounded audit result page.",
                 "[ItemGraph] /ig lookup player <playerName> <eventType> [limit] [sinceMinutes] — filter native audit events by player.",
-                "[ItemGraph] /ig lookup <filter1> [filter2] ... — published GriefLogger-compatible action/user/include/exclude/time/radius lookup (maximum five; radius required; default page size 10).",
+                "[ItemGraph] /ig lookup <filter1> [filter2] ... — published GriefLogger-compatible action/user/include/exclude/time/radius/state lookup (maximum six; radius required; default page size 10).",
                 "[ItemGraph] /ig lookup filters <filter1> [filter2] ... — explicit ItemGraph spelling for the same filtered lookup.",
                 "[ItemGraph] /ig lookup provenance <sourceSha256> <table> <sourceKey> [limit] — exact read-only lookup of an imported GriefLogger row, including reference and identity tables.",
                 "[ItemGraph] /ig ingest now — queue one complete ingest and correlate cycle.",
@@ -86,6 +90,21 @@ final class CommandHelp {
                 "[ItemGraph] Syntax: /ig audit",
                 "[ItemGraph] Runs a read-only invariant audit off the server thread: conservation, positivity, relational integrity, and allocation state.",
                 "[ItemGraph] Example: /ig audit"));
+        topics.put("export", List.of(
+                "[ItemGraph] Syntax: /ig export <filename> <filters>",
+                "[ItemGraph] Writes a default-redacted JSON bundle under <world>/itemgraph/exports; filters use the same name.value syntax as /ig lookup and radius is required.",
+                "[ItemGraph] Each raw evidence payload has a SHA-256 hash and each record links to its predecessor; the manifest hashes the ordered chain. Existing filenames are never overwritten.",
+                "[ItemGraph] Exports are capped at 100 observed rows, 100 linked inferred edges (200 chain records total), and 4 MiB. Jobs run off-thread, report progress, and can be cancelled by their owner or a level-4 operator.",
+                "[ItemGraph] Full details require permission level 4: /ig export full <filename> <filters>.",
+                "[ItemGraph] Examples: /ig export incident-2026-10 action.break_block radius.50 time.1h | /ig export full incident-2026-10 action.break_block radius.50 time.1h"));
+        topics.put("export verify", List.of(
+                "[ItemGraph] Syntax: /ig export verify <filename>",
+                "[ItemGraph] Verifies the manifest hash, every payload hash, chain order, record count, and final hash for a JSON bundle in <world>/itemgraph/exports.",
+                "[ItemGraph] Example: /ig export verify incident-2026-10"));
+        topics.put("export cancel", List.of(
+                "[ItemGraph] Syntax: /ig export cancel <jobId>",
+                "[ItemGraph] Cancels an active export or bundle verification. Only its issuing player or a permission-level-4 operator may cancel it.",
+                "[ItemGraph] Example: /ig export cancel 1A"));
         topics.put("page", List.of(
                 "[ItemGraph] Syntax: /ig page <page>",
                 "[ItemGraph] Continues the issuing player's last lookup with the same filters and bounded page size.",
@@ -104,9 +123,9 @@ final class CommandHelp {
                 "[ItemGraph] playerName is an exact stored player name; eventType uses the same values as /ig lookup.",
                 "[ItemGraph] Example: /ig lookup player Alex COMMAND_ATTEMPT 50 1440"));
         topics.put("lookup filters", List.of(
-                "[ItemGraph] Syntax: /ig lookup <filter1> [filter2] [filter3] [filter4] [filter5]",
+                "[ItemGraph] Syntax: /ig lookup <filter1> [filter2] [filter3] [filter4] [filter5] [filter6]",
                 "[ItemGraph] The explicit extension spelling /ig lookup filters <filter1> ... is also accepted.",
-                "[ItemGraph] Filters use name.value: action, user, include, exclude, time (m/h/d/y), and radius.",
+                "[ItemGraph] Filters use name.value: action, user, include, exclude, time (m/h/d/y), radius, and state (observed, inferred, ambiguous, unresolved).",
                 "[ItemGraph] action values cover native audit, item-flow, and transformation evidence (join, quit, chat, command_attempt, place_block, break_block, drop_item, pickup_item, craft, smelt, anvil_rename, anvil_repair, and more).",
                 "[ItemGraph] radius is required, uses the issuing player's current dimension and position, and searches a cube clamped to 1..1024 blocks.",
                 "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and unified evidence results default to 10 rows (maximum 100) with source and evidence IDs.",

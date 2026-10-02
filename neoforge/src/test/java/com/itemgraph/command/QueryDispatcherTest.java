@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -778,5 +779,50 @@ class QueryDispatcherTest {
     void testShutdownIdempotent() {
         assertDoesNotThrow(QueryDispatcher::shutdown);
         assertDoesNotThrow(QueryDispatcher::shutdown);
+    }
+
+    @Test
+    void shutdownCancelsAnActiveCancellableWorkerTask() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        AtomicBoolean cancellationObserved = new AtomicBoolean();
+        QueryDispatcher.CancellableDataHandle<Boolean> handle = QueryDispatcher.submitCancellableTask(cancelled -> {
+            started.countDown();
+            while (!cancelled.getAsBoolean()) {
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            cancellationObserved.set(cancelled.getAsBoolean());
+            return cancellationObserved.get();
+        });
+
+        assertTrue(started.await(5, TimeUnit.SECONDS), "the cancellable worker task should start");
+        QueryDispatcher.shutdown();
+
+        assertTrue(handle.future().isDone(), "shutdown must finish the accepted cancellable task");
+        assertTrue(cancellationObserved.get(), "the task must observe cancellation before worker shutdown returns");
+    }
+
+    @Test
+    void incidentJobCanCompleteAfterTheOrdinaryFiveSecondQueryDeadline(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("long-incident-job.db"));
+        long startedAt = System.nanoTime();
+        QueryDispatcher.CancellableDataHandle<String> handle = QueryDispatcher.submitCancellableData(
+                (connection, cancelled, commit) -> {
+                    try {
+                        TimeUnit.MILLISECONDS.sleep(5_250);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new SQLException("incident job test interrupted", interrupted);
+                    }
+                    return "complete";
+                }, IncidentExportJobs.JOB_TIMEOUT_MS);
+
+        assertEquals("complete", handle.future().get(10, TimeUnit.SECONDS));
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt) > 5_000,
+                "the regression case must outlast the normal five-second query deadline");
     }
 }

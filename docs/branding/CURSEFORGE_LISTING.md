@@ -98,7 +98,7 @@ Instead of assigning artificial, invasive UUIDs to every Minecraft item, ItemGra
 - **Container Inspector (`/ig inspect`)**: Lets a moderator right-click supported containers to inspect the exact dimension/position without opening or mutating the normal inventory.
 - **Block interaction audit**: Records the same main-hand attempts on GriefLogger's supported vanilla functional blocks. These are attempt records; ItemGraph does not label a pre-use callback as a completed interaction.
 - **Moderator Help (`/ig help`)**: Documents every command topic with syntax, permissions, evidence semantics, limits, and examples.
-- **Preview Integration API**: Trusted NeoForge mods can register an evidence source, submit direct observations, and query bounded flows through `com.itemgraph.api` `PREVIEW_1`.
+- **Preview Integration API**: Trusted NeoForge mods can register an evidence source, submit direct observations, and query bounded flows through `com.itemgraph.api` `PREVIEW_2`.
 - **Live Invariant Auditor (`/ig audit`)**: Self-diagnosing auditor verifies database health, quantity conservation, and relational integrity on demand.
 
 ---

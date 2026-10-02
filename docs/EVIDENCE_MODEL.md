@@ -121,9 +121,9 @@ the edge and allocations but changes `edge_state` to `SUPERSEDED_SOURCE_DUPLICAT
 equipment callbacks, records `PRE_USE_ARMOR_STAND_TRANSFER_UNVERIFIED` in
 `ig_observation_dispositions`, marks the observation `CLOSED_UNRESOLVED`, and changes any
 dependent active edge to `SUPERSEDED_UNVERIFIED_EVIDENCE`. Disposed observations stay
-available through `/ig event <id>` as unresolved raw evidence, but are excluded from current
-item traces and unified evidence results. Superseded edges are excluded from active traces
-and capacity audit totals; `/ig explain <edgeId>` labels them as superseded.
+available through `/ig event <id>`, item traces, and unified evidence results as unresolved
+raw evidence with zero quantity impact. Superseded edges are excluded from active traces and
+capacity audit totals; `/ig explain <edgeId>` labels them as superseded.
 
 ## Preview API raw observations (V12)
 

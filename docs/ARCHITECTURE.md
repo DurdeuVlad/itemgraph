@@ -368,6 +368,14 @@ DTOs. Its callback opens or updates `FlowBrowserMenu` only on the server thread.
 uses vanilla `MenuType.GENERIC_9x6`; its server-side click handler never delegates item
 movement to `ChestMenu`, and every GUI action rechecks permission level 2.
 
+Issue #37 incident exports use that same bounded worker. The command captures the issuing
+player's dimension and center before dispatch; SQL reads use the independent read-only
+connection, and verification uses the worker without requiring a database connection. The
+export's final rename has an atomic cancellation commit point so cancellation cannot report
+failure after a completed file is installed. Bundle bounds, redaction, source hashes,
+recovery markers, and the unkeyed SHA-256 threat model are specified in
+[`INCIDENT_BUNDLES.md`](INCIDENT_BUNDLES.md).
+
 ### Prior art
 
 This pattern was checked against real mods before being adopted rather than derived from
@@ -385,8 +393,13 @@ ItemGraph matches both: `CompletableFuture` + `whenComplete` + `getServer().exec
 with the same liveness guards. The only deliberate deviation is the executor — the mods
 above spawn a thread per invocation, whereas ItemGraph uses one shared single-threaded
 executor with at most 64 waiting queries. This serializes read-only JDBC work and returns
-an explicit queue-full failure instead of growing pending work without bound. Every statement
-receives a five-second JDBC query timeout and is tracked so dispatcher cancellation can call
+an explicit queue-full failure instead of growing pending work without bound. Player and API
+queries have a five-second total deadline; each JDBC statement receives the same five-second
+timeout. Bounded incident export and verification jobs have a separate two-minute total
+deadline. Export JDBC statements receive a matching two-minute timeout, allowing the bounded
+100-evidence-row/100-edge export to finish on slower databases; verification uses that deadline
+for its bounded file reads. Owner/operator cancellation and server shutdown cancel either class
+immediately. Statements are tracked so dispatcher cancellation can call
 `Statement.cancel()`. SQLite additionally uses Xerial's cross-thread database interrupt on the
 dedicated connection and a per-connection `ProgressHandler` to abort during VM execution,
 covering the attach-to-statement race. SQLite documents
@@ -398,15 +411,19 @@ the RCON response buffer immediately afterward. Entity-less server-thread source
 receive a synchronous “query accepted” response; completed query lines are written to the
 server log instead of a response buffer that has already been returned.
 
-Player-originated queries have the same five-second per-statement timeout and cancellation
-behavior, but no total wall-clock deadline across a callback that executes several statements.
-A JDBC driver that does not honor statement timeout or cancellation can still occupy the single
-worker; the 64-entry queue remains bounded and rejects additional requests.
+Player-originated queries use the same five-second total deadline and per-statement timeout.
+Incident job deadlines are total across all statements and file work. A JDBC driver that does
+not honor statement timeout or cancellation can still occupy the single worker; the 64-entry
+queue remains bounded and rejects additional requests.
 
 ### Preview mod-integration API worker
 
-`com.itemgraph.api.ItemGraphServiceImpl` exposes the approved `PREVIEW_1` API in the
-main mod JAR. It uses one bounded worker (capacity 1,024) for source registration and
+`com.itemgraph.api.ItemGraphServiceImpl` exposes the `PREVIEW_2` API from shared code
+packaged in both NeoForge and Fabric mod JARs. Both loader adapters install and stop the
+same `ItemGraphApiLifecycle`; CI consumer mods compile and run against each packaged API.
+Consumers negotiate their required API number before registration; preview versions require
+an exact match and return a diagnostic without touching evidence on mismatch. It uses one
+bounded worker (capacity 1,024) for source registration and
 raw `DirectObservation` persistence, and a second bounded worker (capacity 64) for
 read-only API queries. Saturated submissions return `QUEUE_FULL`; saturated
 registrations return `FAILED`/`QUEUE_FULL` because the approved registration enum has no
@@ -415,8 +432,9 @@ touches Minecraft thread-unsafe state. `ItemGraphApiLifecycle` stops both worker
 the database on `ServerStoppingEvent`.
 
 API submissions never create inferred edges or caller-controlled confidence. They enter
-the same `InternalObservationService`/SQLite path as raw `EXTERNAL_API` evidence and
-deduplicate on `(source_mod_id, source_event_id)`. `ApiQueryBridge` reuses the existing
+the `EXTERNAL_API:<modId>` source namespace and persist immutable `OBSERVED` rows with
+`DIRECT_STATE_DELTA` reliability and `SENSITIVE_LOCATION` privacy assigned by ItemGraph.
+They deduplicate on `(source_mod_id, source_event_id)`. `ApiQueryBridge` reuses the existing
 read-only trace/explain services and maps internal rows to immutable API DTOs, preserving
 observed/transformation/inferred provenance and opaque evidence URIs.
 
@@ -580,9 +598,16 @@ used a corroborating or ambiguous row for an allocation, it is retained with
 from active traces and capacity totals, and visible through `/ig explain <edgeId>` as a
 superseded inference. Migration V20 applies the same lifecycle to dependent edges built from
 legacy pre-use armor-stand callbacks, using `SUPERSEDED_UNVERIFIED_EVIDENCE`; its source rows
-remain inspectable as unresolved evidence but are omitted from current flow traces. Correlation,
+remain visible in traces as unresolved evidence with zero quantity impact. Correlation,
 GriefLogger ingestion, and internal observation writes serialize transactions on the shared
 ItemGraph JDBC connection.
+
+Migration V21 adds `competing_observation_ids` and
+`competing_candidates_truncated` to `ig_inferred_edges`. New edges persist at most 50
+alternative observation IDs, prioritizing the pickup/drop alternatives that set the score's
+nearest-candidate gaps. SQL window counts preserve exact scoring when the in-memory candidate
+read is capped. Old edges keep an empty candidate list because their original alternatives
+were not stored.
 
 ### Ground movement
 - `ItemTossEvent` and `LivingDropsEvent` create bounded pending-drop entries. The
@@ -748,8 +773,8 @@ ItemGraph JDBC connection.
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
 - `/ig trace container <x> <y> <z>`: reconstructs item ingress and egress for a container at coordinates.
 - `/ig trace item <query>`: resolves string queries by numeric ID, item registry ID, or custom name.
-- `/ig lookup filters <filter1> ... <filter5>`: applies GriefLogger's `name.value`
-  action, user, include, exclude, time, and required radius filters to native
+- `/ig lookup filters <filter1> ... <filter7>`: applies GriefLogger's `name.value`
+  action, user, include, exclude, time, state, and required radius filters to native
   audit rows. The radius is a bounded cube around the issuing player and runs
   asynchronously on the read-only query worker.
 

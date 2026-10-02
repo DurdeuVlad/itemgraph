@@ -17,7 +17,6 @@ import java.sql.Statement;
 import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class V20UnverifiedArmorStandInteractionEvidenceTest {
@@ -44,7 +43,7 @@ class V20UnverifiedArmorStandInteractionEvidenceTest {
         long edgeId = insertInferredEdge(playerId, standId, fingerprintId);
         insertAllocation(edgeId, observationId);
 
-        assertEquals(20, MigrationRunner.runMigrations(connection),
+        assertEquals(21, MigrationRunner.runMigrations(connection),
                 "an existing v19 database should receive the quarantine migration");
         V20__UnverifiedArmorStandInteractionEvidence migration =
                 new V20__UnverifiedArmorStandInteractionEvidence();
@@ -77,19 +76,32 @@ class V20UnverifiedArmorStandInteractionEvidenceTest {
         assertEquals(V20__UnverifiedArmorStandInteractionEvidence.REASON_CODE, detail.dispositionReason());
         var formatted = String.join("\n", QueryFormatter.formatEvent(detail));
         assertTrue(formatted.contains("excluded from current item flow"));
-        assertTrue(formatted.contains("historical callback amount is not proof of a transfer"));
+        assertTrue(formatted.contains("quantity:    impact=0 of reported=1"));
 
         var trace = new TraceQueryService().trace(
                 connection, fingerprintId, 100, QueryWindow.unbounded());
         assertEquals(0, trace.observedCount());
         assertEquals(0, trace.inferredCount());
-        assertFalse(trace.hops().stream().anyMatch(hop -> hop.refId() == observationId || hop.refId() == edgeId));
+        assertEquals(1, trace.unresolvedCount());
+        var unresolved = trace.hops().stream()
+                .filter(hop -> hop.source() == com.itemgraph.query.TraceHop.Source.OBSERVATION)
+                .filter(hop -> hop.refId() == observationId)
+                .findFirst().orElseThrow();
+        assertEquals("UNRESOLVED", unresolved.evidenceClass().name());
+        assertEquals(V20__UnverifiedArmorStandInteractionEvidence.REASON_CODE, unresolved.reasonCode());
+        assertEquals(0, unresolved.quantityImpact());
+        assertTrue(trace.hops().stream().noneMatch(hop -> hop.source()
+                == com.itemgraph.query.TraceHop.Source.INFERRED_EDGE && hop.refId() == edgeId));
+        assertTrue(String.join("\n", QueryFormatter.formatTrace(trace)).contains("[UNRESOLVED reason="
+                + V20__UnverifiedArmorStandInteractionEvidence.REASON_CODE + "]"));
     }
 
     private void simulateVersion19Schema() throws Exception {
         try (Statement statement = connection.createStatement()) {
             statement.execute("DROP TABLE ig_observation_dispositions");
-            statement.execute("DELETE FROM ig_schema_migrations WHERE version = 20");
+            statement.execute("ALTER TABLE ig_inferred_edges DROP COLUMN competing_candidates_truncated");
+            statement.execute("ALTER TABLE ig_inferred_edges DROP COLUMN competing_observation_ids");
+            statement.execute("DELETE FROM ig_schema_migrations WHERE version >= 20");
         }
     }
 

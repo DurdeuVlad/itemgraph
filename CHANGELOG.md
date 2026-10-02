@@ -7,6 +7,39 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #37 bounded incident bundles:** added `/ig export`, level-4 `/ig export full`,
+  `/ig export verify`, and owner/operator `/ig export cancel`. Bundles contain up to 100
+  observed evidence rows and 100 linked inferred edges, preserve GriefLogger source and
+  raw-payload hashes when available, default to deterministic redaction, and chain canonical
+  JSON payload hashes with SHA-256. Verification checks record hashes, ordering, counts,
+  manifest, final chain hash, strict UTF-8, duplicate JSON keys at every nesting level,
+  and JSON depth up to 64. Jobs use the bounded query worker, reject filename
+  collisions, and cap output at 4 MiB. Format and unkeyed-hash limitations are documented
+  in `docs/INCIDENT_BUNDLES.md`. M9 batch verification is pending; ItemGraph remains 0.3.2
+  and no distributable JAR is built.
+
+- **Issue #36 cross-loader preview API fixture work:** the shared API now exposes exact
+  positive-version negotiation with explicit compatible/incompatible results. Independent
+  NeoForge and Fabric consumer mods call negotiation before registration, submit one stable
+  observation, query it back, and shut down their isolated test servers. CI is configured
+  to run both fixtures against the current checkout's loader JARs. The fixtures use exact
+  current-version loader metadata and write a `PASS` result only after source registration,
+  durable submission, and query all succeed. External API action IDs now have shared
+  `DIRECT_STATE_DELTA` reliability, evidence-state, and privacy classifications, assigned
+  by ItemGraph in raw evidence. The event taxonomy is version 1.1.0. The initial consumer
+  contract used PREVIEW_1; issue #44 extends the result DTO and advances the current exact-
+  match API to PREVIEW_2. The mod remains 0.3.2. Consolidated M9 verification is pending.
+
+- **Issue #44 first-class evidence states:** trace, event detail, explanation, unified lookup,
+  GUI, API, and incident bundles now preserve `OBSERVED`, `INFERRED`, `AMBIGUOUS`, and
+  `UNRESOLVED` results. Retained dispositions and unknown endpoints remain queryable with
+  reason codes and zero quantity impact; ambiguous source groups include deterministic
+  candidate references capped at 50 with an explicit truncation marker. Unified lookup adds
+  a bounded `state.<class>` predicate applied before source limits. The API DTO update is
+  negotiated as PREVIEW_2. Inference candidate IDs are captured at scoring time and retained
+  by schema migration v21. The taxonomy advances to 1.2.0 for the stable reason codes.
+  M9 consolidated verification is pending; no distributable JAR is built.
+
 - **Issue #34 opt-in automation adapter contract:** added `AutomationEndpoint` for
   restart-stable opaque inventory identities derived from mod, dimension, position,
   slot policy, and side, plus opt-in Fabric `FabricTransferStorageAdapter` and NeoForge
@@ -175,7 +208,8 @@ The project follows a simple pre-1.0 development changelog model.
 - **Issue #75 cross-loader interaction evidence:** non-armor-stand callbacks now carry stable `target_support=callback_only` and `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT` metadata, while armor-stand rows identify their supported method-result boundary. Callback-level denied/unresolved outcomes remain recorded where observed. NeoForge and Fabric isolated server GameTests send entity-use packets through each loader's server handler for unsupported-entity attempts and armor-stand boot equip/unequip. They separately call inherited `ArmorStand.interact` to verify its `PASS` return hook and persisted unresolved method result. Both tests compare the complete `ig_observations` row snapshots before and after, and check the same normalized audit query and `QueryFormatter` output used by `/ig lookup`. CI runs both loader GameTests without creating distributable mod jars.
 - **Issue #76 Ender action compatibility:** the release fixture validator now checksum-verifies both published 1.2.10-1.21.1 jars and finds no Ender action constant field references outside `ItemAction.class`; its `values()` calls are limited to the generic `Actions` catalog and the enum's own `fromId` decoder, and the only external `fromId` caller is `ItemHistory.<init>` reconstructing stored rows. The registry marks both GriefLogger actions `unsupported-no-writer` using `NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE`; existing ItemGraph session net deltas stay labeled as `ITEMGRAPH_INTERNAL` extensions. Regression coverage checks duplicate opens, reconnects, partial signed counts, atomic queue rejection/retry including orderly shutdown under one shared five-second retry deadline, opaque component redaction, no-net sessions, and restart persistence. Registry compatibility version is `m8.7.0`; ItemGraph mod version stays 0.3.2.
 - **Issue #24 command contract:** `/ig` and `/itemgraph` expose the same level-2 command tree; GriefLogger's published direct `name.value` lookup syntax, six filter names and one-letter aliases, required cubic radius, five-filter limit, AND combination, ten-row page default, per-player pages, and page navigation are covered across NeoForge and Fabric tests. The selected published-doc radius requirement is explicit because GriefLogger 26.2 source accepts no-radius lookup. Output retains ItemGraph evidence labels and provenance; `/gl` and `/grieflogger` remain unregistered.
-- **Issue #24 lookup filter boundary coverage:** Fabric and NeoForge now parse an exactly-five-filter valid lookup and execute both `/ig` and `/itemgraph` error cases through both direct and `lookup filters` forms for missing radius, malformed and invalid radius tokens, unknown and duplicate filters, include/exclude conflicts, and a sixth filter. Both roots return the same exact single failure before query output; runtime behavior is unchanged.
+- **Issue #44 evidence-state lookup:** unified history and item traces retain raw rows that are unresolved or superseded, label ambiguity and uncertainty with stable reason codes, report zero allocated quantity for inconclusive rows, and list bounded deterministic source-group candidates. Filtered lookup accepts `state.observed`, `state.inferred`, `state.ambiguous`, or `state.unresolved` before each source's bounded page limit. API flow hops expose the same evidence class, reason, candidates, and quantity impact under PREVIEW_2 negotiation.
+- **Issue #24 lookup filter boundary coverage:** Fabric and NeoForge parse a six-filter valid lookup and execute both `/ig` and `/itemgraph` error cases through both direct and `lookup filters` forms for missing radius, malformed and invalid radius tokens, unknown and duplicate filters, include/exclude conflicts, and a seventh filter. Both roots return the same exact single failure before query output.
 - **Historical user filter completion (#24):** `/ig lookup user.<name>` suggestions now include distinct names from imported GriefLogger `users` and `usernames` reference rows as well as online players. ItemGraph reads its own preserved provenance rows asynchronously through the bounded read-only query worker, caches the result for 30 seconds, and skips malformed payloads. Read-only queries now instrument JDBC statements with a five-second timeout and cancellation; SQLite keeps its progress-handler and connection-interrupt support.
 - **Issue #26 block inspector evidence timeline:** `/ig inspect` now opens one exact-position, globally paginated timeline for block audit events, container item deltas, transformations, and imported GriefLogger event rows. Double chests and doors resolve to their physical target cells without duplicate rows; a container observation matches either endpoint, so a transfer is found even when the player endpoint is stored first. Schema V19 records block-removal supersession links for native and imported interaction evidence while keeping every source row immutable. Imported row links use a SHA-256 key and retain the full source key. Ordinary lookup still returns superseded rows with the replacement evidence ID and reason. Both loaders consume an inspection click only after the bounded asynchronous query is accepted; queue rejection preserves normal gameplay. Live client/server matrix verification remains pending.
 - **Issue #30 configuration baseline:** added cross-loader page-cap, bounded

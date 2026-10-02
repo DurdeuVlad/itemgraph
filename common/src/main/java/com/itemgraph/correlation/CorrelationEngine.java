@@ -12,6 +12,8 @@ import java.sql.Statement;
 import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -92,6 +94,8 @@ public class CorrelationEngine {
 
     /** Hard bound on work per pass, so a backlog is drained over several passes. */
     public static final int MAX_OBSERVATIONS_PER_PASS = 500;
+    private static final int MAX_PERSISTED_COMPETING_CANDIDATES = 50;
+    private static final int MAX_CANDIDATES_READ_PER_SIDE = MAX_PERSISTED_COMPETING_CANDIDATES + 1;
     public static final long DEFAULT_WINDOW_SECONDS = 300;
     private static volatile long configuredDefaultWindowSeconds = DEFAULT_WINDOW_SECONDS;
 
@@ -280,6 +284,12 @@ public class CorrelationEngine {
         }
     }
 
+    private record CandidateBatch(List<Candidate> candidates, int totalCount) {
+        private CandidateBatch {
+            candidates = List.copyOf(candidates);
+        }
+    }
+
     /** An accepted drop -> pickup bridge with full residual and ambiguity breakdown. */
     private record Bridge(
             Candidate pickup,
@@ -294,6 +304,8 @@ public class CorrelationEngine {
             double dropAmbiguityFactor,
             int pickupCandidates,
             int dropCandidates,
+            List<Long> competingObservationIds,
+            boolean competingCandidatesTruncated,
             long forwardGapMs,
             long reverseGapMs,
             boolean entityUuidMatch
@@ -343,7 +355,8 @@ public class CorrelationEngine {
      * Returns null if no eligible candidate exists.
      */
     private Bridge findNextBridge(Connection conn, PendingObservation drop, int dropRemaining) throws SQLException {
-        List<Candidate> pickups = findCandidatePickups(conn, drop);
+        CandidateBatch pickupBatch = findCandidatePickups(conn, drop);
+        List<Candidate> pickups = pickupBatch.candidates();
         if (pickups.isEmpty()) {
             return null;
         }
@@ -365,7 +378,8 @@ public class CorrelationEngine {
                 ? pickups.get(1).timestampMs() - chosen.timestampMs()
                 : 0L;
 
-        List<Candidate> competingDrops = findCompetingDrops(conn, drop, chosen);
+        CandidateBatch dropBatch = findCompetingDrops(conn, drop, chosen);
+        List<Candidate> competingDrops = dropBatch.candidates();
         long reverseGapMs = 0L;
         if (competingDrops.size() > 1) {
             long nearest = Long.MAX_VALUE;
@@ -383,8 +397,8 @@ public class CorrelationEngine {
                 && drop.itemEntityUuid().equals(chosen.itemEntityUuid());
 
         double proximity = proximityFactor(dt);
-        double pickupAmbiguity = ambiguityFactor(pickups.size(), forwardGapMs);
-        double dropAmbiguity = ambiguityFactor(competingDrops.size(), reverseGapMs);
+        double pickupAmbiguity = ambiguityFactor(pickupBatch.totalCount(), forwardGapMs);
+        double dropAmbiguity = ambiguityFactor(dropBatch.totalCount(), reverseGapMs);
 
         double confidence;
         if (entityUuidMatch) {
@@ -400,19 +414,37 @@ public class CorrelationEngine {
         int pickupResidualBefore = pickupRemaining;
         int pickupResidualAfter = pickupRemaining - allocAmount;
 
+        LinkedHashSet<Long> competing = new LinkedHashSet<>();
+        if (pickups.size() > 1) competing.add(pickups.get(1).id());
+        competingDrops.stream().filter(candidate -> candidate.id() != drop.id())
+                .min(Comparator.comparingLong(candidate -> Math.abs(candidate.timestampMs() - drop.timestampMs())))
+                .ifPresent(candidate -> competing.add(candidate.id()));
+        pickups.stream().map(Candidate::id).filter(id -> id != chosen.id()).forEach(competing::add);
+        competingDrops.stream().map(Candidate::id).filter(id -> id != drop.id()).forEach(competing::add);
+        List<Long> orderedCompeting = competing.stream().toList();
+        long totalCompeting = (long) Math.max(0, pickupBatch.totalCount() - 1)
+                + Math.max(0, dropBatch.totalCount() - 1);
+        boolean candidatesTruncated = totalCompeting > orderedCompeting.size()
+                || orderedCompeting.size() > MAX_PERSISTED_COMPETING_CANDIDATES;
+        if (orderedCompeting.size() > MAX_PERSISTED_COMPETING_CANDIDATES) {
+            orderedCompeting = orderedCompeting.subList(0, MAX_PERSISTED_COMPETING_CANDIDATES);
+        }
+
         return new Bridge(
                 chosen, allocAmount,
                 dropResidualBefore, dropResidualAfter,
                 pickupResidualBefore, pickupResidualAfter,
                 confidence, proximity, pickupAmbiguity, dropAmbiguity,
-                pickups.size(), competingDrops.size(), forwardGapMs, reverseGapMs,
+                pickupBatch.totalCount(), dropBatch.totalCount(), orderedCompeting, candidatesTruncated,
+                forwardGapMs, reverseGapMs,
                 entityUuidMatch
         );
     }
 
-    private List<Candidate> findCandidatePickups(Connection conn, PendingObservation drop) throws SQLException {
+    private CandidateBatch findCandidatePickups(Connection conn, PendingObservation drop) throws SQLException {
         String sql = """
             SELECT o.id, o.timestamp_ms, o.target_node_id, o.amount, o.item_entity_uuid,
+                   COUNT(*) OVER () AS candidate_count,
                    COALESCE(alloc.allocated, 0) AS allocated_amount
             FROM ig_observations o
             LEFT JOIN (
@@ -433,6 +465,7 @@ public class CorrelationEngine {
               AND (o.amount - COALESCE(alloc.allocated, 0)) > 0
             ORDER BY (CASE WHEN ? IS NOT NULL AND o.item_entity_uuid = ? THEN 0 ELSE 1 END) ASC,
                      o.timestamp_ms ASC, o.id ASC
+            LIMIT ?
         """;
 
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -448,13 +481,16 @@ public class CorrelationEngine {
                 pstmt.setNull(6, Types.VARCHAR);
                 pstmt.setNull(7, Types.VARCHAR);
             }
+            pstmt.setInt(8, MAX_CANDIDATES_READ_PER_SIDE);
             return readCandidates(pstmt, "target_node_id");
         }
     }
 
-    private List<Candidate> findCompetingDrops(Connection conn, PendingObservation drop, Candidate pickup) throws SQLException {
+    private CandidateBatch findCompetingDrops(Connection conn, PendingObservation drop, Candidate pickup)
+            throws SQLException {
         String sql = """
             SELECT o.id, o.timestamp_ms, o.node_id, o.amount, o.item_entity_uuid,
+                   COUNT(*) OVER () AS candidate_count,
                    COALESCE(alloc.allocated, 0) AS allocated_amount
             FROM ig_observations o
             LEFT JOIN (
@@ -472,7 +508,8 @@ public class CorrelationEngine {
               AND o.correlation_status NOT IN ('CORROBORATING', 'SOURCE_AMBIGUOUS')
               AND EXISTS (SELECT 1 FROM ig_observation_match_checks c WHERE c.observation_id = o.id)
               AND (o.amount - COALESCE(alloc.allocated, 0)) > 0
-            ORDER BY o.timestamp_ms ASC, o.id ASC
+            ORDER BY ABS(o.timestamp_ms - ?) ASC, o.timestamp_ms ASC, o.id ASC
+            LIMIT ?
         """;
 
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -480,14 +517,18 @@ public class CorrelationEngine {
             pstmt.setLong(2, drop.fingerprintId());
             pstmt.setLong(3, pickup.timestampMs());
             pstmt.setLong(4, pickup.timestampMs() - windowMs());
+            pstmt.setLong(5, drop.timestampMs());
+            pstmt.setInt(6, MAX_CANDIDATES_READ_PER_SIDE);
             return readCandidates(pstmt, "node_id");
         }
     }
 
-    private List<Candidate> readCandidates(PreparedStatement pstmt, String playerColumn) throws SQLException {
+    private CandidateBatch readCandidates(PreparedStatement pstmt, String playerColumn) throws SQLException {
         List<Candidate> candidates = new ArrayList<>();
+        int totalCount = 0;
         try (ResultSet rs = pstmt.executeQuery()) {
             while (rs.next()) {
+                totalCount = (int) Math.min(Integer.MAX_VALUE, rs.getLong("candidate_count"));
                 long rawPlayer = rs.getLong(playerColumn);
                 Long playerNodeId = rs.wasNull() ? null : rawPlayer;
                 int originalAmount = rs.getInt("amount");
@@ -503,7 +544,7 @@ public class CorrelationEngine {
                 ));
             }
         }
-        return candidates;
+        return new CandidateBatch(candidates, totalCount);
     }
 
     /**
@@ -584,8 +625,9 @@ public class CorrelationEngine {
             String insertEdgeSql = """
                 INSERT INTO ig_inferred_edges (
                     from_node_id, to_node_id, fingerprint_id, amount,
-                    time_start, time_end, confidence, explanation, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    time_start, time_end, confidence, explanation, created_at,
+                    competing_observation_ids, competing_candidates_truncated
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
             try (PreparedStatement pstmt = conn.prepareStatement(insertEdgeSql, Statement.RETURN_GENERATED_KEYS)) {
                 pstmt.setLong(1, drop.nodeId());
@@ -597,6 +639,9 @@ public class CorrelationEngine {
                 pstmt.setDouble(7, bridge.confidence());
                 pstmt.setString(8, explanation);
                 pstmt.setLong(9, nowMs);
+                pstmt.setString(10, bridge.competingObservationIds().stream()
+                        .map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
+                pstmt.setInt(11, bridge.competingCandidatesTruncated() ? 1 : 0);
                 pstmt.executeUpdate();
                 try (ResultSet keys = pstmt.getGeneratedKeys()) {
                     if (!keys.next()) {

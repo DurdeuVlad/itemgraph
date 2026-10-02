@@ -1,0 +1,79 @@
+plugins {
+    id 'fabric-loom' version '1.10.5'
+}
+
+version = '0.1.0'
+group = 'com.example'
+
+def apiConsumerServerDir = layout.buildDirectory.dir('api-consumer-fabric-server').get().asFile
+def apiConsumerResultFile = new File(apiConsumerServerDir, 'result.txt')
+
+base {
+    archivesName = 'itemgraph-api-consumer-fabric'
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${rootProject.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${rootProject.fabric_loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.fabric_api_version}"
+    modCompileOnly files(rootProject.layout.buildDirectory.file(
+            "libs/itemgraph-${rootProject.mod_version}-fabric.jar"))
+}
+
+loom {
+    runs {
+        server {
+            server()
+            runDir project.relativePath(apiConsumerServerDir)
+            property 'itemgraph.api.consumer.result', apiConsumerResultFile.absolutePath
+        }
+    }
+    mods {
+        itemgraph_api_consumer_fabric {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+tasks.named('compileJava', JavaCompile) {
+    dependsOn ':fabric:remapJar'
+}
+
+tasks.named('generateRemapClasspath') {
+    dependsOn ':fabric:remapJar'
+}
+
+tasks.named('processResources', ProcessResources) {
+    inputs.property('itemgraph_mod_version', rootProject.mod_version)
+    filesMatching('fabric.mod.json') {
+        expand(itemgraph_mod_version: rootProject.mod_version)
+    }
+}
+
+tasks.named('runServer') {
+    dependsOn ':fabric:remapJar'
+    doFirst {
+        apiConsumerServerDir.mkdirs()
+        new File(apiConsumerServerDir, 'eula.txt').setText('eula=true\n', 'UTF-8')
+        def itemgraphJar = rootProject.layout.buildDirectory.file(
+                "libs/itemgraph-${rootProject.mod_version}-fabric.jar").get().asFile
+        if (!itemgraphJar.isFile()) {
+            throw new GradleException("Fabric API fixture is missing ItemGraph test jar: ${itemgraphJar}")
+        }
+        def modsDirectory = new File(apiConsumerServerDir, 'mods')
+        modsDirectory.mkdirs()
+        java.nio.file.Files.copy(itemgraphJar.toPath(), new File(modsDirectory, 'itemgraph-test.jar').toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        apiConsumerResultFile.delete()
+    }
+    doLast {
+        if (!apiConsumerResultFile.isFile() || !apiConsumerResultFile.getText('UTF-8').startsWith('PASS:')) {
+            throw new GradleException('Fabric API consumer fixture did not complete successfully')
+        }
+    }
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}

@@ -102,7 +102,7 @@ class FlowBrowserMenuTest {
         assertTrue(inferredItem.get(DataComponents.LORE).lines().stream()
                 .anyMatch(line -> line.getString().contains("edge #12")));
         assertTrue(inferredItem.get(DataComponents.LORE).lines().stream()
-                .anyMatch(line -> line.getString().contains("Amount: 2x")));
+                .anyMatch(line -> line.getString().contains("Quantity impact: 2")));
         TraceHop unscored = new TraceHop(TraceHop.Kind.INFERRED, 14, null, null, 1,
                 3_500L, 3_500L, null, "missing confidence", fingerprint, TraceHop.Source.INFERRED_EDGE);
         assertTrue(FlowBrowserService.hopItem(unscored).get(DataComponents.CUSTOM_NAME).getString()

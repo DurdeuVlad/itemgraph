@@ -28,7 +28,12 @@ public final class EntityInteractionConformanceFixture {
     public static List<List<String>> snapshotQuantityObservations() {
         try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
              var statement = connection.createStatement();
-             var rows = statement.executeQuery("SELECT * FROM ig_observations ORDER BY id")) {
+             var rows = statement.executeQuery("""
+                     SELECT id, source_type, source_event_id, timestamp_ms, timestamp_end_ms,
+                            node_id, target_node_id, fingerprint_id, action_type, amount,
+                            raw_data, item_entity_uuid, ingest_event_uuid
+                     FROM ig_observations ORDER BY id
+                     """)) {
             int columnCount = rows.getMetaData().getColumnCount();
             List<List<String>> snapshot = new ArrayList<>();
             while (rows.next()) {

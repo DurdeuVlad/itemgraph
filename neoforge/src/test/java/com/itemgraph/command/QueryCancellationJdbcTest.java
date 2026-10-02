@@ -44,6 +44,27 @@ class QueryCancellationJdbcTest {
     }
 
     @Test
+    void appliesTheExtendedIncidentJobDeadlineToJdbcStatements() throws Exception {
+        AtomicInteger timeoutSeconds = new AtomicInteger();
+        PreparedStatement rawStatement = (PreparedStatement) Proxy.newProxyInstance(
+                PreparedStatement.class.getClassLoader(), new Class<?>[]{PreparedStatement.class},
+                (proxy, method, args) -> {
+                    if (method.getName().equals("setQueryTimeout")) timeoutSeconds.set((int) args[0]);
+                    return defaultValue(method.getReturnType());
+                });
+        Connection rawConnection = (Connection) Proxy.newProxyInstance(
+                Connection.class.getClassLoader(), new Class<?>[]{Connection.class},
+                (proxy, method, args) -> method.getName().equals("prepareStatement")
+                        ? rawStatement : defaultValue(method.getReturnType()));
+
+        QueryDispatcher.QueryCancellation cancellation =
+                new QueryDispatcher.QueryCancellation(IncidentExportJobs.JOB_TIMEOUT_MS);
+        cancellation.instrument(rawConnection).prepareStatement("SELECT 1");
+
+        assertEquals(120, timeoutSeconds.get());
+    }
+
+    @Test
     void completedQueryWinsOverLaterTimeoutCallback() {
         QueryDispatcher.QueryCancellation cancellation = new QueryDispatcher.QueryCancellation();
         org.junit.jupiter.api.Assertions.assertTrue(cancellation.finish());

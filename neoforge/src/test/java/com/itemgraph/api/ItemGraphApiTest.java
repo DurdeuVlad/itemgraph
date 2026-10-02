@@ -90,6 +90,44 @@ class ItemGraphApiTest {
         assertEquals("preview", ApiVersion.PREVIEW_1.channel());
         assertTrue(ApiVersion.PREVIEW_1.preview());
         assertEquals("preview-1", ApiVersion.PREVIEW_1.label());
+        assertEquals(2, ApiVersion.PREVIEW_2.number());
+        assertEquals("preview-2", ItemGraphApi.API_VERSION.label());
+        assertEquals(ApiVersion.PREVIEW_2, service.apiVersion());
+    }
+
+    @Test
+    void apiNegotiationRequiresAnExactPositivePreviewNumber() throws Exception {
+        long evidenceBefore = observationCount();
+        ApiCompatibility compatible = ItemGraphApi.negotiate(2);
+        assertTrue(compatible.compatible());
+        assertEquals(ApiCompatibility.Status.COMPATIBLE, compatible.status());
+        assertEquals(2, compatible.requiredVersion());
+        assertEquals(2, compatible.runtimeVersion());
+
+        ApiCompatibility oldVersion = ItemGraphApi.negotiate(1);
+        assertFalse(oldVersion.compatible());
+        assertEquals(ApiCompatibility.Status.INCOMPATIBLE, oldVersion.status());
+        assertEquals("ItemGraph API version mismatch: consumer requires preview-1 but runtime provides preview-2",
+                oldVersion.message());
+
+        ApiCompatibility futureVersion = ItemGraphApi.negotiate(3);
+        assertFalse(futureVersion.compatible());
+        assertEquals(ApiCompatibility.Status.INCOMPATIBLE, futureVersion.status());
+        assertEquals("ItemGraph API version mismatch: consumer requires preview-3 but runtime provides preview-2",
+                futureVersion.message());
+
+        ApiCompatibility invalidVersion = ItemGraphApi.negotiate(0);
+        assertFalse(invalidVersion.compatible());
+        assertTrue(invalidVersion.message().contains("must be positive"));
+        assertEquals(evidenceBefore, observationCount(), "negotiation must not persist evidence");
+    }
+
+    private long observationCount() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("SELECT COUNT(*) FROM ig_observations");
+             ResultSet result = statement.executeQuery()) {
+            assertTrue(result.next());
+            return result.getLong(1);
+        }
     }
 
     @Test
@@ -99,7 +137,7 @@ class ItemGraphApiTest {
         assertEquals(RegistrationStatus.REGISTERED, first.status());
         assertEquals("testmod", first.source().modId());
         assertEquals("Test Mod", first.source().displayName());
-        assertEquals(ApiVersion.PREVIEW_1, first.source().apiVersion());
+        assertEquals(ApiVersion.PREVIEW_2, first.source().apiVersion());
 
         RegistrationResult unchanged = service.registerSource(
                 SourceRegistration.of("testmod", "Test Mod")).join();
@@ -153,9 +191,54 @@ class ItemGraphApiTest {
                 assertTrue(rs.getString(1).startsWith("EXTERNAL_API:"));
                 assertEquals("PENDING", rs.getString(2));
                 String raw = new String(rs.getBytes(3), java.nio.charset.StandardCharsets.UTF_8);
-                assertTrue(raw.contains("\"api_version\":1"));
+                assertTrue(raw.contains("\"api_version\":2"));
+                assertTrue(raw.contains("\"evidence_class\":\"OBSERVED\""));
+                assertTrue(raw.contains("\"source_reliability\":\"DIRECT_STATE_DELTA\""));
+                assertTrue(raw.contains("\"privacy_class\":\"SENSITIVE_LOCATION\""));
                 assertTrue(raw.contains("\"fixture\":\"true\""));
             }
+        }
+    }
+
+    @Test
+    void queuedApiObservationsRetainSubmissionOrderSourceIdsAndPositiveQuantityDirection() throws Exception {
+        SourceHandle source = register("testmod", "Test Mod");
+        ExternalInventoryEndpoint store = new ExternalInventoryEndpoint(
+                "testmod", "fixture-store", "Fixture store", null);
+        UnknownEndpoint unknown = new UnknownEndpoint(Level.OVERWORLD, "explicit fixture boundary");
+        DirectObservation creation = new DirectObservation(
+                900, 1_700_000_000_002L, ObservationAction.CREATE_ITEM,
+                unknown, store, diamond(3), null, null, Map.of());
+        DirectObservation destruction = new DirectObservation(
+                901, 1_700_000_000_001L, ObservationAction.DESTROY_ITEM,
+                store, unknown, diamond(2), null, null, Map.of());
+
+        CompletableFuture<SubmissionResult> first = service.submitObservation(source, creation);
+        CompletableFuture<SubmissionResult> second = service.submitObservation(source, destruction);
+        assertEquals(SubmissionStatus.PERSISTED, first.join().status());
+        assertEquals(SubmissionStatus.PERSISTED, second.join().status());
+
+        try (PreparedStatement statement = conn.prepareStatement("""
+                SELECT source_event_id, action_type, amount, raw_data
+                FROM ig_observations WHERE source_type = 'EXTERNAL_API:testmod' ORDER BY id
+                """ ); ResultSet rows = statement.executeQuery()) {
+            assertTrue(rows.next());
+            assertEquals(900L, rows.getLong("source_event_id"));
+            assertEquals("CREATE_ITEM", rows.getString("action_type"));
+            assertEquals(3, rows.getInt("amount"));
+            String createRaw = new String(rows.getBytes("raw_data"), java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(createRaw.contains("\"source_event_id\":900"));
+            assertTrue(createRaw.contains("\"origin\":{\"kind\":\"UNKNOWN\""));
+            assertTrue(createRaw.contains("\"destination\":{\"kind\":\"EXTERNAL_INVENTORY\""));
+
+            assertTrue(rows.next());
+            assertEquals(901L, rows.getLong("source_event_id"));
+            assertEquals("DESTROY_ITEM", rows.getString("action_type"));
+            assertEquals(2, rows.getInt("amount"));
+            String destroyRaw = new String(rows.getBytes("raw_data"), java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(destroyRaw.contains("\"origin\":{\"kind\":\"EXTERNAL_INVENTORY\""));
+            assertTrue(destroyRaw.contains("\"destination\":{\"kind\":\"UNKNOWN\""));
+            assertFalse(rows.next());
         }
     }
 
@@ -455,6 +538,9 @@ class ItemGraphApiTest {
 
         FlowHop hop = result.result().hops().get(0);
         assertEquals(Provenance.OBSERVED, hop.provenance());
+        assertEquals(com.itemgraph.audit.EventTaxonomy.EvidenceClass.UNRESOLVED, hop.evidenceClass());
+        assertEquals("UNKNOWN_ENDPOINT", hop.reasonCode());
+        assertEquals(0, hop.quantityImpact());
         assertEquals(EvidenceKind.OBSERVATION, hop.evidence().kind());
         assertTrue(hop.evidence().value().startsWith("itemgraph:observation:"));
         assertNull(hop.confidence());
@@ -648,7 +734,7 @@ class ItemGraphApiTest {
 
         ItemGraphServiceImpl unavailable = new ItemGraphServiceImpl(null, 8);
         SourceHandle unavailableGeneration = new SourceHandle(
-                "testmod", "Test Mod", ApiVersion.PREVIEW_1, 8);
+                "testmod", "Test Mod", ApiVersion.PREVIEW_2, 8);
         unavailable.start();
         try {
             assertEquals(RegistrationStatus.DATABASE_UNAVAILABLE,

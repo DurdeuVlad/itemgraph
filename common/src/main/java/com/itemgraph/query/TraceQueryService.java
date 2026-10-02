@@ -16,8 +16,7 @@ import java.util.Map;
 public final class TraceQueryService {
 
     private static final String OBSERVATIONS_BASE = ObservationQueries.SELECT_FROM
-            + " WHERE o.fingerprint_id = ? AND NOT EXISTS ("
-            + "SELECT 1 FROM ig_observation_dispositions d WHERE d.observation_id = o.id)";
+            + " WHERE o.fingerprint_id = ?";
 
     private record CursorSql(String clause, List<Long> parameters) {}
 
@@ -100,6 +99,8 @@ public final class TraceQueryService {
                    e.time_start AS e_time_start,
                    e.time_end AS e_time_end,
                    e.confidence AS e_confidence,
+                   e.competing_observation_ids AS e_competing_observation_ids,
+                   e.competing_candidates_truncated AS e_competing_candidates_truncated,
                    e.from_node_id AS origin_id,
                    origin.node_type AS origin_type,
                    origin.custom_label AS origin_label,
@@ -507,7 +508,7 @@ public final class TraceQueryService {
         sql.append(cursorFilter.clause());
         sql.append(orderBy("o.timestamp_ms", "o.id", direction));
 
-        List<TraceHop> hops = new ArrayList<>();
+        List<ObservationDetail> observations = new ArrayList<>();
         try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
             int idx = 1;
             pstmt.setLong(idx++, fingerprintId);
@@ -521,11 +522,12 @@ public final class TraceQueryService {
             pstmt.setInt(idx, fetch);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
-                    hops.add(TraceHop.observed(ObservationQueries.map(rs)));
+                    observations.add(ObservationQueries.map(rs));
                 }
             }
         }
-        return hops;
+        return ObservationQueries.withAmbiguousCandidates(conn, observations).stream()
+                .map(TraceHop::observed).toList();
     }
 
     private List<TraceHop> loadNodeObservations(Connection conn, long nodeId, int fetch, QueryWindow window)
@@ -542,8 +544,7 @@ public final class TraceQueryService {
                                                 QueryWindow window, TraceCursor cursor,
                                                 TracePage.Direction direction) throws SQLException {
         StringBuilder sql = new StringBuilder(ObservationQueries.SELECT_FROM)
-                .append(" WHERE (o.node_id = ? OR o.target_node_id = ?)"
-                        + " AND NOT EXISTS (SELECT 1 FROM ig_observation_dispositions d WHERE d.observation_id = o.id)");
+                .append(" WHERE (o.node_id = ? OR o.target_node_id = ?)");
         if (window.sinceMs() != null) {
             sql.append(" AND COALESCE(o.timestamp_end_ms, o.timestamp_ms) >= ?");
         }
@@ -555,7 +556,7 @@ public final class TraceQueryService {
         sql.append(cursorFilter.clause());
         sql.append(orderBy("o.timestamp_ms", "o.id", direction));
 
-        List<TraceHop> hops = new ArrayList<>();
+        List<ObservationDetail> observations = new ArrayList<>();
         try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
             int idx = 1;
             pstmt.setLong(idx++, nodeId);
@@ -570,11 +571,12 @@ public final class TraceQueryService {
             pstmt.setInt(idx, fetch);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
-                    hops.add(TraceHop.observed(ObservationQueries.map(rs)));
+                    observations.add(ObservationQueries.map(rs));
                 }
             }
         }
-        return hops;
+        return ObservationQueries.withAmbiguousCandidates(conn, observations).stream()
+                .map(TraceHop::observed).toList();
     }
 
     private List<TraceHop> loadInferredHops(Connection conn, long fingerprintId, int fetch, QueryWindow window)
@@ -690,6 +692,8 @@ public final class TraceQueryService {
         long edgeId = rs.getLong("e_id");
         double confidence = EdgeConfidence.readRequired(rs, edgeId);
 
+        String storedCandidates = rs.getString("e_competing_observation_ids");
+        List<String> competingCandidates = EdgeExplanation.parseCompetingCandidateIds(storedCandidates);
         return new TraceHop(
                 TraceHop.Kind.INFERRED,
                 edgeId,
@@ -700,7 +704,14 @@ public final class TraceQueryService {
                 timeEnd,
                 confidence,
                 "inferred transfer spanning " + QueryFormatter.formatDuration(timeEnd - timeStart),
-                fp
+                fp,
+                TraceHop.Source.INFERRED_EDGE,
+                com.itemgraph.audit.EventTaxonomy.EvidenceClass.INFERRED,
+                storedCandidates == null ? "CORRELATION_CANDIDATES_UNAVAILABLE"
+                        : competingCandidates.isEmpty() ? null : "CORRELATION_COMPETING_CANDIDATES",
+                competingCandidates,
+                rs.getInt("e_competing_candidates_truncated") != 0,
+                rs.getInt("e_amount")
         );
     }
 
@@ -780,13 +791,23 @@ public final class TraceQueryService {
                     int amount = rs.getInt("t_amount");
                     long timestamp = rs.getLong("t_timestamp");
 
+                    boolean missingFingerprint = sourceFpId == 0 || resultFpId == 0
+                            || rs.getString("s_item_id") == null || rs.getString("r_item_id") == null;
                     FingerprintRef otherFp = (sourceFpId == fingerprintId)
-                            ? new FingerprintRef(resultFpId, rs.getString("r_item_id"), rs.getString("r_name"), rs.getString("r_hash"))
-                            : new FingerprintRef(sourceFpId, rs.getString("s_item_id"), rs.getString("s_name"), rs.getString("s_hash"));
+                            ? (resultFpId == 0 || rs.getString("r_item_id") == null
+                                    ? FingerprintRef.missing(resultFpId)
+                                    : new FingerprintRef(resultFpId, rs.getString("r_item_id"), rs.getString("r_name"), rs.getString("r_hash")))
+                            : (sourceFpId == 0 || rs.getString("s_item_id") == null
+                                    ? FingerprintRef.missing(sourceFpId)
+                                    : new FingerprintRef(sourceFpId, rs.getString("s_item_id"), rs.getString("s_name"), rs.getString("s_hash")));
 
                     String arrow = (sourceFpId == fingerprintId) ? "->" : "<-";
                     String detail = "[TRANSFORMATION " + type + " " + arrow + " " + otherFp.describe() + "] (" + details + ")";
 
+                    boolean unresolved = playerNode == null || "UNKNOWN".equals(playerNode.nodeType())
+                            || missingFingerprint;
+                    String unresolvedReason = missingFingerprint ? "ITEM_FINGERPRINT_UNRESOLVED"
+                            : unresolved ? "UNKNOWN_ENDPOINT" : null;
                     hops.add(new TraceHop(
                             TraceHop.Kind.OBSERVED,
                             rs.getLong("t_id"),
@@ -798,7 +819,13 @@ public final class TraceQueryService {
                             null,
                             detail,
                             otherFp,
-                            TraceHop.Source.TRANSFORMATION
+                            TraceHop.Source.TRANSFORMATION,
+                            unresolved ? com.itemgraph.audit.EventTaxonomy.EvidenceClass.UNRESOLVED
+                                    : com.itemgraph.audit.EventTaxonomy.EvidenceClass.OBSERVED,
+                            unresolvedReason,
+                            List.of(),
+                            false,
+                            unresolved ? 0 : amount
                     ));
                 }
             }

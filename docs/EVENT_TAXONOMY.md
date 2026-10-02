@@ -19,7 +19,7 @@ an unknown taxonomy classification, not the `UNRESOLVED` evidence class.
 
 ## Versioning
 
-The taxonomy version is `1.0.0` (`EventTaxonomy.VERSION`) and is independent of
+The taxonomy version is `1.2.0` (`EventTaxonomy.VERSION`) and is independent of
 the ItemGraph mod version and GriefLogger registry version.
 
 - Increment the major taxonomy version when an existing ID is removed, renamed,
@@ -77,12 +77,17 @@ event coverage or full GriefLogger parity.
 The item-flow and transformation action IDs are cataloged on their own storage
 surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,
 `PICKUP_ITEM`, `THROW_ITEM`, `SHOOT_ITEM`, `BREAK_ITEM`, `CONSUME_ITEM`,
+`INSERT_ITEM`, `TRANSFER_ITEM`, `CREATE_ITEM`, `DESTROY_ITEM`,
+`CONTAINER_NET_DELTA`, `DIRECT_OBSERVED`,
 `HOPPER_INSERT`, `HOPPER_EXTRACT`, `DISPENSER_DROP`, `DROPPER_DROP`,
 `DEATH_DROP`, `ADD_ITEM_ENDER`,
 `REMOVE_ITEM_ENDER`, `CRAFT`, `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR`.
 Quantity rows use signed deltas; transformations use explicit input/output
 semantics. The code-level definitions identify issue ownership and the exact
-surface for each ID.
+surface for each ID. External API submissions use `DIRECT_STATE_DELTA`, assigned by
+ItemGraph and persisted with the observation; consumers cannot set reliability or
+reclassify an attempted operation as a committed transfer. The API action IDs are
+implemented on both loaders because the contract and persistence service are shared.
 
 ## Planned child issue families
 
@@ -100,6 +105,14 @@ No row should be emitted as a successful effect solely because an attempt
 callback ran. No quantity may be manufactured from an `UNKNOWN` quantity
 definition. An unavailable or ambiguous cause remains unresolved with its
 reason code and supporting evidence IDs.
+
+Issue #44 reason codes are `SOURCE_EQUIVALENCE_AMBIGUOUS`, `UNKNOWN_ENDPOINT`,
+`ITEM_FINGERPRINT_UNRESOLVED`, `COMPONENT_DECODE_FAILED`,
+`CORRELATION_COMPETING_CANDIDATES`, `CORRELATION_CANDIDATES_UNAVAILABLE`, and
+`EVIDENCE_SUPERSEDED`. They classify query results without changing or replacing
+stored raw evidence. A legacy inferred edge with a null candidate-set column is
+reported as unavailable; an empty string means candidate tracking ran and found
+no competing candidate. Ambiguous and unresolved results allocate zero quantity.
 
 Initial unresolved reason codes are `WORLD_EVENT_API_UNAVAILABLE`,
 `WORLD_EFFECT_PARTIAL`, and `CAUSE_NOT_REPORTED` (#55);

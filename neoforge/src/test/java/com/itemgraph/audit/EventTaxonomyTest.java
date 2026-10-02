@@ -4,6 +4,7 @@ import com.itemgraph.audit.EventTaxonomy.ActorStatus;
 import com.itemgraph.audit.EventTaxonomy.EvidenceClass;
 import com.itemgraph.audit.EventTaxonomy.LoaderStatus;
 import com.itemgraph.audit.EventTaxonomy.QuantitySemantics;
+import com.itemgraph.audit.EventTaxonomy.SourceReliability;
 import com.itemgraph.audit.EventTaxonomy.Surface;
 import org.junit.jupiter.api.Test;
 
@@ -53,7 +54,8 @@ class EventTaxonomyTest {
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
             assertTrue(reasons.add(reason.id()), "duplicate reason code: " + reason.id());
-            assertTrue(reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57, reason.id());
+            assertTrue(reason.ownerIssue() == 44 || reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57,
+                    reason.id());
         }
     }
 
@@ -87,6 +89,23 @@ class EventTaxonomyTest {
             assertEquals(LoaderStatus.IMPLEMENTED, definition.fabric().status(), action);
             assertEquals(LoaderStatus.IMPLEMENTED, definition.neoForge().status(), action);
         }
+    }
+
+    @Test
+    void externalApiActionsHaveFixedReliabilityAndCrossLoaderDefinitions() {
+        for (String action : new String[] {
+                "INSERT_ITEM", "REMOVE_ITEM", "TRANSFER_ITEM", "DROP_ITEM", "PICKUP_ITEM",
+                "CREATE_ITEM", "DESTROY_ITEM", "CONSUME_ITEM", "CONTAINER_NET_DELTA", "DIRECT_OBSERVED"
+        }) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(action, Surface.ITEM_OBSERVATION)
+                    .orElseThrow(() -> new AssertionError("missing API action " + action));
+            assertEquals(SourceReliability.DIRECT_STATE_DELTA, definition.sourceReliability(), action);
+            assertTrue(definition.availableOnBothLoaders(), action);
+            assertTrue(definition.ownerIssue() > 0, action);
+        }
+        assertEquals(QuantitySemantics.SIGNED_DELTA,
+                EventTaxonomy.find("DIRECT_OBSERVED", Surface.ITEM_OBSERVATION)
+                        .orElseThrow().quantity());
     }
 
     @Test

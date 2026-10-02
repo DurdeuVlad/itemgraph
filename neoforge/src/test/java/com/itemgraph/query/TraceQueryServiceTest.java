@@ -93,6 +93,116 @@ class TraceQueryServiceTest extends QueryTestBase {
     }
 
     @Test
+    void inferredTraceHopCarriesPersistedCompetingCandidateIds() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long edgeId = insertEdge(playerA, playerB, fp, 2, now - 2_000, now - 1_000, 0.8125,
+                "competing fixture");
+        try (PreparedStatement statement = conn.prepareStatement("""
+                UPDATE ig_inferred_edges
+                SET competing_observation_ids = '31,29', competing_candidates_truncated = 1
+                WHERE id = ?
+                """)) {
+            statement.setLong(1, edgeId);
+            statement.executeUpdate();
+        }
+
+        TraceResult result = service.trace(conn, fp, QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        TraceHop hop = result.hops().getFirst();
+        assertEquals(com.itemgraph.audit.EventTaxonomy.EvidenceClass.INFERRED, hop.evidenceClass());
+        assertEquals("CORRELATION_COMPETING_CANDIDATES", hop.reasonCode());
+        assertEquals(List.of("observation#31", "observation#29"), hop.candidateEvidenceIds());
+        assertTrue(hop.candidateEvidenceTruncated());
+        assertTrue(QueryFormatter.formatHop(hop).contains("candidates=observation#31,observation#29,…(truncated)"));
+    }
+
+    @Test
+    void inferredTraceMarksLegacyCandidateSetUnavailableAndKnownEmptySetAsEmpty() throws Exception {
+        long playerA = insertPlayerNode("AlphaA");
+        long playerB = insertPlayerNode("BetaB");
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long legacyEdge = insertEdge(playerA, playerB, fp, 1, now - 2_000, now - 1_000, 0.8,
+                "legacy candidates absent");
+        long emptyEdge = insertEdge(playerA, playerB, fp, 1, now - 4_000, now - 3_000, 0.8,
+                "candidate tracking recorded no competitors");
+        try (PreparedStatement statement = conn.prepareStatement(
+                "UPDATE ig_inferred_edges SET competing_observation_ids = '' WHERE id = ?")) {
+            statement.setLong(1, emptyEdge);
+            statement.executeUpdate();
+        }
+
+        TraceResult result = service.trace(conn, fp, QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        TraceHop legacy = result.hops().stream().filter(hop -> hop.refId() == legacyEdge).findFirst().orElseThrow();
+        TraceHop empty = result.hops().stream().filter(hop -> hop.refId() == emptyEdge).findFirst().orElseThrow();
+        assertEquals("CORRELATION_CANDIDATES_UNAVAILABLE", legacy.reasonCode());
+        assertTrue(legacy.candidateEvidenceIds().isEmpty());
+        assertNull(empty.reasonCode());
+        assertTrue(empty.candidateEvidenceIds().isEmpty());
+    }
+
+    @Test
+    void danglingObservationFingerprintIsUnresolvedInTraceWithNoQuantityImpact() throws Exception {
+        long player = insertPlayerNode("AlphaA");
+        long ground = insertGroundNode(20, 64, 20);
+        try (var pragma = conn.createStatement()) {
+            pragma.execute("PRAGMA foreign_keys = OFF");
+        }
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observations (source_type, timestamp_ms, node_id, target_node_id,
+                    fingerprint_id, action_type, amount, raw_data)
+                VALUES ('ITEMGRAPH_INTERNAL', ?, ?, ?, 999_991, 'DROP_ITEM', 5, '{}')
+                """)) {
+            statement.setLong(1, now - 1_000);
+            statement.setLong(2, player);
+            statement.setLong(3, ground);
+            statement.executeUpdate();
+        }
+        try (var pragma = conn.createStatement()) {
+            pragma.execute("PRAGMA foreign_keys = ON");
+        }
+
+        TraceResult result = service.trace(conn, 999_991,
+                QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        assertEquals(1, result.hops().size());
+        assertEquals(com.itemgraph.audit.EventTaxonomy.EvidenceClass.UNRESOLVED,
+                result.hops().getFirst().evidenceClass());
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", result.hops().getFirst().reasonCode());
+        assertEquals(0, result.hops().getFirst().quantityImpact());
+    }
+
+    @Test
+    void transformationTraceUsesFingerprintReasonForMissingItemRow() throws Exception {
+        long player = insertPlayerNode("AlphaA");
+        long resultFp = insertFingerprint("minecraft:stone", "transform-result");
+        try (var pragma = conn.createStatement()) {
+            pragma.execute("PRAGMA foreign_keys = OFF");
+        }
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations (transformation_type, player_node_id,
+                    source_fingerprint_id, result_fingerprint_id, quantity, timestamp_ms, details)
+                VALUES ('CRAFTING', ?, 999_992, ?, 3, ?, 'dangling source fingerprint')
+                """)) {
+            statement.setLong(1, player);
+            statement.setLong(2, resultFp);
+            statement.setLong(3, now - 1_000);
+            statement.executeUpdate();
+        }
+        try (var pragma = conn.createStatement()) {
+            pragma.execute("PRAGMA foreign_keys = ON");
+        }
+
+        TraceResult result = service.trace(conn, resultFp, QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        assertEquals(1, result.hops().size());
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", result.hops().getFirst().reasonCode());
+        assertEquals(0, result.hops().getFirst().quantityImpact());
+    }
+
+    @Test
     void sessionNetDeltaIsIncludedWhenItsIntervalOverlapsTheTraceWindow() throws Exception {
         long container = insertContainerNode(10, 64, 10);
         long player = insertPlayerNode("AlphaA");
@@ -388,7 +498,7 @@ class TraceQueryServiceTest extends QueryTestBase {
         assertTrue(result.hops().isEmpty());
         assertFalse(result.truncated());
         assertTrue(String.join("\n", QueryFormatter.formatTrace(result))
-                .contains("No observed or inferred movement recorded"));
+                .contains("No observed, inferred, ambiguous, or unresolved evidence recorded"));
     }
 
     // ------------------------------------------------------------------
@@ -617,7 +727,7 @@ class TraceQueryServiceTest extends QueryTestBase {
             }
         }
 
-        assertTrue(out.contains("2 observed hops, 1 inferred hop."), out);
+        assertTrue(out.contains("2 observed, 1 inferred, 0 ambiguous, 0 unresolved result(s)."), out);
         assertTrue(out.contains("/ig explain"), "the output must say how to see the evidence");
     }
 }

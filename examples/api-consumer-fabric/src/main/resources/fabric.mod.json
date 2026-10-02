@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "itemgraph_api_consumer_fabric",
+  "version": "0.1.0",
+  "name": "ItemGraph Fabric API Consumer Example",
+  "description": "Loads as an independent Fabric mod and exercises ItemGraph PREVIEW_2 from the public API.",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "com.example.itemgraphconsumerfabric.ExampleApiConsumerFabric"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.9",
+    "fabric-api": "*",
+    "minecraft": ">=1.21.1 <1.22",
+    "java": ">=21",
+    "itemgraph": "=${itemgraph_mod_version}"
+  }
+}

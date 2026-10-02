@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "1.2.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -130,6 +130,20 @@ public final class EventTaxonomy {
     private static final LoaderSupport HISTORICAL_ONLY = new LoaderSupport(LoaderStatus.HISTORICAL_ONLY,
             "NO_NATIVE_WRITER_HISTORICAL_QUERY_ONLY");
     private static final List<ReasonCode> UNRESOLVED_REASON_CODES = List.of(
+            new ReasonCode("SOURCE_EQUIVALENCE_AMBIGUOUS", 44,
+                    "Several source rows remain possible matches; the group has no canonical allocation."),
+            new ReasonCode("UNKNOWN_ENDPOINT", 44,
+                    "The raw row does not identify a resolvable source or destination endpoint."),
+            new ReasonCode("ITEM_FINGERPRINT_UNRESOLVED", 44,
+                    "An observation or transformation references item metadata that has no resolvable fingerprint row."),
+            new ReasonCode("COMPONENT_DECODE_FAILED", 44,
+                    "The raw item component payload is retained but could not be decoded."),
+            new ReasonCode("CORRELATION_COMPETING_CANDIDATES", 44,
+                    "More than one compatible movement candidate prevents deterministic allocation."),
+            new ReasonCode("CORRELATION_CANDIDATES_UNAVAILABLE", 44,
+                    "The stored edge predates candidate tracking, so its competing candidate set is unavailable."),
+            new ReasonCode("EVIDENCE_SUPERSEDED", 44,
+                    "The retained evidence is superseded for active flow claims by linked evidence."),
             new ReasonCode("WORLD_EVENT_API_UNAVAILABLE", 55,
                     "The loader exposes no authoritative callback for this world event."),
             new ReasonCode("WORLD_EFFECT_PARTIAL", 55,
@@ -266,6 +280,20 @@ public final class EventTaxonomy {
         // observation, and transformation lookup parsing.
         action(entries, "ADD_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
                 27, "item_flow", "add");
+        // External integrations submit committed observations through PREVIEW_1. Their
+        // reliability is assigned by ItemGraph from this catalog, never by the consumer.
+        action(entries, "INSERT_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "TRANSFER_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "CREATE_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "DESTROY_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "CONTAINER_NET_DELTA", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
+        action(entries, "DIRECT_OBSERVED", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
+                36, "external_api");
         action(entries, "REMOVE_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
                 27, "item_flow", "remove");
         action(entries, "DROP_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,

@@ -47,6 +47,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.storage.LevelResource;
 
 import java.util.List;
 import java.util.Set;
@@ -119,6 +120,7 @@ public final class ItemGraphCommands {
                                         .executes(ItemGraphCommands::helpTopic)))
                         .then(Commands.literal("status").executes(ItemGraphCommands::status))
                         .then(Commands.literal("audit").executes(ItemGraphCommands::audit))
+                        .then(buildExportCommand())
                         .then(buildStandalonePageCommand())
                         .then(buildLookupCommand())
                         .then(Commands.literal("ingest")
@@ -217,6 +219,27 @@ public final class ItemGraphCommands {
                 .requires(source -> source.hasPermission(2))
                 .executes(ItemGraphCommands::help)
                 .redirect(root));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> buildExportCommand() {
+        LiteralArgumentBuilder<CommandSourceStack> export = Commands.literal("export")
+                .then(Commands.literal("verify")
+                        .then(Commands.argument("filename", StringArgumentType.word())
+                                .executes(ItemGraphCommands::verifyIncidentBundle)))
+                .then(Commands.literal("cancel")
+                        .then(Commands.argument("jobId", StringArgumentType.word())
+                                .executes(ItemGraphCommands::cancelIncidentExport)))
+                .then(Commands.literal("full")
+                        .requires(source -> source.hasPermission(4))
+                        .then(Commands.argument("filename", StringArgumentType.word())
+                                .then(Commands.argument("filters", StringArgumentType.greedyString())
+                                        .executes(ctx -> startIncidentExport(ctx,
+                                                IncidentBundleService.RedactionProfile.FULL)))));
+        export.then(Commands.argument("filename", StringArgumentType.word())
+                .then(Commands.argument("filters", StringArgumentType.greedyString())
+                        .executes(ctx -> startIncidentExport(ctx,
+                                IncidentBundleService.RedactionProfile.REDACTED))));
+        return export;
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> buildLookupCommand() {
@@ -489,6 +512,76 @@ public final class ItemGraphCommands {
         return 1;
     }
 
+    private static int startIncidentExport(CommandContext<CommandSourceStack> ctx,
+                                           IncidentBundleService.RedactionProfile profile) {
+        CommandSourceStack source = ctx.getSource();
+        if (profile == IncidentBundleService.RedactionProfile.FULL && !source.hasPermission(4)) {
+            source.sendFailure(Component.literal("[ItemGraph] Full incident exports require permission level 4."));
+            return 0;
+        }
+        if (!(source.getEntity() instanceof ServerPlayer)) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] Incident export requires a player so radius can use the current dimension and position."));
+            return 0;
+        }
+
+        String filename;
+        AuditLookupFilters filters;
+        try {
+            filename = IncidentBundleService.normalizeFilename(StringArgumentType.getString(ctx, "filename"));
+            filters = AuditLookupFilters.parse(StringArgumentType.getString(ctx, "filters"),
+                    System.currentTimeMillis());
+        } catch (IllegalArgumentException invalid) {
+            source.sendFailure(Component.literal("[ItemGraph] Invalid incident export: " + invalid.getMessage()));
+            return 0;
+        }
+
+        var exportDirectory = source.getServer().getWorldPath(LevelResource.ROOT)
+                .resolve("itemgraph").resolve("exports");
+        try {
+            String jobId = IncidentExportJobs.submitExport(source, filename, filters, profile, exportDirectory);
+            source.sendSuccess(() -> Component.literal("[ItemGraph] Incident export job " + jobId
+                    + " accepted. It will write " + filename + " under the server's itemgraph/exports directory."), false);
+            return 1;
+        } catch (java.util.concurrent.RejectedExecutionException rejected) {
+            source.sendFailure(Component.literal("[ItemGraph] " + rejected.getMessage() + "."));
+            return 0;
+        } catch (IllegalStateException unavailable) {
+            source.sendFailure(Component.literal("[ItemGraph] Incident export could not start: "
+                    + unavailable.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int verifyIncidentBundle(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        String filename;
+        try {
+            filename = IncidentBundleService.normalizeFilename(StringArgumentType.getString(ctx, "filename"));
+        } catch (IllegalArgumentException invalid) {
+            source.sendFailure(Component.literal("[ItemGraph] Invalid incident bundle filename: "
+                    + invalid.getMessage()));
+            return 0;
+        }
+        var exportDirectory = source.getServer().getWorldPath(LevelResource.ROOT)
+                .resolve("itemgraph").resolve("exports");
+        try {
+            String jobId = IncidentExportJobs.submitVerification(source, filename, exportDirectory);
+            source.sendSuccess(() -> Component.literal("[ItemGraph] Incident bundle verification job "
+                    + jobId + " accepted for " + filename + "."), false);
+            return 1;
+        } catch (java.util.concurrent.RejectedExecutionException rejected) {
+            source.sendFailure(Component.literal("[ItemGraph] " + rejected.getMessage() + "."));
+            return 0;
+        }
+    }
+
+    private static int cancelIncidentExport(CommandContext<CommandSourceStack> ctx) {
+        boolean cancelled = IncidentExportJobs.cancel(ctx.getSource(),
+                StringArgumentType.getString(ctx, "jobId"));
+        return cancelled ? 1 : 0;
+    }
+
     private static int helpTopic(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
         String topic = StringArgumentType.getString(ctx, "topic");
@@ -565,13 +658,13 @@ public final class ItemGraphCommands {
         String token = (quoted ? rawToken.substring(1) : rawToken)
                 .toLowerCase(java.util.Locale.ROOT);
         Set<String> usedFilters = usedLookupFilters(remaining.substring(0, tokenStart));
-        if (usedFilters.size() >= 5) {
+        if (usedFilters.size() >= 6) {
             return CompletableFuture.completedFuture(tokenBuilder.build());
         }
         if (!token.contains(".")) {
             boolean hasItemFilter = usedFilters.contains("include") || usedFilters.contains("exclude");
             List<String> suggestions = new java.util.ArrayList<>();
-            for (String filter : List.of("action", "user", "include", "exclude", "time", "radius")) {
+            for (String filter : List.of("action", "user", "include", "exclude", "time", "radius", "state")) {
                 if (usedFilters.contains(filter)
                         || hasItemFilter && (filter.equals("include") || filter.equals("exclude"))) {
                     continue;
@@ -596,6 +689,7 @@ public final class ItemGraphCommands {
                     .toList();
             case "time" -> List.of("5m", "1h", "1d", "1y");
             case "radius" -> List.of("5", "10", "50");
+            case "state" -> List.of("observed", "inferred", "ambiguous", "unresolved");
             default -> List.of();
         };
         if (canonicalName.equals("user")) {
@@ -661,6 +755,7 @@ public final class ItemGraphCommands {
             case "exclude", "e" -> "exclude";
             case "time", "t" -> "time";
             case "radius", "r" -> "radius";
+            case "state", "status", "s" -> "state";
             default -> null;
         };
     }

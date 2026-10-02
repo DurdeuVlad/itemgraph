@@ -57,6 +57,7 @@ public final class UnifiedEvidenceQueryService {
         all.addAll(findAudit(conn, filters, levelId, centerX, centerY, centerZ, sourceLimit, null, false));
         all.addAll(findObservations(conn, filters, levelId, centerX, centerY, centerZ, sourceLimit, null));
         all.addAll(findTransformations(conn, filters, levelId, centerX, centerY, centerZ, sourceLimit, null));
+        all.addAll(findInferredEdges(conn, filters, levelId, centerX, centerY, centerZ, sourceLimit, null));
         all.addAll(findHistoricalGriefLogger(conn, filters, levelId, centerX, centerY, centerZ,
                 sourceLimit, null, false));
 
@@ -65,7 +66,7 @@ public final class UnifiedEvidenceQueryService {
             return List.of();
         }
         int end = Math.min(all.size(), offset + limit);
-        return List.copyOf(all.subList(offset, end));
+        return withCandidateEvidence(conn, all.subList(offset, end));
     }
 
     /**
@@ -95,13 +96,14 @@ public final class UnifiedEvidenceQueryService {
         all.addAll(findAudit(conn, allActions, levelId, 0, 0, 0, sourceLimit, uniquePositions, true));
         all.addAll(findObservations(conn, allActions, levelId, 0, 0, 0, sourceLimit, uniquePositions));
         all.addAll(findTransformations(conn, allActions, levelId, 0, 0, 0, sourceLimit, uniquePositions));
+        all.addAll(findInferredEdges(conn, allActions, levelId, 0, 0, 0, sourceLimit, uniquePositions));
         all.addAll(findHistoricalGriefLogger(conn, allActions, levelId, 0, 0, 0,
                 sourceLimit, uniquePositions, true));
         all.sort(EVIDENCE_ORDER);
         if (offset >= all.size()) {
             return List.of();
         }
-        return List.copyOf(all.subList(offset, Math.min(all.size(), offset + limit)));
+        return withCandidateEvidence(conn, all.subList(offset, Math.min(all.size(), offset + limit)));
     }
 
     /**
@@ -166,9 +168,11 @@ public final class UnifiedEvidenceQueryService {
                                                                     List<AuditEventQueryService.ExactPosition> exactPositions,
                                                                     boolean activeInspectorHistory) throws SQLException {
         StringBuilder sql = new StringBuilder("""
-                SELECT g.source_sha256, g.table_name, g.source_key, g.source_rowid, g.timestamp_ms,
+                SELECT g.source_sha256, g.raw_byte_hash, g.table_name, g.source_key, g.source_rowid, g.timestamp_ms,
                        g.level_name, g.x, g.y, g.z, g.player_name, g.player_uuid, g.action_type, g.quantity,
-                       g.subject_id, g.detail, g.evidence_class,
+                       g.subject_id, g.detail,
+                       CASE WHEN s.source_sha256 IS NOT NULL THEN 'UNRESOLVED'
+                            ELSE COALESCE(g.evidence_class, 'OBSERVED') END AS result_evidence_class,
                        s.superseding_event_id, s.reason_code
                 FROM ig_grieflogger_lookup g
                 LEFT JOIN ig_grieflogger_row_supersessions s
@@ -186,6 +190,9 @@ public final class UnifiedEvidenceQueryService {
         }
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, "UPPER(g.action_type)", filters.eventTypes(), true);
+        appendEvidenceClassFilter(sql, args,
+                "CASE WHEN s.source_sha256 IS NOT NULL THEN 'UNRESOLVED' ELSE COALESCE(g.evidence_class, 'OBSERVED') END",
+                filters.evidenceClasses());
         appendUserFilter(sql, args, List.of("g.player_name"), List.of("g.player_uuid"), filters.playerNames());
         appendWindow(sql, args, filters.window(), "g.timestamp_ms");
         appendEvidenceLocation(sql, args, "g.level_name", "g.x", "g.y", "g.z", levelId,
@@ -220,7 +227,10 @@ public final class UnifiedEvidenceQueryService {
                             firstNonBlank(rs.getString("player_name"), rs.getString("player_uuid")),
                             rs.getString("action_type"), rs.getInt("quantity"),
                             rs.getString("subject_id"), detail,
-                            valueOr(rs.getString("evidence_class"), "OBSERVED"), table, sourceKey));
+                            valueOr(rs.getString("result_evidence_class"), "OBSERVED"), table, sourceKey,
+                            rs.getString("source_sha256"), rs.getString("raw_byte_hash"),
+                            supersedingEvent == null ? null : "EVIDENCE_SUPERSEDED", List.of(),
+                            supersedingEvent == null ? rs.getInt("quantity") : 0, null, false));
                 }
             }
         } catch (SQLException failure) {
@@ -240,7 +250,7 @@ public final class UnifiedEvidenceQueryService {
                                                    List<AuditEventQueryService.ExactPosition> exactPositions,
                                                    boolean activeInspectorHistory) throws SQLException {
         StringBuilder sql = new StringBuilder("""
-                SELECT a.id, a.event_type, a.timestamp_ms, a.player_uuid, a.player_name,
+                SELECT a.id, a.event_type, a.timestamp_ms, a.player_uuid, a.player_name, a.raw_data,
                        a.level_id, a.x, a.y, a.z, a.subject_id, a.detail, a.source_type,
                        s.superseding_event_id, s.reason_code
                 FROM ig_audit_events a
@@ -268,6 +278,10 @@ public final class UnifiedEvidenceQueryService {
         }
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, "UPPER(event_type)", filters.eventTypes(), false);
+        appendEvidenceClassFilter(sql, args,
+                "CASE WHEN s.superseding_event_id IS NOT NULL THEN 'UNRESOLVED' ELSE "
+                        + taxonomyEvidenceClassSql(EventTaxonomy.Surface.AUDIT_EVENT, "event_type") + " END",
+                filters.evidenceClasses());
         appendUserFilter(sql, args, List.of("player_name"), List.of("player_uuid"), filters.playerNames());
         appendWindow(sql, args, filters.window(), "timestamp_ms");
         appendEvidenceLocation(sql, args, "level_id", "x", "y", "z", levelId, centerX, centerY, centerZ,
@@ -283,6 +297,7 @@ public final class UnifiedEvidenceQueryService {
             try (ResultSet rs = statement.executeQuery()) {
                 while (rs.next()) {
                     String detail = rs.getString("detail");
+                    byte[] rawData = rs.getBytes("raw_data");
                     Long supersedingEvent = nullableLong(rs, "superseding_event_id");
                     if (supersedingEvent != null) {
                         String reason = "superseded_by=audit#" + supersedingEvent
@@ -297,9 +312,12 @@ public final class UnifiedEvidenceQueryService {
                             nullableDouble(rs, "x"), nullableDouble(rs, "y"), nullableDouble(rs, "z"),
                             firstNonBlank(rs.getString("player_name"), rs.getString("player_uuid")),
                             rs.getString("event_type"), 0, rs.getString("subject_id"), detail,
-                            EventTaxonomy.find(rs.getString("event_type"), EventTaxonomy.Surface.AUDIT_EVENT)
+                            supersedingEvent != null ? "UNRESOLVED"
+                                    : EventTaxonomy.find(rs.getString("event_type"), EventTaxonomy.Surface.AUDIT_EVENT)
                                     .map(definition -> definition.evidenceClass().name())
-                                    .orElse(EventTaxonomy.UNCLASSIFIED_EVIDENCE)));
+                                    .orElse(EventTaxonomy.UNCLASSIFIED_EVIDENCE), null, null, null,
+                            rawData == null ? null : sha256(rawData),
+                            supersedingEvent == null ? null : "EVIDENCE_SUPERSEDED", List.of(), 0, null, false));
                 }
             }
         }
@@ -312,8 +330,11 @@ public final class UnifiedEvidenceQueryService {
                                                           List<AuditEventQueryService.ExactPosition> exactPositions)
             throws SQLException {
         StringBuilder sql = new StringBuilder("""
-                SELECT o.id, o.source_type, o.source_event_id, o.timestamp_ms,
-                       o.action_type, o.amount,
+                SELECT o.id, o.source_type, o.source_event_id, o.timestamp_ms, o.raw_data,
+                       o.action_type, o.amount, o.node_id AS raw_origin_id, o.target_node_id AS raw_dest_id,
+                       origin.node_type AS origin_type, dest.node_type AS dest_type,
+                       og.id AS source_group_id, og.state AS source_group_state,
+                       disposition.reason_code AS disposition_reason,
                        COALESCE(origin.level_id, dest.level_id) AS level_id,
                        COALESCE(origin.x, dest.x) AS x,
                        COALESCE(origin.y, dest.y) AS y,
@@ -328,19 +349,29 @@ public final class UnifiedEvidenceQueryService {
                        CASE WHEN origin.node_type = 'PLAYER' THEN origin.owner_uuid
                             WHEN dest.node_type = 'PLAYER' THEN dest.owner_uuid
                             ELSE COALESCE(origin.owner_uuid, dest.owner_uuid) END AS player_uuid,
-                       f.item_id, origin.custom_label AS origin_label,
+                       f.id AS fingerprint_row_id, f.item_id, f.component_summary,
+                       origin.custom_label AS origin_label,
                        dest.custom_label AS dest_label
                 FROM ig_observations o
                 LEFT JOIN ig_nodes origin ON origin.id = o.node_id
                 LEFT JOIN ig_nodes dest ON dest.id = o.target_node_id
                 LEFT JOIN ig_item_fingerprints f ON f.id = o.fingerprint_id
+                LEFT JOIN ig_observation_group_members ogm ON ogm.observation_id = o.id
+                LEFT JOIN ig_observation_groups og ON og.id = ogm.group_id
+                LEFT JOIN ig_observation_dispositions disposition ON disposition.observation_id = o.id
                 WHERE 1 = 1
-                  AND NOT EXISTS (
-                      SELECT 1 FROM ig_observation_dispositions d WHERE d.observation_id = o.id
-                  )
                 """);
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, OBSERVATION_ACTION, filters.eventTypes(), true);
+        appendEvidenceClassFilter(sql, args,
+                "CASE WHEN disposition.reason_code IS NOT NULL THEN 'UNRESOLVED' "
+                        + "WHEN o.node_id IS NULL OR o.target_node_id IS NULL "
+                        + "OR origin.node_type IS NULL OR dest.node_type IS NULL "
+                        + "OR origin.node_type = 'UNKNOWN' OR dest.node_type = 'UNKNOWN' THEN 'UNRESOLVED' "
+                        + "WHEN f.id IS NULL THEN 'UNRESOLVED' "
+                        + "WHEN f.component_summary LIKE '%component_decode=UNRESOLVED%' THEN 'UNRESOLVED' "
+                        + "WHEN og.state = 'AMBIGUOUS' THEN 'AMBIGUOUS' "
+                        + "ELSE 'OBSERVED' END", filters.evidenceClasses());
         appendUserFilter(sql, args,
                 List.of("origin.custom_label", "dest.custom_label"),
                 List.of("origin.owner_uuid", "dest.owner_uuid"), filters.playerNames());
@@ -369,10 +400,33 @@ public final class UnifiedEvidenceQueryService {
                     String source = "GRIEFLOGGER".equalsIgnoreCase(sourceType)
                             ? "GRIEFLOGGER" : "OBSERVATION";
                     Long sourceEventId = nullableLong(rs, "source_event_id");
+                    byte[] rawData = rs.getBytes("raw_data");
                     String detail = "source=" + sourceType
                             + (sourceEventId == null ? "" : " sourceEvent#" + sourceEventId)
                             + " origin=" + valueOr(rs.getString("origin_label"), "(unlabeled)")
                             + " destination=" + valueOr(rs.getString("dest_label"), "(unlabeled)");
+                    String dispositionReason = rs.getString("disposition_reason");
+                    String groupState = rs.getString("source_group_state");
+                    boolean missingEndpoint = rs.getObject("raw_origin_id") == null
+                            || rs.getObject("raw_dest_id") == null
+                            || rs.getString("origin_type") == null || rs.getString("dest_type") == null
+                            || "UNKNOWN".equals(rs.getString("origin_type"))
+                            || "UNKNOWN".equals(rs.getString("dest_type"));
+                    String componentSummary = rs.getString("component_summary");
+                    boolean componentDecodeFailed = componentSummary != null
+                            && componentSummary.contains("component_decode=UNRESOLVED");
+                    boolean missingFingerprint = rs.getObject("fingerprint_row_id") == null;
+                    String evidenceClass = dispositionReason != null ? "UNRESOLVED"
+                            : missingEndpoint || missingFingerprint || componentDecodeFailed ? "UNRESOLVED" : "OBSERVED";
+                    String reasonCode = dispositionReason != null ? dispositionReason
+                            : componentDecodeFailed ? "COMPONENT_DECODE_FAILED"
+                            : missingFingerprint ? "ITEM_FINGERPRINT_UNRESOLVED"
+                            : missingEndpoint ? "UNKNOWN_ENDPOINT"
+                            : "AMBIGUOUS".equals(groupState) ? "SOURCE_EQUIVALENCE_AMBIGUOUS" : null;
+                    if ("OBSERVED".equals(evidenceClass) && "AMBIGUOUS".equals(groupState)) {
+                        evidenceClass = "AMBIGUOUS";
+                    }
+                    Long sourceGroupId = nullableLong(rs, "source_group_id");
                     String rowLevel = rs.getString("level_id");
                     Double rowX = nullableDouble(rs, "x");
                     Double rowY = nullableDouble(rs, "y");
@@ -390,7 +444,10 @@ public final class UnifiedEvidenceQueryService {
                             rowLevel, rowX, rowY, rowZ, firstNonBlank(rs.getString("player_name"),
                                     rs.getString("player_uuid")),
                             rs.getString("action_type"), rs.getInt("amount"), rs.getString("item_id"),
-                            detail, "OBSERVED"));
+                            detail, evidenceClass, null, null, null,
+                            rawData == null ? null : sha256(rawData), reasonCode, List.of(),
+                            "OBSERVED".equals(evidenceClass) ? rs.getInt("amount") : 0,
+                            sourceGroupId, false));
                 }
             }
         }
@@ -404,6 +461,7 @@ public final class UnifiedEvidenceQueryService {
             throws SQLException {
         StringBuilder sql = new StringBuilder("""
                 SELECT t.id, t.transformation_type, t.quantity, t.timestamp_ms, t.details,
+                       p.id AS player_node_id, p.node_type AS player_node_type,
                        p.level_id, p.x, p.y, p.z, p.custom_label AS player_name,
                        p.owner_uuid AS player_uuid,
                        source_fp.item_id AS source_item, result_fp.item_id AS result_item
@@ -415,6 +473,11 @@ public final class UnifiedEvidenceQueryService {
                 """);
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, TRANSFORMATION_ACTION, filters.eventTypes(), true);
+        appendEvidenceClassFilter(sql, args,
+                "CASE WHEN source_fp.item_id IS NULL OR result_fp.item_id IS NULL "
+                        + "THEN 'UNRESOLVED' "
+                        + "WHEN p.id IS NULL OR p.node_type = 'UNKNOWN' "
+                        + "THEN 'UNRESOLVED' ELSE 'OBSERVED' END", filters.evidenceClasses());
         appendUserFilter(sql, args, List.of("p.custom_label"), List.of("p.owner_uuid"), filters.playerNames());
         appendWindow(sql, args, filters.window(), "t.timestamp_ms");
         appendEvidenceLocation(sql, args, "p.level_id", "p.x", "p.y", "p.z", levelId,
@@ -434,13 +497,92 @@ public final class UnifiedEvidenceQueryService {
                     String detail = valueOr(rs.getString("details"), "")
                             + " source=" + valueOr(sourceItem, "(missing)")
                             + " result=" + valueOr(resultItem, "(missing)");
+                    boolean unresolved = rs.getObject("player_node_id") == null
+                            || "UNKNOWN".equals(rs.getString("player_node_type"))
+                            || sourceItem == null || resultItem == null;
+                    boolean unknownEndpoint = rs.getObject("player_node_id") == null
+                            || "UNKNOWN".equals(rs.getString("player_node_type"));
                     rows.add(new UnifiedEvidenceDetail(
                             "TRANSFORMATION", "transformation#" + rs.getLong("id"),
                             rs.getLong("timestamp_ms"), rs.getString("level_id"),
                             nullableDouble(rs, "x"), nullableDouble(rs, "y"), nullableDouble(rs, "z"),
                             firstNonBlank(rs.getString("player_name"), rs.getString("player_uuid")),
                             rs.getString("transformation_type"), rs.getInt("quantity"),
-                            sourceItem + " -> " + resultItem, detail, "OBSERVED"));
+                            valueOr(sourceItem, "(missing)") + " -> " + valueOr(resultItem, "(missing)"), detail,
+                            unresolved ? "UNRESOLVED" : "OBSERVED", null, null, null, null,
+                            !unresolved ? null : sourceItem == null || resultItem == null
+                                    ? "ITEM_FINGERPRINT_UNRESOLVED" : "UNKNOWN_ENDPOINT", List.of(),
+                            unresolved ? 0 : rs.getInt("quantity"), null, false));
+                }
+            }
+        }
+        return rows;
+    }
+
+    private List<UnifiedEvidenceDetail> findInferredEdges(Connection conn, AuditLookupFilters filters,
+                                                            String levelId, double centerX,
+                                                            double centerY, double centerZ, int limit,
+                                                            List<AuditEventQueryService.ExactPosition> exactPositions)
+            throws SQLException {
+        if (!filters.eventTypes().isEmpty()) {
+            return List.of();
+        }
+        StringBuilder sql = new StringBuilder("""
+                SELECT e.id, e.amount, e.time_start, e.time_end, e.confidence, e.explanation,
+                       e.competing_observation_ids, e.competing_candidates_truncated,
+                       origin.level_id AS origin_level, origin.x AS origin_x, origin.y AS origin_y,
+                       origin.z AS origin_z, origin.custom_label AS origin_label,
+                       origin.owner_uuid AS origin_uuid,
+                       destination.custom_label AS destination_label,
+                       destination.owner_uuid AS destination_uuid,
+                       f.item_id
+                FROM ig_inferred_edges e
+                LEFT JOIN ig_nodes origin ON origin.id = e.from_node_id
+                LEFT JOIN ig_nodes destination ON destination.id = e.to_node_id
+                LEFT JOIN ig_item_fingerprints f ON f.id = e.fingerprint_id
+                WHERE e.edge_state = 'ACTIVE'
+                """);
+        List<Object> args = new ArrayList<>();
+        appendEvidenceClassFilter(sql, args, "'INFERRED'", filters.evidenceClasses());
+        appendUserFilter(sql, args, List.of("origin.custom_label", "destination.custom_label"),
+                List.of("origin.owner_uuid", "destination.owner_uuid"), filters.playerNames());
+        if (filters.window().sinceMs() != null) {
+            sql.append(" AND e.time_end >= ?");
+            args.add(filters.window().sinceMs());
+        }
+        if (filters.window().untilMs() != null) {
+            sql.append(" AND e.time_start <= ?");
+            args.add(filters.window().untilMs());
+        }
+        appendEvidenceLocation(sql, args, "origin.level_id", "origin.x", "origin.y", "origin.z",
+                levelId, centerX, centerY, centerZ, filters.radiusBlocks(), exactPositions);
+        appendSubjectFilter(sql, args, "f.item_id", filters.includeSubjects(), false);
+        appendSubjectFilter(sql, args, "f.item_id", filters.excludeSubjects(), true);
+        sql.append(" ORDER BY e.time_start DESC, e.id DESC LIMIT ?");
+        args.add(limit);
+
+        List<UnifiedEvidenceDetail> rows = new ArrayList<>();
+        try (PreparedStatement statement = conn.prepareStatement(sql.toString())) {
+            bind(statement, args);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    String storedCandidates = rs.getString("competing_observation_ids");
+                    List<String> candidates = EdgeExplanation.parseCompetingCandidateIds(storedCandidates);
+                    String explanation = rs.getString("explanation");
+                    String detail = "confidence=" + QueryFormatter.formatConfidence(rs.getDouble("confidence"))
+                            + (explanation == null || explanation.isBlank() ? "" : " " + explanation);
+                    rows.add(new UnifiedEvidenceDetail(
+                            "INFERRED", "edge#" + rs.getLong("id"), rs.getLong("time_start"),
+                            rs.getString("origin_level"), nullableDouble(rs, "origin_x"),
+                            nullableDouble(rs, "origin_y"), nullableDouble(rs, "origin_z"),
+                            firstNonBlank(rs.getString("origin_label"), rs.getString("origin_uuid"),
+                                    rs.getString("destination_label"), rs.getString("destination_uuid")),
+                            "GROUND_BRIDGE", rs.getInt("amount"), rs.getString("item_id"), detail,
+                            "INFERRED", null, null, null, null,
+                            storedCandidates == null ? "CORRELATION_CANDIDATES_UNAVAILABLE"
+                                    : candidates.isEmpty() ? null : "CORRELATION_COMPETING_CANDIDATES",
+                            candidates, rs.getInt("amount"), null,
+                            rs.getInt("competing_candidates_truncated") != 0));
                 }
             }
         }
@@ -468,6 +610,65 @@ public final class UnifiedEvidenceQueryService {
             }
         }
         sql.append(")");
+    }
+
+    private static List<UnifiedEvidenceDetail> withCandidateEvidence(Connection conn,
+                                                                      List<UnifiedEvidenceDetail> rows)
+            throws SQLException {
+        List<Long> groupIds = rows.stream()
+                .filter(row -> "AMBIGUOUS".equals(row.evidenceClass()) && row.sourceGroupId() != null)
+                .map(UnifiedEvidenceDetail::sourceGroupId)
+                .distinct()
+                .toList();
+        var candidates = ObservationQueries.candidateEvidenceForGroups(conn, groupIds);
+        return rows.stream().map(row -> row.withCandidateEvidence(candidates.get(row.sourceGroupId()))).toList();
+    }
+
+    private static void appendEvidenceClassFilter(StringBuilder sql, List<Object> args,
+                                                  String expression, List<String> evidenceClasses) {
+        if (evidenceClasses.isEmpty()) {
+            return;
+        }
+        sql.append(" AND ").append(expression).append(" IN (");
+        appendPlaceholders(sql, evidenceClasses.size());
+        sql.append(')');
+        args.addAll(evidenceClasses);
+    }
+
+    private static void appendTaxonomyEvidenceClassFilter(StringBuilder sql, List<Object> args,
+                                                          List<String> evidenceClasses,
+                                                          EventTaxonomy.Surface surface) {
+        if (evidenceClasses.isEmpty()) {
+            return;
+        }
+        List<String> eventTypes = EventTaxonomy.definitions().stream()
+                .filter(definition -> definition.surface() == surface
+                        && evidenceClasses.contains(definition.evidenceClass().name()))
+                .map(EventTaxonomy.Definition::id)
+                .toList();
+        appendActionFilter(sql, args, "UPPER(event_type)", eventTypes, false);
+        if (eventTypes.isEmpty()) {
+            sql.append(" AND 1 = 0");
+        }
+    }
+
+    private static String taxonomyEvidenceClassSql(EventTaxonomy.Surface surface, String column) {
+        StringBuilder expression = new StringBuilder("CASE ");
+        for (EventTaxonomy.EvidenceClass evidenceClass : EventTaxonomy.EvidenceClass.values()) {
+            List<String> ids = EventTaxonomy.definitions().stream()
+                    .filter(definition -> definition.surface() == surface
+                            && definition.evidenceClass() == evidenceClass)
+                    .map(EventTaxonomy.Definition::id)
+                    .toList();
+            if (!ids.isEmpty()) {
+                expression.append("WHEN UPPER(").append(column).append(") IN (")
+                        .append(ids.stream().map(id -> "'" + id + "'")
+                                .collect(java.util.stream.Collectors.joining(",")))
+                        .append(") THEN '").append(evidenceClass.name()).append("' ");
+            }
+        }
+        return expression.append("ELSE '").append(EventTaxonomy.UNCLASSIFIED_EVIDENCE).append("' END")
+                .toString();
     }
 
     private static void appendUserFilter(StringBuilder sql, List<Object> args,
@@ -654,8 +855,16 @@ public final class UnifiedEvidenceQueryService {
         return value == null || value.isBlank() ? fallback : value;
     }
 
-    private static String firstNonBlank(String first, String second) {
-        return valueOr(first, valueOr(second, null));
+    private static String firstNonBlank(String first, String... remaining) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        for (String candidate : remaining) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private static int compareEvidenceIds(UnifiedEvidenceDetail left, UnifiedEvidenceDetail right) {

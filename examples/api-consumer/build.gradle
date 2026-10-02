@@ -15,6 +15,17 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 neoForge {
     version = rootProject.neo_version
 
+    runs {
+        server {
+            server()
+            programArgument '--nogui'
+            gameDirectory = rootProject.layout.buildDirectory.dir('api-consumer-neoforge-server').get().asFile
+            systemProperty 'itemgraph.api.consumer.result',
+                    rootProject.layout.buildDirectory.file('api-consumer-neoforge-server/result.txt')
+                    .get().asFile.absolutePath
+        }
+    }
+
     mods {
         itemgraph_api_consumer {
             sourceSet sourceSets.main
@@ -33,6 +44,39 @@ dependencies {
             "libs/itemgraph-${rootProject.mod_version}-neoforge.jar"))
 }
 
+tasks.named('processResources', ProcessResources) {
+    inputs.property('itemgraph_mod_version', rootProject.mod_version)
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand(itemgraph_mod_version: rootProject.mod_version)
+    }
+}
+
 tasks.named('compileJava', JavaCompile) {
     dependsOn ':neoforge:jar'
+}
+
+tasks.named('runServer') {
+    dependsOn ':neoforge:jar'
+    doFirst {
+        def directory = rootProject.layout.buildDirectory.dir('api-consumer-neoforge-server').get().asFile
+        directory.mkdirs()
+        new File(directory, 'eula.txt').setText('eula=true\n', 'UTF-8')
+        def itemgraphJar = rootProject.layout.buildDirectory.file(
+                "libs/itemgraph-${rootProject.mod_version}-neoforge.jar").get().asFile
+        if (!itemgraphJar.isFile()) {
+            throw new GradleException("NeoForge API fixture is missing ItemGraph test jar: ${itemgraphJar}")
+        }
+        def modsDirectory = new File(directory, 'mods')
+        modsDirectory.mkdirs()
+        java.nio.file.Files.copy(itemgraphJar.toPath(), new File(modsDirectory, 'itemgraph-test.jar').toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        new File(directory, 'result.txt').delete()
+    }
+    doLast {
+        def result = rootProject.layout.buildDirectory.file('api-consumer-neoforge-server/result.txt')
+                .get().asFile
+        if (!result.isFile() || !result.getText('UTF-8').startsWith('PASS:')) {
+            throw new GradleException('NeoForge API consumer fixture did not complete successfully')
+        }
+    }
 }

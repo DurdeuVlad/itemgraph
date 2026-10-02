@@ -3,11 +3,13 @@ package com.itemgraph.db;
 import com.itemgraph.db.migration.MigrationRunner;
 import com.itemgraph.db.migration.V5__ContainerFlowTopology;
 import com.itemgraph.db.migration.V20__UnverifiedArmorStandInteractionEvidence;
+import com.itemgraph.db.migration.V21__PersistInferenceCandidates;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.GriefLoggerAdapter;
 import com.itemgraph.ingest.GriefLoggerHistoricalImporter;
 import com.itemgraph.query.AuditLookupFilters;
 import com.itemgraph.query.UnifiedEvidenceQueryService;
+import com.itemgraph.command.IncidentBundleService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -20,6 +22,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -115,6 +118,9 @@ class MariaDbDialectIntegrationTest {
             assertEquals(DatabaseDialect.MYSQL_MARIADB, DatabaseDialect.fromConnection(conn));
             assertEquals(MigrationRunner.LATEST_VERSION,
                     MigrationRunner.runMigrations(conn, DatabaseDialect.MYSQL_MARIADB));
+            new V21__PersistInferenceCandidates().apply(conn, DatabaseDialect.MYSQL_MARIADB);
+            assertEquals("longtext", columnDataType(conn, "ig_inferred_edges", "competing_observation_ids"));
+            assertEquals("bigint", columnDataType(conn, "ig_inferred_edges", "competing_candidates_truncated"));
             // The V5 archive check deletes active observations. Run it before inserting
             // the V20 disposition fixture, which intentionally holds an FK to its row.
             assertPopulatedLegacyObservationArchive(conn);
@@ -226,7 +232,59 @@ class MariaDbDialectIntegrationTest {
             }
 
             assertHistoricalImportAndLookup(endpoint, conn, tempDir);
+            assertIncidentBundleExportIsPortable(conn, tempDir);
         }
+    }
+
+    private static void assertIncidentBundleExportIsPortable(Connection conn, Path tempDir) throws Exception {
+        long timestamp = System.currentTimeMillis();
+        String uniqueId = Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
+        long sourceEventId = ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
+        String itemId = "itemgraph:incident_export_" + uniqueId;
+        UUID playerUuid = UUID.randomUUID();
+        long playerId;
+        try (PreparedStatement node = conn.prepareStatement(
+                "INSERT INTO ig_nodes (node_type, owner_uuid, level_id, x, y, z) "
+                        + "VALUES ('PLAYER', ?, 'minecraft:overworld', 500000, 64, 500000)",
+                Statement.RETURN_GENERATED_KEYS)) {
+            node.setString(1, playerUuid.toString());
+            node.executeUpdate();
+            playerId = generatedKey(node);
+        }
+        long fingerprintId;
+        try (PreparedStatement fingerprint = conn.prepareStatement(
+                "INSERT INTO ig_item_fingerprints (item_id, fingerprint_hash) VALUES (?, ?)",
+                Statement.RETURN_GENERATED_KEYS)) {
+            fingerprint.setString(1, itemId);
+            fingerprint.setString(2, "incident-export-" + uniqueId);
+            fingerprint.executeUpdate();
+            fingerprintId = generatedKey(fingerprint);
+        }
+        try (PreparedStatement observation = conn.prepareStatement("""
+                INSERT INTO ig_observations (source_type, source_event_id, timestamp_ms,
+                    node_id, fingerprint_id, action_type, amount)
+                VALUES ('INCIDENT_EXPORT_TEST', ?, ?, ?, ?, 'DROP_ITEM', 1)
+                """)) {
+            observation.setLong(1, sourceEventId);
+            observation.setLong(2, timestamp);
+            observation.setLong(3, playerId);
+            observation.setLong(4, fingerprintId);
+            observation.executeUpdate();
+        }
+
+        Path exports = tempDir.resolve("incident-export-" + uniqueId);
+        IncidentBundleService.ExportResult result = IncidentBundleService.export(conn,
+                AuditLookupFilters.parse("action.drop_item include." + itemId + " radius.10", timestamp + 1),
+                "minecraft:overworld", 500000, 64, 500000, 10,
+                IncidentBundleService.RedactionProfile.REDACTED, exports, "network-backend.json",
+                () -> false, () -> true, ignored -> {});
+
+        assertEquals(1, result.evidenceCount(), "the bounded export should include the isolated fixture row");
+        assertTrue(IncidentBundleService.verify(exports, "network-backend.json").valid());
+        String bundle = Files.readString(exports.resolve("network-backend.json"));
+        assertFalse(bundle.contains(itemId),
+                "redacted export must not retain item identity or filter value");
+        assertFalse(bundle.contains(playerUuid.toString()), "redacted export must not contain the player UUID");
     }
 
     private static void assertLegacyArmorStandDispositionIsPortable(Connection conn) throws Exception {

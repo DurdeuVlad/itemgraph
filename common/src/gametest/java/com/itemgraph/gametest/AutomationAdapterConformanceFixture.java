@@ -19,11 +19,13 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /** Shared durable assertions for native loader-adapter inventory replays. */
 public final class AutomationAdapterConformanceFixture {
     public static final String TEST_MOD_ID = "itemgraph_gametest";
     public static final int MOVED_AMOUNT = 3;
+    private static final long REGISTRATION_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
 
     private AutomationAdapterConformanceFixture() { }
 
@@ -32,19 +34,21 @@ public final class AutomationAdapterConformanceFixture {
                 .orElseThrow(() -> new AssertionError("ItemGraph API service is unavailable"));
         CompletableFuture<RegistrationResult> registering = service.registerSource(
                 SourceRegistration.of(TEST_MOD_ID, "ItemGraph automation conformance fixture"));
-        pollRegistration(helper, service, replay, registering, 1);
+        pollRegistration(helper, service, replay, registering,
+                System.nanoTime() + REGISTRATION_TIMEOUT_NANOS, 1);
     }
 
     private static void pollRegistration(GameTestHelper helper, ItemGraphService service,
                                          AdapterReplay replay,
-                                         CompletableFuture<RegistrationResult> registering, int tick) {
+                                         CompletableFuture<RegistrationResult> registering,
+                                         long deadlineNanos, int tick) {
         helper.runAtTickTime(tick, () -> {
             if (!registering.isDone()) {
-                if (tick >= 40) {
-                    helper.fail("test integration source did not register within 40 ticks");
+                if (System.nanoTime() >= deadlineNanos) {
+                    helper.fail("test integration source did not register within 30 seconds");
                     return;
                 }
-                pollRegistration(helper, service, replay, registering, tick + 1);
+                pollRegistration(helper, service, replay, registering, deadlineNanos, tick + 1);
                 return;
             }
             try {

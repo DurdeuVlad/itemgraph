@@ -12,7 +12,7 @@ import java.util.Set;
  * Parsed, bounded filters for the GriefLogger-style native audit lookup.
  *
  * <p>The parser deliberately accepts the documented {@code name.value} form,
- * caps a request at five filters, and rejects ambiguous or unsupported values
+ * caps a request at six filters, and rejects ambiguous or unsupported values
  * before any SQL is dispatched.</p>
  */
 public record AuditLookupFilters(
@@ -21,9 +21,10 @@ public record AuditLookupFilters(
         List<String> includeSubjects,
         List<String> excludeSubjects,
         double radiusBlocks,
-        QueryWindow window) {
+        QueryWindow window,
+        List<String> evidenceClasses) {
 
-    private static final int MAX_FILTERS = 5;
+    private static final int MAX_FILTERS = 6;
     private static final int MAX_VALUES_PER_FILTER = 32;
     private static final long MINUTES_PER_HOUR = 60L;
     private static final long MINUTES_PER_DAY = 1_440L;
@@ -34,6 +35,7 @@ public record AuditLookupFilters(
         playerNames = List.copyOf(playerNames == null ? List.of() : playerNames);
         includeSubjects = List.copyOf(includeSubjects == null ? List.of() : includeSubjects);
         excludeSubjects = List.copyOf(excludeSubjects == null ? List.of() : excludeSubjects);
+        evidenceClasses = List.copyOf(evidenceClasses == null ? List.of() : evidenceClasses);
         if (!Double.isFinite(radiusBlocks) || radiusBlocks < 1.0
                 || radiusBlocks > AuditEventQueryService.MAX_RADIUS_BLOCKS) {
             throw new IllegalArgumentException("radius must be between 1 and "
@@ -45,6 +47,12 @@ public record AuditLookupFilters(
         if (!includeSubjects.isEmpty() && !excludeSubjects.isEmpty()) {
             throw new IllegalArgumentException("include and exclude filters cannot be combined");
         }
+    }
+
+    public AuditLookupFilters(List<String> eventTypes, List<String> playerNames,
+                              List<String> includeSubjects, List<String> excludeSubjects,
+                              double radiusBlocks, QueryWindow window) {
+        this(eventTypes, playerNames, includeSubjects, excludeSubjects, radiusBlocks, window, List.of());
     }
 
     /** Parses one or more whitespace-separated GriefLogger-style filter tokens. */
@@ -63,6 +71,7 @@ public record AuditLookupFilters(
         List<String> excludes = List.of();
         double radius = -1.0;
         QueryWindow window = null;
+        List<String> states = List.of();
         Set<String> seen = new HashSet<>();
 
         for (String rawToken : tokens) {
@@ -81,6 +90,7 @@ public record AuditLookupFilters(
                 case "e", "exclude" -> "exclude";
                 case "r", "radius" -> "radius";
                 case "t", "time" -> "time";
+                case "s", "state", "status" -> "state";
                 default -> throw new IllegalArgumentException("unknown filter '" + name + "'");
             };
             if (!seen.add(canonicalName)) {
@@ -94,6 +104,7 @@ public record AuditLookupFilters(
                 case "exclude" -> excludes = parseSubjects(value);
                 case "radius" -> radius = parseRadius(value);
                 case "time" -> window = QueryWindow.lastMinutes(parseMinutes(value), nowMs);
+                case "state" -> states = parseEvidenceClasses(value);
                 default -> throw new IllegalStateException("Unhandled filter " + canonicalName);
             }
         }
@@ -104,7 +115,7 @@ public record AuditLookupFilters(
             throw new IllegalArgumentException("include and exclude filters cannot be combined");
         }
         return new AuditLookupFilters(actions, users, includes, excludes, radius,
-                window == null ? QueryWindow.unbounded() : window);
+                window == null ? QueryWindow.unbounded() : window, states);
     }
 
     public String describe() {
@@ -121,6 +132,21 @@ public record AuditLookupFilters(
         if (!excludeSubjects.isEmpty()) {
             parts.add("exclude=" + String.join(",", excludeSubjects));
         }
+        if (!evidenceClasses.isEmpty()) {
+            parts.add("state=" + String.join(",", evidenceClasses));
+        }
+        parts.add("radius=" + trimRadius(radiusBlocks));
+        parts.add("window=" + window.describe());
+        return String.join(" ", parts);
+    }
+
+    /** Describes the applied query without copying identity or inventory filter values. */
+    public String describeRedacted() {
+        List<String> parts = new ArrayList<>();
+        parts.add("action=" + (eventTypes.isEmpty() ? "all" : String.join(",", eventTypes)));
+        parts.add("user_filter_applied=" + !playerNames.isEmpty());
+        parts.add("subject_filter_applied=" + (!includeSubjects.isEmpty() || !excludeSubjects.isEmpty()));
+        parts.add("state=" + (evidenceClasses.isEmpty() ? "all" : String.join(",", evidenceClasses)));
         parts.add("radius=" + trimRadius(radiusBlocks));
         parts.add("window=" + window.describe());
         return String.join(" ", parts);
@@ -151,6 +177,23 @@ public record AuditLookupFilters(
         return splitValues(value, "subject").stream()
                 .map(AuditLookupFilters::normalizeSubject)
                 .toList();
+    }
+
+    private static List<String> parseEvidenceClasses(String value) {
+        List<String> values = splitValues(value, "state");
+        List<String> normalized = new ArrayList<>(values.size());
+        for (String state : values) {
+            String canonical = state.toUpperCase(Locale.ROOT);
+            try {
+                com.itemgraph.audit.EventTaxonomy.EvidenceClass.valueOf(canonical);
+            } catch (IllegalArgumentException invalid) {
+                throw new IllegalArgumentException("state must be observed, inferred, ambiguous, or unresolved");
+            }
+            if (!normalized.contains(canonical)) {
+                normalized.add(canonical);
+            }
+        }
+        return List.copyOf(normalized);
     }
 
     private static List<String> splitValues(String value, String kind) {

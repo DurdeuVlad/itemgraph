@@ -99,7 +99,7 @@ final class ItemGraphServiceImpl implements ItemGraphService {
 
     @Override
     public ApiVersion apiVersion() {
-        return ApiVersion.PREVIEW_1;
+        return ItemGraphApi.API_VERSION;
     }
 
     @Override
@@ -126,7 +126,7 @@ final class ItemGraphServiceImpl implements ItemGraphService {
                     "INVALID_SOURCE", "a service-issued SourceHandle is required");
         }
         if (source.serviceGeneration() != generation
-                || source.apiVersion() != ApiVersion.PREVIEW_1) {
+                || source.apiVersion() != ItemGraphApi.API_VERSION) {
             return completedSubmission(SubmissionStatus.INVALID_INPUT, sourceModId, eventId,
                     "STALE_SOURCE", "the SourceHandle belongs to a different server lifetime");
         }
@@ -312,7 +312,16 @@ final class ItemGraphServiceImpl implements ItemGraphService {
                 hop.detail(),
                 explanationText,
                 supporting,
-                supportingTruncated);
+                supportingTruncated,
+                hop.evidenceClass(),
+                hop.reasonCode(),
+                hop.candidateEvidenceIds().stream()
+                        .map(candidate -> candidate.startsWith("observation#")
+                                ? "itemgraph:observation:" + candidate.substring("observation#".length())
+                                : candidate)
+                        .toList(),
+                hop.candidateEvidenceTruncated(),
+                hop.quantityImpact());
     }
 
     private EvidenceRef evidence(TraceHop hop) {
@@ -424,7 +433,7 @@ final class ItemGraphServiceImpl implements ItemGraphService {
                     """)) {
                 pstmt.setString(1, registration.modId());
                 pstmt.setString(2, registration.displayName());
-                pstmt.setInt(3, ApiVersion.PREVIEW_1.number());
+                pstmt.setInt(3, ItemGraphApi.API_VERSION.number());
                 pstmt.setLong(4, now);
                 pstmt.setLong(5, now);
                 pstmt.executeUpdate();
@@ -438,7 +447,7 @@ final class ItemGraphServiceImpl implements ItemGraphService {
                     status, registration.modId(), registration.displayName());
             return new RegistrationResult(status,
                     new SourceHandle(registration.modId(), registration.displayName(),
-                            ApiVersion.PREVIEW_1, generation),
+                            ItemGraphApi.API_VERSION, generation),
                     null, null);
         }
     }
@@ -690,7 +699,10 @@ final class ItemGraphServiceImpl implements ItemGraphService {
     private byte[] rawObservation(SourceHandle source, DirectObservation observation) {
         StringBuilder json = new StringBuilder(512);
         json.append('{');
-        field(json, "api_version", String.valueOf(ApiVersion.PREVIEW_1.number()), false);
+        field(json, "api_version", String.valueOf(ItemGraphApi.API_VERSION.number()), false);
+        field(json, "evidence_class", "OBSERVED", true);
+        field(json, "source_reliability", "DIRECT_STATE_DELTA", true);
+        field(json, "privacy_class", "SENSITIVE_LOCATION", true);
         field(json, "source_mod_id", source.modId(), true);
         field(json, "source_event_id", String.valueOf(observation.sourceEventId()), false);
         field(json, "timestamp_ms", String.valueOf(observation.timestampMs()), false);
