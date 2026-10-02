@@ -53,6 +53,7 @@ tasks.named('processResources', ProcessResources) {
 
 tasks.named('runServer') {
     dependsOn ':fabric:remapJar'
+    workingDir apiConsumerServerDir
     doFirst {
         apiConsumerServerDir.mkdirs()
         new File(apiConsumerServerDir, 'eula.txt').setText('eula=true\n', 'UTF-8')
