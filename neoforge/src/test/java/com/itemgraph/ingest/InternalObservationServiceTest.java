@@ -701,6 +701,7 @@ class InternalObservationServiceTest {
         PerformanceReportFixture.writeIfRequested("neoforge", "shutdown_saturation", java.util.Map.of(
                 "accepted_events", 10_000L,
                 "attempted_events", 10_001L,
+                "persisted_counter_delta", service.getTotalPersisted(),
                 "dropped_counter_delta", service.getTotalDropped(),
                 "durable_rows", durableRows,
                 "queue_remaining", (long) service.getQueueSize(),
