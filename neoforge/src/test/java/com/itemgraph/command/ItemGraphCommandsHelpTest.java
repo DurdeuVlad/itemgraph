@@ -1,5 +1,6 @@
 package com.itemgraph.command;
 
+import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.query.AuditLookupFilters;
 import com.itemgraph.query.QueryWindow;
 import com.mojang.brigadier.CommandDispatcher;
@@ -144,6 +145,14 @@ class ItemGraphCommandsHelpTest {
         String pageHelp = String.join("\n", CommandHelp.topicLines("page"));
         assertTrue(pageHelp.contains("Syntax: /ig page <page>"));
         assertTrue(pageHelp.contains("per-player"));
+    }
+
+    @Test
+    void lookupHelpUsesTheSharedAuditEventCatalog() {
+        String lookupHelp = String.join("\n", CommandHelp.topicLines("lookup"));
+
+        assertTrue(lookupHelp.contains(
+                "eventType: " + String.join(", ", AuditEventQueryService.EVENT_TYPES) + "."));
     }
 
     @Test

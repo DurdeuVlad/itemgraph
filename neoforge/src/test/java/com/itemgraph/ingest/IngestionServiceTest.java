@@ -4,6 +4,7 @@ import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.correlation.CorrelationEngine;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.graph.NodeManager;
+import com.itemgraph.metrics.OperationalMetrics;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import net.neoforged.fml.loading.LoadingModList;
@@ -591,6 +592,19 @@ class IngestionServiceTest {
         IngestionResult result = service.runIngestion();
         assertFalse(result.success());
         assertTrue(result.errorMessage().contains("not found"));
+    }
+
+    @Test
+    void correlationMetricsRecordReturnedFailureAsFailure() {
+        OperationalMetrics metrics = OperationalMetrics.getInstance();
+        metrics.reset();
+        dbManager.close();
+
+        var result = ingestionService.runCorrelation();
+
+        assertFalse(result.success());
+        assertEquals(1, metrics.snapshot().correlation().count());
+        assertEquals(1, metrics.snapshot().correlation().failed());
     }
 
     @Test

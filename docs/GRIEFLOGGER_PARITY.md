@@ -377,13 +377,20 @@ callback with zero drops; all three registered Fabric GameTests passed locally.
 CI uploads redacted reports for both loader SQLite probes, NeoForge and Fabric
 512-event probes against disposable MySQL and MariaDB services, and a NeoForge
 shutdown saturation probe. Each network probe runs 20 read-only ledger count
-queries across four worker threads and requires a completed lookup to overlap
-the remaining synthetic hopper, automation, and modded-inventory audit-event
-submissions. The shutdown probe rejects one event beyond the 10,000-item audit
-queue capacity and verifies every accepted event is durable after worker-owned
-shutdown draining. These synthetic probes do not measure real mod adapters or
-the moderator command lookup. Idle baselines and staging-derived latency/memory
-budgets remain open under [#32](https://github.com/DurdeuVlad/itemgraph/issues/32).
+queries across four worker threads and 20 registered `/ig lookup radius.20`
+commands while synthetic hopper, automation, and modded-inventory audit events
+are submitted. The command probe requires returned evidence and successful
+server-thread callbacks, and reports aggregate dispatch-to-callback latency. It
+uses mocked server/player objects; it does not measure live-client delivery,
+real server tick impact, or third-party adapter behavior. The shutdown probe
+rejects one event beyond the 10,000-item audit queue capacity and verifies every
+accepted event is durable after worker-owned shutdown draining. Idle baselines,
+adapter-specific load, and staging-derived latency/memory budgets remain open
+under [#32](https://github.com/DurdeuVlad/itemgraph/issues/32).
+Five isolated local NeoForge runs measured the 10,000-event SQLite shutdown
+drain at 626–666 ms; CI now applies a 1,000 ms regression budget to that exact
+healthy-database fixture. This is not a hard deadline for stalled JDBC I/O and
+does not establish a production budget.
 The metrics
 and current probe limits are documented in [configuration](CONFIGURATION.md)
 and the [test plan](TEST_PLAN.md); they do not establish staging budgets.

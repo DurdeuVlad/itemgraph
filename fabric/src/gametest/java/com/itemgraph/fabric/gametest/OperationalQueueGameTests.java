@@ -1,6 +1,7 @@
 package com.itemgraph.fabric.gametest;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.gametest.CorrelationPerformanceFixture;
 import com.itemgraph.gametest.PerformanceReportFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
@@ -27,9 +28,18 @@ public final class OperationalQueueGameTests implements FabricGameTest {
         ServerTickEvents.END_SERVER_TICK.register(server -> END_TICK_CALLBACKS.incrementAndGet());
     }
 
+    @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zzzz_itemgraph_correlation_burst",
+            timeoutTicks = 300_000)
+    public void correlationThroughputUsesPersistedQuantityEvidence(GameTestHelper helper) {
+        CorrelationPerformanceFixture.run(helper, "fabric");
+    }
+
     @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zz_itemgraph_queue_flush", timeoutTicks = 300_000)
     public void endServerTickFlushPersistsAcceptedAuditEvents(GameTestHelper helper) {
         InternalObservationService service = InternalObservationService.getInstance();
+        service.stop();
+        service.clear();
+        service.start();
         String detailPrefix = "issue30-fabric-queue:" + UUID.randomUUID() + ":";
         long persistedBefore = service.getTotalPersisted();
         long droppedBefore = service.getTotalDropped();
