@@ -72,7 +72,7 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             name: {
                 "count": attempted if name == "enqueue" else (
                     1 if name == "persistence_commit" else 20 if backend_matrix and name == "query" else 0),
-                "failed": 0,
+                "failed": 1 if shutdown_saturation and name == "enqueue" else 0,
                 "average_us": 0,
                 "max_ns": 0,
                 "p95_upper_bound_ns": 0,
@@ -140,6 +140,19 @@ class PerformanceReportValidationTest(unittest.TestCase):
         candidate = report("neoforge", "queue_burst", 8_000)
         candidate["latency"]["enqueue"]["count"] += 25
         with self.assertRaisesRegex(ReportError, "attempted events"):
+            validate_report(candidate)
+
+    def test_rejects_attempted_events_override_for_queue_burst(self) -> None:
+        candidate = report("neoforge", "queue_burst", 8_000)
+        candidate["workload"]["attempted_events"] = 8_001
+        candidate["latency"]["enqueue"]["count"] = 8_001
+        with self.assertRaisesRegex(ReportError, "only valid.*shutdown_saturation"):
+            validate_report(candidate)
+
+    def test_rejects_enqueue_failures_that_disagree_with_explicit_rejections(self) -> None:
+        candidate = report("neoforge", "queue_burst", 8_000)
+        candidate["latency"]["enqueue"]["failed"] = 1
+        with self.assertRaisesRegex(ReportError, "explicit rejection count"):
             validate_report(candidate)
 
     def test_directory_requires_complete_seven_report_artifact_set(self) -> None:

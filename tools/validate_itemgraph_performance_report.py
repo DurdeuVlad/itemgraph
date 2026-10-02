@@ -73,6 +73,8 @@ def validate_report(report: Any) -> dict[str, Any]:
     for key, item in workload.items():
         _integer(item, f"workload.{key}")
     accepted = _integer(workload.get("accepted_events"), "workload.accepted_events", 1)
+    if "attempted_events" in workload and value["scenario"] != "shutdown_saturation":
+        raise ReportError("attempted_events is only valid for the pinned shutdown_saturation probe")
     persisted = _integer(workload.get("persisted_counter_delta"), "workload.persisted_counter_delta")
     dropped = _integer(workload.get("dropped_counter_delta"), "workload.dropped_counter_delta")
     durable_rows = _integer(workload.get("durable_rows"), "workload.durable_rows")
@@ -110,9 +112,11 @@ def validate_report(report: Any) -> dict[str, Any]:
         elif _integer(bound, f"latency.{metric_name}.p95_upper_bound_ns") > 10_000_000_000:
             raise ReportError(f"latency.{metric_name} percentile bound exceeds its declared histogram range")
 
-    expected_enqueue_samples = workload.get("attempted_events", accepted)
+    expected_enqueue_samples = accepted + expected_drop_count
     if latency["enqueue"]["count"] != expected_enqueue_samples:
         raise ReportError("enqueue latency samples do not match this scenario's attempted events")
+    if latency["enqueue"]["failed"] != expected_drop_count:
+        raise ReportError("enqueue latency failures do not match this scenario's explicit rejection count")
     if latency["persistence_commit"]["count"] == 0:
         raise ReportError("queue benchmark is missing persistence latency samples")
 
