@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -778,5 +779,30 @@ class QueryDispatcherTest {
     void testShutdownIdempotent() {
         assertDoesNotThrow(QueryDispatcher::shutdown);
         assertDoesNotThrow(QueryDispatcher::shutdown);
+    }
+
+    @Test
+    void shutdownCancelsAnActiveCancellableWorkerTask() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        AtomicBoolean cancellationObserved = new AtomicBoolean();
+        QueryDispatcher.CancellableDataHandle<Boolean> handle = QueryDispatcher.submitCancellableTask(cancelled -> {
+            started.countDown();
+            while (!cancelled.getAsBoolean()) {
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            cancellationObserved.set(cancelled.getAsBoolean());
+            return cancellationObserved.get();
+        });
+
+        assertTrue(started.await(5, TimeUnit.SECONDS), "the cancellable worker task should start");
+        QueryDispatcher.shutdown();
+
+        assertTrue(handle.future().isDone(), "shutdown must finish the accepted cancellable task");
+        assertTrue(cancellationObserved.get(), "the task must observe cancellation before worker shutdown returns");
     }
 }

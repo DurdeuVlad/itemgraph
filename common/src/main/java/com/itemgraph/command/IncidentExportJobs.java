@@ -100,9 +100,7 @@ final class IncidentExportJobs {
             source.sendFailure(Component.literal("[ItemGraph] No active export job has that ID."));
             return false;
         }
-        Entity actor = source.getEntity();
-        UUID actorId = actor instanceof ServerPlayer player ? player.getUUID() : null;
-        if (!source.hasPermission(4) && (actorId == null || !actorId.equals(job.ownerId))) {
+        if (!isAuthorizedToCancel(source, job.ownerId)) {
             source.sendFailure(Component.literal("[ItemGraph] Only the job owner or a level-4 operator can cancel it."));
             return false;
         }
@@ -115,6 +113,12 @@ final class IncidentExportJobs {
         }
         source.sendSuccess(() -> Component.literal("[ItemGraph] Cancellation requested for export job " + job.id + "."), false);
         return true;
+    }
+
+    static boolean isAuthorizedToCancel(CommandSourceStack source, UUID ownerId) {
+        Entity actor = source.getEntity();
+        UUID actorId = actor instanceof ServerPlayer player ? player.getUUID() : null;
+        return source.hasPermission(4) || actorId != null && actorId.equals(ownerId);
     }
 
     private static void reportProgress(Job job, int completedRecords) {

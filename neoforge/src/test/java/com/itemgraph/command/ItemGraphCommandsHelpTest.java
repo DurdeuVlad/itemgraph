@@ -229,6 +229,26 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
+    void fullIncidentExportRequiresPermissionLevelFourOnBothRoots() {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        var fullExport = dispatcher.getRoot().getChild("itemgraph")
+                .getChild("export").getChild("full");
+        when(source.hasPermission(4)).thenReturn(false);
+
+        assertFalse(fullExport.canUse(source), "permission level 2 must not see the full-export literal");
+        assertSame(dispatcher.getRoot().getChild("itemgraph"), dispatcher.getRoot().getChild("ig").getRedirect(),
+                "the /ig alias must use the same permission-gated command tree");
+        assertTrue(dispatcher.getRoot().getChild("itemgraph").getChild("export").canUse(source),
+                "permission level 2 can still access redacted export commands");
+
+        when(source.hasPermission(4)).thenReturn(true);
+        assertTrue(fullExport.canUse(source), "permission level 4 must have access to full export");
+        when(source.hasPermission(4)).thenReturn(false);
+        assertTrue(dispatcher.getRoot().getChild("itemgraph").getChild("export").canUse(source));
+    }
+
+    @Test
     void standalonePageRequiresAnActivePlayerSession() throws Exception {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();

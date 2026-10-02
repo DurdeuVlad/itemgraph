@@ -1144,15 +1144,19 @@ Run once with the consolidated M9 verification batch:
 - Confirm all source reads use ItemGraph's read-only connection and that neither
   export nor verification mutates GriefLogger or ItemGraph evidence storage.
 
-The current local SQLite unit batch covers 100 observed rows, 100 linked edges,
+The local SQLite unit batch covers 100 observed rows, 100 linked edges,
 200 total records, the 4 MiB rejection, same-name concurrent publication,
 existing-file collision, invalid/missing names, write failure, cancellation
 before/after the bounded query, cancellation during record processing, and a
-worker interruption before query execution. The expanded-batch command and
-result are recorded in the PR. The remaining matrix items are permission-level
-execution, owner/operator cancellation authorization, MySQL/MariaDB bundle
-exports, and an actual server-shutdown integration fixture. No staging or
-production run is claimed.
+worker interruption before query execution. Command tests verify redacted
+exports remain available at permission level 2, full exports require level 4
+through both `/itemgraph` and `/ig`, and only the owner or a level-4 operator
+passes the cancellation authorization policy. `QueryDispatcherTest` verifies
+an active cancellable worker observes cancellation and terminates on dispatcher
+shutdown; both loader server-stop callbacks are the source-level integration
+entry points. A CI-only MariaDB/MySQL integration fixture exports and verifies
+a redacted bundle from each disposable backend. The expanded-batch command and
+result are recorded in the PR. No staging or production run is claimed.
 
 CoreProtect's documented lookup filters and caller-managed asynchronous API
 lookups are the comparison point; they do not define a signed incident bundle.
