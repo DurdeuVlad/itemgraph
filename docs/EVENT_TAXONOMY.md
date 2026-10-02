@@ -107,7 +107,7 @@ definition. An unavailable or ambiguous cause remains unresolved with its
 reason code and supporting evidence IDs.
 
 Issue #44 reason codes are `SOURCE_EQUIVALENCE_AMBIGUOUS`, `UNKNOWN_ENDPOINT`,
-`COMPONENT_DECODE_FAILED`, `CORRELATION_COMPETING_CANDIDATES`, and
+`ITEM_FINGERPRINT_UNRESOLVED`, `COMPONENT_DECODE_FAILED`, `CORRELATION_COMPETING_CANDIDATES`, and
 `EVIDENCE_SUPERSEDED`. They classify query results without changing or replacing
 stored raw evidence. Ambiguous and unresolved results allocate zero quantity.
 

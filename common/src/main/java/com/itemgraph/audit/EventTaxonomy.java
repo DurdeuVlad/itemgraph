@@ -134,6 +134,8 @@ public final class EventTaxonomy {
                     "Several source rows remain possible matches; the group has no canonical allocation."),
             new ReasonCode("UNKNOWN_ENDPOINT", 44,
                     "The raw row does not identify a resolvable source or destination endpoint."),
+            new ReasonCode("ITEM_FINGERPRINT_UNRESOLVED", 44,
+                    "A transformation references a source or result item fingerprint that is unavailable."),
             new ReasonCode("COMPONENT_DECODE_FAILED", 44,
                     "The raw item component payload is retained but could not be decoded."),
             new ReasonCode("CORRELATION_COMPETING_CANDIDATES", 44,

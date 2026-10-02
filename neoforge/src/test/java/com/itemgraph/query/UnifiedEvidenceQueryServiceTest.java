@@ -79,15 +79,18 @@ class UnifiedEvidenceQueryServiceTest {
     }
 
     @Test
-    void stateFilterKeepsDanglingTransformationEvidenceAsUnresolvedWithoutAllocatingQuantity() throws Exception {
+    void stateFilterNamesDanglingTransformationFingerprintSeparatelyFromMissingEndpoint() throws Exception {
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_item_transformations
                     (transformation_type, player_node_id, source_fingerprint_id,
                      result_fingerprint_id, quantity, timestamp_ms, details)
-                VALUES ('CRAFTING', ?, 9998, ?, 4, 2_000, 'missing source fingerprint fixture')
+                VALUES ('CRAFTING', ?, 9998, ?, 4, 2_000, 'missing source fingerprint fixture'),
+                       ('CRAFTING', NULL, ?, ?, 2, 2_000, 'missing player endpoint fixture')
                 """)) {
             statement.setLong(1, playerNode);
             statement.setLong(2, resultFingerprint);
+            statement.setLong(3, stoneFingerprint);
+            statement.setLong(4, resultFingerprint);
             statement.executeUpdate();
         }
 
@@ -96,12 +99,19 @@ class UnifiedEvidenceQueryServiceTest {
         List<UnifiedEvidenceDetail> rows = service.findFiltered(
                 conn, unresolved, "minecraft:overworld", 10, 64, 10, 100, 0);
 
-        assertEquals(1, rows.size());
-        assertEquals("transformation#1", rows.get(0).evidenceId());
-        assertEquals("UNRESOLVED", rows.get(0).evidenceClass());
-        assertEquals("UNKNOWN_ENDPOINT", rows.get(0).reasonCode());
-        assertEquals(4, rows.get(0).quantity());
-        assertEquals(0, rows.get(0).quantityImpact());
+        assertEquals(2, rows.size());
+        UnifiedEvidenceDetail missingFingerprint = rows.stream()
+                .filter(row -> row.detail().contains("missing source fingerprint fixture"))
+                .findFirst().orElseThrow();
+        UnifiedEvidenceDetail missingEndpoint = rows.stream()
+                .filter(row -> row.detail().contains("missing player endpoint fixture"))
+                .findFirst().orElseThrow();
+        assertEquals("UNRESOLVED", missingFingerprint.evidenceClass());
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", missingFingerprint.reasonCode());
+        assertEquals(4, missingFingerprint.quantity());
+        assertEquals(0, missingFingerprint.quantityImpact());
+        assertEquals("UNKNOWN_ENDPOINT", missingEndpoint.reasonCode());
+        assertEquals(0, missingEndpoint.quantityImpact());
         assertTrue(service.findFiltered(conn, AuditLookupFilters.parse(
                         "state.observed radius.100", 10_000L),
                 "minecraft:overworld", 10, 64, 10, 100, 0).isEmpty());

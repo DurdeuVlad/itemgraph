@@ -469,7 +469,8 @@ public final class UnifiedEvidenceQueryService {
         appendActionFilter(sql, args, TRANSFORMATION_ACTION, filters.eventTypes(), true);
         appendEvidenceClassFilter(sql, args,
                 "CASE WHEN p.id IS NULL OR p.node_type = 'UNKNOWN' "
-                        + "OR source_fp.item_id IS NULL OR result_fp.item_id IS NULL "
+                        + "THEN 'UNRESOLVED' "
+                        + "WHEN source_fp.item_id IS NULL OR result_fp.item_id IS NULL "
                         + "THEN 'UNRESOLVED' ELSE 'OBSERVED' END", filters.evidenceClasses());
         appendUserFilter(sql, args, List.of("p.custom_label"), List.of("p.owner_uuid"), filters.playerNames());
         appendWindow(sql, args, filters.window(), "t.timestamp_ms");
@@ -493,6 +494,8 @@ public final class UnifiedEvidenceQueryService {
                     boolean unresolved = rs.getObject("player_node_id") == null
                             || "UNKNOWN".equals(rs.getString("player_node_type"))
                             || sourceItem == null || resultItem == null;
+                    boolean unknownEndpoint = rs.getObject("player_node_id") == null
+                            || "UNKNOWN".equals(rs.getString("player_node_type"));
                     rows.add(new UnifiedEvidenceDetail(
                             "TRANSFORMATION", "transformation#" + rs.getLong("id"),
                             rs.getLong("timestamp_ms"), rs.getString("level_id"),
@@ -501,7 +504,8 @@ public final class UnifiedEvidenceQueryService {
                             rs.getString("transformation_type"), rs.getInt("quantity"),
                             valueOr(sourceItem, "(missing)") + " -> " + valueOr(resultItem, "(missing)"), detail,
                             unresolved ? "UNRESOLVED" : "OBSERVED", null, null, null, null,
-                            unresolved ? "UNKNOWN_ENDPOINT" : null, List.of(),
+                            !unresolved ? null : unknownEndpoint
+                                    ? "UNKNOWN_ENDPOINT" : "ITEM_FINGERPRINT_UNRESOLVED", List.of(),
                             unresolved ? 0 : rs.getInt("quantity"), null, false));
                 }
             }
