@@ -23,6 +23,7 @@ WORKLOAD_FIELDS = {
     "max_server_thread_batch_ns", "end_tick_callbacks", "flush_every_ticks",
     "enqueue_total_ns", "concurrent_lookups", "overlapping_lookups",
     "automation_events", "modded_inventory_events", "elapsed_ms", "attempted_events",
+    "correlation_pairs", "correlation_passes", "correlation_edges",
 }
 QUEUE_FIELDS = {
     "depth", "peak_depth", "capacity_per_type", "flush_every_ticks",
@@ -57,7 +58,7 @@ def validate_report(report: Any) -> dict[str, Any]:
     if value["scenario"] not in {
         "queue_burst", "queue_flush_durability",
         "backend_mariadb_matrix", "backend_mysql_matrix", "backend_fabric_mariadb_matrix",
-        "backend_fabric_mysql_matrix", "shutdown_saturation",
+        "backend_fabric_mysql_matrix", "shutdown_saturation", "correlation_burst",
     }:
         raise ReportError("scenario is not a supported queue benchmark")
     if value["minecraft_version"] != "1.21.1":
@@ -169,6 +170,18 @@ def validate_report(report: Any) -> dict[str, Any]:
             raise ReportError("shutdown_saturation must record exactly one over-capacity submission")
         if queue["peak_depth"] != queue["capacity_per_type"] or queue["rejected_items"] != 1:
             raise ReportError("shutdown_saturation must fill the bounded audit queue and record its rejection")
+    if value["scenario"] == "correlation_burst":
+        if value["loader"] not in LOADERS or value["backend"] != "sqlite" or accepted != 500:
+            raise ReportError("correlation_burst must be the pinned 500-observation SQLite workload on either loader")
+        if durable_rows != accepted:
+            raise ReportError("correlation_burst must durably persist every accepted source observation")
+        if (_integer(workload.get("correlation_pairs"), "workload.correlation_pairs") != 250
+                or _integer(workload.get("correlation_passes"), "workload.correlation_passes") != 5
+                or _integer(workload.get("correlation_edges"), "workload.correlation_edges") != 250):
+            raise ReportError("correlation_burst must correlate five batches into exactly 250 quantity-conserving edges")
+        if (latency["correlation"]["count"] != workload["correlation_passes"]
+                or latency["correlation"]["failed"] != 0):
+            raise ReportError("correlation_burst must report five successful measured correlation passes")
     network_scenarios = {"backend_mariadb_matrix", "backend_mysql_matrix",
                          "backend_fabric_mariadb_matrix", "backend_fabric_mysql_matrix"}
     if value["scenario"] in network_scenarios:
@@ -209,6 +222,8 @@ def validate_directory(directory: Path) -> list[dict[str, Any]]:
         "itemgraph-fabric-backend_fabric_mariadb_matrix.json",
         "itemgraph-fabric-backend_fabric_mysql_matrix.json",
         "itemgraph-neoforge-shutdown_saturation.json",
+        "itemgraph-neoforge-correlation_burst.json",
+        "itemgraph-fabric-correlation_burst.json",
     }
     actual = {path.name for path in directory.glob("*.json")}
     if actual != expected:

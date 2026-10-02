@@ -2,6 +2,7 @@ package com.itemgraph.gametest;
 
 import com.itemgraph.ItemGraph;
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.gametest.CorrelationPerformanceFixture;
 import com.itemgraph.gametest.PerformanceReportFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.gametest.framework.GameTest;
@@ -27,6 +28,14 @@ public final class OperationalLoadGameTests {
     private static final long SERVER_TICK_BUDGET_NANOS = 50_000_000L;
 
     private OperationalLoadGameTests() { }
+
+    @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zzzzz_itemgraph_correlation_burst",
+            timeoutTicks = 300_000)
+    public static void correlationThroughputUsesPersistedQuantityEvidence(GameTestHelper helper) {
+        helper.assertFalse(ModList.get().isLoaded("grieflogger"),
+                "The isolated correlation probe must run without GriefLogger installed");
+        CorrelationPerformanceFixture.run(helper, "neoforge");
+    }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zz_itemgraph_queue_burst",
             timeoutTicks = 300_000)

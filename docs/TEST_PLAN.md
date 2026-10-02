@@ -418,27 +418,33 @@ counts, queue accounting, and existing server-thread submission ceilings.
 rejection accounting, and the complete artifact set. CI uploads the validated
 `itemgraph-performance-reports` artifact for 14 days.
 
-The seven-report set covers NeoForge SQLite burst (8,000 events), Fabric SQLite
+The nine-report set covers NeoForge SQLite burst (8,000 events), Fabric SQLite
 flush (32 events), NeoForge and Fabric each against disposable MySQL and MariaDB
 (512 synthetic events and 20 concurrent read-only ledger lookups per backend),
-and NeoForge shutdown saturation (10,000 accepted audit events, one explicitly
+NeoForge shutdown saturation (10,000 accepted audit events, one explicitly
 rejected over-capacity submission, worker-owned bounded drain, and exact durable
-row verification). The network probes require a measured query/submission overlap
-and include labeled synthetic automation and modded-inventory events. They do
-not exercise real adapters or the moderator command lookup. An idle baseline and
-staging-derived latency/memory budgets remain open; CI timings are measurements,
-not production budgets.
+row verification), and a cross-loader SQLite correlation workload (500 accepted
+observations, five passes over 50 drop/pickup pairs each, and 250 quantity-
+conserving inferred edges). The correlation reports verify durable source rows,
+finalized observations, edge totals, and source/destination allocation totals.
+The network probes require a measured query/submission overlap and include
+labeled synthetic automation and modded-inventory events. They do not exercise
+real adapters or the moderator command lookup. An idle baseline and staging-
+derived latency/memory budgets remain open; CI timings are measurements, not
+production budgets.
 
 The performance reports snapshot process-wide metrics. Each queue GameTest now
 stops and drains the prior worker, clears its counters, and restarts it before
 measuring; each GameTest has its own batch. The validator requires the enqueue
 sample count to equal this scenario's attempted-event count, and each network
-report's query sample count to equal its 20 completed lookups. This catches
-metrics accidentally carried in from another test. Reports still contain a
-single run per scenario; their latency and heap fields are diagnostic rather
-than statistical regression baselines. `heap_used_bytes` is a point-in-time
-snapshot, not peak memory or allocation rate. The latency histogram reports
-coarse upper-bound buckets, so it cannot support narrow p95 regression gates.
+report's query sample count to equal its 20 completed lookups. Correlation reports
+must contain exactly five successful passes and the expected durable quantity
+allocations. This catches metrics accidentally carried in from another test.
+Reports still contain one CI run per scenario; their latency and heap fields are
+diagnostic rather than statistical regression baselines. `heap_used_bytes` is a
+point-in-time snapshot, not peak memory or allocation rate. The latency histogram
+reports coarse upper-bound buckets, so it cannot support narrow p95 regression
+gates.
 
 Two redacted CI artifacts show why those limits matter. Runs
 [36944915206](https://github.com/DurdeuVlad/itemgraph/actions/runs/36944915206)
