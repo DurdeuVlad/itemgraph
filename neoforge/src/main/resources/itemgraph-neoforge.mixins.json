@@ -18,7 +18,11 @@
     "ProjectileMixin",
     "BucketItemMixin",
     "BucketItemAccessor",
-    "ServerLevelMixin"
+    "ServerLevelMixin",
+    "HopperBlockEntityMixin",
+    "DispenserBlockMixin",
+    "DropperBlockMixin",
+    "DefaultDispenseItemBehaviorMixin"
   ],
   "injectors": {
     "defaultRequire": 1

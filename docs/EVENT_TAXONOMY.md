@@ -77,7 +77,8 @@ event coverage or full GriefLogger parity.
 The item-flow and transformation action IDs are cataloged on their own storage
 surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,
 `PICKUP_ITEM`, `THROW_ITEM`, `SHOOT_ITEM`, `BREAK_ITEM`, `CONSUME_ITEM`,
-`HOPPER_INSERT`, `HOPPER_EXTRACT`, `DEATH_DROP`, `ADD_ITEM_ENDER`,
+`HOPPER_INSERT`, `HOPPER_EXTRACT`, `DISPENSER_DROP`, `DROPPER_DROP`,
+`DEATH_DROP`, `ADD_ITEM_ENDER`,
 `REMOVE_ITEM_ENDER`, `CRAFT`, `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR`.
 Quantity rows use signed deltas; transformations use explicit input/output
 semantics. The code-level definitions identify issue ownership and the exact

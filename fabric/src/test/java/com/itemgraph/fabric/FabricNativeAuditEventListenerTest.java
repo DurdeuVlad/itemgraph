@@ -51,6 +51,8 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.never;
 
 class FabricNativeAuditEventListenerTest {
     private final InspectionService inspections = InspectionService.getInstance();
@@ -711,6 +713,70 @@ class FabricNativeAuditEventListenerTest {
                         new FabricNativeAuditEventListener.HopperDelta(hopper, dirt, 3, false),
                         new FabricNativeAuditEventListener.HopperDelta(destination, dirt, 3, true)),
                 deltas.stream().sorted(java.util.Comparator.comparing(delta -> delta.containerPos().toShortString())).toList());
+    }
+
+    @Test
+    void hopperSnapshotRejectsOverflowingSlotCountAndKeepsEmptyDistinctFromIncomplete() {
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos hopperPos = BlockPos.ZERO;
+        BlockPos adjacentPos = hopperPos.east();
+        when(level.hasChunkAt(any(BlockPos.class))).thenReturn(true);
+
+        BlockEntity hopperEntity = mock(BlockEntity.class,
+                org.mockito.Mockito.withSettings().extraInterfaces(Container.class));
+        BlockEntity oversizedEntity = mock(BlockEntity.class,
+                org.mockito.Mockito.withSettings().extraInterfaces(Container.class));
+        Container hopper = (Container) hopperEntity;
+        Container oversized = (Container) oversizedEntity;
+        when(hopper.getContainerSize()).thenReturn(5);
+        when(oversized.getContainerSize()).thenReturn(Integer.MAX_VALUE);
+        when(level.getBlockEntity(hopperPos)).thenReturn(hopperEntity);
+        when(level.getBlockEntity(adjacentPos)).thenReturn(oversizedEntity);
+
+        Map<BlockPos, Map<CanonicalItem, Integer>> incomplete =
+                FabricNativeAuditEventListener.snapshotHopperContainers(level, List.of(hopperPos, adjacentPos));
+
+        assertNull(incomplete, "oversized post-transfer inventory must invalidate the whole snapshot");
+        verify(oversized, never()).getItem(anyInt());
+        assertTrue(FabricNativeAuditEventListener.computeHopperDeltas(
+                Map.of(hopperPos, Map.of()), incomplete).isEmpty(),
+                "an incomplete snapshot must not create synthetic extraction deltas");
+
+        when(level.getBlockEntity(hopperPos)).thenReturn(null);
+        Map<BlockPos, Map<CanonicalItem, Integer>> replaced =
+                FabricNativeAuditEventListener.snapshotHopperContainers(level, List.of(hopperPos));
+        assertNull(replaced, "a previously observed container replaced before the after snapshot is incomplete");
+        assertTrue(FabricNativeAuditEventListener.computeHopperDeltas(
+                Map.of(hopperPos, Map.of()), replaced).isEmpty(),
+                "a replaced container must not create synthetic extraction deltas");
+
+        when(level.hasChunkAt(any(BlockPos.class))).thenReturn(false);
+        Map<BlockPos, Map<CanonicalItem, Integer>> empty =
+                FabricNativeAuditEventListener.snapshotHopperContainers(level, List.of(hopperPos), false);
+        assertEquals(Map.of(), empty, "a valid empty snapshot must remain distinguishable from failure");
+    }
+
+    @Test
+    void hopperAfterSnapshotRejectsAnUnloadedPreviouslyObservedContainer() {
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos containerPos = BlockPos.ZERO;
+        when(level.hasChunkAt(containerPos)).thenReturn(false);
+
+        Map<BlockPos, Map<CanonicalItem, Integer>> incomplete =
+                FabricNativeAuditEventListener.snapshotHopperContainers(level, List.of(containerPos));
+
+        assertNull(incomplete, "an unloaded container cannot be interpreted as empty after a transfer");
+        verify(level, never()).getBlockEntity(containerPos);
+        CanonicalItem dirt = new CanonicalItem("minecraft:dirt", "fp-dirt", null, null, null);
+        assertTrue(FabricNativeAuditEventListener.computeHopperDeltas(
+                Map.of(containerPos, Map.of(dirt, 1)), incomplete).isEmpty());
+    }
+
+    @Test
+    void hopperSlotBoundArithmeticRejectsIntegerOverflow() {
+        assertFalse(FabricNativeAuditEventListener.hopperSlotCountWithinBound(5, Integer.MAX_VALUE));
+        assertTrue(FabricNativeAuditEventListener.hopperSlotCountWithinBound(5, 507));
+        assertFalse(FabricNativeAuditEventListener.hopperSlotCountWithinBound(5, 508));
     }
 
     @Test

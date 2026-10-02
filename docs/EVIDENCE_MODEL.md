@@ -160,6 +160,16 @@ interval-bounded UNKNOWN-caller evidence. If the queue remains full, the retry i
 dropped and is not attributed to a player; `/ig status` reports `dropped` and
 `capabilityQueueRejections` counters.
 
+`HOPPER_INSERT` and `HOPPER_EXTRACT` are bounded net deltas around a successful vanilla
+`HopperBlockEntity.tryMoveItems` call. They identify the changed container and leave the
+remote endpoint unknown; they do not claim a player or a specific modded machine. Both loader
+hooks snapshot only the hopper and six adjacent block positions, skip an incomplete snapshot,
+and cap it at 512 total container slots. `DISPENSER_DROP` and `DROPPER_DROP` are
+emitted only for a vanilla default-behavior `ItemEntity` accepted by `addFreshEntity`; each
+row connects the exact source block position to the ground node and retains the entity UUID.
+They do not cover projectile launches, bucket/container behavior, custom behaviors that do not
+use the default item spawn path, or rejected entity insertion.
+
 An integration using `AutomationTransferAdapter` may emit `TRANSFER_ITEM` only after its
 native operation's outermost transaction commits. The reported amount is the quantity the
 native API accepted; simulation, zero acceptance, rejection, and rollback emit no movement

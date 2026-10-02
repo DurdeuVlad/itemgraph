@@ -1477,6 +1477,7 @@ public class InternalObservationService {
                         }
                         case "GROUND" -> {
                             // DROP_ITEM / DEATH_DROP: player -> ground
+                            // Dispenser/dropper item entities: exact source container -> ground
                             // PICKUP_ITEM: ground -> player
                             long groundNodeId = nodeManager.getOrCreateGroundNode(
                                     conn, obs.targetLevelName(),
@@ -1484,6 +1485,11 @@ public class InternalObservationService {
                             if ("PICKUP_ITEM".equals(obs.actionType())) {
                                 originNodeId = groundNodeId;
                                 targetNodeId = playerNode(conn, nodeManager, obs);
+                            } else if ("DISPENSER_DROP".equals(obs.actionType())
+                                    || "DROPPER_DROP".equals(obs.actionType())) {
+                                originNodeId = nodeManager.getOrCreateContainerNode(
+                                        conn, obs.levelName(), obs.x(), obs.y(), obs.z());
+                                targetNodeId = groundNodeId;
                             } else {
                                 // DROP_ITEM, DEATH_DROP, THROW_ITEM, SHOOT_ITEM
                                 originNodeId = playerNode(conn, nodeManager, obs);

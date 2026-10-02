@@ -652,9 +652,19 @@ ItemGraph JDBC connection.
   methods and nested transaction commit/rollback, but no global callback for all third-party
   storage calls. NeoForge 21.1 capabilities register per block or block entity type;
   `IItemHandler` has a per-call `simulate` flag but no caller identity. ItemGraph therefore
-  does not claim automatic interception of arbitrary modded inventories. Existing native
-  NeoForge wrappers cover the vanilla providers listed above; Fabric's native hopper hook
-  covers vanilla `Container` implementations.
+  does not claim automatic interception of arbitrary modded inventories. NeoForge's
+  native capability wrappers cover the vanilla providers listed above. Vanilla hopper
+  transfers use a separate `HopperBlockEntity.tryMoveItems` hook on both loaders because
+  the vanilla path mutates `Container` directly. The NeoForge capture snapshots at most
+  seven adjacent positions and 512 total slots; both loaders report only net quantity
+  changes with an UNKNOWN caller and endpoint. Narrow `DispenserBlock` and `DropperBlock`
+  wrappers bind their `dispenseFrom` calls to `DefaultDispenseItemBehavior.spawnItem` and record
+  only an accepted `ItemEntity` after `Level.addFreshEntity` succeeds. That observed
+  path becomes a source-container-to-ground row with the entity UUID; custom behaviors,
+  projectiles, buckets, and rejected spawns are outside the contract. The pinned Fabric
+  0.116.12+1.21.1 event set and NeoForge 21.1.248 API do not provide a global hopper or
+  dispenser committed-transfer event, so these vanilla hooks are loader-local and
+  modded inventories use the explicit adapter contract.
 - Fabric integrations can use `FabricTransferStorageAdapter` to wrap a `Storage<ItemVariant>`
   (or one `SlottedStorage` slot). It delegates reads and transfer results unchanged, keeps
   a bounded per-thread transaction journal, applies nested rollback, and submits endpoint

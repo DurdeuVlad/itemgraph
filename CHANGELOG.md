@@ -18,9 +18,15 @@ The project follows a simple pre-1.0 development changelog model.
   movement evidence. Explicit `QUEUE_FULL` responses retry the same event identity at
   most three times through a 128-entry bounded worker queue; other outcomes are not
   replayed. This is in-memory retry only, and pending retries can be interrupted by
-  process shutdown. Automatic interception of
+  process shutdown. Vanilla hopper transfers now emit the same bounded,
+  endpoint-unknown net deltas on NeoForge as on Fabric; the NeoForge hook is
+  limited to seven adjacent container positions and 512 total slots. Both loaders
+  also persist accepted default-behavior dispenser/dropper item entities with exact
+  source, item, amount, ground endpoint, and entity UUID. Automatic interception of
   arbitrary modded inventories remains unsupported until a supported integration is
-  exercised; no version bump or distributable JAR was produced.
+  exercised. Snapshot bounds use overflow-safe arithmetic, and hopper delta pairs are
+  suppressed when a previously observed container cannot be reread; no version bump
+  or distributable JAR was produced.
 
 ### Fixed
 
