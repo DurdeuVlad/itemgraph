@@ -1,6 +1,9 @@
 package com.itemgraph.fabric.mixin;
 
 import com.itemgraph.fabric.FabricNativeAuditEventListener;
+import com.itemgraph.audit.AdminMutationCapture;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.mojang.brigadier.ParseResults;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -20,5 +23,15 @@ public final class CommandsMixin {
     private void itemgraph$recordCommandAttempt(ParseResults<CommandSourceStack> parse,
                                                  String command, CallbackInfo callback) {
         FabricNativeAuditEventListener.onCommandAttempt(parse, command);
+    }
+
+    @WrapMethod(method = "performCommand")
+    private void itemgraph$clearPendingCommandContext(ParseResults<CommandSourceStack> parse,
+                                                       String command, Operation<Void> original) throws Throwable {
+        try {
+            original.call(parse, command);
+        } finally {
+            AdminMutationCapture.finishCommandDispatch();
+        }
     }
 }

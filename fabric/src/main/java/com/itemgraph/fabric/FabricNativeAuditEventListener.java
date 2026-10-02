@@ -2,6 +2,7 @@ package com.itemgraph.fabric;
 
 import com.itemgraph.fabric.mixin.BucketItemAccessor;
 import com.itemgraph.ingest.InternalObservationService;
+import com.itemgraph.audit.AdminMutationCapture;
 import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
@@ -147,6 +148,9 @@ public final class FabricNativeAuditEventListener {
         ServerMessageEvents.CHAT_MESSAGE.register(FabricNativeAuditEventListener::onChat);
         PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
+                AdminMutationCapture.recordCreativeBlockConfirmed(serverPlayer, "break",
+                        BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos,
+                        "fabric_player_block_break_after");
                 List<AuditEventQueryService.ExactPosition> supersessionPositions = BlockInspectionTargets
                         .resolveBlockPositions(serverLevel, pos, state).stream()
                         .map(target -> new AuditEventQueryService.ExactPosition(
@@ -266,12 +270,27 @@ public final class FabricNativeAuditEventListener {
      * deliberately an attempt rather than completed command evidence.
      */
     public static void onCommandAttempt(ParseResults<CommandSourceStack> parse, String command) {
-        if (parse == null || parse.getContext() == null || parse.getContext().getSource() == null
-                || !(parse.getContext().getSource().getEntity() instanceof ServerPlayer player)) {
+        if (parse == null || parse.getContext() == null || parse.getContext().getSource() == null) {
             return;
         }
+        CommandSourceStack source = parse.getContext().getSource();
+        AdminMutationCapture.recordCommandAttemptSafely(new AdminMutationCapture.ParseResultsAdapter(
+                source, command, source.hasPermission(2), false,
+                !parse.getExceptions().isEmpty(), commandNodeNames(parse)));
+        if (AdminMutationCapture.shouldSuppressRawCommand(command)) return;
+        if (!(source.getEntity() instanceof ServerPlayer player)) return;
         recordCommandAttempt(player.getUUID().toString(), player.getGameProfile().getName(),
                 player.level().dimension().location().toString(), player.blockPosition(), command);
+    }
+
+    private static List<String> commandNodeNames(ParseResults<CommandSourceStack> parse) {
+        List<String> names = new ArrayList<>();
+        var context = parse.getContext();
+        while (context != null) {
+            context.getNodes().forEach(node -> names.add(node.getNode().getName()));
+            context = context.getChild();
+        }
+        return List.copyOf(names);
     }
 
     static void recordCommandAttempt(String playerUuid, String playerName, String levelName,
@@ -534,6 +553,10 @@ public final class FabricNativeAuditEventListener {
 
     private static void onItemDropped(ServerPlayer player, ItemEntity itemEntity,
                                       ItemStack originalStack, String actionType) {
+        if (AdminMutationCapture.captureGiveDrop(player, itemEntity)
+                || AdminMutationCapture.captureCreativeDrop(player, itemEntity, true)) {
+            return;
+        }
         if (player == null || itemEntity == null || originalStack == null || originalStack.isEmpty()
                 || actionType == null || player.level().isClientSide() || itemEntity.isRemoved()) {
             return;
@@ -911,9 +934,22 @@ public final class FabricNativeAuditEventListener {
                         java.util.LinkedHashMap::new));
         for (BlockPos pos : changedBlockPositions(beforeStates, afterStates, item.getBlock())) {
             BlockState state = afterStates.get(pos);
+            AdminMutationCapture.recordCreativeBlockConfirmedSafely(player, "place",
+                    BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos,
+                    "fabric_block_item_after_state_diff");
             recordBlockPlacement(player.getUUID().toString(), player.getGameProfile().getName(),
                     level.dimension().location().toString(), pos,
                     BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+        }
+    }
+
+    public static void onBlockItemPlacedSafely(BlockPlaceContext context, BlockItem item,
+                                               InteractionResult result,
+                                               Map<BlockPos, BlockState> beforeStates) {
+        try {
+            onBlockItemPlaced(context, item, result, beforeStates);
+        } catch (Throwable failure) {
+            AdminMutationCapture.recordCreativeBlockCaptureFailureSafely("fabric_placement_result", failure);
         }
     }
 
@@ -932,9 +968,7 @@ public final class FabricNativeAuditEventListener {
             BlockPos pos = entry.getKey();
             BlockState after = entry.getValue();
             BlockState before = beforeStates.get(pos);
-            if (after != null && after.getBlock() == placedBlock
-                    && (before == null || before.getBlock() != placedBlock)
-                    && !after.equals(before)) {
+            if (AdminMutationCapture.isCreativePlacedBlockChange(before, after, placedBlock)) {
                 changed.add(pos.immutable());
             }
         }

@@ -1282,6 +1282,42 @@ public class InternalObservationService {
                                 targetNodeId = groundNodeId;
                             }
                         }
+                        case "ADMIN_CREATE_PLAYER", "CREATIVE_CREATE_PLAYER" -> {
+                            // Administrative or creative creation is an explicit
+                            // source event: unknown source -> confirmed player inventory.
+                            originNodeId = unknownNode(conn, nodeManager, obs);
+                            targetNodeId = playerNode(conn, nodeManager, obs);
+                        }
+                        case "ADMIN_REMOVE_PLAYER", "CREATIVE_REMOVE_PLAYER" -> {
+                            // Administrative or creative removal is explicit destruction;
+                            // the sink stays unknown instead of inventing a destination.
+                            originNodeId = playerNode(conn, nodeManager, obs);
+                            targetNodeId = unknownNode(conn, nodeManager, obs);
+                        }
+                        case "ADMIN_CREATE_CONTAINER" -> {
+                            originNodeId = unknownNode(conn, nodeManager, obs);
+                            targetNodeId = nodeManager.getOrCreateContainerNode(
+                                    conn, obs.targetLevelName(),
+                                    obs.targetX(), obs.targetY(), obs.targetZ());
+                        }
+                        case "ADMIN_REMOVE_CONTAINER" -> {
+                            originNodeId = nodeManager.getOrCreateContainerNode(
+                                    conn, obs.targetLevelName(),
+                                    obs.targetX(), obs.targetY(), obs.targetZ());
+                            targetNodeId = unknownNode(conn, nodeManager, obs);
+                        }
+                        case "ADMIN_CREATE_GROUND", "CREATIVE_CREATE_GROUND" -> {
+                            originNodeId = unknownNode(conn, nodeManager, obs);
+                            targetNodeId = nodeManager.getOrCreateGroundNode(
+                                    conn, obs.targetLevelName(),
+                                    obs.targetX(), obs.targetY(), obs.targetZ());
+                        }
+                        case "ADMIN_REMOVE_GROUND" -> {
+                            originNodeId = nodeManager.getOrCreateGroundNode(
+                                    conn, obs.targetLevelName(),
+                                    obs.targetX(), obs.targetY(), obs.targetZ());
+                            targetNodeId = unknownNode(conn, nodeManager, obs);
+                        }
                         case "CONTAINER" -> {
                             // ADD_ITEM / REMOVE_ITEM: player <-> container; CAPABILITY_* keeps the remote endpoint UNKNOWN.
                             long containerNodeId = nodeManager.getOrCreateContainerNode(
