@@ -68,11 +68,13 @@ from each queue per worker pass; if a backlog remains, additional bounded passes
 continue on the worker until the queues are empty. `poll_interval_ms` is only the
 maximum idle wait used for worker housekeeping and database heartbeat deadlines.
 A failed transformation write is retried through its bounded queue with backoff.
-If the queue fills while re-queuing, or shutdown cannot persist pending records,
-the dropped count is incremented and the server log reports evidence loss. During
-server shutdown, ItemGraph waits for the active worker write to finish before it
-flushes the queues and closes the database. There is no hard deadline for this
-wait: a stalled JDBC operation can delay shutdown. `database_connection_timeout_ms`
+If the queue fills while re-queuing, or a producer submits after shutdown closes
+admission, the dropped count is incremented and the server log reports evidence
+loss. During server shutdown, ItemGraph waits for active worker and importer writes
+to finish before it flushes the queues and closes the database. There is no hard
+deadline for this wait: a stalled JDBC operation can delay shutdown. Failures before transaction start and failures followed by confirmed rollback count as
+definite loss. If commit and rollback both leave the durable result uncertain, ItemGraph
+increments the separate persistence-outcome-unknown count. `database_connection_timeout_ms`
 limits connection establishment, not an already-running write.
 
 GriefLogger's `helloFrequency` is a database connection keepalive, not a status
@@ -97,23 +99,21 @@ counters contain no item payloads, player names, UUIDs, coordinates, or database
 credentials. They reset when the ingestion service starts.
 
 CI stores redacted JSON reports for the NeoForge SQLite 8,000-event burst, the
-Fabric SQLite 32-event tick-flush probe, and 512-event NeoForge ingestion probes
-against disposable MySQL and MariaDB services for 14 days. The network probes
-run 20 read-only ledger count queries across four reader workers while
-enqueuing synthetic hopper, automation, and modded-inventory audit events; each
-report requires a completed lookup to overlap the remaining submission window.
-They do not exercise
-actual modded inventory adapters or a moderator command lookup. The pinned
-server-thread submission budgets are 50 ms per NeoForge batch and 50 ms for the
-Fabric submission set;
-both fail CI at or above the limit. The queue remains capped at 10,000 entries
-per queue, flush cadence remains 1–100 ticks, and SQL batches remain capped at
-1,000 records. The current reports include aggregate latency and heap snapshots
-for the listed CI probes. Idle baselines, real automation and modded-inventory
-workloads, moderator command lookups, saturation/shutdown performance, and
-cross-loader MySQL/MariaDB runs are not implemented yet. Numeric latency and
-memory thresholds require the full SQLite/MySQL/MariaDB staging matrix; these
-CI service runs do not establish staging budgets.
+Fabric SQLite 32-event tick-flush probe, NeoForge and Fabric network probes
+against disposable MySQL and MariaDB services, and a NeoForge shutdown
+saturation probe. Each network probe submits 512 synthetic audit events and runs
+20 read-only ledger count queries across four workers, requiring at least one
+query to overlap the remaining submission window. The shutdown probe accepts
+10,000 audit events, explicitly rejects the next event, then verifies all
+accepted rows reached SQLite through worker-owned batches before shutdown
+returns. No database operation runs in the loader lifecycle callback.
+
+The NeoForge and Fabric server-thread submission limits remain 50 ms per probe
+and are enforced by CI. These are operational safeguards, not staging-derived
+production budgets. Actual modded-inventory adapters, moderator command lookup,
+an idle baseline, and staging latency/memory budgets remain unverified. The
+queue remains capped at 10,000 entries per queue, flush cadence remains 1–100
+ticks, and SQL batches remain capped at 1,000 records.
 
 ## Secret-safe status
 

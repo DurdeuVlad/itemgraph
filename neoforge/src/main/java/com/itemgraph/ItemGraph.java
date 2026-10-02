@@ -91,8 +91,9 @@ public class ItemGraph {
         com.itemgraph.listener.ContainerInteractionTracker.getInstance().closeAllSessions();
         com.itemgraph.listener.EnderChestInteractionTracker.getInstance().closeAllSessions();
         com.itemgraph.command.InspectionService.getInstance().clear();
-        com.itemgraph.ingest.InternalObservationService.getInstance().stop();
+        // Wait for the importer to terminate before closing the database it writes to.
         com.itemgraph.ingest.IngestionService.getInstance().stop();
+        com.itemgraph.ingest.InternalObservationService.getInstance().stop();
         // Stop the query worker before closing the database, so an in-flight /ig trace
         // cannot be reading through a connection that is about to disappear.
         com.itemgraph.command.QueryDispatcher.shutdown();

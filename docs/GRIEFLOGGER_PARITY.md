@@ -368,15 +368,17 @@ bounded queues and a slowest 400-event producer batch of 9.299 ms, below the
 existing 50 ms per-batch server-thread budget. The isolated Fabric GameTest used
 a 20-tick cadence and persisted all 32 accepted queue events after the end-tick
 callback with zero drops; all three registered Fabric GameTests passed locally.
-CI uploads redacted reports for both loader SQLite probes and 512-event
-NeoForge ingestion probes against disposable MySQL and MariaDB services. Each
-network probe runs 20 read-only ledger count queries across four worker threads
-and requires a completed lookup to overlap the remaining synthetic hopper,
-automation, and modded-inventory audit-event submissions. These synthetic
-events do not measure real mod adapters or the
-moderator command lookup. Idle baselines, saturation/shutdown performance,
-cross-loader network runs, and staging-derived latency/memory budgets remain
-open under [#32](https://github.com/DurdeuVlad/itemgraph/issues/32). The metrics
+CI uploads redacted reports for both loader SQLite probes, NeoForge and Fabric
+512-event probes against disposable MySQL and MariaDB services, and a NeoForge
+shutdown saturation probe. Each network probe runs 20 read-only ledger count
+queries across four worker threads and requires a completed lookup to overlap
+the remaining synthetic hopper, automation, and modded-inventory audit-event
+submissions. The shutdown probe rejects one event beyond the 10,000-item audit
+queue capacity and verifies every accepted event is durable after worker-owned
+shutdown draining. These synthetic probes do not measure real mod adapters or
+the moderator command lookup. Idle baselines and staging-derived latency/memory
+budgets remain open under [#32](https://github.com/DurdeuVlad/itemgraph/issues/32).
+The metrics
 and current probe limits are documented in [configuration](CONFIGURATION.md)
 and the [test plan](TEST_PLAN.md); they do not establish staging budgets.
 `helloFrequency` defaults to 600 ticks

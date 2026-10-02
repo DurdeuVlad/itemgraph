@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -13,7 +14,9 @@ from validate_itemgraph_performance_report import ReportError, validate_director
 
 
 def report(loader: str, scenario: str, accepted: int) -> dict:
-    backend_matrix = scenario in {"backend_mariadb_matrix", "backend_mysql_matrix"}
+    backend_matrix = scenario in {"backend_mariadb_matrix", "backend_mysql_matrix", "backend_fabric_mariadb_matrix", "backend_fabric_mysql_matrix"}
+    shutdown_saturation = scenario == "shutdown_saturation"
+    attempted = accepted + 1 if shutdown_saturation else accepted
     if backend_matrix:
         workload = {
             "accepted_events": accepted,
@@ -27,6 +30,16 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             "modded_inventory_events": 171,
             "enqueue_total_ns": 20_000_000,
             "elapsed_ms": 300,
+        }
+    elif shutdown_saturation:
+        workload = {
+            "accepted_events": accepted,
+            "attempted_events": attempted,
+            "persisted_counter_delta": accepted,
+            "dropped_counter_delta": 1,
+            "durable_rows": accepted,
+            "queue_remaining": 0,
+            "elapsed_ms": 100,
         }
     else:
         workload = {
@@ -52,12 +65,12 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             "peak_depth": accepted,
             "capacity_per_type": 10_000,
             "flush_every_ticks": 20,
-            "max_batch_size": 1_000,
-            "rejected_items": 0,
+            "max_batch_size": 100 if shutdown_saturation else 1_000,
+            "rejected_items": 1 if shutdown_saturation else 0,
         },
         "latency": {
             name: {
-                "count": accepted if name == "enqueue" else (
+                "count": attempted if name == "enqueue" else (
                     1 if name == "persistence_commit" else 20 if backend_matrix and name == "query" else 0),
                 "failed": 0,
                 "average_us": 0,
@@ -67,11 +80,14 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             }
             for name in ("enqueue", "persistence_commit", "query", "correlation")
         },
-        "persistence": {"persisted_items": accepted, "failed_batches": 0, "largest_batch": accepted},
+        "persistence": {
+            "persisted_items": accepted,
+            "failed_batches": 0,
+            "largest_batch": 100 if shutdown_saturation else accepted,
+        },
         "components": {"decode_failure_cache_insertions": 0, "negative_cache_hits": 0},
         "memory": {"heap_used_bytes": 1, "heap_max_bytes": -1},
     }
-
 
 class PerformanceReportValidationTest(unittest.TestCase):
     def test_accepts_pinned_loader_reports_and_unbounded_heap_max(self) -> None:
@@ -120,15 +136,44 @@ class PerformanceReportValidationTest(unittest.TestCase):
         with self.assertRaises(ReportError):
             validate_report(candidate)
 
-    def test_directory_requires_complete_four_scenario_artifact_set(self) -> None:
+    def test_directory_requires_complete_seven_report_artifact_set(self) -> None:
+        scenarios = [
+            ("itemgraph-neoforge-queue_burst.json", report("neoforge", "queue_burst", 8_000)),
+            ("itemgraph-fabric-queue_flush_durability.json", report("fabric", "queue_flush_durability", 32)),
+            ("itemgraph-neoforge-backend_mariadb_matrix.json", report("neoforge", "backend_mariadb_matrix", 512)),
+            ("itemgraph-neoforge-backend_mysql_matrix.json", report("neoforge", "backend_mysql_matrix", 512)),
+            ("itemgraph-fabric-backend_fabric_mariadb_matrix.json", report("fabric", "backend_fabric_mariadb_matrix", 512)),
+            ("itemgraph-fabric-backend_fabric_mysql_matrix.json", report("fabric", "backend_fabric_mysql_matrix", 512)),
+            ("itemgraph-neoforge-shutdown_saturation.json", report("neoforge", "shutdown_saturation", 10_000)),
+        ]
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
+            for filename, contents in scenarios:
+                (directory / filename).write_text(json.dumps(contents), encoding="utf-8")
+            self.assertEqual(7, len(validate_directory(directory)))
+            (directory / "itemgraph-fabric-backend_fabric_mysql_matrix.json").unlink()
             with self.assertRaises(ReportError):
                 validate_directory(directory)
+    def test_accepts_shutdown_saturation_report_with_one_explicit_rejection(self) -> None:
+        candidate = report("neoforge", "shutdown_saturation", 10_000)
+        self.assertEqual("shutdown_saturation", validate_report(candidate)["scenario"])
 
-    def test_accepts_mysql_and_mariadb_backend_matrix_reports(self) -> None:
-        for flavor in ("mariadb", "mysql"):
-            candidate = report("neoforge", f"backend_{flavor}_matrix", 512)
+    def test_rejects_shutdown_saturation_report_when_accepted_rows_are_not_durable(self) -> None:
+        candidate = report("neoforge", "shutdown_saturation", 10_000)
+        candidate["workload"]["durable_rows"] = 9_999
+        with self.assertRaises(ReportError):
+            validate_report(candidate)
+
+    def test_accepts_mysql_and_mariadb_backend_matrix_reports_on_both_loaders(self) -> None:
+        cases = (
+            ("neoforge", "backend_mariadb_matrix"),
+            ("neoforge", "backend_mysql_matrix"),
+            ("fabric", "backend_fabric_mariadb_matrix"),
+            ("fabric", "backend_fabric_mysql_matrix"),
+        )
+        for loader, scenario in cases:
+            candidate = report(loader, scenario, 512)
+            self.assertEqual(loader, validate_report(candidate)["loader"])
             self.assertEqual("mysql_mariadb", validate_report(candidate)["backend"])
 
     def test_rejects_network_backend_report_without_concurrent_lookup_samples(self) -> None:

@@ -22,6 +22,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -120,6 +121,43 @@ class IngestionServiceTest {
         }
         if (dbManager != null) {
             dbManager.close();
+        }
+    }
+
+    @Test
+    void stopWaitsForQueuedWorkerTaskBeforeReturning() throws Exception {
+        ingestionService.start();
+        java.lang.reflect.Field executorField = IngestionService.class.getDeclaredField("executor");
+        executorField.setAccessible(true);
+        ScheduledExecutorService worker = (ScheduledExecutorService) executorField.get(ingestionService);
+        CountDownLatch taskStarted = new CountDownLatch(1);
+        CountDownLatch releaseTask = new CountDownLatch(1);
+        worker.execute(() -> {
+            taskStarted.countDown();
+            try {
+                releaseTask.await();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertTrue(taskStarted.await(5, TimeUnit.SECONDS));
+
+        ExecutorService stopper = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> stopped = stopper.submit(ingestionService::stop);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!worker.isShutdown() && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertTrue(worker.isShutdown(), "stop should shut down admission to the worker");
+            assertFalse(stopped.isDone(), "stop must wait while a worker task can still use the database");
+            releaseTask.countDown();
+            stopped.get(5, TimeUnit.SECONDS);
+            assertTrue(worker.isTerminated());
+        } finally {
+            releaseTask.countDown();
+            stopper.shutdownNow();
+            assertTrue(stopper.awaitTermination(5, TimeUnit.SECONDS));
         }
     }
 

@@ -412,22 +412,22 @@ Verify that ItemGraph reports authoritative inventory evidence independent of cl
 
 CI integration tests and GameTests emit redacted performance JSON under
 `ITEMGRAPH_PERFORMANCE_REPORT_DIR`. `tools/validate_itemgraph_performance_report.py`
-checks the pinned report schema, both loader/scenario identities, durable row
-counts, zero drops/backlog, queue bounds, and existing 50 ms server-thread
-budgets. `tools/test_validate_itemgraph_performance_report.py` checks schema
-rejection and the SQLite and network report forms. CI uploads validated output as the
+checks the pinned report schema, loader/backend identity, exact durable row
+counts, queue accounting, and existing server-thread submission ceilings.
+`tools/test_validate_itemgraph_performance_report.py` covers malformed schemas,
+rejection accounting, and the complete artifact set. CI uploads the validated
 `itemgraph-performance-reports` artifact for 14 days.
 
-The automated report set covers the NeoForge SQLite 8,000-event burst, Fabric
-SQLite 32-event tick-flush probe, and NeoForge 512-event queue probes against
-disposable MySQL and MariaDB CI services. Each network probe runs 20 read-only
-exact-ledger count queries across four reader workers and requires a completed
-lookup to overlap the remaining event-submission window. It labels synthetic
-hopper, automation, and modded-inventory audit events. It does not exercise real
-automation/mod inventory adapters or the moderator command query path. Idle
-baselines, saturation/shutdown performance, and cross-loader MySQL/MariaDB runs
-remain unimplemented. No latency or heap regression thresholds are claimed for
-those scenarios; use the staging backend matrix before setting those budgets.
+The seven-report set covers NeoForge SQLite burst (8,000 events), Fabric SQLite
+flush (32 events), NeoForge and Fabric each against disposable MySQL and MariaDB
+(512 synthetic events and 20 concurrent read-only ledger lookups per backend),
+and NeoForge shutdown saturation (10,000 accepted audit events, one explicitly
+rejected over-capacity submission, worker-owned bounded drain, and exact durable
+row verification). The network probes require a measured query/submission overlap
+and include labeled synthetic automation and modded-inventory events. They do
+not exercise real adapters or the moderator command lookup. An idle baseline and
+staging-derived latency/memory budgets remain open; CI timings are measurements,
+not production budgets.
 
 ### Consolidated local validation (2026-10-02)
 
@@ -523,7 +523,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `QuantityFlowTest` | stack splits/merges, partial transfers, windows, capacity limits, competing candidates, idempotency, restart continuity, and rollback atomicity (19 tests) |
 | `TransformationEventListenerTest` | anvil rename/repair, crafting matrix fallback, smelting, client guards, and empty-stack handling (12 tests) |
 | `EntityInteractionEvidenceTest` | Armor stand method outcomes, target UUID, actor/position/dimension, and client-side suppression; interaction attempts are queried separately from completed results |
-| `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, 2,000-record worker persistence, shutdown flush and failure accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
+| `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue/stop admission race, 2,000-record worker persistence, shutdown flush, confirmed-loss and unknown-commit accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
 | `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
 | `ItemGraphConfigTest` | default values, config paths and metadata, strict NeoForge type/range rejection, and NightConfig default correction without clamping invalid supplied values (8 tests) |
@@ -536,7 +536,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `CorrelationEngineTest` | ground bridging/scoring, cross-source confirmed/ambiguous groups, canceled-source conflicts, legacy edge supersession, temporal ordering, and MVP chain (24 tests) |
 | `ItemCanonicalizerTest` | fingerprint determinism and DataComponent decoding (Phase 3) |
 | `NodeManagerTest` | node identity resolution (Phase 4) |
-| `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction, and concurrent shared-connection transaction isolation (5 + 10 tests) |
+| `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction, worker termination before stop returns, and concurrent shared-connection transaction isolation (5 + 11 tests) |
 | `GriefLoggerHistoricalImporterTest` | all 11 source tables, all 18 action IDs, opaque binary retention, source-byte immutability, supported-schema rejection, independent-writer concurrency, durable failed-run counts, per-table checkpoints, and idempotent replay |
 | `DatabaseManagerTest` | migrations V1–V14, interval/group/edge-state schema, API source/external-key schema, historical import provenance/checkpoints, dedup constraints, read-only query connection, and independent writer configuration |
 | `EventQueryServiceTest` | found/not-found, dangling references rendering as "no such row", OBSERVED labelling |

@@ -40,7 +40,8 @@ public class IngestionService {
 
     private final Map<String, Long> fingerprintCache = new ConcurrentHashMap<>();
 
-    private ScheduledExecutorService executor;
+    private volatile ScheduledExecutorService executor;
+    private final Object lifecycleLock = new Object();
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean manualIngestionQueued = new AtomicBoolean(false);
     private final AtomicBoolean historicalImportQueued = new AtomicBoolean(false);
@@ -107,57 +108,89 @@ public class IngestionService {
     /**
      * Starts the background ingestion executor. Runs off the server tick thread.
      */
-    public synchronized void start() {
-        if (running.get()) {
-            return;
-        }
-
-        // The ItemGraph database can be reopened for a new server lifecycle while this
-        // singleton remains alive (for example, an integrated-server restart). Node IDs
-        // are only valid for the database that populated them, so never carry the
-        // read-through identity cache into a newly initialized database.
-        nodeManager.clearCaches();
-
-        executor = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
-            @Override
-            public Thread newThread(Runnable r) {
-                Thread t = new Thread(r, "ItemGraph-Ingestion-Worker");
-                t.setDaemon(true);
-                return t;
+    public void start() {
+        synchronized (lifecycleLock) {
+            if (running.get()) {
+                return;
             }
-        });
 
-        manualIngestionQueued.set(false);
-        historicalImportQueued.set(false);
-        running.set(true);
-        // Schedule every 60 seconds, with an initial delay of 5 seconds
-        executor.scheduleWithFixedDelay(this::runIngestionSafely, 5, 60, TimeUnit.SECONDS);
-        LOGGER.info("ItemGraph ingestion service started (ingest + correlate every 60s, ground bridge window {}s).",
-                correlationEngine.getWindowSeconds());
+            // The ItemGraph database can be reopened for a new server lifecycle while this
+            // singleton remains alive (for example, an integrated-server restart). Node IDs
+            // are only valid for the database that populated them, so never carry the
+            // read-through identity cache into a newly initialized database.
+            nodeManager.clearCaches();
+
+            executor = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "ItemGraph-Ingestion-Worker");
+                    t.setDaemon(true);
+                    return t;
+                }
+            });
+
+            manualIngestionQueued.set(false);
+            historicalImportQueued.set(false);
+            running.set(true);
+            // Schedule every 60 seconds, with an initial delay of 5 seconds
+            executor.scheduleWithFixedDelay(this::runIngestionSafely, 5, 60, TimeUnit.SECONDS);
+            LOGGER.info("ItemGraph ingestion service started (ingest + correlate every 60s, ground bridge window {}s).",
+                    correlationEngine.getWindowSeconds());
+        }
     }
 
     /**
      * Stops the background ingestion executor cleanly.
      */
-    public synchronized void stop() {
-        running.set(false);
-        if (executor != null) {
+    public void stop() {
+        synchronized (lifecycleLock) {
+            running.set(false);
+            ScheduledExecutorService stopping = executor;
+            executor = null;
+            if (stopping == null) {
+                manualIngestionQueued.set(false);
+                historicalImportQueued.set(false);
+                nodeManager.clearCaches();
+                return;
+            }
             LOGGER.info("Stopping ItemGraph ingestion service...");
-            executor.shutdown();
+            stopping.shutdown();
+            boolean interrupted = false;
             try {
-                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                    executor.shutdownNow();
+                if (!stopping.awaitTermination(5, TimeUnit.SECONDS)) {
+                    LOGGER.warn("ItemGraph ingestion is still active after 5 seconds; interrupting and waiting before database shutdown");
+                    stopping.shutdownNow();
+                }
+                // Do not return while a JDBC operation or queued correlation pass can
+                // still use DatabaseManager. Some drivers ignore interruption during I/O.
+                while (!stopping.isTerminated()) {
+                    try {
+                        stopping.awaitTermination(1, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                        stopping.shutdownNow();
+                    }
                 }
             } catch (InterruptedException e) {
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
+                interrupted = true;
+                stopping.shutdownNow();
+                while (!stopping.isTerminated()) {
+                    try {
+                        stopping.awaitTermination(1, TimeUnit.SECONDS);
+                    } catch (InterruptedException ignored) {
+                        interrupted = true;
+                    }
+                }
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
             }
-            executor = null;
+            manualIngestionQueued.set(false);
+            historicalImportQueued.set(false);
+            nodeManager.clearCaches();
             LOGGER.info("ItemGraph ingestion service stopped.");
         }
-        manualIngestionQueued.set(false);
-        historicalImportQueued.set(false);
-        nodeManager.clearCaches();
     }
 
     public boolean isRunning() {
@@ -211,8 +244,12 @@ public class IngestionService {
         if (!running.get() || current == null) {
             return false;
         }
-        current.execute(this::runCorrelationSafely);
-        return true;
+        try {
+            current.execute(this::runCorrelationSafely);
+            return true;
+        } catch (java.util.concurrent.RejectedExecutionException stopping) {
+            return false;
+        }
     }
 
     /** Queues one manual ingest-and-correlate pass; false means the worker is stopped or already has a manual request queued. */

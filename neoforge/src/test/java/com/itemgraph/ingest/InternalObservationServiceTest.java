@@ -8,6 +8,8 @@ import com.itemgraph.ingest.InternalObservationService.InternalObservation;
 import com.itemgraph.ingest.InternalObservationService.InternalAuditEvent;
 import com.itemgraph.ingest.InternalObservationService.InternalTransformation;
 import com.itemgraph.listener.ContainerCapabilityWrapper;
+import com.itemgraph.gametest.PerformanceReportFixture;
+import com.itemgraph.metrics.OperationalMetrics;
 import com.itemgraph.listener.ContainerInteractionTracker;
 import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.query.AuditLookupFilters;
@@ -378,7 +380,9 @@ class InternalObservationServiceTest {
 
         assertEquals(0, service.getTotalAuditEvents());
         assertEquals(0, service.getTotalPersisted());
-        assertEquals(1, service.getTotalDropped(), "shutdown loss is counted instead of reported as persisted");
+        assertEquals(1, service.getTotalDropped(), "a failure before transaction start is definite loss");
+        assertEquals(0, service.getTotalPersistenceOutcomeUnknown(),
+                "no commit was attempted because the database was not initialized");
         assertEquals(0, service.getQueueSize());
     }
 
@@ -629,7 +633,7 @@ class InternalObservationServiceTest {
         assertEquals(8, service.getQueueSize());
         assertEquals(0, service.getTotalPersisted());
 
-        // stop() must synchronously flush all remaining queued items
+        // stop() must wait for the worker-owned drain before returning
         service.stop();
 
         assertEquals(0, service.getQueueSize());
@@ -650,7 +654,61 @@ class InternalObservationServiceTest {
     }
 
     @Test
-    void failedTransformationBatchIsRetainedAndShutdownLossIsCounted() throws Exception {
+    void saturatedQueueDrainsOnWorkerDuringShutdownAndReportsExplicitRejection(
+            @TempDir Path testTempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(testTempDir.resolve("shutdown_saturation.db"));
+        OperationalMetrics.getInstance().reset();
+        String prefix = "issue32-shutdown:" + UUID.randomUUID() + ":";
+        long started = System.nanoTime();
+
+        for (int index = 0; index < 10_000; index++) {
+            assertTrue(service.submitAuditEvent(new InternalAuditEvent(
+                    System.currentTimeMillis(), "SHUTDOWN_SATURATION", null, null,
+                    "minecraft:overworld", index % 256, 64, (index / 256) % 256,
+                    "itemgraph:shutdown-probe", prefix + index, null)),
+                    "all events within the bounded audit queue must be accepted");
+        }
+        assertFalse(service.submitAuditEvent(new InternalAuditEvent(
+                System.currentTimeMillis(), "SHUTDOWN_SATURATION", null, null,
+                "minecraft:overworld", 0, 64, 0, "itemgraph:shutdown-probe", prefix + "rejected", null)),
+                "the event beyond the audit queue capacity must be rejected explicitly");
+        assertEquals(10_000, service.getQueueSize());
+        assertEquals(1, service.getTotalDropped());
+
+        service.stop();
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        assertEquals(0, service.getQueueSize(), "shutdown must drain all retained events");
+        assertEquals(10_000, service.getTotalAuditEvents());
+        assertEquals(10_000, service.getTotalPersisted());
+        assertEquals(1, service.getTotalDropped(), "the overflow event must remain visible as explicit loss");
+
+        long durableRows;
+        try (PreparedStatement statement = DatabaseManager.getInstance().getConnection().prepareStatement(
+                "SELECT COUNT(*) FROM ig_audit_events WHERE detail LIKE ?")) {
+            statement.setString(1, prefix + "%");
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                durableRows = rows.getLong(1);
+            }
+        }
+        assertEquals(10_000, durableRows, "every accepted event must be durable after shutdown returns");
+        OperationalMetrics.Snapshot metrics = OperationalMetrics.getInstance().snapshot();
+        assertEquals(10_000, metrics.peakQueueDepth());
+        assertEquals(1, metrics.queueRejectedItems());
+        assertTrue(metrics.largestBatchSize() <= service.getMaxBatchSize(),
+                "shutdown persistence must honor the configured batch bound");
+
+        PerformanceReportFixture.writeIfRequested("neoforge", "shutdown_saturation", java.util.Map.of(
+                "accepted_events", 10_000L,
+                "attempted_events", 10_001L,
+                "dropped_counter_delta", service.getTotalDropped(),
+                "durable_rows", durableRows,
+                "queue_remaining", (long) service.getQueueSize(),
+                "elapsed_ms", elapsedMillis));
+    }
+
+    @Test
+    void failedTransformationBatchIsRetainedAndShutdownCountsDefiniteLoss() throws Exception {
         service.configureOperations(10, 1, 2, 30_000, true);
         service.start();
         for (int i = 0; i < 5; i++) {
@@ -668,7 +726,15 @@ class InternalObservationServiceTest {
         assertEquals(0, service.getQueueSize());
         assertEquals(0, service.getTotalPersisted());
         assertEquals(5, service.getTotalDropped(),
-                "shutdown must count every transformation that could not be written");
+                "an unavailable database means none of the transformations could have committed");
+        assertEquals(0, service.getTotalPersistenceOutcomeUnknown(),
+                "no transaction was started for the unavailable database");
+        java.lang.reflect.Field pendingField = InternalObservationService.class
+                .getDeclaredField("pendingTransformations");
+        pendingField.setAccessible(true);
+        java.util.concurrent.atomic.AtomicInteger pending =
+                (java.util.concurrent.atomic.AtomicInteger) pendingField.get(service);
+        assertEquals(0, pending.get(), "shutdown must release each failed transformation exactly once");
     }
 
     @Test
@@ -766,6 +832,45 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void confirmedRollbackIsClassifiedAsDefiniteLoss() throws Exception {
+        int[] rollbackCalls = {0};
+        Connection transaction = (Connection) Proxy.newProxyInstance(
+                Connection.class.getClassLoader(), new Class<?>[]{Connection.class}, (proxy, method, args) -> {
+                    return switch (method.getName()) {
+                        case "getAutoCommit" -> true;
+                        case "setAutoCommit" -> null;
+                        case "rollback" -> {
+                            rollbackCalls[0]++;
+                            yield null;
+                        }
+                        case "commit" -> throw new AssertionError("commit must not run after the body fails");
+                        default -> throw new UnsupportedOperationException(method.getName());
+                    };
+                });
+        Class<?> bodyType = Class.forName(
+                "com.itemgraph.ingest.InternalObservationService$SqlTransactionBody");
+        Object failingBody = Proxy.newProxyInstance(bodyType.getClassLoader(), new Class<?>[]{bodyType},
+                (proxy, method, args) -> {
+                    if (method.getName().equals("run")) {
+                        throw new java.sql.SQLException("simulated statement failure");
+                    }
+                    return null;
+                });
+        Method runTransaction = InternalObservationService.class.getDeclaredMethod(
+                "runTransaction", Connection.class, bodyType);
+        runTransaction.setAccessible(true);
+        InvocationTargetException failure = assertThrows(InvocationTargetException.class,
+                () -> runTransaction.invoke(null, transaction, failingBody));
+
+        assertEquals(1, rollbackCalls[0], "the failed transaction must be rolled back");
+        Method unknownCommit = InternalObservationService.class.getDeclaredMethod(
+                "hasUnknownCommitOutcome", Exception.class);
+        unknownCommit.setAccessible(true);
+        assertFalse((boolean) unknownCommit.invoke(service, failure.getCause()),
+                "a successful rollback must be classified as definite loss");
+    }
+
+    @Test
     void replayAfterCommittedBatchLostAcknowledgementDoesNotDuplicateEvidence() throws Exception {
         initializeTopologyDatabase();
         InternalObservation observation = createDummyObservation(9100);
@@ -796,6 +901,11 @@ class InternalObservationServiceTest {
         InvocationTargetException commitAcknowledgementFailure = assertThrows(InvocationTargetException.class,
                 () -> persistBatch.invoke(service, acknowledgementLossConnection, List.of(observation)));
         assertInstanceOf(java.sql.SQLException.class, commitAcknowledgementFailure.getCause());
+        Method unknownCommit = InternalObservationService.class.getDeclaredMethod(
+                "hasUnknownCommitOutcome", Exception.class);
+        unknownCommit.setAccessible(true);
+        assertTrue((boolean) unknownCommit.invoke(service, commitAcknowledgementFailure.getCause()),
+                "an exception after commit was attempted must be classified as unknown");
         assertTrue(loseAcknowledgement[0] == false, "the simulated exception must follow a successful commit");
 
         // Replaying the same immutable queue record must be a no-op, despite the
@@ -854,6 +964,44 @@ class InternalObservationServiceTest {
                         "distinct events must survive even when every V11 dedup field is identical");
                 assertEquals(2, result.getInt(2));
             }
+        }
+    }
+
+    @Test
+    void concurrentSubmitAndStopNeverStrandsAnAcceptedObservation() throws Exception {
+        initializeTopologyDatabase();
+        service.start();
+        CountDownLatch race = new CountDownLatch(1);
+        ExecutorService producer = Executors.newSingleThreadExecutor();
+        try {
+            Future<Boolean> accepted = producer.submit(() -> {
+                assertTrue(race.await(5, TimeUnit.SECONDS));
+                return service.submit(containerObs("ADD_ITEM", PLAYER_UUID, "TestPlayer", 1));
+            });
+            race.countDown();
+            service.stop();
+            boolean wasAccepted = accepted.get(5, TimeUnit.SECONDS);
+
+            assertEquals(0, service.getQueueSize(), "stop must leave no accepted record stranded in memory");
+            assertEquals(wasAccepted ? 1 : 0, observationCount(),
+                    "every accepted record must be durable before stop returns");
+
+            long droppedBeforeLateSubmit = service.getTotalDropped();
+            assertFalse(service.submit(containerObs("ADD_ITEM", PLAYER_UUID, "TestPlayer", 1)),
+                    "submissions after stop must be rejected");
+            assertEquals(droppedBeforeLateSubmit + 1, service.getTotalDropped(),
+                    "a post-stop submission must be counted as explicit loss");
+        } finally {
+            producer.shutdownNow();
+            assertTrue(producer.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    private int observationCount() throws Exception {
+        try (Statement statement = conn.createStatement();
+             ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM ig_observations")) {
+            assertTrue(result.next());
+            return result.getInt(1);
         }
     }
 

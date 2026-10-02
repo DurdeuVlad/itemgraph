@@ -22,7 +22,7 @@ WORKLOAD_FIELDS = {
     "dropped_counter_delta", "durable_rows", "queue_remaining",
     "max_server_thread_batch_ns", "end_tick_callbacks", "flush_every_ticks",
     "enqueue_total_ns", "concurrent_lookups", "overlapping_lookups",
-    "automation_events", "modded_inventory_events", "elapsed_ms",
+    "automation_events", "modded_inventory_events", "elapsed_ms", "attempted_events",
 }
 QUEUE_FIELDS = {
     "depth", "peak_depth", "capacity_per_type", "flush_every_ticks",
@@ -56,7 +56,8 @@ def validate_report(report: Any) -> dict[str, Any]:
         raise ReportError("loader must be fabric or neoforge")
     if value["scenario"] not in {
         "queue_burst", "queue_flush_durability",
-        "backend_mariadb_matrix", "backend_mysql_matrix",
+        "backend_mariadb_matrix", "backend_mysql_matrix", "backend_fabric_mariadb_matrix",
+        "backend_fabric_mysql_matrix", "shutdown_saturation",
     }:
         raise ReportError("scenario is not a supported queue benchmark")
     if value["minecraft_version"] != "1.21.1":
@@ -76,8 +77,9 @@ def validate_report(report: Any) -> dict[str, Any]:
     dropped = _integer(workload.get("dropped_counter_delta"), "workload.dropped_counter_delta")
     durable_rows = _integer(workload.get("durable_rows"), "workload.durable_rows")
     queue_remaining = _integer(workload.get("queue_remaining"), "workload.queue_remaining")
-    if persisted < accepted or dropped != 0 or queue_remaining != 0:
-        raise ReportError("queue benchmark must durably persist all accepted events with zero drops and backlog")
+    expected_drop_count = 1 if value["scenario"] == "shutdown_saturation" else 0
+    if persisted < accepted or dropped != expected_drop_count or queue_remaining != 0:
+        raise ReportError("queue benchmark persistence, explicit loss count, or shutdown backlog is inconsistent")
 
     queue = _object(value["queue"], "queue", QUEUE_FIELDS)
     for key, item in queue.items():
@@ -88,9 +90,9 @@ def validate_report(report: Any) -> dict[str, Any]:
         raise ReportError("max_batch_size is outside the validated configuration range")
     if queue["depth"] != queue_remaining:
         raise ReportError("queue depth disagrees with the durable workload result")
-    if (queue["rejected_items"] != 0 or queue["peak_depth"] < 1
+    if (queue["rejected_items"] != expected_drop_count or queue["peak_depth"] < 1
             or queue["peak_depth"] > queue["capacity_per_type"] * 3):
-        raise ReportError("isolated queue probe must record queue depth, have no rejected items, and stay within total queue capacity")
+        raise ReportError("isolated queue probe rejection count or recorded peak depth is inconsistent")
 
     latency = _object(value["latency"], "latency", LATENCY_METRICS)
     for metric_name, metric_value in latency.items():
@@ -147,10 +149,27 @@ def validate_report(report: Any) -> dict[str, Any]:
             raise ReportError("queue_flush_durability ledger must contain exactly its accepted events")
         if _integer(workload.get("enqueue_total_ns"), "workload.enqueue_total_ns") >= 50_000_000:
             raise ReportError("Fabric queue submission exceeded the existing 50 ms server-thread budget")
-    if value["scenario"] in {"backend_mariadb_matrix", "backend_mysql_matrix"}:
-        expected_flavor = value["scenario"].removeprefix("backend_").removesuffix("_matrix")
-        if value["loader"] != "neoforge" or value["backend"] != "mysql_mariadb" or accepted != 512:
-            raise ReportError("network backend matrix must be a 512-event NeoForge network workload")
+    if value["scenario"] == "shutdown_saturation":
+        if value["loader"] != "neoforge" or value["backend"] != "sqlite" or accepted != 10_000:
+            raise ReportError("shutdown_saturation must be the pinned NeoForge SQLite bounded-queue workload")
+        if durable_rows != accepted or dropped != 1:
+            raise ReportError("shutdown_saturation must persist all 10,000 accepted events and count one rejected event")
+        if _integer(workload.get("attempted_events"), "workload.attempted_events") != accepted + 1:
+            raise ReportError("shutdown_saturation must record exactly one over-capacity submission")
+        if queue["peak_depth"] != queue["capacity_per_type"] or queue["rejected_items"] != 1:
+            raise ReportError("shutdown_saturation must fill the bounded audit queue and record its rejection")
+        if persistence["largest_batch"] > queue["max_batch_size"]:
+            raise ReportError("shutdown drain exceeded the configured maximum persistence batch size")
+
+    network_scenarios = {"backend_mariadb_matrix", "backend_mysql_matrix",
+                         "backend_fabric_mariadb_matrix", "backend_fabric_mysql_matrix"}
+    if value["scenario"] in network_scenarios:
+        is_fabric = value["scenario"].startswith("backend_fabric_")
+        scenario_prefix = "backend_fabric_" if is_fabric else "backend_"
+        expected_flavor = value["scenario"].removeprefix(scenario_prefix).removesuffix("_matrix")
+        expected_loader = "fabric" if is_fabric else "neoforge"
+        if value["loader"] != expected_loader or value["backend"] != "mysql_mariadb" or accepted != 512:
+            raise ReportError("network backend matrix must be a 512-event workload on the pinned loader")
         if durable_rows != accepted:
             raise ReportError("network backend matrix must match its exact durable ledger row count")
         if _integer(workload.get("concurrent_lookups"), "workload.concurrent_lookups") != 20:
@@ -178,10 +197,13 @@ def validate_directory(directory: Path) -> list[dict[str, Any]]:
         "itemgraph-fabric-queue_flush_durability.json",
         "itemgraph-neoforge-backend_mariadb_matrix.json",
         "itemgraph-neoforge-backend_mysql_matrix.json",
+        "itemgraph-fabric-backend_fabric_mariadb_matrix.json",
+        "itemgraph-fabric-backend_fabric_mysql_matrix.json",
+        "itemgraph-neoforge-shutdown_saturation.json",
     }
     actual = {path.name for path in directory.glob("*.json")}
     if actual != expected:
-        raise ReportError("performance report directory must contain exactly one pinned report per loader")
+        raise ReportError("performance report directory must contain exactly the pinned benchmark reports")
     reports = []
     for name in sorted(expected):
         try:

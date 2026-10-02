@@ -510,11 +510,17 @@ was lost becomes an ignored duplicate on replay rather than a second quantity or
 row. Producer `source_event_id` remains separate and continues to represent source-level
 identity.
 
-The native worker limits each transformation write and shutdown flush to the configured
-`ingestion.max_batch_size`. Failed transformation batches return to the same bounded queue
-with exponential backoff; the status queue count includes in-flight transformations. A
-requeue overflow or shutdown write failure increments the evidence-loss counter and logs
-the number of dropped records. Legacy migrations V3–V5 copy the original observation
+The internal persistence worker limits observation, transformation, and audit writes,
+including its shutdown drain, to `ingestion.max_batch_size`. A loader shutdown closes queue
+admission before draining accepted ItemGraph records on the persistence worker. It waits for
+the GriefLogger importer executor to terminate before closing the database. The lifecycle
+callback waits for completion but never performs JDBC writes itself. A rejected post-stop
+submission increments the evidence-loss counter. A pre-transaction failure or confirmed rollback increments the evidence-loss counter.
+If commit or rollback leaves the durable result uncertain, ItemGraph increments the
+separate persistence-outcome-unknown counter. Failed live transformation batches return to the same bounded queue with exponential
+backoff; the status queue count includes in-flight transformations. A requeue overflow also
+increments the evidence-loss counter and logs the dropped record count. Legacy migrations
+V3–V5 copy the original observation
 fields, referenced fingerprint values, and raw payload into
 `ig_legacy_observation_evidence` before clearing endpoints written under obsolete
 topology rules. That archive is retained but excluded from live
