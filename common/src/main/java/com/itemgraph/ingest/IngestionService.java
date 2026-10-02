@@ -231,7 +231,7 @@ public class IngestionService {
         boolean succeeded = false;
         try {
             CorrelationResult result = correlationEngine.runCorrelation();
-            succeeded = true;
+            succeeded = result.success();
             return result;
         } finally {
             OperationalMetrics.getInstance().recordCorrelation(System.nanoTime() - started, succeeded);

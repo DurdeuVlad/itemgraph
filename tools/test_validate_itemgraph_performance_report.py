@@ -16,8 +16,21 @@ from validate_itemgraph_performance_report import ReportError, validate_director
 def report(loader: str, scenario: str, accepted: int) -> dict:
     backend_matrix = scenario in {"backend_mariadb_matrix", "backend_mysql_matrix", "backend_fabric_mariadb_matrix", "backend_fabric_mysql_matrix"}
     shutdown_saturation = scenario == "shutdown_saturation"
+    correlation_burst = scenario == "correlation_burst"
     attempted = accepted + 1 if shutdown_saturation else accepted
-    if backend_matrix:
+    if correlation_burst:
+        workload = {
+            "accepted_events": accepted,
+            "persisted_counter_delta": accepted,
+            "dropped_counter_delta": 0,
+            "durable_rows": accepted,
+            "queue_remaining": 0,
+            "correlation_pairs": 250,
+            "correlation_passes": 5,
+            "correlation_edges": 250,
+            "elapsed_ms": 1_000,
+        }
+    elif backend_matrix:
         workload = {
             "accepted_events": accepted,
             "persisted_counter_delta": accepted,
@@ -26,6 +39,13 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             "queue_remaining": 0,
             "concurrent_lookups": 20,
             "overlapping_lookups": 20,
+            "registered_lookup_commands": 20,
+            "registered_lookup_callbacks_completed": 20,
+            "registered_lookup_callbacks_failed": 0,
+            "registered_lookup_callbacks_completed_during_submissions": 1,
+            "registered_lookup_dispatch_callback_total_ns": 20_000,
+            "registered_lookup_dispatch_callback_max_ns": 1_000,
+            "registered_lookup_dispatch_callback_p95_ns": 950,
             "automation_events": 170,
             "modded_inventory_events": 171,
             "enqueue_total_ns": 20_000_000,
@@ -71,8 +91,9 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
         "latency": {
             name: {
                 "count": attempted if name == "enqueue" else (
-                    1 if name == "persistence_commit" else 20 if backend_matrix and name == "query" else 0),
-                "failed": 0,
+                    5 if correlation_burst and name == "correlation" else (
+                        1 if name == "persistence_commit" else 40 if backend_matrix and name == "query" else 0)),
+                "failed": 1 if shutdown_saturation and name == "enqueue" else 0,
                 "average_us": 0,
                 "max_ns": 0,
                 "p95_upper_bound_ns": 0,
@@ -83,7 +104,7 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
         "persistence": {
             "persisted_items": accepted,
             "failed_batches": 0,
-            "largest_batch": 100 if shutdown_saturation else accepted,
+            "largest_batch": min(accepted, 100 if shutdown_saturation else 1_000),
         },
         "components": {"decode_failure_cache_insertions": 0, "negative_cache_hits": 0},
         "memory": {"heap_used_bytes": 1, "heap_max_bytes": -1},
@@ -136,7 +157,26 @@ class PerformanceReportValidationTest(unittest.TestCase):
         with self.assertRaises(ReportError):
             validate_report(candidate)
 
-    def test_directory_requires_complete_seven_report_artifact_set(self) -> None:
+    def test_rejects_enqueue_samples_from_another_scenario(self) -> None:
+        candidate = report("neoforge", "queue_burst", 8_000)
+        candidate["latency"]["enqueue"]["count"] += 25
+        with self.assertRaisesRegex(ReportError, "attempted events"):
+            validate_report(candidate)
+
+    def test_rejects_attempted_events_override_for_queue_burst(self) -> None:
+        candidate = report("neoforge", "queue_burst", 8_000)
+        candidate["workload"]["attempted_events"] = 8_001
+        candidate["latency"]["enqueue"]["count"] = 8_001
+        with self.assertRaisesRegex(ReportError, "only valid.*shutdown_saturation"):
+            validate_report(candidate)
+
+    def test_rejects_enqueue_failures_that_disagree_with_explicit_rejections(self) -> None:
+        candidate = report("neoforge", "queue_burst", 8_000)
+        candidate["latency"]["enqueue"]["failed"] = 1
+        with self.assertRaisesRegex(ReportError, "explicit rejection count"):
+            validate_report(candidate)
+
+    def test_directory_requires_complete_nine_report_artifact_set(self) -> None:
         scenarios = [
             ("itemgraph-neoforge-queue_burst.json", report("neoforge", "queue_burst", 8_000)),
             ("itemgraph-fabric-queue_flush_durability.json", report("fabric", "queue_flush_durability", 32)),
@@ -145,23 +185,84 @@ class PerformanceReportValidationTest(unittest.TestCase):
             ("itemgraph-fabric-backend_fabric_mariadb_matrix.json", report("fabric", "backend_fabric_mariadb_matrix", 512)),
             ("itemgraph-fabric-backend_fabric_mysql_matrix.json", report("fabric", "backend_fabric_mysql_matrix", 512)),
             ("itemgraph-neoforge-shutdown_saturation.json", report("neoforge", "shutdown_saturation", 10_000)),
+            ("itemgraph-neoforge-correlation_burst.json", report("neoforge", "correlation_burst", 500)),
+            ("itemgraph-fabric-correlation_burst.json", report("fabric", "correlation_burst", 500)),
         ]
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             for filename, contents in scenarios:
                 (directory / filename).write_text(json.dumps(contents), encoding="utf-8")
-            self.assertEqual(7, len(validate_directory(directory)))
+            self.assertEqual(9, len(validate_directory(directory)))
+            (directory / "itemgraph-fabric-correlation_burst.json").write_text(
+                json.dumps(scenarios[0][1]), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ReportError, "pinned loader and scenario"):
+                validate_directory(directory)
+            (directory / "itemgraph-fabric-correlation_burst.json").write_text(
+                json.dumps(scenarios[-1][1]), encoding="utf-8"
+            )
             (directory / "itemgraph-fabric-backend_fabric_mysql_matrix.json").unlink()
             with self.assertRaises(ReportError):
                 validate_directory(directory)
     def test_accepts_shutdown_saturation_report_with_one_explicit_rejection(self) -> None:
         candidate = report("neoforge", "shutdown_saturation", 10_000)
+        candidate["workload"]["elapsed_ms"] = 999
         self.assertEqual("shutdown_saturation", validate_report(candidate)["scenario"])
+
+    def test_rejects_shutdown_saturation_at_or_over_one_second(self) -> None:
+        candidate = report("neoforge", "shutdown_saturation", 10_000)
+        candidate["workload"]["elapsed_ms"] = 1_000
+        with self.assertRaisesRegex(ReportError, "1,000 ms healthy-SQLite drain regression budget"):
+            validate_report(candidate)
+
+    def test_accepts_cross_loader_correlation_reports_with_five_measured_passes(self) -> None:
+        for loader in ("neoforge", "fabric"):
+            with self.subTest(loader=loader):
+                self.assertEqual("correlation_burst",
+                                 validate_report(report(loader, "correlation_burst", 500))["scenario"])
+
+    def test_rejects_correlation_report_without_all_expected_edges(self) -> None:
+        candidate = report("neoforge", "correlation_burst", 500)
+        candidate["workload"]["correlation_edges"] = 249
+        with self.assertRaisesRegex(ReportError, "quantity-conserving edges"):
+            validate_report(candidate)
+
+    def test_rejects_correlation_report_with_unmatched_pass_samples(self) -> None:
+        candidate = report("fabric", "correlation_burst", 500)
+        candidate["latency"]["correlation"]["count"] = 4
+        with self.assertRaisesRegex(ReportError, "five successful measured correlation passes"):
+            validate_report(candidate)
 
     def test_rejects_shutdown_saturation_report_when_accepted_rows_are_not_durable(self) -> None:
         candidate = report("neoforge", "shutdown_saturation", 10_000)
         candidate["workload"]["durable_rows"] = 9_999
         with self.assertRaises(ReportError):
+            validate_report(candidate)
+
+    def test_rejects_persistence_batch_over_configured_cap_for_every_scenario(self) -> None:
+        scenarios = (
+            ("neoforge", "queue_burst", 8_000),
+            ("fabric", "queue_flush_durability", 32),
+            ("neoforge", "backend_mariadb_matrix", 512),
+            ("neoforge", "backend_mysql_matrix", 512),
+            ("fabric", "backend_fabric_mariadb_matrix", 512),
+            ("fabric", "backend_fabric_mysql_matrix", 512),
+            ("neoforge", "shutdown_saturation", 10_000),
+            ("neoforge", "correlation_burst", 500),
+            ("fabric", "correlation_burst", 500),
+        )
+        for loader, scenario, accepted in scenarios:
+            with self.subTest(scenario=scenario):
+                candidate = report(loader, scenario, accepted)
+                candidate["queue"]["max_batch_size"] = 10
+                candidate["persistence"]["largest_batch"] = 11
+                with self.assertRaisesRegex(ReportError, "largest persistence batch"):
+                    validate_report(candidate)
+
+    def test_rejects_missing_persistence_batch_size_for_accepted_events(self) -> None:
+        candidate = report("fabric", "queue_flush_durability", 32)
+        candidate["persistence"]["largest_batch"] = 0
+        with self.assertRaisesRegex(ReportError, "no recorded batch size"):
             validate_report(candidate)
 
     def test_accepts_mysql_and_mariadb_backend_matrix_reports_on_both_loaders(self) -> None:
@@ -182,10 +283,41 @@ class PerformanceReportValidationTest(unittest.TestCase):
         with self.assertRaises(ReportError):
             validate_report(candidate)
 
+    def test_rejects_network_backend_report_with_cumulative_lookup_samples(self) -> None:
+        candidate = report("neoforge", "backend_mysql_matrix", 512)
+        candidate["latency"]["query"]["count"] += 20
+        with self.assertRaisesRegex(ReportError, "raw-SQL and registered lookup"):
+            validate_report(candidate)
+
     def test_rejects_network_backend_report_without_proven_lookup_overlap(self) -> None:
         candidate = report("neoforge", "backend_mysql_matrix", 512)
         candidate["workload"]["overlapping_lookups"] = 0
         with self.assertRaises(ReportError):
+            validate_report(candidate)
+
+    def test_rejects_network_backend_report_with_missing_registered_lookup_callback(self) -> None:
+        candidate = report("neoforge", "backend_mysql_matrix", 512)
+        candidate["workload"]["registered_lookup_callbacks_completed"] = 19
+        with self.assertRaisesRegex(ReportError, "registered lookup command count"):
+            validate_report(candidate)
+
+    def test_rejects_network_backend_report_with_failed_registered_lookup_callback(self) -> None:
+        candidate = report("fabric", "backend_fabric_mariadb_matrix", 512)
+        candidate["workload"]["registered_lookup_callbacks_failed"] = 1
+        with self.assertRaisesRegex(ReportError, "registered lookup command count"):
+            validate_report(candidate)
+
+    def test_rejects_network_backend_report_without_callback_completed_during_submissions(self) -> None:
+        candidate = report("neoforge", "backend_mariadb_matrix", 512)
+        candidate["workload"]["registered_lookup_callbacks_completed_during_submissions"] = 0
+        with self.assertRaisesRegex(
+                ReportError, "registered_lookup_callbacks_completed_during_submissions must be an integer >= 1"):
+            validate_report(candidate)
+
+    def test_rejects_network_backend_report_with_inconsistent_registered_lookup_latency(self) -> None:
+        candidate = report("fabric", "backend_fabric_mysql_matrix", 512)
+        candidate["workload"]["registered_lookup_dispatch_callback_p95_ns"] = 1_001
+        with self.assertRaisesRegex(ReportError, "aggregate callback latency"):
             validate_report(candidate)
 
 
