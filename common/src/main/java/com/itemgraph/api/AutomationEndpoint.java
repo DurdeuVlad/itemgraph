@@ -47,6 +47,18 @@ public record AutomationEndpoint(ExternalInventoryEndpoint reference, String slo
                 displayName, null), slotPolicy, sideName);
     }
 
+    /**
+     * Creates an endpoint for a portable or otherwise non-world-backed inventory.
+     * The integration supplies its own stable opaque inventory ID; ItemGraph does
+     * not derive identity from an item stack or assign per-item UUIDs.
+     */
+    public static AutomationEndpoint externalInventory(String ownerModId, String inventoryId,
+                                                       String displayName, String slotPolicy,
+                                                       String side) {
+        return new AutomationEndpoint(new ExternalInventoryEndpoint(ownerModId, inventoryId,
+                displayName, null), slotPolicy, side == null ? "unsided" : side);
+    }
+
     private static String digest(String... values) {
         try {
             MessageDigest sha256 = MessageDigest.getInstance("SHA-256");

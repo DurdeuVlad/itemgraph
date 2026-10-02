@@ -13,7 +13,14 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import org.mockito.ArgumentCaptor;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -239,6 +246,24 @@ class ItemGraphApiTest {
     }
 
     @Test
+    void portableInventoryEndpointPreservesOpaqueModOwnedIdentityWithoutCoordinates() {
+        AutomationEndpoint first = AutomationEndpoint.externalInventory(
+                "backpack_mod", "portable-storage:owner-token-7", "Backpack", "slot:2", "item");
+        AutomationEndpoint afterRestart = AutomationEndpoint.externalInventory(
+                "backpack_mod", "portable-storage:owner-token-7", "Renamed Backpack", "slot:2", "item");
+        AutomationEndpoint anotherSlot = AutomationEndpoint.externalInventory(
+                "backpack_mod", "portable-storage:owner-token-7", "Backpack", "slot:3", "item");
+
+        assertEquals(first.reference().inventoryId(), afterRestart.reference().inventoryId());
+        assertEquals(first.reference().inventoryId(), anotherSlot.reference().inventoryId());
+        assertNotEquals(first.slotPolicy(), anotherSlot.slotPolicy());
+        assertNull(first.reference().lastKnownLocation());
+        assertEquals("item", first.side());
+        assertThrows(IllegalArgumentException.class, () -> AutomationEndpoint.externalInventory(
+                "backpack_mod", "bad\nidentity", "Backpack", "aggregate", "item"));
+    }
+
+    @Test
     void automationAdapterRecordsOnlyCommittedExactPartialQuantity() throws Exception {
         SourceHandle source = register("storage_mod", "Storage Mod");
         AutomationEndpoint origin = AutomationEndpoint.blockInventory(
@@ -344,6 +369,74 @@ class ItemGraphApiTest {
 
         assertEquals(SubmissionStatus.QUEUE_FULL, result.status());
         verify(retryingService, times(4)).submitObservation(eq(source), any());
+    }
+
+    @Test
+    void concurrentQueueFullSubmissionsReturnVisibleResultWhenRetryQueueIsSaturated() throws Exception {
+        SourceHandle source = register("storage_mod", "Storage Mod");
+        ItemGraphService busyService = mock(ItemGraphService.class);
+        AutomationEndpoint endpoint = AutomationEndpoint.externalInventory(
+                "storage_mod", "portable-storage:concurrency-fixture", "Backpack", "aggregate", "item");
+        when(busyService.submitObservation(eq(source), any())).thenAnswer(invocation -> {
+            DirectObservation observation = invocation.getArgument(1);
+            return CompletableFuture.completedFuture(new SubmissionResult(SubmissionStatus.QUEUE_FULL,
+                    "storage_mod", observation.sourceEventId(), "QUEUE_FULL", "queue saturated"));
+        });
+
+        CountDownLatch retryWorkerStarted = new CountDownLatch(1);
+        CountDownLatch releaseRetryWorker = new CountDownLatch(1);
+        ThreadPoolExecutor saturatedExecutor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(AutomationTransferAdapter.MAX_PENDING_RETRIES), runnable -> {
+                    Thread thread = new Thread(runnable, "automation-retry-saturation-test");
+                    thread.setDaemon(true);
+                    return thread;
+                }, new ThreadPoolExecutor.AbortPolicy());
+        Executor previous = null;
+        ExecutorService producers = null;
+        try {
+            saturatedExecutor.execute(() -> {
+                retryWorkerStarted.countDown();
+                try {
+                    releaseRetryWorker.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertTrue(retryWorkerStarted.await(5, TimeUnit.SECONDS));
+            for (int index = 0; index < AutomationTransferAdapter.MAX_PENDING_RETRIES; index++) {
+                saturatedExecutor.execute(() -> { });
+            }
+            assertEquals(AutomationTransferAdapter.MAX_PENDING_RETRIES, saturatedExecutor.getQueue().size(),
+                    "retry queue must respect its 128-entry bound");
+
+            previous = AutomationTransferAdapter.setRetryExecutorForTesting(saturatedExecutor);
+            ExecutorService concurrentProducers = Executors.newFixedThreadPool(8);
+            producers = concurrentProducers;
+            var concurrent = java.util.stream.IntStream.range(0, 32)
+                    .mapToObj(index -> concurrentProducers.submit(() -> AutomationTransferAdapter
+                            .reportCommittedEndpointDelta(busyService, source, 20_000L + index,
+                                    1_700_000_020_000L + index, "saturated-" + index, endpoint,
+                                    Level.OVERWORLD, diamond(1), 1, 1, true, true, false,
+                                    "storage_mod", -1).orElseThrow().join()))
+                    .toList();
+            for (var result : concurrent) {
+                SubmissionResult submission = result.get(5, TimeUnit.SECONDS);
+                assertEquals(SubmissionStatus.QUEUE_FULL, submission.status());
+                assertEquals("QUEUE_FULL", submission.errorCode());
+            }
+            assertEquals(AutomationTransferAdapter.MAX_PENDING_RETRIES, saturatedExecutor.getQueue().size(),
+                    "rejected retries must not grow the bounded queue");
+            verify(busyService, times(32)).submitObservation(eq(source), any());
+        } finally {
+            if (previous != null) {
+                AutomationTransferAdapter.setRetryExecutorForTesting(previous);
+            }
+            if (producers != null) {
+                producers.shutdownNow();
+            }
+            releaseRetryWorker.countDown();
+            saturatedExecutor.shutdownNow();
+        }
     }
 
     @Test

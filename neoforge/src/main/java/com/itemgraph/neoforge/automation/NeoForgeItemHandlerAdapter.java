@@ -2,6 +2,7 @@ package com.itemgraph.neoforge.automation;
 
 import com.itemgraph.api.AutomationEndpoint;
 import com.itemgraph.api.AutomationTransferAdapter;
+import com.itemgraph.api.ExternalInventoryEndpoint;
 import com.itemgraph.api.ItemGraphService;
 import com.itemgraph.api.ItemSnapshot;
 import com.itemgraph.api.SourceHandle;
@@ -32,9 +33,11 @@ public final class NeoForgeItemHandlerAdapter implements IItemHandler {
     private final SourceHandle source;
     private final String ownerModId;
     private final String displayName;
+    private final ExternalInventoryEndpoint externalInventory;
     private final ResourceKey<Level> dimension;
     private final BlockPos position;
     private final Direction side;
+    private final String externalSide;
     private final String automationModId;
 
     public NeoForgeItemHandlerAdapter(IItemHandler delegate, ItemGraphService service, SourceHandle source,
@@ -50,10 +53,41 @@ public final class NeoForgeItemHandlerAdapter implements IItemHandler {
         this.source = source;
         this.ownerModId = ownerModId;
         this.displayName = displayName;
+        this.externalInventory = null;
         this.dimension = dimension;
         this.position = position.immutable();
         this.side = side;
+        this.externalSide = null;
         this.automationModId = automationModId;
+    }
+
+    /**
+     * Wraps a portable inventory capability such as a backpack item's
+     * {@code Capabilities.ItemHandler.ITEM}. The provider must supply a stable,
+     * opaque inventory ID; the adapter adds the exact slot policy to each delta.
+     */
+    public NeoForgeItemHandlerAdapter(IItemHandler delegate, ItemGraphService service, SourceHandle source,
+                                      ExternalInventoryEndpoint externalInventory, String side,
+                                      ResourceKey<Level> dimension, String automationModId) {
+        if (delegate == null || service == null || source == null || externalInventory == null
+                || externalInventory.lastKnownLocation() != null || dimension == null || automationModId == null
+                || !source.modId().equals(automationModId)) {
+            throw new IllegalArgumentException("delegate, service, source, external inventory, dimension, and automation mod are required");
+        }
+        // Reuse the public validation contract for provider-owned endpoint identifiers.
+        AutomationEndpoint.externalInventory(externalInventory.ownerModId(), externalInventory.inventoryId(),
+                externalInventory.displayName(), "aggregate", side);
+        this.delegate = delegate;
+        this.service = service;
+        this.source = source;
+        this.ownerModId = null;
+        this.displayName = null;
+        this.externalInventory = externalInventory;
+        this.dimension = dimension;
+        this.position = null;
+        this.side = null;
+        this.automationModId = automationModId;
+        this.externalSide = side == null ? "unsided" : side;
     }
 
     @Override
@@ -101,8 +135,12 @@ public final class NeoForgeItemHandlerAdapter implements IItemHandler {
 
     private void record(int slot, ItemStack stack, int requested, int moved, boolean inserted) {
         try {
-            AutomationEndpoint endpoint = AutomationEndpoint.blockInventory(ownerModId, displayName,
-                    dimension, position, "slot:" + slot, side);
+            AutomationEndpoint endpoint = externalInventory == null
+                    ? AutomationEndpoint.blockInventory(ownerModId, displayName,
+                            dimension, position, "slot:" + slot, side)
+                    : AutomationEndpoint.externalInventory(externalInventory.ownerModId(),
+                            externalInventory.inventoryId(), externalInventory.displayName(),
+                            "slot:" + slot, externalSide);
             var result = AutomationTransferAdapter.reportCommittedEndpointDelta(
                     service, source, sourceEventId(), System.currentTimeMillis(), UUID.randomUUID().toString(),
                     endpoint, dimension, ItemSnapshot.of(stack), requested, moved, inserted, true, false,

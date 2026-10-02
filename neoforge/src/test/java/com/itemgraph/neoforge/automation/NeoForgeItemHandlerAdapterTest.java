@@ -1,6 +1,7 @@
 package com.itemgraph.neoforge.automation;
 
 import com.itemgraph.api.DirectObservation;
+import com.itemgraph.api.ExternalInventoryEndpoint;
 import com.itemgraph.api.ItemGraphService;
 import com.itemgraph.api.SourceHandle;
 import com.itemgraph.api.SubmissionResult;
@@ -89,6 +90,25 @@ class NeoForgeItemHandlerAdapterTest {
         when(delegate.insertItem(3, input, false)).thenReturn(input);
         adapter.insertItem(3, input, false);
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void portableInventoryAdapterKeepsProviderIdentityAndExactSlot() {
+        ExternalInventoryEndpoint portable = new ExternalInventoryEndpoint(
+                "backpack_mod", "portable-storage:owner-token-7", "Backpack", null);
+        NeoForgeItemHandlerAdapter portableAdapter = new NeoForgeItemHandlerAdapter(delegate, service, source,
+                portable, "item", Level.OVERWORLD, "pipe_mod");
+        when(delegate.extractItem(1, 5, false)).thenReturn(new ItemStack(Items.DIAMOND, 3));
+
+        assertEquals(3, portableAdapter.extractItem(1, 5, false).getCount());
+
+        DirectObservation extraction = captureObservation();
+        assertEquals("portable-storage:owner-token-7",
+                ((ExternalInventoryEndpoint) extraction.origin()).inventoryId());
+        assertEquals("backpack_mod", ((ExternalInventoryEndpoint) extraction.origin()).ownerModId());
+        assertEquals("slot:1", extraction.attributes().get("endpoint_slot_policy"));
+        assertEquals("item", extraction.attributes().get("endpoint_side"));
+        assertEquals("UNKNOWN", extraction.destination().kind().name());
     }
 
     private DirectObservation captureObservation() {

@@ -23,10 +23,19 @@ The project follows a simple pre-1.0 development changelog model.
   limited to seven adjacent container positions and 512 total slots. Both loaders
   also persist accepted default-behavior dispenser/dropper item entities with exact
   source, item, amount, ground endpoint, and entity UUID. Automatic interception of
-  arbitrary modded inventories remains unsupported until a supported integration is
-  exercised. Snapshot bounds use overflow-safe arithmetic, and hopper delta pairs are
-  suppressed when a previously observed container cannot be reread; no version bump
-  or distributable JAR was produced.
+  arbitrary modded inventories remains unsupported without an explicit integration.
+  Portable inventories can provide a stable opaque mod-owned inventory ID; NeoForge's
+  adapter now accepts it for `Capabilities.ItemHandler.ITEM` providers without deriving
+  identity from an `ItemStack`. Cross-loader test-consumer replays now move a stack through
+  the Fabric Transfer API and NeoForge item capability adapters between portable and
+  shulker-like storage, then check both persisted endpoint deltas. These are vanilla/API
+  fixtures, not third-party backpack integrations. Snapshot bounds use overflow-safe
+  arithmetic, and hopper delta pairs are suppressed when a previously observed container
+  cannot be reread. The grouped local verification passed 495 NeoForge unit tests and 76
+  Fabric unit tests (8 skipped for unavailable database services), plus eight required
+  GameTests on each loader. Retry queue saturation and concurrent rejection are covered by
+  a deterministic test of the 128-entry bound and visible `QUEUE_FULL`. No version bump or
+  distributable JAR was produced.
 
 ### Fixed
 

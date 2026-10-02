@@ -677,8 +677,10 @@ ItemGraph JDBC connection.
 - NeoForge integrations can use `NeoForgeItemHandlerAdapter` to wrap an `IItemHandler`.
   It preserves delegate results, ignores `simulate=true`, records exact insert/extract
   quantities by slot, and leaves the caller/opposite endpoint UNKNOWN unless the
-  integration submits a paired observation through the shared API. Its storage identity
-  includes the queried face and slot.
+  integration submits a paired observation through the shared API. Block-backed storage
+  identity includes the queried face and slot. Portable storage integrations provide
+  their own stable opaque `ExternalInventoryEndpoint`; the adapter adds slot and side to
+  each delta and does not derive identity from an `ItemStack`.
 - A confirmed `QUEUE_FULL` from the public API receives at most three retries with the
   same source event ID and immutable observation. One daemon worker and a 128-entry
   pending queue bound retry memory; other statuses are not retried. Retries are

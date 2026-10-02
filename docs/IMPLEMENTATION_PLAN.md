@@ -378,9 +378,26 @@ including accepted projectile-spawn evidence.
   `AutomationTransferAdapter.reportCommittedTransfer` records exact committed amounts,
   endpoint slots/policies/sides, and automation mod identity. Automatic global discovery
   of arbitrary Fabric Transfer API storages or NeoForge capabilities remains unsupported
-  because neither API exposes a universal committed-operation callback; automatic modded
-  inventory integration acceptance remains open until representative integrations use the
-  contract.
+  because neither API exposes a universal committed-operation callback. Cross-loader
+  GameTests register a test-only consumer source through an isolated runtime shim and
+  replay portable-to-shulker movement through each loader's public storage adapter, then
+  read both endpoint deltas back from ItemGraph storage. This proves the opt-in integration
+  contract, not automatic interception of unrelated third-party mods.
+- **M9 / Issue #34 completion batch:** close the adapter evidence gap in one CI-backed
+  verification pass. Test-consumer GameTests on both loaders move seven nether stars from
+  a portable storage fixture into a placed shulker block through the public opt-in adapters.
+  Fabric uses `ItemStorage.SIDED` and one outer transaction; NeoForge calls the portable
+  `IItemHandler` wrapper and the block's `Capabilities.ItemHandler.BLOCK` wrapper. Both
+  fixtures read two persisted endpoint deltas and assert the 7 = 4 + 3 quantity balance,
+  slot policy, stable opaque portable identity, and the block endpoint. They do not load a
+  third-party backpack or modded capability implementation; arbitrary mods must opt in,
+  and their implementation-specific compatibility remains a follow-up. In the same batch,
+  exercise retry executor saturation and concurrent `QUEUE_FULL` submissions, proving the
+  128-entry bound, visible rejection result, and stable retry identity. Update API docs and
+  the issue acceptance report with the evidence and this coverage limit. Do not build
+  distributable JARs or change the project version. Run both loader unit suites, both loader
+  GameTest suites, and the compatibility/differential validators together after all code and
+  docs are complete; rerun only if a later code correction changes their inputs.
 - Both loaders expose the same per-player inspector: NeoForge uses its high-priority
   `InspectionListener`, while Fabric uses `UseBlockCallback`/`AttackBlockCallback`;
   each delegates to `ItemGraphCommands.openBlockInspection` and the shared exact-position
