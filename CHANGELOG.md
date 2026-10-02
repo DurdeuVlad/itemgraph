@@ -5,6 +5,23 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Added
+
+- **Issue #34 opt-in automation adapter contract:** added `AutomationEndpoint` for
+  restart-stable opaque inventory identities derived from mod, dimension, position,
+  slot policy, and side, plus opt-in Fabric `FabricTransferStorageAdapter` and NeoForge
+  `NeoForgeItemHandlerAdapter` implementations. They preserve native transfer results,
+  record exact committed quantities, and suppress simulations and rollbacks. Fabric
+  overflow omits the whole transaction; source mod identity is checked against its
+  registered handle, and caller-created endpoints cannot add a location to the opaque
+  reference. Rejected transfers, zero movement, and impossible quantity claims emit no
+  movement evidence. Explicit `QUEUE_FULL` responses retry the same event identity at
+  most three times through a 128-entry bounded worker queue; other outcomes are not
+  replayed. This is in-memory retry only, and pending retries can be interrupted by
+  process shutdown. Automatic interception of
+  arbitrary modded inventories remains unsupported until a supported integration is
+  exercised; no version bump or distributable JAR was produced.
+
 ### Fixed
 
 - **Issue #32 shutdown durability:** submission admission closes atomically with the final queue drain; submissions after stop are rejected and counted. Loader shutdown waits for the GriefLogger importer executor to terminate before database close. Shutdown write failures with uncertain commit status are reported as unknown outcomes instead of definite drops. Regression tests cover submit/stop races and importer worker termination.

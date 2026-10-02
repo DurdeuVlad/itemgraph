@@ -160,6 +160,14 @@ interval-bounded UNKNOWN-caller evidence. If the queue remains full, the retry i
 dropped and is not attributed to a player; `/ig status` reports `dropped` and
 `capabilityQueueRejections` counters.
 
+An integration using `AutomationTransferAdapter` may emit `TRANSFER_ITEM` only after its
+native operation's outermost transaction commits. The reported amount is the quantity the
+native API accepted; simulation, zero acceptance, rejection, and rollback emit no movement
+row. `AutomationEndpoint` IDs bind owner mod, dimension, position, slot policy, and side
+into a restart-stable opaque identifier. The default reference does not disclose coordinates.
+Adapters that cannot identify both ends must preserve an UNKNOWN endpoint and leave
+correlation unresolved.
+
 A canceled `ItemTossEvent` is recorded as `DROP_CANCELLED` to UNKNOWN because it did not
 produce a world item entity. A canceled `LivingDropsEvent` is recorded as
 `DEATH_DROP_CANCELLED` with no destination. Neither is a ground transfer or correlation

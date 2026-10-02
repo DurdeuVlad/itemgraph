@@ -360,6 +360,14 @@ including accepted projectile-spawn evidence.
 - Fabric `HopperBlockEntityMixin` captures successful vanilla hopper transfers as
   endpoint-unknown `HOPPER_INSERT`/`HOPPER_EXTRACT` net deltas, preserving quantity
   without attributing automation to a player.
+- Issue 34 adds an opt-in cross-loader adapter contract: `AutomationEndpoint` provides
+  opaque restart-stable external inventory identity, and
+  `AutomationTransferAdapter.reportCommittedTransfer` records exact committed amounts,
+  endpoint slots/policies/sides, and automation mod identity. Automatic global discovery
+  of arbitrary Fabric Transfer API storages or NeoForge capabilities remains unsupported
+  because neither API exposes a universal committed-operation callback; automatic modded
+  inventory integration acceptance remains open until representative integrations use the
+  contract.
 - Both loaders expose the same per-player inspector: NeoForge uses its high-priority
   `InspectionListener`, while Fabric uses `UseBlockCallback`/`AttackBlockCallback`;
   each delegates to `ItemGraphCommands.openBlockInspection` and the shared exact-position
