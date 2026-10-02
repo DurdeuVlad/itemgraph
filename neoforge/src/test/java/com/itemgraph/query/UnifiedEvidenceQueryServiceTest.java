@@ -80,17 +80,22 @@ class UnifiedEvidenceQueryServiceTest {
 
     @Test
     void stateFilterNamesDanglingTransformationFingerprintSeparatelyFromMissingEndpoint() throws Exception {
+        long unknownEndpoint = node("UNKNOWN", 11, 64, 10, "unknown endpoint", null);
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_item_transformations
                     (transformation_type, player_node_id, source_fingerprint_id,
                      result_fingerprint_id, quantity, timestamp_ms, details)
                 VALUES ('CRAFTING', ?, 9998, ?, 4, 2_000, 'missing source fingerprint fixture'),
-                       ('CRAFTING', NULL, ?, ?, 2, 2_000, 'missing player endpoint fixture')
+                       ('CRAFTING', ?, ?, ?, 2, 2_000, 'missing player endpoint fixture'),
+                       ('CRAFTING', ?, 9999, ?, 1, 2_000, 'missing both endpoint and fingerprint fixture')
                 """)) {
             statement.setLong(1, playerNode);
             statement.setLong(2, resultFingerprint);
-            statement.setLong(3, stoneFingerprint);
-            statement.setLong(4, resultFingerprint);
+            statement.setLong(3, unknownEndpoint);
+            statement.setLong(4, stoneFingerprint);
+            statement.setLong(5, resultFingerprint);
+            statement.setLong(6, unknownEndpoint);
+            statement.setLong(7, resultFingerprint);
             statement.executeUpdate();
         }
 
@@ -99,7 +104,7 @@ class UnifiedEvidenceQueryServiceTest {
         List<UnifiedEvidenceDetail> rows = service.findFiltered(
                 conn, unresolved, "minecraft:overworld", 10, 64, 10, 100, 0);
 
-        assertEquals(2, rows.size());
+        assertEquals(3, rows.size());
         UnifiedEvidenceDetail missingFingerprint = rows.stream()
                 .filter(row -> row.detail().contains("missing source fingerprint fixture"))
                 .findFirst().orElseThrow();
@@ -112,6 +117,11 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals(0, missingFingerprint.quantityImpact());
         assertEquals("UNKNOWN_ENDPOINT", missingEndpoint.reasonCode());
         assertEquals(0, missingEndpoint.quantityImpact());
+        UnifiedEvidenceDetail missingBoth = rows.stream()
+                .filter(row -> row.detail().contains("missing both endpoint and fingerprint fixture"))
+                .findFirst().orElseThrow();
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", missingBoth.reasonCode());
+        assertEquals(0, missingBoth.quantityImpact());
         assertTrue(service.findFiltered(conn, AuditLookupFilters.parse(
                         "state.observed radius.100", 10_000L),
                 "minecraft:overworld", 10, 64, 10, 100, 0).isEmpty());
@@ -137,6 +147,61 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals("UNRESOLVED", rows.get(0).evidenceClass());
         assertEquals("PRE_USE_ARMOR_STAND_TRANSFER_UNVERIFIED", rows.get(0).reasonCode());
         assertEquals(0, rows.get(0).quantityImpact());
+    }
+
+    @Test
+    void danglingObservationFingerprintIsVisibleAsUnresolvedWithoutAllocatingQuantity() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observations
+                    (source_type, timestamp_ms, node_id, target_node_id, fingerprint_id,
+                     action_type, amount, raw_data)
+                VALUES ('ITEMGRAPH_INTERNAL', 2_000, ?, ?, 999_991, 'DROP_ITEM', 8, '{}')
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.setLong(2, groundNode);
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> unresolved = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.unresolved radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, unresolved.size());
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", unresolved.getFirst().reasonCode());
+        assertEquals(8, unresolved.getFirst().quantity());
+        assertEquals(0, unresolved.getFirst().quantityImpact());
+        assertTrue(service.findFiltered(conn, AuditLookupFilters.parse("state.observed radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0).isEmpty());
+    }
+
+    @Test
+    void danglingFingerprintTakesPrecedenceWhenObservationAlsoHasAmbiguousSourceGroup() throws Exception {
+        observation("ITEMGRAPH_INTERNAL", 2_000L, "DROP_ITEM", 999_992, 6);
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_observation_groups (state, match_basis, explanation, created_at_ms)
+                VALUES ('AMBIGUOUS', 'fixture', 'two unresolved source candidates', 2_001)
+                """, java.sql.Statement.RETURN_GENERATED_KEYS)) {
+            statement.executeUpdate();
+            try (var keys = statement.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                try (PreparedStatement member = conn.prepareStatement("""
+                        INSERT INTO ig_observation_group_members (group_id, observation_id, member_role)
+                        VALUES (?, 1, 'CANDIDATE')
+                        """)) {
+                    member.setLong(1, keys.getLong(1));
+                    member.executeUpdate();
+                }
+            }
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.unresolved radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, rows.size());
+        assertEquals("UNRESOLVED", rows.getFirst().evidenceClass());
+        assertEquals("ITEM_FINGERPRINT_UNRESOLVED", rows.getFirst().reasonCode());
+        assertEquals(0, rows.getFirst().quantityImpact());
     }
 
     @Test
@@ -207,6 +272,37 @@ class UnifiedEvidenceQueryServiceTest {
         assertTrue(edge.candidateEvidenceTruncated());
         assertEquals(3, edge.quantityImpact());
         assertTrue(edge.detail().contains("confidence=0.8125"));
+    }
+
+    @Test
+    void inferredLookupDistinguishesLegacyUnavailableCandidatesFromKnownEmptySet() throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_inferred_edges
+                    (from_node_id, to_node_id, fingerprint_id, amount, time_start, time_end,
+                     confidence, explanation, created_at, competing_observation_ids,
+                     competing_candidates_truncated)
+                VALUES (?, ?, ?, 1, 1_000, 2_000, 0.8, 'legacy unknown set', 2_100, NULL, 0),
+                       (?, ?, ?, 1, 1_001, 2_001, 0.8, 'known empty set', 2_101, '', 0)
+                """)) {
+            statement.setLong(1, playerNode);
+            statement.setLong(2, groundNode);
+            statement.setLong(3, stoneFingerprint);
+            statement.setLong(4, playerNode);
+            statement.setLong(5, groundNode);
+            statement.setLong(6, stoneFingerprint);
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("state.inferred radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        UnifiedEvidenceDetail legacy = rows.stream().filter(row -> row.detail().contains("legacy unknown set"))
+                .findFirst().orElseThrow();
+        UnifiedEvidenceDetail knownEmpty = rows.stream().filter(row -> row.detail().contains("known empty set"))
+                .findFirst().orElseThrow();
+        assertEquals("CORRELATION_CANDIDATES_UNAVAILABLE", legacy.reasonCode());
+        assertNull(knownEmpty.reasonCode());
     }
 
     @Test
@@ -688,6 +784,25 @@ class UnifiedEvidenceQueryServiceTest {
             statement.setLong(4, resultFingerprint);
             statement.setLong(5, timestamp);
             statement.executeUpdate();
+        }
+    }
+
+    private long node(String type, int x, int y, int z, String label, String ownerUuid) throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_nodes (node_type, level_id, x, y, z, custom_label, owner_uuid)
+                VALUES (?, 'minecraft:overworld', ?, ?, ?, ?, ?)
+                """, java.sql.Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, type);
+            statement.setInt(2, x);
+            statement.setInt(3, y);
+            statement.setInt(4, z);
+            statement.setString(5, label);
+            statement.setString(6, ownerUuid);
+            statement.executeUpdate();
+            try (var keys = statement.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                return keys.getLong(1);
+            }
         }
     }
 }

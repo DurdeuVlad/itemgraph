@@ -98,8 +98,12 @@ audit rows include a raw payload hash only when their `raw_data` is present;
 transformation rows do not have a raw payload hash in schema version 1.
 
 Version 1 exports rows returned by the bounded unified lookup. Ambiguous and
-unresolved classifications are not synthesized by the exporter; the shared
-query/export state vocabulary is being completed under issue #44. A bounded
+unresolved classifications use the shared query/export evidence vocabulary from
+issue #44. Missing observation fingerprints export as
+`ITEM_FINGERPRINT_UNRESOLVED` with zero quantity impact. For inferred edges,
+`candidate_evidence_available` distinguishes a known empty candidate set from a
+legacy edge whose competing candidates were not persisted; the latter reports
+`CORRELATION_CANDIDATES_UNAVAILABLE`. A bounded
 export that reaches its evidence or edge cap reports its counts and edge
 truncation in the manifest rather than implying completeness.
 

@@ -99,6 +99,7 @@ class IncidentBundleServiceTest extends QueryTestBase {
         assertTrue(inferredPayload.get("candidate_evidence_truncated").getAsBoolean());
         assertEquals("CORRELATION_COMPETING_CANDIDATES",
                 inferredPayload.get("reason_code").getAsString());
+        assertTrue(inferredPayload.get("candidate_evidence_available").getAsBoolean());
         assertFalse(redactedText.contains("observation#900"));
         assertTrue(IncidentBundleService.verify(exports, "redacted.json").valid());
 
@@ -128,7 +129,12 @@ class IncidentBundleServiceTest extends QueryTestBase {
         String directText = Files.readString(exports.resolve("direct.json"));
         assertFalse(directText.contains("private-entity-uuid"));
         JsonArray directRecords = JsonParser.parseString(directText).getAsJsonObject().getAsJsonArray("records");
-        JsonObject directPayload = directRecords.get(3).getAsJsonObject().getAsJsonObject("payload");
+        JsonObject directPayload = directRecords.asList().stream()
+                .map(element -> element.getAsJsonObject().getAsJsonObject("payload"))
+                .filter(payload -> payload.has("confidence") && payload.get("confidence").getAsDouble() == 0.95)
+                .findFirst().orElseThrow();
+        assertFalse(directPayload.get("candidate_evidence_available").getAsBoolean());
+        assertEquals("CORRELATION_CANDIDATES_UNAVAILABLE", directPayload.get("reason_code").getAsString());
         JsonObject directFactors = directPayload.getAsJsonObject("scoring_factors");
         assertEquals(1, directFactors.get("drop_allocated_quantity").getAsInt());
         assertEquals(30, directFactors.get("correlation_window_seconds").getAsInt());

@@ -349,7 +349,8 @@ public final class UnifiedEvidenceQueryService {
                        CASE WHEN origin.node_type = 'PLAYER' THEN origin.owner_uuid
                             WHEN dest.node_type = 'PLAYER' THEN dest.owner_uuid
                             ELSE COALESCE(origin.owner_uuid, dest.owner_uuid) END AS player_uuid,
-                       f.item_id, f.component_summary, origin.custom_label AS origin_label,
+                       f.id AS fingerprint_row_id, f.item_id, f.component_summary,
+                       origin.custom_label AS origin_label,
                        dest.custom_label AS dest_label
                 FROM ig_observations o
                 LEFT JOIN ig_nodes origin ON origin.id = o.node_id
@@ -364,11 +365,12 @@ public final class UnifiedEvidenceQueryService {
         appendActionFilter(sql, args, OBSERVATION_ACTION, filters.eventTypes(), true);
         appendEvidenceClassFilter(sql, args,
                 "CASE WHEN disposition.reason_code IS NOT NULL THEN 'UNRESOLVED' "
-                        + "WHEN og.state = 'AMBIGUOUS' THEN 'AMBIGUOUS' "
                         + "WHEN o.node_id IS NULL OR o.target_node_id IS NULL "
                         + "OR origin.node_type IS NULL OR dest.node_type IS NULL "
                         + "OR origin.node_type = 'UNKNOWN' OR dest.node_type = 'UNKNOWN' THEN 'UNRESOLVED' "
+                        + "WHEN f.id IS NULL THEN 'UNRESOLVED' "
                         + "WHEN f.component_summary LIKE '%component_decode=UNRESOLVED%' THEN 'UNRESOLVED' "
+                        + "WHEN og.state = 'AMBIGUOUS' THEN 'AMBIGUOUS' "
                         + "ELSE 'OBSERVED' END", filters.evidenceClasses());
         appendUserFilter(sql, args,
                 List.of("origin.custom_label", "dest.custom_label"),
@@ -413,13 +415,17 @@ public final class UnifiedEvidenceQueryService {
                     String componentSummary = rs.getString("component_summary");
                     boolean componentDecodeFailed = componentSummary != null
                             && componentSummary.contains("component_decode=UNRESOLVED");
+                    boolean missingFingerprint = rs.getObject("fingerprint_row_id") == null;
                     String evidenceClass = dispositionReason != null ? "UNRESOLVED"
-                            : "AMBIGUOUS".equals(groupState) ? "AMBIGUOUS"
-                            : missingEndpoint || componentDecodeFailed ? "UNRESOLVED" : "OBSERVED";
+                            : missingEndpoint || missingFingerprint || componentDecodeFailed ? "UNRESOLVED" : "OBSERVED";
                     String reasonCode = dispositionReason != null ? dispositionReason
-                            : "AMBIGUOUS".equals(groupState) ? "SOURCE_EQUIVALENCE_AMBIGUOUS"
                             : componentDecodeFailed ? "COMPONENT_DECODE_FAILED"
-                            : missingEndpoint ? "UNKNOWN_ENDPOINT" : null;
+                            : missingFingerprint ? "ITEM_FINGERPRINT_UNRESOLVED"
+                            : missingEndpoint ? "UNKNOWN_ENDPOINT"
+                            : "AMBIGUOUS".equals(groupState) ? "SOURCE_EQUIVALENCE_AMBIGUOUS" : null;
+                    if ("OBSERVED".equals(evidenceClass) && "AMBIGUOUS".equals(groupState)) {
+                        evidenceClass = "AMBIGUOUS";
+                    }
                     Long sourceGroupId = nullableLong(rs, "source_group_id");
                     String rowLevel = rs.getString("level_id");
                     Double rowX = nullableDouble(rs, "x");
@@ -468,9 +474,9 @@ public final class UnifiedEvidenceQueryService {
         List<Object> args = new ArrayList<>();
         appendActionFilter(sql, args, TRANSFORMATION_ACTION, filters.eventTypes(), true);
         appendEvidenceClassFilter(sql, args,
-                "CASE WHEN p.id IS NULL OR p.node_type = 'UNKNOWN' "
+                "CASE WHEN source_fp.item_id IS NULL OR result_fp.item_id IS NULL "
                         + "THEN 'UNRESOLVED' "
-                        + "WHEN source_fp.item_id IS NULL OR result_fp.item_id IS NULL "
+                        + "WHEN p.id IS NULL OR p.node_type = 'UNKNOWN' "
                         + "THEN 'UNRESOLVED' ELSE 'OBSERVED' END", filters.evidenceClasses());
         appendUserFilter(sql, args, List.of("p.custom_label"), List.of("p.owner_uuid"), filters.playerNames());
         appendWindow(sql, args, filters.window(), "t.timestamp_ms");
@@ -504,8 +510,8 @@ public final class UnifiedEvidenceQueryService {
                             rs.getString("transformation_type"), rs.getInt("quantity"),
                             valueOr(sourceItem, "(missing)") + " -> " + valueOr(resultItem, "(missing)"), detail,
                             unresolved ? "UNRESOLVED" : "OBSERVED", null, null, null, null,
-                            !unresolved ? null : unknownEndpoint
-                                    ? "UNKNOWN_ENDPOINT" : "ITEM_FINGERPRINT_UNRESOLVED", List.of(),
+                            !unresolved ? null : sourceItem == null || resultItem == null
+                                    ? "ITEM_FINGERPRINT_UNRESOLVED" : "UNKNOWN_ENDPOINT", List.of(),
                             unresolved ? 0 : rs.getInt("quantity"), null, false));
                 }
             }
@@ -560,8 +566,8 @@ public final class UnifiedEvidenceQueryService {
             bind(statement, args);
             try (ResultSet rs = statement.executeQuery()) {
                 while (rs.next()) {
-                    List<String> candidates = EdgeExplanation.parseCompetingCandidateIds(
-                            rs.getString("competing_observation_ids"));
+                    String storedCandidates = rs.getString("competing_observation_ids");
+                    List<String> candidates = EdgeExplanation.parseCompetingCandidateIds(storedCandidates);
                     String explanation = rs.getString("explanation");
                     String detail = "confidence=" + QueryFormatter.formatConfidence(rs.getDouble("confidence"))
                             + (explanation == null || explanation.isBlank() ? "" : " " + explanation);
@@ -573,7 +579,8 @@ public final class UnifiedEvidenceQueryService {
                                     rs.getString("destination_label"), rs.getString("destination_uuid")),
                             "GROUND_BRIDGE", rs.getInt("amount"), rs.getString("item_id"), detail,
                             "INFERRED", null, null, null, null,
-                            candidates.isEmpty() ? null : "CORRELATION_COMPETING_CANDIDATES",
+                            storedCandidates == null ? "CORRELATION_CANDIDATES_UNAVAILABLE"
+                                    : candidates.isEmpty() ? null : "CORRELATION_COMPETING_CANDIDATES",
                             candidates, rs.getInt("amount"), null,
                             rs.getInt("competing_candidates_truncated") != 0));
                 }

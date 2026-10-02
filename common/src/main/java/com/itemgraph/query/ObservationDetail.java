@@ -141,14 +141,17 @@ public record ObservationDetail(
         if (dispositionReason != null) {
             return EventTaxonomy.EvidenceClass.UNRESOLVED;
         }
-        if (sourceGroup != null && "AMBIGUOUS".equals(sourceGroup.state())) {
-            return EventTaxonomy.EvidenceClass.AMBIGUOUS;
-        }
         if (fingerprint != null && fingerprint.componentDecodeFailed()) {
+            return EventTaxonomy.EvidenceClass.UNRESOLVED;
+        }
+        if (fingerprint == null || !fingerprint.resolved()) {
             return EventTaxonomy.EvidenceClass.UNRESOLVED;
         }
         if (unknownEndpoint(origin) || unknownEndpoint(destination)) {
             return EventTaxonomy.EvidenceClass.UNRESOLVED;
+        }
+        if (sourceGroup != null && "AMBIGUOUS".equals(sourceGroup.state())) {
+            return EventTaxonomy.EvidenceClass.AMBIGUOUS;
         }
         return EventTaxonomy.EvidenceClass.OBSERVED;
     }
@@ -158,14 +161,17 @@ public record ObservationDetail(
         if (dispositionReason != null) {
             return dispositionReason;
         }
-        if (sourceGroup != null && "AMBIGUOUS".equals(sourceGroup.state())) {
-            return "SOURCE_EQUIVALENCE_AMBIGUOUS";
-        }
         if (fingerprint != null && fingerprint.componentDecodeFailed()) {
             return "COMPONENT_DECODE_FAILED";
         }
+        if (fingerprint == null || !fingerprint.resolved()) {
+            return "ITEM_FINGERPRINT_UNRESOLVED";
+        }
         if (unknownEndpoint(origin) || unknownEndpoint(destination)) {
             return "UNKNOWN_ENDPOINT";
+        }
+        if (sourceGroup != null && "AMBIGUOUS".equals(sourceGroup.state())) {
+            return "SOURCE_EQUIVALENCE_AMBIGUOUS";
         }
         return null;
     }

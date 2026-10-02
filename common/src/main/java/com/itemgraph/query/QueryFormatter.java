@@ -276,6 +276,8 @@ public final class QueryFormatter {
         if (!edge.competingCandidateEvidenceIds().isEmpty()) {
             lines.add("  competing candidates: " + String.join(",", edge.competingCandidateEvidenceIds())
                     + (edge.competingCandidatesTruncated() ? " (truncated)" : ""));
+        } else if (!edge.competingCandidatesAvailable()) {
+            lines.add("  competing candidates: unavailable for this legacy edge");
         }
 
         if (edge.evidence().isEmpty()) {

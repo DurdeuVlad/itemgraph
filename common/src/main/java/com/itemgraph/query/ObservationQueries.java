@@ -78,6 +78,7 @@ final class ObservationQueries {
                    dest.owner_uuid AS dest_owner_uuid,
                    dest.external_key AS dest_external_key,
                    o.fingerprint_id AS o_fingerprint_id,
+                   f.id AS fp_row_id,
                    f.item_id AS fp_item_id,
                    f.custom_name AS fp_custom_name,
                    f.fingerprint_hash AS fp_hash,

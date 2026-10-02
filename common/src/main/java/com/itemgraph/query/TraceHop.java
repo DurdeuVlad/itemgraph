@@ -180,7 +180,7 @@ public record TraceHop(
                 edge.fingerprint(),
                 Source.INFERRED_EDGE,
                 EventTaxonomy.EvidenceClass.INFERRED,
-                edge.competingCandidateEvidenceIds().isEmpty() ? null : "CORRELATION_COMPETING_CANDIDATES",
+                edge.competingCandidatesReasonCode(),
                 edge.competingCandidateEvidenceIds(),
                 edge.competingCandidatesTruncated(),
                 edge.amount()

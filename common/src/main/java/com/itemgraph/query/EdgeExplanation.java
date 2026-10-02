@@ -27,6 +27,7 @@ import java.util.List;
  * @param createdAtMs  when the edge was written
  * @param evidence     the observations cited by {@code ig_edge_evidence}, chronological
  * @param evidenceTruncated true if more evidence rows exist than were loaded
+ * @param competingCandidatesAvailable false only for legacy edges predating persisted candidate sets
  */
 public record EdgeExplanation(
         long id,
@@ -43,7 +44,8 @@ public record EdgeExplanation(
         boolean evidenceTruncated,
         String edgeState,
         List<String> competingCandidateEvidenceIds,
-        boolean competingCandidatesTruncated
+        boolean competingCandidatesTruncated,
+        boolean competingCandidatesAvailable
 ) {
 
     public EdgeExplanation(
@@ -61,7 +63,7 @@ public record EdgeExplanation(
             boolean evidenceTruncated
     ) {
         this(id, from, to, fingerprint, amount, timeStart, timeEnd, confidence, explanation,
-                createdAtMs, evidence, evidenceTruncated, "ACTIVE", List.of(), false);
+                createdAtMs, evidence, evidenceTruncated, "ACTIVE", List.of(), false, true);
     }
 
     public EdgeExplanation(long id, NodeRef from, NodeRef to, FingerprintRef fingerprint,
@@ -69,7 +71,7 @@ public record EdgeExplanation(
                            String explanation, long createdAtMs, List<ObservationDetail> evidence,
                            boolean evidenceTruncated, String edgeState) {
         this(id, from, to, fingerprint, amount, timeStart, timeEnd, confidence, explanation,
-                createdAtMs, evidence, evidenceTruncated, edgeState, List.of(), false);
+                createdAtMs, evidence, evidenceTruncated, edgeState, List.of(), false, true);
     }
 
     public EdgeExplanation {
@@ -92,6 +94,13 @@ public record EdgeExplanation(
     /** Always {@code INFERRED}. See the class javadoc. */
     public String kindLabel() {
         return "INFERRED";
+    }
+
+    public String competingCandidatesReasonCode() {
+        if (!competingCandidatesAvailable) {
+            return "CORRELATION_CANDIDATES_UNAVAILABLE";
+        }
+        return competingCandidateEvidenceIds.isEmpty() ? null : "CORRELATION_COMPETING_CANDIDATES";
     }
 
     /** Elapsed time the claimed transfer spans. */

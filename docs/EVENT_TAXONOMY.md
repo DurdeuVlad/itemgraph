@@ -107,9 +107,12 @@ definition. An unavailable or ambiguous cause remains unresolved with its
 reason code and supporting evidence IDs.
 
 Issue #44 reason codes are `SOURCE_EQUIVALENCE_AMBIGUOUS`, `UNKNOWN_ENDPOINT`,
-`ITEM_FINGERPRINT_UNRESOLVED`, `COMPONENT_DECODE_FAILED`, `CORRELATION_COMPETING_CANDIDATES`, and
+`ITEM_FINGERPRINT_UNRESOLVED`, `COMPONENT_DECODE_FAILED`,
+`CORRELATION_COMPETING_CANDIDATES`, `CORRELATION_CANDIDATES_UNAVAILABLE`, and
 `EVIDENCE_SUPERSEDED`. They classify query results without changing or replacing
-stored raw evidence. Ambiguous and unresolved results allocate zero quantity.
+stored raw evidence. A legacy inferred edge with a null candidate-set column is
+reported as unavailable; an empty string means candidate tracking ran and found
+no competing candidate. Ambiguous and unresolved results allocate zero quantity.
 
 Initial unresolved reason codes are `WORLD_EVENT_API_UNAVAILABLE`,
 `WORLD_EFFECT_PARTIAL`, and `CAUSE_NOT_REPORTED` (#55);

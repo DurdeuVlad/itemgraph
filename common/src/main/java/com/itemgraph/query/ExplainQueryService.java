@@ -102,6 +102,7 @@ public final class ExplainQueryService {
                     evidence = evidence.subList(0, QueryLimits.MAX_EVIDENCE_ROWS);
                 }
 
+                String storedCandidates = rs.getString("e_competing_observation_ids");
                 return Optional.of(new EdgeExplanation(
                         rs.getLong("e_id"),
                         from,
@@ -116,9 +117,9 @@ public final class ExplainQueryService {
                         evidence,
                         truncated,
                         rs.getString("e_edge_state"),
-                        EdgeExplanation.parseCompetingCandidateIds(
-                                rs.getString("e_competing_observation_ids")),
-                        rs.getInt("e_competing_candidates_truncated") != 0
+                        EdgeExplanation.parseCompetingCandidateIds(storedCandidates),
+                        rs.getInt("e_competing_candidates_truncated") != 0,
+                        storedCandidates != null
                 ));
             }
         }

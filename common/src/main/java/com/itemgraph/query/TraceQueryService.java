@@ -692,8 +692,8 @@ public final class TraceQueryService {
         long edgeId = rs.getLong("e_id");
         double confidence = EdgeConfidence.readRequired(rs, edgeId);
 
-        List<String> competingCandidates = EdgeExplanation.parseCompetingCandidateIds(
-                rs.getString("e_competing_observation_ids"));
+        String storedCandidates = rs.getString("e_competing_observation_ids");
+        List<String> competingCandidates = EdgeExplanation.parseCompetingCandidateIds(storedCandidates);
         return new TraceHop(
                 TraceHop.Kind.INFERRED,
                 edgeId,
@@ -707,7 +707,8 @@ public final class TraceQueryService {
                 fp,
                 TraceHop.Source.INFERRED_EDGE,
                 com.itemgraph.audit.EventTaxonomy.EvidenceClass.INFERRED,
-                competingCandidates.isEmpty() ? null : "CORRELATION_COMPETING_CANDIDATES",
+                storedCandidates == null ? "CORRELATION_CANDIDATES_UNAVAILABLE"
+                        : competingCandidates.isEmpty() ? null : "CORRELATION_COMPETING_CANDIDATES",
                 competingCandidates,
                 rs.getInt("e_competing_candidates_truncated") != 0,
                 rs.getInt("e_amount")
@@ -805,6 +806,8 @@ public final class TraceQueryService {
 
                     boolean unresolved = playerNode == null || "UNKNOWN".equals(playerNode.nodeType())
                             || missingFingerprint;
+                    String unresolvedReason = missingFingerprint ? "ITEM_FINGERPRINT_UNRESOLVED"
+                            : unresolved ? "UNKNOWN_ENDPOINT" : null;
                     hops.add(new TraceHop(
                             TraceHop.Kind.OBSERVED,
                             rs.getLong("t_id"),
@@ -819,7 +822,7 @@ public final class TraceQueryService {
                             TraceHop.Source.TRANSFORMATION,
                             unresolved ? com.itemgraph.audit.EventTaxonomy.EvidenceClass.UNRESOLVED
                                     : com.itemgraph.audit.EventTaxonomy.EvidenceClass.OBSERVED,
-                            unresolved ? "UNKNOWN_ENDPOINT" : null,
+                            unresolvedReason,
                             List.of(),
                             false,
                             unresolved ? 0 : amount

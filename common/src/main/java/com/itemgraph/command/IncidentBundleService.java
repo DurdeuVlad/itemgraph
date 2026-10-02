@@ -546,11 +546,8 @@ public final class IncidentBundleService {
         }
         payload.add("candidate_evidence_ids", competingCandidates);
         payload.addProperty("candidate_evidence_truncated", edge.competingCandidatesTruncated());
-        if (!edge.competingCandidateEvidenceIds().isEmpty()) {
-            payload.addProperty("reason_code", "CORRELATION_COMPETING_CANDIDATES");
-        } else {
-            payload.add("reason_code", null);
-        }
+        nullable(payload, "reason_code", edge.competingCandidatesReasonCode());
+        payload.addProperty("candidate_evidence_available", edge.competingCandidatesAvailable());
         payload.add("origin", node(edge.from(), profile, evidenceReferences));
         payload.add("destination", node(edge.to(), profile, evidenceReferences));
 
