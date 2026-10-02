@@ -467,10 +467,12 @@ separate performance change from machine noise. [OpenJDK JMH](https://github.com
 recommends a standalone harness setup for more reliable JVM measurements. These
 practices support repeated, environment-matched staging runs for ItemGraph.
 They do not supply ItemGraph's production budgets. Until those measurements
-exist, CI gates the established 50 ms
-server-thread ceiling, exact queue bounds, durability/loss accounting, and
-existing 5-second query deadline; it does not invent persistence, correlation,
-or memory budgets.
+exist, CI gates the established 50 ms server-thread submission ceiling, exact
+queue bounds, durability/loss accounting, and report-shape/workload invariants.
+The separate five-second application command-query cancellation deadline is not
+a threshold for the concurrent raw-JDBC benchmark; that fixture currently uses
+a 30-second test wait. CI does not invent persistence, correlation, query, or
+memory budgets.
 
 ### Consolidated local validation (2026-10-02)
 

@@ -215,25 +215,28 @@ def validate_report(report: Any) -> dict[str, Any]:
 
 def validate_directory(directory: Path) -> list[dict[str, Any]]:
     expected = {
-        "itemgraph-neoforge-queue_burst.json",
-        "itemgraph-fabric-queue_flush_durability.json",
-        "itemgraph-neoforge-backend_mariadb_matrix.json",
-        "itemgraph-neoforge-backend_mysql_matrix.json",
-        "itemgraph-fabric-backend_fabric_mariadb_matrix.json",
-        "itemgraph-fabric-backend_fabric_mysql_matrix.json",
-        "itemgraph-neoforge-shutdown_saturation.json",
-        "itemgraph-neoforge-correlation_burst.json",
-        "itemgraph-fabric-correlation_burst.json",
+        "itemgraph-neoforge-queue_burst.json": ("neoforge", "queue_burst"),
+        "itemgraph-fabric-queue_flush_durability.json": ("fabric", "queue_flush_durability"),
+        "itemgraph-neoforge-backend_mariadb_matrix.json": ("neoforge", "backend_mariadb_matrix"),
+        "itemgraph-neoforge-backend_mysql_matrix.json": ("neoforge", "backend_mysql_matrix"),
+        "itemgraph-fabric-backend_fabric_mariadb_matrix.json": ("fabric", "backend_fabric_mariadb_matrix"),
+        "itemgraph-fabric-backend_fabric_mysql_matrix.json": ("fabric", "backend_fabric_mysql_matrix"),
+        "itemgraph-neoforge-shutdown_saturation.json": ("neoforge", "shutdown_saturation"),
+        "itemgraph-neoforge-correlation_burst.json": ("neoforge", "correlation_burst"),
+        "itemgraph-fabric-correlation_burst.json": ("fabric", "correlation_burst"),
     }
     actual = {path.name for path in directory.glob("*.json")}
-    if actual != expected:
+    if actual != set(expected):
         raise ReportError("performance report directory must contain exactly the pinned benchmark reports")
     reports = []
-    for name in sorted(expected):
+    for name, (expected_loader, expected_scenario) in sorted(expected.items()):
         try:
-            reports.append(validate_report(json.loads((directory / name).read_text(encoding="utf-8"))))
+            report = validate_report(json.loads((directory / name).read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError) as error:
             raise ReportError(f"could not read {name}: {error}") from error
+        if (report["loader"], report["scenario"]) != (expected_loader, expected_scenario):
+            raise ReportError(f"{name} does not contain its pinned loader and scenario report")
+        reports.append(report)
     return reports
 
 

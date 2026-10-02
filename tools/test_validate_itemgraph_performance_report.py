@@ -186,6 +186,14 @@ class PerformanceReportValidationTest(unittest.TestCase):
             for filename, contents in scenarios:
                 (directory / filename).write_text(json.dumps(contents), encoding="utf-8")
             self.assertEqual(9, len(validate_directory(directory)))
+            (directory / "itemgraph-fabric-correlation_burst.json").write_text(
+                json.dumps(scenarios[0][1]), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ReportError, "pinned loader and scenario"):
+                validate_directory(directory)
+            (directory / "itemgraph-fabric-correlation_burst.json").write_text(
+                json.dumps(scenarios[-1][1]), encoding="utf-8"
+            )
             (directory / "itemgraph-fabric-backend_fabric_mysql_matrix.json").unlink()
             with self.assertRaises(ReportError):
                 validate_directory(directory)
