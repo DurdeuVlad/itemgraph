@@ -13,7 +13,7 @@ final class CommandHelp {
 
     static final List<String> TOPIC_NAMES = List.of(
             "help", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain",
-            "lookup", "lookup player", "lookup filters",
+            "lookup", "lookup player", "lookup filters", "export", "export verify", "export cancel",
             "page",
             "trace", "trace item", "trace player", "trace container",
             "gui", "gui item", "gui player", "gui container", "inspect");
@@ -28,6 +28,10 @@ final class CommandHelp {
                 "[ItemGraph] /ig help [topic] — show all commands or one topic.",
                 "[ItemGraph] /ig status — show mod, GriefLogger, database, ingestion, and inference state.",
                 "[ItemGraph] /ig audit — verify ItemGraph database invariants asynchronously.",
+                "[ItemGraph] /ig export <filename> <filters> — write a redacted, bounded, hash-chained incident bundle.",
+                "[ItemGraph] /ig export full <filename> <filters> — write a full-detail bundle (permission level 4).",
+                "[ItemGraph] /ig export verify <filename> — verify a bundle's manifest and evidence chain.",
+                "[ItemGraph] /ig export cancel <jobId> — cancel an active export or verification job.",
                 "[ItemGraph] /ig page <page> — continue the issuing player's active lookup session.",
                 "[ItemGraph] /ig lookup <eventType> [limit] [sinceMinutes] — query native audit events.",
                 "[ItemGraph] /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes] — bound results to a location.",
@@ -86,6 +90,21 @@ final class CommandHelp {
                 "[ItemGraph] Syntax: /ig audit",
                 "[ItemGraph] Runs a read-only invariant audit off the server thread: conservation, positivity, relational integrity, and allocation state.",
                 "[ItemGraph] Example: /ig audit"));
+        topics.put("export", List.of(
+                "[ItemGraph] Syntax: /ig export <filename> <filters>",
+                "[ItemGraph] Writes a default-redacted JSON bundle under <world>/itemgraph/exports; filters use the same name.value syntax as /ig lookup and radius is required.",
+                "[ItemGraph] Each raw evidence payload has a SHA-256 hash and each record links to its predecessor; the manifest hashes the ordered chain. Existing filenames are never overwritten.",
+                "[ItemGraph] Exports are capped at 100 observed rows, 100 linked inferred edges (200 chain records total), and 4 MiB. Jobs run off-thread, report progress, and can be cancelled by their owner or a level-4 operator.",
+                "[ItemGraph] Full details require permission level 4: /ig export full <filename> <filters>.",
+                "[ItemGraph] Examples: /ig export incident-2026-10 action.break_block radius.50 time.1h | /ig export full incident-2026-10 action.break_block radius.50 time.1h"));
+        topics.put("export verify", List.of(
+                "[ItemGraph] Syntax: /ig export verify <filename>",
+                "[ItemGraph] Verifies the manifest hash, every payload hash, chain order, record count, and final hash for a JSON bundle in <world>/itemgraph/exports.",
+                "[ItemGraph] Example: /ig export verify incident-2026-10"));
+        topics.put("export cancel", List.of(
+                "[ItemGraph] Syntax: /ig export cancel <jobId>",
+                "[ItemGraph] Cancels an active export or bundle verification. Only its issuing player or a permission-level-4 operator may cancel it.",
+                "[ItemGraph] Example: /ig export cancel 1A"));
         topics.put("page", List.of(
                 "[ItemGraph] Syntax: /ig page <page>",
                 "[ItemGraph] Continues the issuing player's last lookup with the same filters and bounded page size.",

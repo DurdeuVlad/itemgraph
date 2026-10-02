@@ -368,6 +368,14 @@ DTOs. Its callback opens or updates `FlowBrowserMenu` only on the server thread.
 uses vanilla `MenuType.GENERIC_9x6`; its server-side click handler never delegates item
 movement to `ChestMenu`, and every GUI action rechecks permission level 2.
 
+Issue #37 incident exports use that same bounded worker. The command captures the issuing
+player's dimension and center before dispatch; SQL reads use the independent read-only
+connection, and verification uses the worker without requiring a database connection. The
+export's final rename has an atomic cancellation commit point so cancellation cannot report
+failure after a completed file is installed. Bundle bounds, redaction, source hashes,
+recovery markers, and the unkeyed SHA-256 threat model are specified in
+[`INCIDENT_BUNDLES.md`](INCIDENT_BUNDLES.md).
+
 ### Prior art
 
 This pattern was checked against real mods before being adopted rather than derived from

@@ -40,7 +40,8 @@ class UnifiedEvidenceQueryServiceTest {
     @Test
     void mergesAuditObservationTransformationAndImportedEvidenceInStableOrder() throws Exception {
         audit("BREAK_BLOCK", 1_000L, "minecraft:stone");
-        observation("ITEMGRAPH_INTERNAL", 2_000L, "DROP_ITEM", stoneFingerprint, 3);
+        observationWithRaw("ITEMGRAPH_INTERNAL", 2_000L, "DROP_ITEM", stoneFingerprint, 3,
+                "{\"event\":\"drop\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         transformation("CRAFT", 3_000L);
         observationFromGround("GRIEFLOGGER", 4_000L, "PICKUP_ITEM", stoneFingerprint, 3);
 
@@ -57,6 +58,9 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals("observation#2", rows.get(0).evidenceId());
         assertEquals("OBSERVED", rows.get(0).evidenceClass());
         assertEquals("Alex", rows.get(0).playerName());
+        assertEquals(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest("{\"event\":\"drop\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8))),
+                rows.get(2).sourcePayloadSha256());
     }
 
     @Test
@@ -250,6 +254,8 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals(1, rows.size());
         assertEquals("audit#1", rows.get(0).evidenceId());
         assertEquals("SHOOT_ITEM", rows.get(0).actionType());
+        assertEquals(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(projectionIdentity)), rows.get(0).sourcePayloadSha256());
     }
 
     @Test
@@ -307,10 +313,10 @@ class UnifiedEvidenceQueryServiceTest {
     void mergesNormalizedHistoricalGriefLoggerRowsWithProvenance() throws Exception {
         try (PreparedStatement statement = conn.prepareStatement("""
                 INSERT INTO ig_grieflogger_lookup
-                    (source_sha256, table_name, source_key, timestamp_ms, level_name,
+                    (source_sha256, raw_byte_hash, table_name, source_key, timestamp_ms, level_name,
                      x, y, z, player_name, player_uuid, action_type, quantity,
                      subject_id, detail, evidence_class, unresolved_reason)
-                VALUES ('source-hash', 'items', 'pk:42', 5_000, 'minecraft:overworld',
+                VALUES ('source-hash', 'raw-payload-hash', 'items', 'pk:42', 5_000, 'minecraft:overworld',
                         10, 64, 10, 'Alex', 'uuid-alex', 'DROP_ITEM', 2,
                         'minecraft:stone', 'source=GRIEFLOGGER table=items key=pk:42',
                         'UNRESOLVED', 'opaque_binary_field')
@@ -329,6 +335,10 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals("DROP_ITEM", rows.get(0).actionType());
         assertEquals("minecraft:stone", rows.get(0).subjectId());
         assertEquals("UNRESOLVED", rows.get(0).evidenceClass());
+        assertEquals("source-hash", rows.get(0).sourceSha256());
+        assertEquals("raw-payload-hash", rows.get(0).sourcePayloadSha256());
+        assertEquals("items", rows.get(0).orderingTableName());
+        assertEquals("pk:42", rows.get(0).orderingSourceKey());
         assertTrue(rows.get(0).detail().contains("table=items"));
     }
 

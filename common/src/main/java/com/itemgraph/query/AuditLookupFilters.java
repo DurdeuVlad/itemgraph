@@ -126,6 +126,17 @@ public record AuditLookupFilters(
         return String.join(" ", parts);
     }
 
+    /** Describes the applied query without copying identity or inventory filter values. */
+    public String describeRedacted() {
+        List<String> parts = new ArrayList<>();
+        parts.add("action=" + (eventTypes.isEmpty() ? "all" : String.join(",", eventTypes)));
+        parts.add("user_filter_applied=" + !playerNames.isEmpty());
+        parts.add("subject_filter_applied=" + (!includeSubjects.isEmpty() || !excludeSubjects.isEmpty()));
+        parts.add("radius=" + trimRadius(radiusBlocks));
+        parts.add("window=" + window.describe());
+        return String.join(" ", parts);
+    }
+
     private static List<String> parseActions(String value) {
         List<String> actions = splitValues(value, "action");
         List<String> result = new ArrayList<>(actions.size());

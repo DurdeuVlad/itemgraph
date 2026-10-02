@@ -7,6 +7,16 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #37 bounded incident bundles:** added `/ig export`, level-4 `/ig export full`,
+  `/ig export verify`, and owner/operator `/ig export cancel`. Bundles contain up to 100
+  observed evidence rows and 100 linked inferred edges, preserve GriefLogger source and
+  raw-payload hashes when available, default to deterministic redaction, and chain canonical
+  JSON payload hashes with SHA-256. Verification checks record hashes, ordering, counts,
+  manifest, and final chain hash. Jobs use the bounded query worker, reject filename
+  collisions, and cap output at 4 MiB. Format and unkeyed-hash limitations are documented
+  in `docs/INCIDENT_BUNDLES.md`. M9 batch verification is pending; ItemGraph remains 0.3.2
+  and no distributable JAR is built.
+
 - **Issue #36 cross-loader preview API fixture work:** the shared API now exposes exact
   positive-version negotiation with explicit compatible/incompatible results. Independent
   NeoForge and Fabric consumer mods call negotiation before registration, submit one stable

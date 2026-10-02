@@ -166,7 +166,7 @@ public final class UnifiedEvidenceQueryService {
                                                                     List<AuditEventQueryService.ExactPosition> exactPositions,
                                                                     boolean activeInspectorHistory) throws SQLException {
         StringBuilder sql = new StringBuilder("""
-                SELECT g.source_sha256, g.table_name, g.source_key, g.source_rowid, g.timestamp_ms,
+                SELECT g.source_sha256, g.raw_byte_hash, g.table_name, g.source_key, g.source_rowid, g.timestamp_ms,
                        g.level_name, g.x, g.y, g.z, g.player_name, g.player_uuid, g.action_type, g.quantity,
                        g.subject_id, g.detail, g.evidence_class,
                        s.superseding_event_id, s.reason_code
@@ -220,7 +220,8 @@ public final class UnifiedEvidenceQueryService {
                             firstNonBlank(rs.getString("player_name"), rs.getString("player_uuid")),
                             rs.getString("action_type"), rs.getInt("quantity"),
                             rs.getString("subject_id"), detail,
-                            valueOr(rs.getString("evidence_class"), "OBSERVED"), table, sourceKey));
+                            valueOr(rs.getString("evidence_class"), "OBSERVED"), table, sourceKey,
+                            rs.getString("source_sha256"), rs.getString("raw_byte_hash")));
                 }
             }
         } catch (SQLException failure) {
@@ -240,7 +241,7 @@ public final class UnifiedEvidenceQueryService {
                                                    List<AuditEventQueryService.ExactPosition> exactPositions,
                                                    boolean activeInspectorHistory) throws SQLException {
         StringBuilder sql = new StringBuilder("""
-                SELECT a.id, a.event_type, a.timestamp_ms, a.player_uuid, a.player_name,
+                SELECT a.id, a.event_type, a.timestamp_ms, a.player_uuid, a.player_name, a.raw_data,
                        a.level_id, a.x, a.y, a.z, a.subject_id, a.detail, a.source_type,
                        s.superseding_event_id, s.reason_code
                 FROM ig_audit_events a
@@ -283,6 +284,7 @@ public final class UnifiedEvidenceQueryService {
             try (ResultSet rs = statement.executeQuery()) {
                 while (rs.next()) {
                     String detail = rs.getString("detail");
+                    byte[] rawData = rs.getBytes("raw_data");
                     Long supersedingEvent = nullableLong(rs, "superseding_event_id");
                     if (supersedingEvent != null) {
                         String reason = "superseded_by=audit#" + supersedingEvent
@@ -299,7 +301,8 @@ public final class UnifiedEvidenceQueryService {
                             rs.getString("event_type"), 0, rs.getString("subject_id"), detail,
                             EventTaxonomy.find(rs.getString("event_type"), EventTaxonomy.Surface.AUDIT_EVENT)
                                     .map(definition -> definition.evidenceClass().name())
-                                    .orElse(EventTaxonomy.UNCLASSIFIED_EVIDENCE)));
+                                    .orElse(EventTaxonomy.UNCLASSIFIED_EVIDENCE), null, null, null,
+                            rawData == null ? null : sha256(rawData)));
                 }
             }
         }
@@ -312,7 +315,7 @@ public final class UnifiedEvidenceQueryService {
                                                           List<AuditEventQueryService.ExactPosition> exactPositions)
             throws SQLException {
         StringBuilder sql = new StringBuilder("""
-                SELECT o.id, o.source_type, o.source_event_id, o.timestamp_ms,
+                SELECT o.id, o.source_type, o.source_event_id, o.timestamp_ms, o.raw_data,
                        o.action_type, o.amount,
                        COALESCE(origin.level_id, dest.level_id) AS level_id,
                        COALESCE(origin.x, dest.x) AS x,
@@ -369,6 +372,7 @@ public final class UnifiedEvidenceQueryService {
                     String source = "GRIEFLOGGER".equalsIgnoreCase(sourceType)
                             ? "GRIEFLOGGER" : "OBSERVATION";
                     Long sourceEventId = nullableLong(rs, "source_event_id");
+                    byte[] rawData = rs.getBytes("raw_data");
                     String detail = "source=" + sourceType
                             + (sourceEventId == null ? "" : " sourceEvent#" + sourceEventId)
                             + " origin=" + valueOr(rs.getString("origin_label"), "(unlabeled)")
@@ -390,7 +394,8 @@ public final class UnifiedEvidenceQueryService {
                             rowLevel, rowX, rowY, rowZ, firstNonBlank(rs.getString("player_name"),
                                     rs.getString("player_uuid")),
                             rs.getString("action_type"), rs.getInt("amount"), rs.getString("item_id"),
-                            detail, "OBSERVED"));
+                            detail, "OBSERVED", null, null, null,
+                            rawData == null ? null : sha256(rawData)));
                 }
             }
         }

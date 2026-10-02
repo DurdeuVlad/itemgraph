@@ -7,7 +7,8 @@ package com.itemgraph.query;
  * independent integer sequences. The evidence id is prefixed (for example,
  * {@code observation#42}) so an operator can open the correct detail command without
  * confusing an audit row with an observation or transformation row. Every row returned by
- * this service is raw evidence and therefore carries the {@code OBSERVED} class.</n+ */
+ * this service is raw evidence and therefore carries the {@code OBSERVED} class.
+ */
 public record UnifiedEvidenceDetail(
         String source,
         String evidenceId,
@@ -23,14 +24,26 @@ public record UnifiedEvidenceDetail(
         String detail,
         String evidenceClass,
         String orderingTableName,
-        String orderingSourceKey) {
+        String orderingSourceKey,
+        String sourceSha256,
+        String sourcePayloadSha256) {
 
     public UnifiedEvidenceDetail(String source, String evidenceId, long timestampMs,
                                  String levelName, Double x, Double y, Double z,
                                  String playerName, String actionType, int quantity,
                                  String subjectId, String detail, String evidenceClass) {
         this(source, evidenceId, timestampMs, levelName, x, y, z, playerName,
-                actionType, quantity, subjectId, detail, evidenceClass, null, null);
+                actionType, quantity, subjectId, detail, evidenceClass, null, null, null, null);
+    }
+
+    public UnifiedEvidenceDetail(String source, String evidenceId, long timestampMs,
+                                 String levelName, Double x, Double y, Double z,
+                                 String playerName, String actionType, int quantity,
+                                 String subjectId, String detail, String evidenceClass,
+                                 String orderingTableName, String orderingSourceKey) {
+        this(source, evidenceId, timestampMs, levelName, x, y, z, playerName,
+                actionType, quantity, subjectId, detail, evidenceClass,
+                orderingTableName, orderingSourceKey, null, null);
     }
 
     public UnifiedEvidenceDetail {

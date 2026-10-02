@@ -157,6 +157,10 @@ Implemented and available (all require permission level 2):
 /ig help [topic]
 /ig status
 /ig audit
+/ig export <filename> <filters>
+/ig export full <filename> <filters>
+/ig export verify <filename>
+/ig export cancel <jobId>
 /ig ingest now
 /ig event   <observationId>
 /ig explain <edgeId>
@@ -171,6 +175,7 @@ Implemented and available (all require permission level 2):
 
 - `/ig help`: bare `/itemgraph` or `/ig` shows the full live command tree. `/ig help <topic>` shows syntax, permission, defaults, query semantics, and an example; unknown topics list the valid topics.
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
+- `/ig export`: writes a bounded, redacted incident bundle to `<world>/itemgraph/exports`; full identity/location data requires permission level 4. `/ig export verify` checks its SHA-256 manifest and chain, and `/ig export cancel` cancels an active job. See [incident bundle format and limits](docs/INCIDENT_BUNDLES.md).
 - `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows the chronological timeline, including transformations (`[TRANSFORMATION <type> <- <source>]`).
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
 - `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.

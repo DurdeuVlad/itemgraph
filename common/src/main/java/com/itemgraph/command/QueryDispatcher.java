@@ -89,6 +89,8 @@ public final class QueryDispatcher {
     /** Created on first use and reused; the single worker accepts a bounded queue. */
     private static volatile ExecutorService executor;
     private static volatile ScheduledExecutorService timeoutExecutor;
+    private static final java.util.concurrent.ConcurrentHashMap<QueryCancellation, CompletableFuture<?>>
+            CANCELLABLE_DATA_TASKS = new java.util.concurrent.ConcurrentHashMap<>();
 
     private QueryDispatcher() {}
 
@@ -108,6 +110,17 @@ public final class QueryDispatcher {
     @FunctionalInterface
     interface DataQuery<T> {
         T run(Connection conn) throws SQLException;
+    }
+
+    @FunctionalInterface
+    interface CancellableDataQuery<T> {
+        T run(Connection conn, java.util.function.BooleanSupplier cancelled,
+              java.util.function.BooleanSupplier commit) throws SQLException;
+    }
+
+    @FunctionalInterface
+    interface CancellableTask<T> {
+        T run(java.util.function.BooleanSupplier cancelled) throws Exception;
     }
 
     @FunctionalInterface
@@ -259,6 +272,81 @@ public final class QueryDispatcher {
         }
         future.whenComplete((result, failure) -> cancelTimeout(timeout));
         return future;
+    }
+
+    /** Submits bounded database work and returns a handle that cancels active JDBC statements. */
+    static <T> CancellableDataHandle<T> submitCancellableData(CancellableDataQuery<T> query) {
+        QueryCancellation cancellation = new QueryCancellation();
+        ScheduledFuture<?> timeout = schedulePlayerTimeout(cancellation);
+        CompletableFuture<T> future;
+        try {
+            future = CompletableFuture.supplyAsync(
+                    () -> executeReadOnly(conn -> query.run(conn, cancellation::isCancelled,
+                            cancellation::finish), cancellation), queryExecutor());
+        } catch (RejectedExecutionException rejected) {
+            cancelTimeout(timeout);
+            throw rejected;
+        }
+        CANCELLABLE_DATA_TASKS.put(cancellation, future);
+        future.whenComplete((result, failure) -> {
+            cancelTimeout(timeout);
+            CANCELLABLE_DATA_TASKS.remove(cancellation);
+        });
+        return new CancellableDataHandle<>(future, cancellation);
+    }
+
+    /** Submits bounded worker work that does not require an ItemGraph database connection. */
+    static <T> CancellableDataHandle<T> submitCancellableTask(CancellableTask<T> task) {
+        QueryCancellation cancellation = new QueryCancellation();
+        ScheduledFuture<?> timeout = schedulePlayerTimeout(cancellation);
+        CompletableFuture<T> future;
+        try {
+            future = CompletableFuture.supplyAsync(() -> {
+                if (cancellation.isCancelled()) {
+                    throw new java.util.concurrent.CompletionException(
+                            new java.util.concurrent.CancellationException("query task cancelled"));
+                }
+                try {
+                    T result = task.run(cancellation::isCancelled);
+                    if (!cancellation.finish()) {
+                        throw new java.util.concurrent.CancellationException("query task cancelled");
+                    }
+                    return result;
+                } catch (Exception failure) {
+                    throw new java.util.concurrent.CompletionException(failure);
+                }
+            }, queryExecutor());
+        } catch (RejectedExecutionException rejected) {
+            cancelTimeout(timeout);
+            throw rejected;
+        }
+        CANCELLABLE_DATA_TASKS.put(cancellation, future);
+        future.whenComplete((result, failure) -> {
+            cancelTimeout(timeout);
+            CANCELLABLE_DATA_TASKS.remove(cancellation);
+        });
+        return new CancellableDataHandle<>(future, cancellation);
+    }
+
+    static final class CancellableDataHandle<T> {
+        private final CompletableFuture<T> future;
+        private final QueryCancellation cancellation;
+
+        private CancellableDataHandle(CompletableFuture<T> future, QueryCancellation cancellation) {
+            this.future = future;
+            this.cancellation = cancellation;
+        }
+
+        CompletableFuture<T> future() {
+            return future;
+        }
+
+        boolean cancel() {
+            if (future.isDone()) {
+                return false;
+            }
+            return cancellation.cancel();
+        }
     }
 
     static <T> int dispatchData(CommandSourceStack source, String label, DataQuery<T> query,
@@ -533,6 +621,12 @@ public final class QueryDispatcher {
 
     /** Stops the query executor. Called from {@code ServerStoppingEvent}. */
     public static void shutdown() {
+        CANCELLABLE_DATA_TASKS.forEach((cancellation, future) -> {
+            if (cancellation.cancel()) {
+                future.cancel(true);
+            }
+        });
+        CANCELLABLE_DATA_TASKS.clear();
         ExecutorService current;
         ScheduledExecutorService timers;
         synchronized (QueryDispatcher.class) {
@@ -667,9 +761,9 @@ public final class QueryDispatcher {
             activeStatements.clear();
         }
 
-        synchronized void cancel() {
+        synchronized boolean cancel() {
             if (finished) {
-                return;
+                return false;
             }
             cancelled = true;
             for (Statement statement : List.copyOf(activeStatements)) {
@@ -686,6 +780,7 @@ public final class QueryDispatcher {
                     LOGGER.warn("Unable to interrupt a timed-out ItemGraph SQLite query", e);
                 }
             }
+            return true;
         }
     }
 }

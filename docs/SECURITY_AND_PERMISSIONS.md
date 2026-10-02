@@ -120,6 +120,18 @@ Queries should have:
 credentials accidentally typed into chat, so they must remain restricted to the
 audit permission and must never be included in player-facing flow views.
 
+`/ig export` is operator-only (permission level 2) and writes the redacted
+profile by default under the world's `itemgraph/exports` directory. It omits
+player names, coordinates, owner UUIDs, inventory item metadata, raw detail,
+external keys, and GriefLogger row keys while preserving evidence links and
+source hashes. `/ig export full` requires permission level 4 and includes exact
+locations, identities, item metadata, and the stored inference explanation.
+Both paths are bounded to 100 observed rows, 100 linked inferred edges, four
+active jobs, and 4 MiB per bundle. Exports refuse filename collisions. Hashes
+make edits detectable against a separately trusted manifest/final hash; the
+unsigned bundle does not authenticate its creator. Store and share exports as
+sensitive moderation records.
+
 Issue #33 administrative item-command and creative-inventory records are also
 staff-private. `/give`, `/clear`, and `/item` attempt rows retain only the command
 root and outcome; they do not copy selector expressions or command arguments.

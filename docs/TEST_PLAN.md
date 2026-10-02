@@ -1117,3 +1117,35 @@ Run the loader test suites and GameTest suites once after the whole #33
 implementation batch, then run the full M9 CI matrix after milestone work is
 complete. Do not build distributable artifacts unless the mod version is bumped.
 
+## M9 issue #37: incident bundle acceptance matrix
+
+Run once with the consolidated M9 verification batch:
+
+- Create redacted and level-4 full fixtures from SQLite and MySQL/MariaDB query
+  results; assert `source_database_sha256` and GriefLogger `source_raw_payload_sha256` fields
+  survive when present, while redacted names, coordinates, item metadata, raw
+  details, external keys, and source keys are absent.
+- Include an ItemGraph observation cited by an inferred edge; assert the bundle
+  contains separate `OBSERVED_EVIDENCE` and `INFERRED_EDGE` records, exact
+    supporting observation IDs, stored confidence, structured allocation and
+    residual quantities, correlation window, candidate counts and time gaps,
+    confidence multipliers, and explicit edge truncation state.
+- Verify the original bundle, then independently alter, reorder, remove, and
+  append records; also alter payload hashes, manifest counts, and final hash.
+  Each modified fixture must fail verification.
+  - Exercise 100-row and 100-edge caps, the 200-record limit, the 4 MiB limit,
+    concurrent same-filename exports (exactly one may commit), existing-file
+    collision, invalid filename, missing file, disk write failure,
+  cancellation before query, cancellation during query, and server shutdown.
+- Assert permission-level-2 export is redacted, permission-level-2 full export
+  is denied, permission-level-4 full export succeeds, and cancellation is
+  limited to the owner or level-4 operator.
+- Confirm all source reads use ItemGraph's read-only connection and that neither
+  export nor verification mutates GriefLogger or ItemGraph evidence storage.
+
+CoreProtect's documented lookup filters and caller-managed asynchronous API
+lookups are the comparison point; they do not define a signed incident bundle.
+The ItemGraph SHA-256 chain is tamper-evident only when its manifest/final hash
+is retained separately. It does not authenticate the exporter. These checks are
+pending; no live staging or production run is claimed.
+
