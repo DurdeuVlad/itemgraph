@@ -1,5 +1,6 @@
 package com.itemgraph.query;
 
+import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.db.migration.MigrationRunner;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,6 +57,21 @@ class UnifiedEvidenceQueryServiceTest {
         assertEquals("observation#2", rows.get(0).evidenceId());
         assertEquals("OBSERVED", rows.get(0).evidenceClass());
         assertEquals("Alex", rows.get(0).playerName());
+    }
+
+    @Test
+    void auditEvidenceClassComesFromTaxonomyAndUnknownIdsStayUnclassified() throws Exception {
+        audit("INTERACT_ENTITY_UNRESOLVED", 2_000L, "minecraft:villager");
+        audit("FUTURE_MOD_EVENT", 1_000L, "example:subject");
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(List.of("INTERACT_ENTITY_UNRESOLVED", "FUTURE_MOD_EVENT"),
+                rows.stream().map(UnifiedEvidenceDetail::actionType).toList());
+        assertEquals(List.of("UNRESOLVED", EventTaxonomy.UNCLASSIFIED_EVIDENCE),
+                rows.stream().map(UnifiedEvidenceDetail::evidenceClass).toList());
     }
 
     @Test

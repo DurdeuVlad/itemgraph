@@ -259,10 +259,12 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   backend, GameTest, benchmark, and export matrix. Repair failures as a focused correction
   batch and rerun affected checks plus final CI. No distributable artifact or version bump
   is part of M9 verification.
-- Current evidence: PR #119 merged as `22b892e` and repairs the Fabric durability GameTest;
-  issue #32 remains open because the PR does not establish numeric budgets or the required
-  benchmark matrix. Its final performance thresholds must be based on measured results,
-  not guessed values.
+- Current evidence: PR #119 merged as `22b892e` and repairs the Fabric durability GameTest.
+  PR #120 adds seven validated benchmark reports, including NeoForge shutdown saturation
+  and Fabric MySQL/MariaDB probes; its CI run passed. #32 still has no staging-derived
+  production budget, so PR #120 remains draft and numeric thresholds remain unset until
+  maintainers choose a production-safe target from observed evidence. Its performance
+  acceptance is not complete merely because the report harness passes.
 
 ## M10: Native-only cutover and release hardening
 

@@ -11,6 +11,16 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #35 shared event taxonomy:** introduced the versioned `EventTaxonomy`
+  for native audit, item observation, and transformation IDs. Audit command
+  types and unified lookup aliases now use the shared registry. Definitions
+  specify evidence class, capture reliability, endpoint and quantity semantics,
+  actor status, privacy class, loader support, evidence-ID contract, aliases,
+  and owning issue. #55–#57 event families and stable unresolved reason codes
+  are listed as planned until loader adapters and fixtures prove support. This
+  is a taxonomy version only; the ItemGraph mod remains 0.3.2 and no distributable
+  JAR is built.
+
 - **Issue #32 operational metrics and queue probes:** `/ig status` reports
   redacted enqueue, persistence, query, correlation, queue-pressure, component
   decode-cache, and heap aggregates. CI emits validated 14-day reports for both

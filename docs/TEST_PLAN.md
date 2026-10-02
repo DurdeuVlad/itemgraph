@@ -1023,3 +1023,15 @@ Automated tests cover these server-side boundaries:
 
 **Runtime boundary:** the operator asked to skip visible-client clicks. Both local loader GameTests directly invoke the actual server packet handler with embedded mock players and verify armor-stand equip/unequip attempt and result rows. No real client connection, whole-server restart, or live denied/canceled/repeated interaction sequence was run. Denied/canceled handling, missing target UUID behavior, and restart persistence are covered by cross-loader unit/database tests, not by packet-level GameTests. MariaDB/MySQL integration cases passed in hosted CI; local endpoints remain unconfigured. The exact 1.21.1 GriefLogger release artifact has no entity-interaction writer; the pinned 26.2 source records a successful armor-stand interaction without held-item data. ItemGraph makes no item-transfer or equipment-slot claim from these method results.
 
+## M9 issue #35: shared event taxonomy
+
+`EventTaxonomyTest` checks stable unique IDs per evidence surface, complete
+evidence/reliability/endpoint/quantity/actor/privacy/loader/owner fields,
+reason-code uniqueness, version shape, and unknown-ID behavior. It also checks
+the legacy unified-lookup aliases (including the `interact_block` mapping),
+that each shared query choice is implemented or historical-queryable on both
+loaders, and that planned #55–#57 definitions do not claim runtime support.
+They validate the shared taxonomy contract; they do not prove loader event capture,
+database persistence of new event families, or runtime parity. Those checks
+belong to the child issue fixtures and the consolidated M9 acceptance pass.
+

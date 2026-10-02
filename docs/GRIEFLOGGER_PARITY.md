@@ -33,6 +33,12 @@ are patch changes; additive mappings with existing behavior are minor changes;
 renamed, removed, or incompatible mappings are major changes. The registry,
 this document, and the owning issue change together.
 
+This GriefLogger compatibility registry is separate from ItemGraph's
+[event taxonomy](EVENT_TAXONOMY.md), which defines ItemGraph-owned audit,
+observation, and transformation IDs, loader support, and privacy/evidence
+semantics. ItemGraph-only extensions do not become GriefLogger actions by being
+listed in that taxonomy.
+
 ## Published source surface
 
 The contract uses GriefLogger's published documentation:
