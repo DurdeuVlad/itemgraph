@@ -8,6 +8,27 @@ claim live-server or benchmark results. The GitHub milestone is already open as
 M9 (#5); this document records the current comparison and delivery order instead
 of creating a duplicate milestone.
 
+## Product direction
+
+ItemGraph is the standalone product and the intended complete replacement for
+GriefLogger. Normal operation requires neither the GriefLogger jar nor its
+database. GriefLogger's published features and audited source are behavior
+references only; all implementations, event types, storage, and query behavior
+are ItemGraph-owned. Do not copy or patch GriefLogger code.
+
+During migration, the optional importer may read a GriefLogger database without
+modifying it so operators can retain and compare historical evidence. That path
+is not required for ItemGraph capture or queries and is not the product's
+long-term source of events. Compatible jars remain temporary coexistence builds
+until every tracked parity acceptance gate and the native-only cutover evidence
+are complete.
+
+ItemGraph's replacement standard preserves the observed/inferred/ambiguous/
+unresolved distinction, traceable evidence IDs, deterministic explanations,
+quantity conservation, and privacy boundaries across native capture, queries,
+and exports. Feature parity alone is insufficient if a feature would invent
+quantity or present an inference as direct evidence.
+
 ## Feature comparison
 
 | Area | ItemGraph source today | M9 contract still missing | Prior-art pattern and decision |
