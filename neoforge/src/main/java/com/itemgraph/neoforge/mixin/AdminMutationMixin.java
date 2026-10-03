@@ -44,7 +44,6 @@ abstract class AdminGiveMutationMixin {
         return result;
     }
 }
-
 @Mixin(ClearInventoryCommands.class)
 abstract class AdminClearMutationMixin {
     @WrapMethod(method = "clearInventory")
@@ -181,4 +180,3 @@ abstract class CommandDispatchCleanupMixin {
         }
     }
 }
-

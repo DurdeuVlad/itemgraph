@@ -146,11 +146,16 @@ public final class FabricNativeAuditEventListener {
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.getPlayer()));
         ServerMessageEvents.CHAT_MESSAGE.register(FabricNativeAuditEventListener::onChat);
+        PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) -> {
+            if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel) {
+                AdminMutationCapture.beginCreativeBlockBreakSafely(serverPlayer,
+                        BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos);
+            }
+            return true;
+        });
         PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
-                AdminMutationCapture.recordCreativeBlockConfirmed(serverPlayer, "break",
-                        BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos,
-                        "fabric_player_block_break_after");
+                AdminMutationCapture.finishCreativeBlockBreakSafely(serverPlayer, pos, true, true);
                 List<AuditEventQueryService.ExactPosition> supersessionPositions = BlockInspectionTargets
                         .resolveBlockPositions(serverLevel, pos, state).stream()
                         .map(target -> new AuditEventQueryService.ExactPosition(
@@ -159,6 +164,11 @@ public final class FabricNativeAuditEventListener {
                 submit("BREAK_BLOCK", serverPlayer, serverLevel, pos,
                         BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), null,
                         supersessionPositions);
+            }
+        });
+        PlayerBlockBreakEvents.CANCELED.register((level, player, pos, state, blockEntity) -> {
+            if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel) {
+                AdminMutationCapture.finishCreativeBlockBreakSafely(serverPlayer, pos, true, false);
             }
         });
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
@@ -919,9 +929,9 @@ public final class FabricNativeAuditEventListener {
      */
     public static void onBlockItemPlaced(BlockPlaceContext context, BlockItem item,
                                          InteractionResult result,
-                                         Map<BlockPos, BlockState> beforeStates) {
-        if (context == null || item == null || result == null || !result.consumesAction()
-                || beforeStates == null || beforeStates.isEmpty()
+                                         Map<BlockPos, BlockState> beforeStates,
+                                         String mutationEventId) {
+        if (context == null || item == null || result == null || beforeStates == null
                 || !(context.getPlayer() instanceof ServerPlayer player)
                 || !(context.getLevel() instanceof ServerLevel level)) {
             return;
@@ -932,23 +942,38 @@ public final class FabricNativeAuditEventListener {
                         level::getBlockState,
                         (left, right) -> right,
                         java.util.LinkedHashMap::new));
-        for (BlockPos pos : changedBlockPositions(beforeStates, afterStates, item.getBlock(),
-                context.getClickedPos())) {
+        List<BlockPos> changedPositions = changedBlockPositions(beforeStates, afterStates, item.getBlock(),
+                context.getClickedPos());
+        for (BlockPos pos : changedPositions) {
             BlockState state = afterStates.get(pos);
-            AdminMutationCapture.recordCreativeBlockConfirmedSafely(player, "place",
-                    BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos,
-                    "fabric_block_item_after_state_diff");
-            recordBlockPlacement(player.getUUID().toString(), player.getGameProfile().getName(),
-                    level.dimension().location().toString(), pos,
-                    BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+            String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+            if (mutationEventId != null) {
+                if (result.consumesAction()) {
+                    AdminMutationCapture.recordCreativeBlockConfirmedSafely(player, "place", blockId, pos,
+                            "fabric_block_item_after_state_diff", mutationEventId);
+                } else {
+                    AdminMutationCapture.recordCreativeBlockUnresolvedSafely(player, "place", blockId, pos,
+                            "fabric_state_changed_without_consumed_result", mutationEventId);
+                }
+            }
+            if (result.consumesAction()) {
+                recordBlockPlacement(player.getUUID().toString(), player.getGameProfile().getName(),
+                        level.dimension().location().toString(), pos, blockId);
+            }
+        }
+        if (changedPositions.isEmpty() && mutationEventId != null) {
+            String intendedBlockId = BuiltInRegistries.BLOCK.getKey(item.getBlock()).toString();
+            AdminMutationCapture.recordCreativeBlockNoChangeSafely(player, "place", intendedBlockId,
+                    context.getClickedPos(), "fabric_block_item_return_no_state_change", mutationEventId);
         }
     }
 
     public static void onBlockItemPlacedSafely(BlockPlaceContext context, BlockItem item,
                                                InteractionResult result,
-                                               Map<BlockPos, BlockState> beforeStates) {
+                                               Map<BlockPos, BlockState> beforeStates,
+                                               String mutationEventId) {
         try {
-            onBlockItemPlaced(context, item, result, beforeStates);
+            onBlockItemPlaced(context, item, result, beforeStates, mutationEventId);
         } catch (Throwable failure) {
             AdminMutationCapture.recordCreativeBlockCaptureFailureSafely("fabric_placement_result", failure);
         }

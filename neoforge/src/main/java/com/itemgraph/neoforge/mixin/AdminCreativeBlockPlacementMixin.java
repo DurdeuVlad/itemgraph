@@ -29,6 +29,10 @@ abstract class AdminCreativeBlockPlacementMixin {
                 || !player.getAbilities().instabuild || !(context.getLevel() instanceof ServerLevel)) {
             return original.call(context);
         }
+        BlockItem item = (BlockItem) (Object) this;
+        String intendedBlockId = BuiltInRegistries.BLOCK.getKey(item.getBlock()).toString();
+        String mutationEventId = AdminMutationCapture.recordCreativeBlockAttemptSafely(player, "place",
+                intendedBlockId, context.getClickedPos(), false);
         Map<BlockPos, BlockState> beforeStates;
         try {
             beforeStates = captureBefore(context);
@@ -40,48 +44,73 @@ abstract class AdminCreativeBlockPlacementMixin {
         try {
             result = original.call(context);
         } catch (Throwable failure) {
-            recordPartialCreativePlacement(context, beforeStates, (BlockItem) (Object) this);
+            boolean changed = recordPartialCreativePlacement(context, beforeStates, item, mutationEventId);
+            if (!changed && mutationEventId != null) {
+                AdminMutationCapture.recordCreativeBlockUnresolvedSafely(player, "place", intendedBlockId,
+                        context.getClickedPos(), "neoforge_block_item_place_exception_no_state_change",
+                        mutationEventId);
+            }
             throw failure;
         }
+        if (mutationEventId == null) return result;
+        if (beforeStates.isEmpty()) {
+            AdminMutationCapture.recordCreativeBlockUnresolvedSafely(player, "place", intendedBlockId,
+                    context.getClickedPos(), "neoforge_before_snapshot_unavailable", mutationEventId);
+            return result;
+        }
+        boolean changed = false;
         try {
-            if (result.consumesAction() && context.getLevel() instanceof ServerLevel level) {
+            if (context.getLevel() instanceof ServerLevel level) {
                 for (Map.Entry<BlockPos, BlockState> entry : beforeStates.entrySet()) {
                     BlockPos position = entry.getKey();
                     BlockState after = level.getBlockState(position);
-                    if (AdminMutationCapture.isCreativePlacedBlockChange(entry.getValue(), after,
-                            ((BlockItem) (Object) this).getBlock(), position.equals(context.getClickedPos()))) {
-                        AdminMutationCapture.recordCreativeBlockConfirmedSafely(player, "place",
-                                BuiltInRegistries.BLOCK.getKey(after.getBlock()).toString(), position,
-                                "neoforge_block_item_place_return");
+                    if (!AdminMutationCapture.isCreativePlacedBlockChange(entry.getValue(), after,
+                            item.getBlock(), position.equals(context.getClickedPos()))) continue;
+                    changed = true;
+                    String blockId = BuiltInRegistries.BLOCK.getKey(after.getBlock()).toString();
+                    if (result.consumesAction()) {
+                        AdminMutationCapture.recordCreativeBlockConfirmedSafely(player, "place", blockId,
+                                position, "neoforge_block_item_place_return", mutationEventId);
+                    } else {
+                        AdminMutationCapture.recordCreativeBlockUnresolvedSafely(player, "place", blockId,
+                                position, "neoforge_state_changed_without_consumed_result", mutationEventId);
                     }
                 }
             }
         } catch (Throwable failure) {
             AdminMutationCapture.recordCreativeBlockCaptureFailureSafely("placement_result", failure);
         }
+        if (!changed) {
+            AdminMutationCapture.recordCreativeBlockNoChangeSafely(player, "place", intendedBlockId,
+                    context.getClickedPos(), "neoforge_block_item_place_return_no_state_change", mutationEventId);
+        }
         return result;
     }
 
-    private static void recordPartialCreativePlacement(BlockPlaceContext context,
-                                                        Map<BlockPos, BlockState> beforeStates,
-                                                        BlockItem item) {
+    private static boolean recordPartialCreativePlacement(BlockPlaceContext context,
+                                                          Map<BlockPos, BlockState> beforeStates,
+                                                          BlockItem item, String mutationEventId) {
+        if (mutationEventId == null) return false;
+        boolean changed = false;
         try {
             if (context == null || !(context.getPlayer() instanceof ServerPlayer player)
                     || !player.getAbilities().instabuild || !(context.getLevel() instanceof ServerLevel level)) {
-                return;
+                return false;
             }
             for (Map.Entry<BlockPos, BlockState> entry : beforeStates.entrySet()) {
                 BlockState after = level.getBlockState(entry.getKey());
                 if (AdminMutationCapture.isCreativePlacedBlockChange(entry.getValue(), after, item.getBlock(),
                         entry.getKey().equals(context.getClickedPos()))) {
+                    changed = true;
                     AdminMutationCapture.recordCreativeBlockUnresolvedSafely(player, "place",
                             BuiltInRegistries.BLOCK.getKey(after.getBlock()).toString(), entry.getKey(),
-                            "neoforge_block_item_place_exception");
+                            "neoforge_block_item_place_exception", mutationEventId);
                 }
             }
         } catch (Throwable failure) {
             AdminMutationCapture.recordCreativeBlockCaptureFailureSafely("neoforge_placement_exception", failure);
         }
+        return changed;
     }
 
     private static Map<BlockPos, BlockState> captureBefore(BlockPlaceContext context) {

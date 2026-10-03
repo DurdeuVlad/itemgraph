@@ -203,6 +203,9 @@ public final class AdminMutationConformanceFixture {
                         && player.getInventory().getItem(0).getCount() == 4,
                 "accepted creative-slot packet must set the addressed inventory slot");
         player.connection.handleSetCreativeModeSlot(creativePacket);
+        AdminMutationCapture.beginCreativeSlotSafely(player, 35);
+        player.inventoryMenu.getSlot(35).set(new ItemStack(Items.LAPIS_LAZULI, 2));
+        AdminMutationCapture.failCurrentSafely("creative_slot", "packet_handler_exception");
         var creativeDrop = new ServerboundSetCreativeModeSlotPacket(-1,
                 new ItemStack(Items.GOLD_NUGGET, 3));
         player.connection.handleSetCreativeModeSlot(creativeDrop);
@@ -293,9 +296,11 @@ public final class AdminMutationConformanceFixture {
         int unresolvedNoDeltaResults = 0;
         int creativeEffects = 0;
         int unchangedCreativeAttempts = 0;
+        int unresolvedCreativeSlots = 0;
         int confirmedCreativeBreaks = 0;
         int observedCreativePlacements = 0;
         int observedSlabMerges = 0;
+        Map<String, String> creativeBlockAttempts = new HashMap<>();
         int invalidItemFailures = 0;
         int executionContextEvidence = 0;
         for (AuditRow row : rows) {
@@ -381,16 +386,38 @@ public final class AdminMutationConformanceFixture {
                     helper.assertTrue(payload.get("detail").getAsString()
                                     .contains("cause=creative_inventory_packet cause_status=undifferentiated"),
                             "creative slot attempts must state that server-visible cause is undifferentiated");
-                    String outcome = row.detail().contains("unchanged_or_rejected")
-                            ? "unchanged_or_rejected" : "attempt";
+                    String outcome = row.detail().contains("outcome=unresolved_packet_handler_exception")
+                            ? "unresolved_packet_handler_exception"
+                            : row.detail().contains("unchanged_or_rejected")
+                                ? "unchanged_or_rejected" : "attempt";
                     creativeAttempts.put(payload.get("mutation_event_id").getAsString(), outcome);
                     if ("unchanged_or_rejected".equals(outcome)) unchangedCreativeAttempts++;
+                    if ("unresolved_packet_handler_exception".equals(outcome)) {
+                        helper.assertTrue(row.detail().contains("mutation_count=1"),
+                                "a partial creative slot mutation followed by a packet exception must remain unresolved");
+                        unresolvedCreativeSlots++;
+                    }
                 }
-                case "CREATIVE_BLOCK_ATTEMPT", "CREATIVE_BLOCK_RESULT", "CREATIVE_BLOCK_UNRESOLVED" -> {
+                case "CREATIVE_BLOCK_ATTEMPT" -> {
                     helper.assertTrue(payload.has("player_inventory_quantity_delta")
                                     && payload.get("player_inventory_quantity_delta").getAsInt() == 0
-                                    && payload.has("mutation_event_id"),
-                            "creative block events must store exact zero inventory delta and a mutation ID");
+                                    && payload.has("mutation_event_id")
+                                    && payload.get("event_id").getAsString()
+                                    .equals(payload.get("mutation_event_id").getAsString())
+                                    && "attempt".equals(payload.get("outcome").getAsString()),
+                            "creative block attempts must store exact zero inventory delta and their mutation ID");
+                    creativeBlockAttempts.put(payload.get("mutation_event_id").getAsString(),
+                            payload.get("event_id").getAsString());
+                }
+                case "CREATIVE_BLOCK_RESULT", "CREATIVE_BLOCK_UNRESOLVED" -> {
+                    String mutationId = payload.get("mutation_event_id").getAsString();
+                    helper.assertTrue(creativeBlockAttempts.containsKey(mutationId)
+                                    && payload.get("attempt_event_id").getAsString()
+                                    .equals(creativeBlockAttempts.get(mutationId)),
+                            "creative block outcomes must link to the durable attempt event");
+                    helper.assertTrue(payload.has("player_inventory_quantity_delta")
+                                    && payload.get("player_inventory_quantity_delta").getAsInt() == 0,
+                            "creative block outcomes must store exact zero inventory delta");
                     if ("break".equals(payload.get("action").getAsString())) {
                         helper.assertTrue(row.eventType().equals("CREATIVE_BLOCK_RESULT")
                                         && payload.get("outcome").getAsString().equals("confirmed_success")
@@ -432,11 +459,15 @@ public final class AdminMutationConformanceFixture {
                 "nested /execute as evidence must preserve exactly one original issuer and effective actor pair");
         helper.assertTrue(creativeEffects == 2 && unchangedCreativeAttempts == 1,
                 "changed, unchanged, and ground-drop creative packets must have distinct outcomes");
+        helper.assertTrue(unresolvedCreativeSlots == 1,
+                "a partial creative-slot packet mutation followed by an exception must not be reported as confirmed");
         helper.assertTrue(confirmedCreativeBreaks == 1,
                 "creative block break must have one durable confirmed result on both loaders");
         helper.assertTrue(observedCreativePlacements == 2 && observedSlabMerges == 1,
                 "ordinary placement and same-block slab merge must each have one durable result on both loaders");
-        helper.assertTrue(creativeAttempts.size() == 3,
+        helper.assertTrue(creativeBlockAttempts.size() == 3,
+                "each creative block placement and break must have a durable attempt row");
+        helper.assertTrue(creativeAttempts.size() == 4,
                 "each creative slot packet must have its own mutation ID");
         return new MutationIds(commandAttempts, creativeAttempts.keySet());
     }
@@ -475,7 +506,7 @@ public final class AdminMutationConformanceFixture {
             throw new IllegalStateException("Could not read issue #33 item deltas", failure);
         }
 
-        helper.assertTrue(rows.size() == 11, "issue #33 must persist exactly eleven quantity deltas");
+        helper.assertTrue(rows.size() == 12, "issue #33 must persist exactly twelve quantity deltas");
         helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
                         && row.amount() == 5 && row.itemId().equals("minecraft:diamond")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
@@ -537,6 +568,10 @@ public final class AdminMutationConformanceFixture {
                         && row.amount() == 3 && row.itemId().equals("minecraft:gold_nugget")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("GROUND")),
                 "accepted negative-slot creative packet must persist one exact ground creation");
+        helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("CREATIVE_ITEM_CREATE")
+                        && row.amount() == 2 && row.itemId().equals("minecraft:lapis_lazuli")
+                        && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
+                "a partial creative-slot mutation followed by a handler exception must retain its observed quantity delta");
         helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
                         && row.amount() == 7 && row.itemId().equals("minecraft:amethyst_shard")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("GROUND")),

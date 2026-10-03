@@ -482,17 +482,56 @@ public final class AdminMutationCapture {
         }
     }
 
-    public static void recordCreativeBlockAttempt(ServerPlayer player, String action, String subjectId,
-                                                   BlockPos position, boolean callbackReturned) {
-        if (player == null || position == null || !player.getAbilities().instabuild) return;
-        recordCreativeBlockOutcome(player, action, subjectId, position,
-                callbackReturned ? "callback_observed" : "attempt", "game_callback");
+    public static String recordCreativeBlockAttempt(ServerPlayer player, String action, String subjectId,
+                                                      BlockPos position, boolean callbackReturned) {
+        if (player == null || position == null || !player.getAbilities().instabuild) return null;
+        String attemptEventId = UUID.randomUUID().toString();
+        boolean accepted = recordCreativeBlockOutcome(player, action, subjectId, position,
+                callbackReturned ? "callback_observed" : "attempt", "game_callback",
+                player.level().dimension().location().toString(), attemptEventId, attemptEventId);
+        return accepted ? attemptEventId : null;
+    }
+
+    public static String recordCreativeBlockAttemptSafely(ServerPlayer player, String action, String subjectId,
+                                                            BlockPos position, boolean callbackReturned) {
+        try {
+            return recordCreativeBlockAttempt(player, action, subjectId, position, callbackReturned);
+        } catch (Throwable failure) {
+            recordCaptureFailure("attempt", "creative_block", failure);
+            return null;
+        }
     }
 
     public static void recordCreativeBlockConfirmed(ServerPlayer player, String action, String subjectId,
                                                     BlockPos position, String causeStatus) {
         if (player == null || position == null || !player.getAbilities().instabuild) return;
         recordCreativeBlockOutcome(player, action, subjectId, position, "confirmed_success", causeStatus);
+    }
+
+    public static void recordCreativeBlockConfirmedSafely(ServerPlayer player, String action, String subjectId,
+                                                           BlockPos position, String causeStatus,
+                                                           String mutationEventId) {
+        try {
+            if (player == null || position == null || !player.getAbilities().instabuild) return;
+            recordCreativeBlockOutcome(player, action, subjectId, position, "confirmed_success", causeStatus,
+                    player.level().dimension().location().toString(), UUID.randomUUID().toString(),
+                    mutationEventId);
+        } catch (Throwable failure) {
+            recordCaptureFailure("result", "creative_block", failure);
+        }
+    }
+
+    public static void recordCreativeBlockNoChangeSafely(ServerPlayer player, String action, String subjectId,
+                                                          BlockPos position, String causeStatus,
+                                                          String mutationEventId) {
+        try {
+            if (player == null || position == null || !player.getAbilities().instabuild) return;
+            recordCreativeBlockOutcome(player, action, subjectId, position, "confirmed_no_change", causeStatus,
+                    player.level().dimension().location().toString(), UUID.randomUUID().toString(),
+                    mutationEventId);
+        } catch (Throwable failure) {
+            recordCaptureFailure("result", "creative_block", failure);
+        }
     }
 
     public static void recordCreativeBlockConfirmedSafely(ServerPlayer player, String action, String subjectId,
@@ -510,6 +549,20 @@ public final class AdminMutationCapture {
             if (player == null || position == null || !player.getAbilities().instabuild) return;
             recordCreativeBlockOutcome(player, action, subjectId, position,
                     "exception_after_callback", causeStatus);
+        } catch (Throwable failure) {
+            recordCaptureFailure("unresolved", "creative_block", failure);
+        }
+    }
+
+    public static void recordCreativeBlockUnresolvedSafely(ServerPlayer player, String action, String subjectId,
+                                                            BlockPos position, String causeStatus,
+                                                            String mutationEventId) {
+        try {
+            if (player == null || position == null || !player.getAbilities().instabuild) return;
+            recordCreativeBlockOutcome(player, action, subjectId, position,
+                    "exception_after_callback", causeStatus,
+                    player.level().dimension().location().toString(), UUID.randomUUID().toString(),
+                    mutationEventId);
         } catch (Throwable failure) {
             recordCaptureFailure("unresolved", "creative_block", failure);
         }
@@ -548,8 +601,13 @@ public final class AdminMutationCapture {
             breaks = new ArrayDeque<>();
             CREATIVE_BLOCK_BREAKS.set(breaks);
         }
+        String attemptEventId = recordCreativeBlockAttempt(player, "break", subjectId, position, false);
+        if (attemptEventId == null) {
+            if (breaks.isEmpty()) CREATIVE_BLOCK_BREAKS.remove();
+            return;
+        }
         breaks.push(new PendingCreativeBlockBreak(player, bounded(subjectId), position.immutable(),
-                player.level().dimension().location().toString(), UUID.randomUUID().toString()));
+                player.level().dimension().location().toString(), attemptEventId));
     }
 
     public static void beginCreativeBlockBreakSafely(ServerPlayer player, String subjectId, BlockPos position) {
@@ -573,7 +631,7 @@ public final class AdminMutationCapture {
         String causeStatus = completed ? "server_player_game_mode_result"
                 : "server_player_game_mode_exception";
         recordCreativeBlockOutcome(player, "break", pending.subjectId(), position,
-                outcome, causeStatus, pending.level(), pending.eventId());
+                outcome, causeStatus, pending.level(), UUID.randomUUID().toString(), pending.eventId());
     }
 
     public static void finishCreativeBlockBreakSafely(ServerPlayer player, BlockPos position,
@@ -585,15 +643,16 @@ public final class AdminMutationCapture {
         }
     }
 
-    private static void recordCreativeBlockOutcome(ServerPlayer player, String action, String subjectId,
+    private static boolean recordCreativeBlockOutcome(ServerPlayer player, String action, String subjectId,
                                                     BlockPos position, String outcome, String causeStatus) {
-        recordCreativeBlockOutcome(player, action, subjectId, position, outcome, causeStatus,
-                player.level().dimension().location().toString(), UUID.randomUUID().toString());
+        return recordCreativeBlockOutcome(player, action, subjectId, position, outcome, causeStatus,
+                player.level().dimension().location().toString(), UUID.randomUUID().toString(),
+                UUID.randomUUID().toString());
     }
 
-    private static void recordCreativeBlockOutcome(ServerPlayer player, String action, String subjectId,
+    private static boolean recordCreativeBlockOutcome(ServerPlayer player, String action, String subjectId,
                                                     BlockPos position, String outcome, String causeStatus,
-                                                    String level, String eventId) {
+                                                    String level, String eventId, String mutationEventId) {
         String eventType = switch (outcome) {
             case "confirmed_success", "confirmed_no_change" -> "CREATIVE_BLOCK_RESULT";
             case "exception_after_callback" -> "CREATIVE_BLOCK_UNRESOLVED";
@@ -601,7 +660,8 @@ public final class AdminMutationCapture {
         };
         JsonObject raw = new JsonObject();
         raw.addProperty("event_id", eventId);
-        raw.addProperty("mutation_event_id", eventId);
+        raw.addProperty("mutation_event_id", mutationEventId);
+        if (!"CREATIVE_BLOCK_ATTEMPT".equals(eventType)) raw.addProperty("attempt_event_id", mutationEventId);
         raw.addProperty("evidence", eventType.toLowerCase(java.util.Locale.ROOT));
         raw.addProperty("action", bounded(action));
         raw.addProperty("outcome", outcome);
@@ -618,6 +678,7 @@ public final class AdminMutationCapture {
                 raw.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 InternalObservationService.sourceEventIdForUuid(eventId), eventId, List.of()));
         if (!accepted) reportUnpersistedOutcome(eventType, eventId);
+        return accepted;
     }
 
     private static void finish(MutationScope scope, boolean completed, int result) {
@@ -647,6 +708,11 @@ public final class AdminMutationCapture {
                         "outcome=unresolved_evidence_incomplete reason="
                                 + (scope.incompleteReason == null ? "effect_queue_rejected" : scope.incompleteReason)
                                 + " rejected_evidence=" + scope.rejectedEvidence);
+                return;
+            }
+            if (!completed) {
+                recordCreativeOutcome(scope, "CREATIVE_SLOT_ATTEMPT",
+                        "outcome=unresolved_packet_handler_exception mutation_count=" + observedChanges);
                 return;
             }
             if (observedChanges > 0) {

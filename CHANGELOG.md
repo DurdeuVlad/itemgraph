@@ -16,7 +16,6 @@ The project follows a simple pre-1.0 development changelog model.
   distributable jar is built.
 
 - **Issue #33 administrative item evidence:** both loaders capture `/give`,
-<<<<<<< HEAD
   `/clear`, `/item` slot mutations, creative inventory slot changes, accepted
   `/give` overflow, and negative-slot creative drops at vanilla mutation
   boundaries. Creative block placement and destruction store authoritative
