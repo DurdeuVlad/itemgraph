@@ -44,6 +44,8 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.StackWalker;
 import java.util.ArrayList;
@@ -55,16 +57,21 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Fabric-native audit capture. Each callback copies only immutable identifiers,
  * item metadata, and text before handing the record to ItemGraph's bounded worker.
  */
 public final class FabricNativeAuditEventListener {
+    private static final Logger LOGGER = LoggerFactory.getLogger(FabricNativeAuditEventListener.class);
+    private static final AtomicLong HOPPER_CAPTURE_FAILURES = new AtomicLong();
     private static final int MAX_DETAIL_LENGTH = 16_384;
     private static final int MAX_DROP_CAPTURE_DEPTH = 32;
     private static final ThreadLocal<Deque<DropCapture>> PENDING_PLAYER_DROPS = new ThreadLocal<>();
     private static final int MAX_HOPPER_CAPTURE_DEPTH = 16;
+    private static final int MAX_HOPPER_CAPTURE_POSITIONS = 7;
+    private static final int MAX_HOPPER_CAPTURE_SLOTS = 512;
     private static final StackWalker HOPPER_STACK_WALKER = StackWalker.getInstance();
     private static final ThreadLocal<Deque<HopperCapture>> PENDING_HOPPER_TRANSFERS = new ThreadLocal<>();
     private static final int MAX_DEATH_CAPTURE_DEPTH = 8;
@@ -683,10 +690,15 @@ public final class FabricNativeAuditEventListener {
             // snapshots so automation cannot retain server-thread state.
             pending.clear();
         }
-        pending.push(new HopperCapture(serverLevel, hopper,
-                hopperPos.immutable(),
-                currentHopperSite(),
-                snapshotHopperContainers(serverLevel, hopperPos)));
+        Map<BlockPos, Map<CanonicalItem, Integer>> before;
+        try {
+            before = snapshotHopperContainers(serverLevel, hopperPos);
+        } catch (RuntimeException failure) {
+            reportHopperCaptureFailure("pre-transfer snapshot failed: " + failure);
+            before = null;
+        }
+        pending.push(new HopperCapture(serverLevel, hopper, hopperPos.immutable(),
+                currentHopperSite(), before));
     }
 
     /** Emits only net changes when the hopper transfer method reports success. */
@@ -698,11 +710,20 @@ public final class FabricNativeAuditEventListener {
         if (pending != null && pending.isEmpty()) {
             PENDING_HOPPER_TRANSFERS.remove();
         }
-        if (capture == null || !moved) {
+        if (capture == null || !moved || capture.before() == null) {
             return;
         }
-        Map<BlockPos, Map<CanonicalItem, Integer>> after = snapshotHopperContainers(
-                capture.level(), capture.before().keySet());
+        Map<BlockPos, Map<CanonicalItem, Integer>> after;
+        try {
+            after = snapshotHopperContainers(capture.level(), capture.before().keySet());
+        } catch (RuntimeException failure) {
+            reportHopperCaptureFailure("post-transfer snapshot failed: " + failure);
+            return;
+        }
+        if (after == null) {
+            reportHopperCaptureFailure("post-transfer snapshot exceeded its configured bounds");
+            return;
+        }
         for (HopperDelta delta : computeHopperDeltas(capture.before(), after)) {
             recordHopperDelta(capture.level(), delta);
         }
@@ -768,19 +789,42 @@ public final class FabricNativeAuditEventListener {
         for (Direction direction : Direction.values()) {
             positions.add(hopperPos.relative(direction).immutable());
         }
-        return snapshotHopperContainers(level, positions);
+        return snapshotHopperContainers(level, positions, false);
     }
 
-    private static Map<BlockPos, Map<CanonicalItem, Integer>> snapshotHopperContainers(
+    static Map<BlockPos, Map<CanonicalItem, Integer>> snapshotHopperContainers(
             ServerLevel level, java.util.Collection<BlockPos> positions) {
+        return snapshotHopperContainers(level, positions, true);
+    }
+
+    static Map<BlockPos, Map<CanonicalItem, Integer>> snapshotHopperContainers(
+            ServerLevel level, java.util.Collection<BlockPos> positions, boolean requireEveryContainer) {
         Map<BlockPos, Map<CanonicalItem, Integer>> snapshot = new java.util.LinkedHashMap<>();
+        int visitedSlots = 0;
         for (BlockPos position : positions) {
-            BlockEntity blockEntity = level.getBlockEntity(position);
-            if (!(blockEntity instanceof Container container)) {
+            if (snapshot.size() >= MAX_HOPPER_CAPTURE_POSITIONS) {
+                return null;
+            }
+            if (!level.hasChunkAt(position)) {
+                if (requireEveryContainer) {
+                    return null;
+                }
                 continue;
             }
+            BlockEntity blockEntity = level.getBlockEntity(position);
+            if (!(blockEntity instanceof Container container)) {
+                if (requireEveryContainer) {
+                    return null;
+                }
+                continue;
+            }
+            int slotCount = container.getContainerSize();
+            if (!hopperSlotCountWithinBound(visitedSlots, slotCount)) {
+                return null;
+            }
+            visitedSlots += slotCount;
             Map<CanonicalItem, Integer> totals = new java.util.LinkedHashMap<>();
-            for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            for (int slot = 0; slot < slotCount; slot++) {
                 ItemStack stack = container.getItem(slot);
                 if (stack == null || stack.isEmpty()) {
                     continue;
@@ -791,6 +835,12 @@ public final class FabricNativeAuditEventListener {
             snapshot.put(position.immutable(), Map.copyOf(totals));
         }
         return Map.copyOf(snapshot);
+    }
+
+    static boolean hopperSlotCountWithinBound(int visitedSlots, int candidateSlots) {
+        return visitedSlots >= 0 && visitedSlots <= MAX_HOPPER_CAPTURE_SLOTS
+                && candidateSlots >= 0
+                && candidateSlots <= MAX_HOPPER_CAPTURE_SLOTS - visitedSlots;
     }
 
     /** Computes per-container net deltas without observing intermediate slot mutations. */
@@ -826,7 +876,8 @@ public final class FabricNativeAuditEventListener {
         String levelName = level.dimension().location().toString();
         byte[] rawData = "{\"capture\":\"fabric_hopper_net_delta\",\"endpoint\":\"unknown\"}"
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+        try {
+            boolean accepted = InternalObservationService.getInstance().submitNativeCapture(new InternalObservationService.InternalObservation(
                 System.currentTimeMillis(), delta.inserted() ? "HOPPER_INSERT" : "HOPPER_EXTRACT",
                 com.itemgraph.listener.ContainerInteractionTracker.UNKNOWN_CALLER_UUID,
                 com.itemgraph.listener.ContainerInteractionTracker.UNKNOWN_CALLER_NAME, levelName,
@@ -834,6 +885,19 @@ public final class FabricNativeAuditEventListener {
                 levelName, (double) containerPos.getX(), (double) containerPos.getY(),
                 (double) containerPos.getZ(), "CONTAINER", delta.item().itemId(), rawData,
                 delta.item(), delta.amount(), null, null));
+            if (!accepted) {
+                reportHopperCaptureFailure("native capture backpressure queue exhausted for a hopper delta");
+            }
+        } catch (RuntimeException failure) {
+            reportHopperCaptureFailure("observation submission failed: " + failure);
+        }
+    }
+
+    private static void reportHopperCaptureFailure(String reason) {
+        long failures = HOPPER_CAPTURE_FAILURES.incrementAndGet();
+        if (failures == 1 || failures % 1_000 == 0) {
+            LOGGER.warn("ItemGraph omitted Fabric hopper evidence ({} total); latest reason: {}", failures, reason);
+        }
     }
 
     /** Records a crafting result taken from a server-side crafting result slot. */

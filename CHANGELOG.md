@@ -39,6 +39,34 @@ The project follows a simple pre-1.0 development changelog model.
   arguments, and contains capture exceptions without changing vanilla results.
   Version remains 0.3.2; no distributable jar is built.
 
+- **Issue #34 opt-in automation adapter contract:** added `AutomationEndpoint` for
+  restart-stable opaque inventory identities derived from mod, dimension, position,
+  slot policy, and side, plus opt-in Fabric `FabricTransferStorageAdapter` and NeoForge
+  `NeoForgeItemHandlerAdapter` implementations. They preserve native transfer results,
+  record exact committed quantities, and suppress simulations and rollbacks. Fabric
+  overflow omits the whole transaction; source mod identity is checked against its
+  registered handle, and caller-created endpoints cannot add a location to the opaque
+  reference. Rejected transfers, zero movement, and impossible quantity claims emit no
+  movement evidence. Explicit `QUEUE_FULL` responses retry the same event identity at
+  most three times through a 128-entry bounded worker queue; other outcomes are not
+  replayed. This is in-memory retry only, and pending retries can be interrupted by
+  process shutdown. Vanilla hopper transfers emit bounded endpoint-unknown net deltas
+  on NeoForge; both loaders record accepted default-behavior dispenser/dropper outputs
+  with source, item, amount, ground endpoint, and entity UUID. Snapshot bounds use
+  overflow-safe arithmetic, and unreadable prior hopper snapshots suppress paired
+  deltas. NeoForge adapters accept mod-owned opaque inventory IDs for item-handler
+  providers without deriving identity from an `ItemStack`. Cross-loader test consumers
+  move stacks through Fabric Transfer API and NeoForge item-capability adapters between
+  portable and shulker-like storage and assert both persisted endpoint deltas. These are
+  vanilla/API fixtures, not third-party backpack integrations. Arbitrary modded
+  inventories still require an exercised supported adapter. Bounded queue saturation
+  and concurrent rejection tests verify the 128-entry queue and visible `QUEUE_FULL`.
+  Native hopper/dispenser captures use an additional 1,024-entry bounded backpressure
+  queue on the same database worker; `/ig status` reports pending rows and explicit
+  exhaustion, and shutdown flushes both queues. Saturation tests verify native capture
+  retention and persistence after the primary 10,000-entry observation queue fills.
+  No version bump or distributable JAR was produced.
+
 - **Issue #35 shared event taxonomy:** introduced the versioned `EventTaxonomy`
   for native audit, item observation, and transformation IDs. Audit command
   types and unified lookup aliases now use the shared registry. Definitions

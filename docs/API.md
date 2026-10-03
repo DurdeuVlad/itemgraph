@@ -38,7 +38,7 @@ accepting impossible evidence.
 ## Version and preview policy
 
 `ItemGraphApi.API_VERSION` is `ApiVersion.PREVIEW_1`. It is separate from `mod_version`
-(`0.3.0` at the time of writing). `PREVIEW_1` is the first public boundary and may change
+(`0.3.2` at the time of writing). `PREVIEW_1` is the first public boundary and may change
 incompatibly before ItemGraph 1.0.
 
 Policy:
@@ -634,6 +634,73 @@ name; it is not part of identity. If `lastKnownLocation` exists, the node uses t
 and floored block coordinates as last-known context. If it does not, `level_id` is
 `external:<ownerModId>` and coordinates remain `NULL`; the node is still durable and is
 never collapsed into the per-level `UNKNOWN` sentinel.
+
+### Automation transfer integration
+
+`AutomationEndpoint.blockInventory(ownerModId, displayName, dimension, position,
+slotPolicy, side)` creates a coordinate-less `ExternalInventoryEndpoint`. Its inventory
+ID is `automation:` followed by SHA-256 over length-prefixed owner mod ID, dimension,
+block coordinates, slot policy, and side. This is stable across restart and hides the
+coordinate from the endpoint key. Use distinct slot policies such as `slot:3` or
+`aggregate` when the native storage does not expose a stable slot model.
+
+Portable and other non-world-backed inventories use
+`AutomationEndpoint.externalInventory(ownerModId, inventoryId, displayName, slotPolicy,
+side)`. The integration must supply an opaque inventory ID that remains stable for that
+inventory across restart; ItemGraph does not derive identity from the `ItemStack` or assign
+an ItemGraph UUID to each item. Keep player identity and private inventory contents out of
+the ID. The location is always omitted. The NeoForge
+`NeoForgeItemHandlerAdapter` also accepts an `ExternalInventoryEndpoint` for portable item
+capabilities such as a backpack's `Capabilities.ItemHandler.ITEM`; it applies the actual
+slot policy to each captured delta. The Fabric `FabricTransferStorageAdapter` already
+accepts the equivalent `AutomationEndpoint` and wraps `Storage<ItemVariant>`.
+
+`AutomationTransferAdapter.reportCommittedTransfer(...)` creates a `TRANSFER_ITEM`
+observation only when the native operation committed, was not a simulation, and moved a
+positive amount. It rejects `movedAmount > requestedAmount`, copies the item's canonical
+metadata with the exact moved amount, and includes source mod, transfer ID, slots, sides,
+and endpoint slot policies in attributes. Pass the `SourceHandle` for the automation mod;
+`automationModId` must match that handle. Call it after Fabric's outermost transaction
+commit callback or after a NeoForge `IItemHandler` call with `simulate=false` returns.
+No callback exists in either API to intercept every other mod's storage operations, so
+integrations must opt in. Fabric API 0.116.12's Transfer API transactions support nested
+commit and rollback, but there is no global committed-transfer listener; NeoForge's
+capability providers are registered per block/block-entity type and `IItemHandler` does
+not identify the caller. See the [Fabric Transfer API item-storage guide](https://wiki.fabricmc.net/tutorial%3Atransfer-api_item_storage)
+and [NeoForge 1.21.1 capability documentation](https://docs.neoforged.net/docs/1.21.1/inventories/capabilities/).
+
+Fabric consumers may wrap a `Storage<ItemVariant>` with
+`com.itemgraph.fabric.automation.FabricTransferStorageAdapter`. The wrapper records exact
+insert/extract deltas only after the outer transaction commits and leaves the opposite
+endpoint UNKNOWN. Wrap each slot separately with a matching `slot:<index>` endpoint policy
+when the provider exposes stable slots; use `aggregate` and slot `-1` when it does not.
+Its journal accepts at most 64 distinct item/direction deltas and 262,144 units per delta;
+when either bound is exceeded, it omits all evidence from that transaction and logs the
+capture-bound event.
+
+NeoForge consumers may wrap `net.neoforged.neoforge.items.IItemHandler` with
+`com.itemgraph.neoforge.automation.NeoForgeItemHandlerAdapter`. It records the exact
+remainder/extraction delta only when `simulate=false`, uses the actual slot and queried
+face in its endpoint ID, preserves the delegate's return value, and leaves the other end
+UNKNOWN. For portable `Capabilities.ItemHandler.ITEM` providers, integrations pass the
+stable opaque `ExternalInventoryEndpoint` they own; the adapter adds the actual slot and
+side without deriving a permanent identity from the backpack `ItemStack`. The wrapper is
+opt-in; ItemGraph does not globally replace arbitrary mod capability providers.
+
+Both loaders also record vanilla hopper net deltas and default-behavior dispenser/dropper
+item entities after the world accepts them. Dispenser/dropper rows keep the source block,
+ground endpoint, item fingerprint, quantity, and item-entity UUID. These native hooks do
+not discover arbitrary modded inventory calls; mod integrations must use the adapter
+contract above.
+
+Automation observations retry only an explicit `QUEUE_FULL` response up to three times,
+reusing the same immutable observation and source event ID so persistence deduplication
+remains effective. Retries use one daemon worker and a 128-entry pending queue with 50,
+100, and 150 ms backoff. If that retry queue is full, or all retries are rejected, the
+last `QUEUE_FULL` result is returned and adapter logging reports the rejected evidence.
+Database failures, shutdown, invalid input, and exceptional completions are not replayed.
+This is bounded in-memory backpressure handling, not a durable retry journal; a process
+shutdown can still interrupt pending retries.
 
 The migration affects only `run/itemgraph/itemgraph.db` or another configured ItemGraph
 database. It does not touch `run/database.db` or any GriefLogger schema/table.

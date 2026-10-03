@@ -13,8 +13,17 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import org.mockito.ArgumentCaptor;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +31,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ItemGraphApiTest {
     private static final UUID PLAYER = UUID.fromString("11111111-2222-3333-4444-555555555555");
@@ -197,6 +212,230 @@ class ItemGraphApiTest {
                 rs.getDouble(2);
                 assertTrue(rs.wasNull(), "coordinate-less external inventory must not be UNKNOWN or located");
             }
+        }
+    }
+
+    @Test
+    void automationEndpointIdentityIsStableAndSeparatesDimensionSlotPolicyAndSide() {
+        AutomationEndpoint endpoint = AutomationEndpoint.blockInventory(
+                "storage_mod", "Storage", Level.OVERWORLD, new BlockPos(10, 64, -20),
+                "slot:3", Direction.NORTH);
+        AutomationEndpoint restarted = AutomationEndpoint.blockInventory(
+                "storage_mod", "Renamed Storage", Level.OVERWORLD, new BlockPos(10, 64, -20),
+                "slot:3", Direction.NORTH);
+        AutomationEndpoint otherSlot = AutomationEndpoint.blockInventory(
+                "storage_mod", "Storage", Level.OVERWORLD, new BlockPos(10, 64, -20),
+                "slot:4", Direction.NORTH);
+        AutomationEndpoint otherSide = AutomationEndpoint.blockInventory(
+                "storage_mod", "Storage", Level.OVERWORLD, new BlockPos(10, 64, -20),
+                "slot:3", Direction.SOUTH);
+        AutomationEndpoint otherDimension = AutomationEndpoint.blockInventory(
+                "storage_mod", "Storage", Level.NETHER, new BlockPos(10, 64, -20),
+                "slot:3", Direction.NORTH);
+
+        assertEquals(endpoint.reference().inventoryId(), restarted.reference().inventoryId());
+        assertTrue(endpoint.reference().inventoryId().matches("automation:[0-9a-f]{64}"));
+        assertNotEquals(endpoint.reference().inventoryId(), otherSlot.reference().inventoryId());
+        assertNotEquals(endpoint.reference().inventoryId(), otherSide.reference().inventoryId());
+        assertNotEquals(endpoint.reference().inventoryId(), otherDimension.reference().inventoryId());
+        assertNull(endpoint.reference().lastKnownLocation(), "opaque identity must not disclose coordinates");
+        assertThrows(IllegalArgumentException.class, () -> new AutomationEndpoint(
+                new ExternalInventoryEndpoint("storage_mod", "coordinates", "Leaked",
+                        new WorldLocation(Level.OVERWORLD, new BlockPos(10, 64, -20))),
+                "slot:3", "north"));
+    }
+
+    @Test
+    void portableInventoryEndpointPreservesOpaqueModOwnedIdentityWithoutCoordinates() {
+        AutomationEndpoint first = AutomationEndpoint.externalInventory(
+                "backpack_mod", "portable-storage:owner-token-7", "Backpack", "slot:2", "item");
+        AutomationEndpoint afterRestart = AutomationEndpoint.externalInventory(
+                "backpack_mod", "portable-storage:owner-token-7", "Renamed Backpack", "slot:2", "item");
+        AutomationEndpoint anotherSlot = AutomationEndpoint.externalInventory(
+                "backpack_mod", "portable-storage:owner-token-7", "Backpack", "slot:3", "item");
+
+        assertEquals(first.reference().inventoryId(), afterRestart.reference().inventoryId());
+        assertEquals(first.reference().inventoryId(), anotherSlot.reference().inventoryId());
+        assertNotEquals(first.slotPolicy(), anotherSlot.slotPolicy());
+        assertNull(first.reference().lastKnownLocation());
+        assertEquals("item", first.side());
+        assertThrows(IllegalArgumentException.class, () -> AutomationEndpoint.externalInventory(
+                "backpack_mod", "bad\nidentity", "Backpack", "aggregate", "item"));
+    }
+
+    @Test
+    void automationAdapterRecordsOnlyCommittedExactPartialQuantity() throws Exception {
+        SourceHandle source = register("storage_mod", "Storage Mod");
+        AutomationEndpoint origin = AutomationEndpoint.blockInventory(
+                "storage_mod", "Source", Level.OVERWORLD, new BlockPos(1, 64, 2), "slot:0", Direction.EAST);
+        AutomationEndpoint destination = AutomationEndpoint.blockInventory(
+                "storage_mod", "Destination", Level.OVERWORLD, new BlockPos(2, 64, 2), "slot:4", Direction.WEST);
+
+        assertTrue(AutomationTransferAdapter.reportCommittedTransfer(service, source, 1, 1_700_000_000_001L,
+                "simulated", origin, destination, diamond(10), 10, 10, false, true,
+                "storage_mod", 0, 4).isEmpty());
+        assertTrue(AutomationTransferAdapter.reportCommittedTransfer(service, source, 2, 1_700_000_000_002L,
+                "rolled-back", origin, destination, diamond(10), 10, 10, false, false,
+                "storage_mod", 0, 4).isEmpty());
+        assertTrue(AutomationTransferAdapter.reportCommittedTransfer(service, source, 3, 1_700_000_000_003L,
+                "rejected", origin, destination, diamond(10), 10, 0, true, false,
+                "storage_mod", 0, 4).isEmpty());
+
+        CompletableFuture<SubmissionResult> result = AutomationTransferAdapter.reportCommittedTransfer(
+                service, source, 4, 1_700_000_000_004L, "partial-commit", origin, destination,
+                diamond(10), 10, 4, true, false, "storage_mod", 0, 4).orElseThrow();
+        assertEquals(SubmissionStatus.PERSISTED, result.join().status());
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT amount, raw_data FROM ig_observations WHERE source_event_id = 4")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(4, rs.getInt(1));
+                String raw = new String(rs.getBytes(2), java.nio.charset.StandardCharsets.UTF_8);
+                assertTrue(raw.contains("\"transfer_state\":\"committed\""));
+                assertTrue(raw.contains("\"requested_amount\":\"10\""));
+                assertTrue(raw.contains("\"moved_amount\":\"4\""));
+                assertTrue(raw.contains("\"automation_mod_id\":\"storage_mod\""));
+            }
+        }
+        assertThrows(IllegalArgumentException.class, () -> AutomationTransferAdapter.reportCommittedTransfer(
+                service, source, 5, 1_700_000_000_005L, "over-count", origin, destination,
+                diamond(10), 10, 11, true, false, "storage_mod", 0, 4));
+        assertThrows(IllegalArgumentException.class, () -> AutomationTransferAdapter.reportCommittedTransfer(
+                service, source, 6, 1_700_000_000_006L, "spoofed-source", origin, destination,
+                diamond(1), 1, 1, true, false, "other_mod", 0, 4));
+        assertThrows(IllegalArgumentException.class, () -> AutomationTransferAdapter.reportCommittedTransfer(
+                service, source, 7, 1_700_000_000_007L, "wrong-slot", origin, destination,
+                diamond(1), 1, 1, true, false, "storage_mod", 1, 4));
+
+        QueryResult trace = service.traceItem(
+                ItemQuery.itemId("minecraft:diamond"), QueryOptions.defaults()).join();
+        assertEquals(QueryStatus.OK, trace.status());
+        assertEquals(1, trace.result().hops().size());
+        FlowHop hop = trace.result().hops().get(0);
+        assertEquals(Provenance.OBSERVED, hop.provenance());
+        assertEquals(4, hop.amount());
+        assertEquals(EndpointKind.EXTERNAL_INVENTORY, hop.origin().kind());
+        assertEquals(EndpointKind.EXTERNAL_INVENTORY, hop.destination().kind());
+        assertEquals(EvidenceKind.OBSERVATION, hop.evidence().kind());
+    }
+
+    @Test
+    void automationAdapterRetriesQueueSaturationWithSameObservationIdentity() {
+        SourceHandle source = register("storage_mod", "Storage Mod");
+        ItemGraphService retryingService = mock(ItemGraphService.class);
+        AutomationEndpoint endpoint = AutomationEndpoint.blockInventory(
+                "storage_mod", "Storage", Level.OVERWORLD, new BlockPos(1, 64, 2),
+                "slot:0", Direction.NORTH);
+        long eventId = 808;
+        CompletableFuture<SubmissionResult> full = CompletableFuture.completedFuture(
+                new SubmissionResult(SubmissionStatus.QUEUE_FULL, "storage_mod", eventId,
+                        "QUEUE_FULL", "queue saturated"));
+        CompletableFuture<SubmissionResult> persisted = CompletableFuture.completedFuture(
+                new SubmissionResult(SubmissionStatus.PERSISTED, "storage_mod", eventId, null, null));
+        when(retryingService.submitObservation(eq(source), any())).thenReturn(full, persisted);
+
+        SubmissionResult result = AutomationTransferAdapter.reportCommittedEndpointDelta(
+                retryingService, source, eventId, 1_700_000_000_808L, "retry-transfer", endpoint,
+                Level.OVERWORLD, diamond(4), 8, 4, true, true, false,
+                "storage_mod", 0).orElseThrow().join();
+
+        assertEquals(SubmissionStatus.PERSISTED, result.status());
+        ArgumentCaptor<DirectObservation> observations = ArgumentCaptor.forClass(DirectObservation.class);
+        verify(retryingService, times(2)).submitObservation(eq(source), observations.capture());
+        assertSame(observations.getAllValues().get(0), observations.getAllValues().get(1));
+        assertEquals(eventId, observations.getAllValues().get(0).sourceEventId());
+        assertEquals("retry-transfer", observations.getAllValues().get(0).attributes().get("transfer_id"));
+        assertEquals("4", observations.getAllValues().get(0).attributes().get("moved_amount"));
+    }
+
+    @Test
+    void automationAdapterReturnsQueueFullAfterBoundedRetries() {
+        SourceHandle source = register("storage_mod", "Storage Mod");
+        ItemGraphService retryingService = mock(ItemGraphService.class);
+        AutomationEndpoint endpoint = AutomationEndpoint.blockInventory(
+                "storage_mod", "Storage", Level.OVERWORLD, new BlockPos(1, 64, 2),
+                "aggregate", null);
+        long eventId = 809;
+        CompletableFuture<SubmissionResult> full = CompletableFuture.completedFuture(
+                new SubmissionResult(SubmissionStatus.QUEUE_FULL, "storage_mod", eventId,
+                        "QUEUE_FULL", "queue saturated"));
+        when(retryingService.submitObservation(eq(source), any()))
+                .thenReturn(full, full, full, full);
+
+        SubmissionResult result = AutomationTransferAdapter.reportCommittedEndpointDelta(
+                retryingService, source, eventId, 1_700_000_000_809L, "retry-exhausted", endpoint,
+                Level.OVERWORLD, diamond(1), 1, 1, true, true, false,
+                "storage_mod", -1).orElseThrow().join();
+
+        assertEquals(SubmissionStatus.QUEUE_FULL, result.status());
+        verify(retryingService, times(4)).submitObservation(eq(source), any());
+    }
+
+    @Test
+    void concurrentQueueFullSubmissionsReturnVisibleResultWhenRetryQueueIsSaturated() throws Exception {
+        SourceHandle source = register("storage_mod", "Storage Mod");
+        ItemGraphService busyService = mock(ItemGraphService.class);
+        AutomationEndpoint endpoint = AutomationEndpoint.externalInventory(
+                "storage_mod", "portable-storage:concurrency-fixture", "Backpack", "aggregate", "item");
+        when(busyService.submitObservation(eq(source), any())).thenAnswer(invocation -> {
+            DirectObservation observation = invocation.getArgument(1);
+            return CompletableFuture.completedFuture(new SubmissionResult(SubmissionStatus.QUEUE_FULL,
+                    "storage_mod", observation.sourceEventId(), "QUEUE_FULL", "queue saturated"));
+        });
+
+        CountDownLatch retryWorkerStarted = new CountDownLatch(1);
+        CountDownLatch releaseRetryWorker = new CountDownLatch(1);
+        ThreadPoolExecutor saturatedExecutor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(AutomationTransferAdapter.MAX_PENDING_RETRIES), runnable -> {
+                    Thread thread = new Thread(runnable, "automation-retry-saturation-test");
+                    thread.setDaemon(true);
+                    return thread;
+                }, new ThreadPoolExecutor.AbortPolicy());
+        Executor previous = null;
+        ExecutorService producers = null;
+        try {
+            saturatedExecutor.execute(() -> {
+                retryWorkerStarted.countDown();
+                try {
+                    releaseRetryWorker.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertTrue(retryWorkerStarted.await(5, TimeUnit.SECONDS));
+            for (int index = 0; index < AutomationTransferAdapter.MAX_PENDING_RETRIES; index++) {
+                saturatedExecutor.execute(() -> { });
+            }
+            assertEquals(AutomationTransferAdapter.MAX_PENDING_RETRIES, saturatedExecutor.getQueue().size(),
+                    "retry queue must respect its 128-entry bound");
+
+            previous = AutomationTransferAdapter.setRetryExecutorForTesting(saturatedExecutor);
+            ExecutorService concurrentProducers = Executors.newFixedThreadPool(8);
+            producers = concurrentProducers;
+            var concurrent = java.util.stream.IntStream.range(0, 32)
+                    .mapToObj(index -> concurrentProducers.submit(() -> AutomationTransferAdapter
+                            .reportCommittedEndpointDelta(busyService, source, 20_000L + index,
+                                    1_700_000_020_000L + index, "saturated-" + index, endpoint,
+                                    Level.OVERWORLD, diamond(1), 1, 1, true, true, false,
+                                    "storage_mod", -1).orElseThrow().join()))
+                    .toList();
+            for (var result : concurrent) {
+                SubmissionResult submission = result.get(5, TimeUnit.SECONDS);
+                assertEquals(SubmissionStatus.QUEUE_FULL, submission.status());
+                assertEquals("QUEUE_FULL", submission.errorCode());
+            }
+            assertEquals(AutomationTransferAdapter.MAX_PENDING_RETRIES, saturatedExecutor.getQueue().size(),
+                    "rejected retries must not grow the bounded queue");
+            verify(busyService, times(32)).submitObservation(eq(source), any());
+        } finally {
+            if (previous != null) {
+                AutomationTransferAdapter.setRetryExecutorForTesting(previous);
+            }
+            if (producers != null) {
+                producers.shutdownNow();
+            }
+            releaseRetryWorker.countDown();
+            saturatedExecutor.shutdownNow();
         }
     }
 

@@ -181,6 +181,8 @@ EXPECTED_EXTENSION_ACTION_CONTRACT: dict[str, tuple[str, str, str]] = {
     "ANVIL_REPAIR": ("extended", "observed", "transformation"),
     "HOPPER_INSERT": ("extended", "observed", "signed_delta"),
     "HOPPER_EXTRACT": ("extended", "observed", "signed_delta"),
+    "DISPENSER_DROP": ("extended", "observed", "signed_delta"),
+    "DROPPER_DROP": ("extended", "observed", "signed_delta"),
     "INTERACT_ENTITY_COMPLETED": ("extended", "observed", "none"),
     "INTERACT_ENTITY_DENIED": ("extended", "observed", "none"),
     "INTERACT_ENTITY_UNRESOLVED": ("extended", "observed", "none"),

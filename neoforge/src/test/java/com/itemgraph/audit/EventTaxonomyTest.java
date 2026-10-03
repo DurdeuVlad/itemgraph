@@ -78,6 +78,18 @@ class EventTaxonomyTest {
     }
 
     @Test
+    void vanillaAutomationActionsAreVersionedAndImplementedOnBothLoaders() {
+        for (String action : new String[] {"HOPPER_INSERT", "HOPPER_EXTRACT", "DISPENSER_DROP", "DROPPER_DROP"}) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(action, Surface.ITEM_OBSERVATION)
+                    .orElseThrow();
+            assertEquals(34, definition.ownerIssue(), action);
+            assertEquals(QuantitySemantics.SIGNED_DELTA, definition.quantity(), action);
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.fabric().status(), action);
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.neoForge().status(), action);
+        }
+    }
+
+    @Test
     void lookupChoicesExcludePlannedEventsAndKeepCurrentTypes() {
         assertTrue(EventTaxonomy.auditLookupTypes().contains("INTERACT_BLOCK_ATTEMPT"));
         assertTrue(EventTaxonomy.auditLookupTypes().contains("COMMAND_EXECUTED"));

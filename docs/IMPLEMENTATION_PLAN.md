@@ -360,6 +360,48 @@ including accepted projectile-spawn evidence.
 - Fabric `HopperBlockEntityMixin` captures successful vanilla hopper transfers as
   endpoint-unknown `HOPPER_INSERT`/`HOPPER_EXTRACT` net deltas, preserving quantity
   without attributing automation to a player.
+- NeoForge captures the same successful vanilla hopper deltas through a narrow
+  `HopperBlockEntity.tryMoveItems` mixin. It snapshots at most seven neighboring
+  positions and 512 total slots, then emits only canonical net changes. This hook
+  is separate from NeoForge's capability wrapper because vanilla hopper code can
+  mutate `Container` without calling `IItemHandler`.
+- Both loaders wrap `DispenserBlock.dispenseFrom` and the separate `DropperBlock`
+  override to bind the source position, then observe `Level.addFreshEntity` only
+  inside `DefaultDispenseItemBehavior.spawnItem`.
+  Accepted `ItemEntity` results become `DISPENSER_DROP`/`DROPPER_DROP` rows with the
+  exact item fingerprint, count, and entity UUID. Projectiles, buckets, custom dispense
+  paths, and rejected world insertion are omitted. The pinned Fabric Transfer API and
+  NeoForge 21.1 capability APIs expose per-storage operations but no global callback;
+  explicit integration adapters remain the supported path for arbitrary modded storage.
+- Issue 34 adds an opt-in cross-loader adapter contract: `AutomationEndpoint` provides
+  opaque restart-stable external inventory identity, and
+  `AutomationTransferAdapter.reportCommittedTransfer` records exact committed amounts,
+  endpoint slots/policies/sides, and automation mod identity. Automatic global discovery
+  of arbitrary Fabric Transfer API storages or NeoForge capabilities remains unsupported
+  because neither API exposes a universal committed-operation callback. Cross-loader
+  GameTests register a test-only consumer source through an isolated runtime shim and
+  replay portable-to-shulker movement through each loader's public storage adapter, then
+  read both endpoint deltas back from ItemGraph storage. This proves the opt-in integration
+  contract, not automatic interception of unrelated third-party mods.
+- **M9 / Issue #34 completion batch:** close the adapter evidence gap in one CI-backed
+  verification pass. Test-consumer GameTests on both loaders move seven nether stars from
+  a portable storage fixture into a placed shulker block through the public opt-in adapters.
+  Fabric uses `ItemStorage.SIDED` and one outer transaction; NeoForge calls the portable
+  `IItemHandler` wrapper and the block's `Capabilities.ItemHandler.BLOCK` wrapper. Both
+  fixtures read two persisted endpoint deltas and assert the 7 = 4 + 3 quantity balance,
+  slot policy, stable opaque portable identity, and the block endpoint. They do not load a
+  third-party backpack or modded capability implementation; arbitrary mods must opt in,
+  and their implementation-specific compatibility remains a follow-up. In the same batch,
+  exercise retry executor saturation and concurrent `QUEUE_FULL` submissions, proving the
+  128-entry bound, visible rejection result, and stable retry identity. Also fill the
+  10,000-row primary observation queue, verify committed native captures remain bounded in
+  the additional 1,024-row queue, and prove the worker persists deferred hopper evidence
+  after primary-queue saturation. Expose and test the exhaustion counter in `/ig status`.
+  Update API docs and the issue acceptance report with the evidence and this coverage limit.
+  Do not build
+  distributable JARs or change the project version. Run both loader unit suites, both loader
+  GameTest suites, and the compatibility/differential validators together after all code and
+  docs are complete; rerun only if a later code correction changes their inputs.
 - Both loaders expose the same per-player inspector: NeoForge uses its high-priority
   `InspectionListener`, while Fabric uses `UseBlockCallback`/`AttackBlockCallback`;
   each delegates to `ItemGraphCommands.openBlockInspection` and the shared exact-position

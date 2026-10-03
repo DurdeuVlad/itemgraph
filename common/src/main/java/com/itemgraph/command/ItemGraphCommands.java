@@ -1290,6 +1290,10 @@ public final class ItemGraphCommands {
                     "[ItemGraph] inference ledger: activeEdges=" + activeEdges + " supersededEdges=" + supersededEdges,
                     "[ItemGraph] internal queue: size=" + internalObs.getQueueSize()
                             + " capacityPerQueue=10000"
+                            + " nativeCaptureBackpressure=" + internalObs.getNativeCaptureBackpressureQueueSize()
+                            + "/" + internalObs.getNativeCaptureBackpressureCapacity()
+                            + " nativeCaptureBackpressureExhausted="
+                            + internalObs.getNativeCaptureBackpressureExhausted()
                             + " idlePollMs=" + internalObs.getQueuePollIntervalMs()
                             + " flushEveryTicks=" + internalObs.getQueueFrequencyTicks()
                             + " maxBatchSize=" + internalObs.getMaxBatchSize()

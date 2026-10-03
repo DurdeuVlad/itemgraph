@@ -160,6 +160,34 @@ interval-bounded UNKNOWN-caller evidence. If the queue remains full, the retry i
 dropped and is not attributed to a player; `/ig status` reports `dropped` and
 `capabilityQueueRejections` counters.
 
+`HOPPER_INSERT` and `HOPPER_EXTRACT` are bounded net deltas around a successful vanilla
+`HopperBlockEntity.tryMoveItems` call. They identify the changed container and leave the
+remote endpoint unknown; they do not claim a player or a specific modded machine. Both loader
+hooks snapshot only the hopper and six adjacent block positions, skip an incomplete snapshot,
+and cap it at 512 total container slots. `DISPENSER_DROP` and `DROPPER_DROP` are
+emitted only for a vanilla default-behavior `ItemEntity` accepted by `addFreshEntity`; each
+row connects the exact source block position to the ground node and retains the entity UUID.
+They do not cover projectile launches, bucket/container behavior, custom behaviors that do not
+use the default item spawn path, or rejected entity insertion.
+
+Committed hopper and accepted dispenser/dropper observations enter the primary bounded
+observation queue, followed by a separate bounded 1,024-row overflow queue when the primary
+queue is saturated or has deferred native work. Failed database batches retry into either
+bounded queue. One asynchronous worker drains both.
+If both bounded queues are full, ItemGraph counts the evidence as dropped and exposes the
+exhaustion count and pending overflow-queue occupancy in `/ig status`; the loader hook emits
+a throttled warning. That occupancy can include rows requeued after a failed database write.
+Shutdown attempts one write for pending rows; a failed final write is counted as dropped.
+This backpressure buffer is in-memory and does not survive a process crash.
+
+An integration using `AutomationTransferAdapter` may emit `TRANSFER_ITEM` only after its
+native operation's outermost transaction commits. The reported amount is the quantity the
+native API accepted; simulation, zero acceptance, rejection, and rollback emit no movement
+row. `AutomationEndpoint` IDs bind owner mod, dimension, position, slot policy, and side
+into a restart-stable opaque identifier. The default reference does not disclose coordinates.
+Adapters that cannot identify both ends must preserve an UNKNOWN endpoint and leave
+correlation unresolved.
+
 A canceled `ItemTossEvent` is recorded as `DROP_CANCELLED` to UNKNOWN because it did not
 produce a world item entity. A canceled `LivingDropsEvent` is recorded as
 `DEATH_DROP_CANCELLED` with no destination. Neither is a ground transfer or correlation
