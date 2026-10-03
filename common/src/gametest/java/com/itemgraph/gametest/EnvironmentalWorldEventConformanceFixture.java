@@ -146,8 +146,10 @@ public final class EnvironmentalWorldEventConformanceFixture {
             fallingEntity.setPos(fallingLanding.getX() + 0.5,
                     fallingLanding.getY() + 1.25,
                     fallingLanding.getZ() + 0.5);
-            fallingEntity.setDeltaMovement(0.0, -1.0, 0.0);
+            fallingEntity.setDeltaMovement(0.0, -2.0, 0.0);
             fallingEntity.tick();
+            helper.assertTrue(level.getBlockState(fallingLanding).is(Blocks.SAND),
+                    "vanilla falling-block tick did not place sand at its controlled landing position");
             level.setBlock(exceptionalFluidTarget.below(), Blocks.STONE.defaultBlockState(), 3);
             for (Direction side : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
                 level.setBlock(exceptionalFluidTarget.relative(side), Blocks.STONE.defaultBlockState(), 3);
