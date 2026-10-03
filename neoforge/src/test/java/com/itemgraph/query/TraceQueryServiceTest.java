@@ -32,6 +32,29 @@ class TraceQueryServiceTest extends QueryTestBase {
         return result.hops().stream().map(TraceHop::refId).toList();
     }
 
+    @Test
+    void unsupportedLegacyCreativeTransformationCannotBecomeAnItemTraceHop() throws Exception {
+        long player = insertPlayerNode("CreativeOperator");
+        long source = insertFingerprint("minecraft:diamond", "creative-source");
+        long result = insertFingerprint("minecraft:emerald", "creative-result");
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations (transformation_type, player_node_id,
+                    source_fingerprint_id, result_fingerprint_id, quantity, timestamp_ms, details)
+                VALUES ('CREATIVE_ITEM_TRANSFORM', ?, ?, ?, 7, ?, 'legacy row')
+                """)) {
+            statement.setLong(1, player);
+            statement.setLong(2, source);
+            statement.setLong(3, result);
+            statement.setLong(4, now - 1_000);
+            statement.executeUpdate();
+        }
+
+        TraceResult trace = service.trace(conn, source, QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        assertTrue(trace.hops().isEmpty(),
+                "unresolved creative cause remains available in unified evidence, not as a proven movement hop");
+    }
+
     /**
      * The charter's MVP chain, as an admin sees it:
      *

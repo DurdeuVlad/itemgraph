@@ -144,6 +144,13 @@ The project follows a simple pre-1.0 development changelog model.
   are listed as planned until loader adapters and fixtures prove support. This
   is a taxonomy version only; the ItemGraph mod remains 0.3.2 and no distributable
   JAR is built.
+- **Creative transformation evidence boundary:** taxonomy `2.0.0` retains
+  `CREATIVE_ITEM_TRANSFORM` for classification but marks it unsupported on both
+  loaders with `CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED`. Creative slot packets
+  prove separate quantity deltas, not conversion between item fingerprints, so
+  the ID retains `UNRESOLVED` evidence with `UNKNOWN` quantity and no longer
+  appears in lookup suggestions. Mod version remains 0.3.2; no distributable
+  JAR is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus ten allowlisted audit
   events, including `PLACE_BLOCK`, `INTERACT_BLOCK_ATTEMPT`, and `KILL_ENTITY`,

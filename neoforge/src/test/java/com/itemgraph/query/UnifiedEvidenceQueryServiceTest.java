@@ -95,6 +95,35 @@ class UnifiedEvidenceQueryServiceTest {
     }
 
     @Test
+    void legacyCreativeTransformationRemainsTraceableButQuantityIsUnknown() throws Exception {
+        transformation("CREATIVE_ITEM_TRANSFORM", 2_000L);
+        try (PreparedStatement statement = conn.prepareStatement(
+                "UPDATE ig_item_transformations SET quantity = 7 WHERE transformation_type = ?")) {
+            statement.setString(1, "CREATIVE_ITEM_TRANSFORM");
+            statement.executeUpdate();
+        }
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("action.all radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(1, rows.size());
+        UnifiedEvidenceDetail row = rows.get(0);
+        assertEquals("transformation#1", row.evidenceId());
+        assertEquals("CREATIVE_ITEM_TRANSFORM", row.actionType());
+        assertEquals("UNRESOLVED", row.evidenceClass());
+        assertNull(row.quantity());
+        assertTrue(row.detail().contains("reason=CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED"));
+        assertTrue(row.detail().contains("quantity=UNKNOWN"));
+        assertFalse(row.detail().contains("7"));
+
+        String formatted = String.join("\n", QueryFormatter.formatUnifiedEvidence(rows, "test"));
+        assertTrue(formatted.contains("[UNRESOLVED]"));
+        assertTrue(formatted.contains("quantity=UNKNOWN"));
+        assertFalse(formatted.contains("quantity=7"));
+    }
+
+    @Test
     void appliesUserSubjectTimeRadiusAndGlobalPagingAcrossSources() throws Exception {
         audit("BREAK_BLOCK", 7_000L, "minecraft:stone");
         observation("ITEMGRAPH_INTERNAL", 6_000L, "DROP_ITEM", stoneFingerprint, 2);
