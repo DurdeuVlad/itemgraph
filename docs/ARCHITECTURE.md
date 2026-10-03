@@ -15,7 +15,7 @@ neoforge adapter┘
 ```
 
 - `core/` contains Java-only domain records (`CanonicalItem`, `CorrelationResult`, and `NodeType`) and loader-neutral ports. It must not import Minecraft, Brigadier, Fabric, NeoForge, SQLite, or JDBC packages. `verifyCoreArchitecture` enforces that source boundary.
-- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence, migrations, and GriefLogger's read-only adapter are shared runtime components here.
+- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence and migrations are shared runtime components here. The optional GriefLogger read-only migration adapter is disabled by default.
 - `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite and MariaDB Connector/J as nested Fabric jars; its compatible jar replaces the metadata, requires GriefLogger, and strips only the nested SQLite jar.
 - `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite and MariaDB Connector/J; its compatible jar requires GriefLogger, keeps MariaDB Connector/J, and omits the Jar-in-Jar SQLite module.
 
@@ -28,6 +28,41 @@ completed-consumption, durability-break, transformation-result, and container-in
 NeoForge command callbacks and the Fabric `CommandsMixin` are stored as
 `COMMAND_ATTEMPT` because both hooks run before command execution. This matches
 GriefLogger's documented command-attempt behavior and avoids inventing a success result.
+
+Issue #33 adds a separate staff-private evidence path at vanilla's item mutation
+boundaries. Both loaders hook `GiveCommand.giveItem`,
+`ClearInventoryCommands.clearInventory`, the four `ItemCommands` block/entity
+set/modify methods, the `getBlockItem` and `getEntityItem` source readers used by
+`/item ... from`, and `ServerGamePacketListenerImpl.handleSetCreativeModeSlot`.
+The hooks snapshot only the addressed player inventory or selected block/entity
+slots, then compare canonical item fingerprints and stack counts after the method
+returns. `/give` additionally records only accepted overflow item entities. A
+command callback remains an attempt; slot deltas are authoritative observations.
+For non-player entity slots where ItemGraph has no supported graph endpoint, the
+change is retained as an unresolved staff audit event and does not create a graph
+edge. Fabric records creative destruction from `PlayerBlockBreakEvents.AFTER`.
+NeoForge's `BlockEvent.BreakEvent` runs before block removal, so the NeoForge
+adapter pairs that callback with the boolean returned by
+`ServerPlayerGameMode.destroyBlock`; this narrowly scoped mixin is required to
+record the actual result consistently across loaders.
+Placement is confirmed after `BlockItem.place` returns and bounded before/after
+state snapshots show the placed block. NeoForge's cancellable
+`BlockEvent.EntityPlaceEvent` is not treated as completion because a later
+listener can still cancel it. The NeoForge BlockItem return wrapper mirrors the
+Fabric post-return capture and preserves the original result if capture fails.
+Both adapters use invocation-local snapshots, so nested modded placements do
+not overwrite their callers' state.
+The typed command attempt carries the mutation event ID; confirmed slot deltas
+and the completion outcome reuse that ID, while the outcome also records the
+attempt event ID. `/item ... from block/entity` records the copied-from endpoint,
+slot, and canonical stack on the target evidence; a copy leaves the source slot
+unchanged and the target delta remains explicit creation. Nested `/execute as`
+records the original command issuer in actor fields and a differing effective
+entity in separate execution-context fields. A positive command return without
+a captured delta and an exception after a captured mutation are unresolved
+outcomes. Generic command history suppresses `/execute` text to avoid retaining
+nested item-command arguments. Vanilla item commands require permission level 2;
+the root attempt records the issuer's permission outcome before execution.
 NeoForge-only inventory hooks remain an explicit platform coverage boundary in
 `docs/GRIEFLOGGER_PARITY.md`; Fabric `BlockItemMixin` captures completed BlockItem
 placements, `LivingEntityMixin` captures completed eat/drink uses, `ItemStackMixin` captures
@@ -46,7 +81,7 @@ into the shared ledger. Both loaders
 share the read-only `FlowBrowserService` for coordinate inspection; GriefLogger ingestion
 remains optional and read-only on both loaders.
 
-The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the jars that require GriefLogger `1.2.10-1.21.1`.
+The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the temporary coexistence jars that require GriefLogger `1.2.10-1.21.1`.
 
 The architecture is designed around four requirements:
 
@@ -297,7 +332,7 @@ The exact factor values, candidate counts, both observation IDs, both player nam
 - A **drop** is stamped once it produces an edge, or once its window has closed with no match (a recorded negative result).
 - A drop whose window is **still open is left pending on purpose**: the pickup that explains it may simply not have been ingested yet — ingestion runs every 60s while the window is minutes long. That deferral is what stops the engine from permanently writing off drops purely for arriving near a cycle boundary.
 
-Correlation runs on the **existing ingestion worker thread**, from the same scheduled executor, immediately after each ingestion cycle completes (`IngestionService.runIngestionSafely`). Before candidate search, cross-source matching checks at most 500 unchecked ground observations; `loadPendingGroundObservations` only admits checked rows. `/ig ingest now` queues one complete ingest-and-correlate cycle with `requestIngestionAsync`; it does not read GriefLogger or search candidates on the server thread. Internal persistence, GriefLogger batch writes, and correlation transactions synchronize on the shared ItemGraph JDBC connection, preventing `autoCommit`/commit state interleaving. GriefLogger's database is not touched by correlation at all: accepted bridges write the edge, corroborating evidence rows and quantity allocations to ItemGraph's own tables in a single transaction.
+Correlation runs on the **existing ingestion worker thread**, from the same scheduled executor, after each worker cycle (`IngestionService.runIngestionSafely`). The optional GriefLogger source sync runs before correlation only when explicitly enabled. Before candidate search, cross-source matching checks at most 500 unchecked ground observations; `loadPendingGroundObservations` only admits checked rows. `/ig ingest now` queues one complete migration sync-and-correlate cycle with `requestIngestionAsync`; it does not read GriefLogger or search candidates on the server thread. Internal persistence, enabled GriefLogger batch writes, and correlation transactions synchronize on the shared ItemGraph JDBC connection, preventing `autoCommit`/commit state interleaving. GriefLogger's database is not touched by correlation at all: accepted bridges write the edge, corroborating evidence rows and quantity allocations to ItemGraph's own tables in a single transaction.
 
 ## Query execution: off-thread, reported back on-thread (Phase 6)
 
@@ -494,8 +529,8 @@ Authoritative Minecraft `ItemEntity` UUIDs are tracked only after the entity is 
 
 ## Native Container & Ground Observation (M5, 0.2.0)
 
-When GriefLogger is absent (or as additive evidence when present), ItemGraph records
-its own `ITEMGRAPH_INTERNAL` observations via `InternalObservationService` (bounded
+ItemGraph records its own `ITEMGRAPH_INTERNAL` observations via
+`InternalObservationService` (bounded
 10,000-entry async queue, batch-persisted with `INSERT OR IGNORE`). V11 adds a
 destination-sensitive internal dedup index, interval end times, edge state, and derived
 cross-source source groups. Raw observations remain unchanged; a confirmed group has one
@@ -510,11 +545,30 @@ was lost becomes an ignored duplicate on replay rather than a second quantity or
 row. Producer `source_event_id` remains separate and continues to represent source-level
 identity.
 
-The native worker limits each transformation write and shutdown flush to the configured
-`ingestion.max_batch_size`. Failed transformation batches return to the same bounded queue
-with exponential backoff; the status queue count includes in-flight transformations. A
-requeue overflow or shutdown write failure increments the evidence-loss counter and logs
-the number of dropped records. Legacy migrations V3–V5 copy the original observation
+The internal persistence worker limits observation, transformation, and audit writes,
+including its shutdown drain, to `ingestion.max_batch_size`. A loader shutdown closes queue
+admission before draining accepted ItemGraph records on the persistence worker. The ingestion
+worker has a 5-second graceful wait plus a 5-second interrupt wait. The internal persistence
+worker uses the same bound; if it is still inside JDBC, the lifecycle callback hands its
+queued and in-flight immutable events to an ItemGraph daemon writer, then waits at most 5 seconds
+for the recovery-file write. `ingest_event_uuid` makes the next startup's database replay
+idempotent. The recovery file is retained until all its records are confirmed durable in ItemGraph
+storage. Malformed or unsupported recovery files are preserved and prevent capture from starting.
+If shutdown finds already-accepted pre-start records while the primary recovery file cannot be
+read, it writes those records to the adjacent `itemgraph-pending-evidence.json.overflow` file and
+leaves the primary file intact. Startup merges both files after the primary file is readable; both
+are removed only after all recovered records commit.
+If the recovery writer fails or exceeds its deadline, the log and evidence-loss counter report the
+outstanding record count; a late write may finish only if the process remains alive and the
+filesystem returns. JDBC connection close runs on a daemon closer with a 1-second wait, so the
+server callback does not wait forever on a driver that ignores interruption. The lifecycle callback
+never performs evidence JDBC writes or recovery-file I/O itself. A rejected post-stop submission increments the evidence-loss counter.
+A pre-transaction failure or confirmed rollback increments the evidence-loss counter.
+If commit or rollback leaves the durable result uncertain, ItemGraph increments the
+separate persistence-outcome-unknown counter. Failed live transformation batches return to the same bounded queue with exponential
+backoff; the status queue count includes in-flight transformations. A requeue overflow also
+increments the evidence-loss counter and logs the dropped record count. Legacy migrations
+V3–V5 copy the original observation
 fields, referenced fingerprint values, and raw payload into
 `ig_legacy_observation_evidence` before clearing endpoints written under obsolete
 topology rules. That archive is retained but excluded from live
@@ -714,7 +768,10 @@ The `/ig audit` command runs this engine on the query worker and outputs a compr
 
 ### GriefLogger
 
-GriefLogger is an external read-only evidence source.
+The GriefLogger source bridge is disabled by default. ItemGraph's native
+observation service, storage, correlation, and query paths do not probe or read a
+GriefLogger database. When an operator enables migration mode, ItemGraph uses
+read-only source connections for supported-row sync and explicit history import.
 
 ItemGraph must not:
 

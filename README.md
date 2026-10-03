@@ -4,9 +4,9 @@
 
 ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **Fabric and NeoForge 1.21.1**.
 
-Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time, while retaining a native audit ledger for non-item events. It does **not** assign a permanent UUID to every item. Instead, it combines raw evidence from native server hooks and optional existing logging systems such as GriefLogger, then builds an explainable temporal item-flow graph.
+Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time, while retaining a native audit ledger for non-item events. It does **not** assign a permanent UUID to every item. ItemGraph records native server evidence into its own database and builds an explainable temporal item-flow graph.
 
-**GriefLogger is optional.** The NeoForge and Fabric builds record native item-flow and supported audit events and can also read GriefLogger's SQLite database strictly read-only. Native parity coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
+**ItemGraph runs independently of GriefLogger.** Native capture, storage, reconstruction, and native queries require neither the GriefLogger jar nor its database. A separate read-only migration bridge can import legacy evidence when explicitly enabled. Native replacement coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
 
 Each loader has a standard build and a GriefLogger-compatible build. For GriefLogger
 `1.2.10-1.21.1`, install the artifact ending in
@@ -22,15 +22,19 @@ is absent. The four release files are:
 
 The compatible variants are a migration bridge while the M8 parity gates remain
 open. ItemGraph will switch to the standard loader jar as the only supported
-artifact only after every M8 acceptance gate, the differential replay, the
-native-only 24-hour staging window, and the recorded rollback rehearsal in [the
-cutover plan](docs/GRIEFLOGGER_PARITY.md) are complete. That cutover retires the
+artifact only after every M8 feature-parity gate and the separate M10 operator
+cutover checks in [the cutover plan](docs/GRIEFLOGGER_PARITY.md) are approved.
+Those later operational checks do not make the GriefLogger JAR or database
+runtime dependencies. That cutover retires the
 GriefLogger jar dependency; it does not change the read-only importer or delete
 the retained source database copy.
 
-On Fabric, configure `grieflogger_database_path` in `config/itemgraph.properties`
-to point at GriefLogger's database file. The database remains read-only from
-ItemGraph. ItemGraph-owned storage defaults to SQLite; set `database_backend=mysql_mariadb`
+The legacy bridge is disabled by default and does not probe `database.db`. To
+use it during migration, set NeoForge `general.grieflogger_integration_enabled=true`
+or Fabric `grieflogger_integration_enabled=true`, then set
+`grieflogger_database_path` to GriefLogger's database file. The source remains
+read-only. Native queries work without that bridge; queries over imported legacy
+rows require a completed source sync/import. ItemGraph-owned storage defaults to SQLite; set `database_backend=mysql_mariadb`
 plus `database_host`, `database_port`, `database_name`, `database_username`,
 `database_password`, `database_ssl_mode`, and `database_connection_timeout_ms` to
 use the shared MySQL/MariaDB storage contract. Optional non-unique lookup
@@ -125,7 +129,7 @@ GriefLogger / Minecraft / Mod hooks
        Query + explanation UI
 ```
 
-GriefLogger is treated as a read-only evidence source. ItemGraph maintains its own storage for supplemental observations and derived data. Confirmed cross-source copies preserve both raw rows but contribute one quantity capacity; uncertain matches remain ambiguous. Container GUI observations are session net deltas with explicit time bounds, not click history, and generic `IItemHandler` rows keep caller/cause identity UNKNOWN.
+ItemGraph works independently of GriefLogger and stores its own native evidence and derived data. The GriefLogger read-only migration bridge is disabled by default and never probes `database.db` unless an operator enables `general.grieflogger_integration_enabled` (NeoForge) or `grieflogger_integration_enabled` (Fabric). When enabled, confirmed cross-source copies preserve both raw rows but contribute one quantity capacity; uncertain matches remain ambiguous. Container GUI observations are session net deltas with explicit time bounds, not click history, and generic `IItemHandler` rows keep caller/cause identity UNKNOWN.
 
 ## MVP goals
 
@@ -206,6 +210,7 @@ The complete boundary and authorization rules are in [Preview integration API](d
 - [Architecture](docs/ARCHITECTURE.md)
 - [Preview integration API](docs/API.md)
 - [Evidence model](docs/EVIDENCE_MODEL.md)
+- [ItemGraph event taxonomy](docs/EVENT_TAXONOMY.md)
 - [GriefLogger integration](docs/GRIEFLOGGER_INTEGRATION.md)
 - [Query model](docs/QUERY_MODEL.md)
 - [Security and permissions](docs/SECURITY_AND_PERMISSIONS.md)

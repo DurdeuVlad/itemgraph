@@ -2,16 +2,20 @@
 
 ## Purpose
 
-GriefLogger has been an **optional additive evidence source** for ItemGraph since version 0.2.0.
+ItemGraph is the standalone product and native-only operation is the default.
+GriefLogger's database is used only by the optional read-only migration bridge,
+which is disabled until explicitly enabled in ItemGraph configuration.
 
 ## Supported modes
 
 | GriefLogger installation | ItemGraph behavior |
 |---|---|
-| Absent | ItemGraph boots with its own database and records its supported native NeoForge observations and registered vanilla `IItemHandler` changes. Coverage remains limited: container observations are open/close session net deltas, capability callers/causes are UNKNOWN, private ender chests are not natively watched, and non-vanilla inventories need dedicated adapters. |
-| Present | The same ItemGraph-native capture remains enabled. ItemGraph additionally ingests GriefLogger's SQLite evidence through read-only connections. Raw rows from both sources are preserved; confirmed copies share one capacity group and uncertain matches remain ambiguous. |
+| Default, GriefLogger absent or present | ItemGraph records native evidence into its own database. It does not probe `database.db` or perform any GriefLogger database reads. |
+| Explicit migration mode | Set `general.grieflogger_integration_enabled=true` in NeoForge or `grieflogger_integration_enabled=true` in Fabric and configure `grieflogger_database_path`. ItemGraph then polls supported `items` and `containers` rows read-only; `/ig ingest history` separately imports the documented legacy tables. |
 
-These are additive modes, not an either/or switch. GriefLogger is not required for ItemGraph to boot or run.
+Native capture, ItemGraph-owned storage, correlation, and native queries work in
+either mode. The migration bridge is not needed for normal ItemGraph operation;
+legacy-source queries require that source evidence be imported or synchronized.
 
 ## Artifact selection and SQLite module compatibility
 
@@ -67,11 +71,13 @@ compatibility check before widening this artifact's declared version range.
 ## Integration principle
 
 ```text
-GriefLogger (optional) = external audit evidence (additive)
-ItemGraph               = native event coverage, reconstruction, and graph inference
+ItemGraph               = standalone native evidence, reconstruction, and graph inference
+GriefLogger bridge      = opt-in, read-only legacy migration source; disabled by default
 ```
 
-GriefLogger must always be treated as read-only. Ingestion skips gracefully with no log spam when the database is absent.
+GriefLogger must always be treated as read-only. Installing GriefLogger does not enable
+the bridge. The source path is not checked while migration mode is disabled. When enabled, ingestion skips gracefully with
+no log spam if the database is absent.
 
 ### Historical component blobs
 

@@ -1,8 +1,10 @@
 package com.itemgraph.listener;
 
+import com.itemgraph.audit.AdminMutationCapture;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.tracker.ItemEntityTracker;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
@@ -18,6 +20,7 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -42,6 +45,7 @@ import java.util.UUID;
  * {@code Post} clears the pending entry, so full pickups are never double-counted.
  */
 public class ItemEntityEventListener {
+    private static volatile ItemEntityEventListener activeListener;
 
     private static final long PENDING_PICKUP_TTL_MS = 1000;
     private static final int PENDING_PICKUP_MAX = 512;
@@ -123,6 +127,7 @@ public class ItemEntityEventListener {
 
     public ItemEntityEventListener(ItemEntityTracker tracker) {
         this.tracker = tracker;
+        activeListener = this;
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
@@ -134,10 +139,38 @@ public class ItemEntityEventListener {
         }
         // A canceled toss removes the item from inventory but never adds the entity to the world.
         if (event.isCanceled()) {
+            if (player instanceof ServerPlayer serverPlayer
+                    && AdminMutationCapture.deferGiveDropSafely(
+                            serverPlayer, itemEntity, itemEntity.getItem(), true)) return;
             emitUnresolvedDrop(player, itemEntity, "DROP_CANCELLED", "item_toss_cancelled");
             return;
         }
+        if (player instanceof ServerPlayer serverPlayer
+                && AdminMutationCapture.isCreativeSlotDropInProgress(serverPlayer)) {
+            return;
+        }
+        if (player instanceof ServerPlayer serverPlayer
+                && AdminMutationCapture.deferGiveDropSafely(serverPlayer, itemEntity, itemEntity.getItem())) return;
         queuePendingDrop(player, itemEntity, "DROP_ITEM");
+    }
+
+    /** Replays reentrant tosses after /give resolves which ItemEntity it returned. */
+    public static void replayDeferredGiveDrops(List<AdminMutationCapture.DeferredGiveDrop> deferredDrops) {
+        ItemEntityEventListener listener = activeListener;
+        if (listener == null || deferredDrops == null) return;
+        for (AdminMutationCapture.DeferredGiveDrop deferred : deferredDrops) {
+            if (deferred.canceled()) {
+                listener.emitUnresolvedDrop(deferred.player(), deferred.entity(), "DROP_CANCELLED",
+                        "item_toss_cancelled_during_give");
+                continue;
+            }
+            if (deferred.accepted()) {
+                listener.queuePendingDrop(deferred.player(), deferred.entity(), "DROP_ITEM");
+            } else {
+                listener.emitUnresolvedDrop(deferred.player(), deferred.entity(), "DROP_REJECTED",
+                        "give_overflow_entity_not_added_to_level");
+            }
+        }
     }
 
     /**

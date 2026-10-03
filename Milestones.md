@@ -137,14 +137,19 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Risk: external source identity, inventory identity, backpressure, and sensitive query
   results require explicit contracts and consumer-side permission checks.
 
-## M8: Drop-in GriefLogger parity
+## M8: Standalone GriefLogger replacement parity
 
 - Status: in progress; GitHub milestone
   https://github.com/DurdeuVlad/itemgraph/milestone/4.
-- Outcome: ItemGraph keeps `/ig` and `/itemgraph` while matching GriefLogger behavior
-  for commands, filters, inspector, events, read-only history import, storage, and
-  operations. `/gl` and `/grieflogger` are not aliases. ItemGraph owns the native audit
-  evidence needed to retire GriefLogger as a runtime dependency.
+- Outcome: ItemGraph is a standalone replacement for the documented and exact-release
+  GriefLogger 1.2.10-1.21.1 feature profile. Native capture, storage, reconstruction,
+  and queries work without the GriefLogger JAR or database; the legacy read-only
+  importer is optional and disabled by default. M8 parity is proved through
+  exact-release/source research, ItemGraph-only isolated local NeoForge tests, and
+  cross-loader CI reports. No GriefLogger runtime, staging/production access, live GUI
+  click, or release publication is required or claimed. Remaining acceptance work is
+  #24 and #31. Deployment soak, rollback, and compatible-artifact retirement are
+  separate M10 operator/release gates.
 - Delivered: V13 native audit ledger and bounded `/ig lookup` for NeoForge, shared
   Fabric capture for its supported audit events, asynchronous persistence, action/player/
   time/radius lookup, item-flow and transformation capture, read-only container
@@ -229,24 +234,62 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   retention is indefinite, and queue flush cadence is tick-configurable.
   Issue #27 is decomposed into #73 (projectile outcomes),
   #74 (block interaction outcomes), #75 (entity interaction outcomes, completed
-  in PR #86), and #76 (Ender action writer determination). Compatibility artifacts remain supported
-  until the M8 gate and the native-only cutover evidence pass.
+  in PR #86), and #76 (Ender action writer determination). Compatibility artifacts
+  remain supported until the M8 parity gates and separate M10 cutover approvals pass;
+  these checks do not make the GriefLogger runtime a dependency.
 
 ## M9: ItemGraph audit++ performance and extra events
 
-- Status: planned; GitHub milestone
+- Status: in progress; GitHub milestone
   https://github.com/DurdeuVlad/itemgraph/milestone/5.
-- Outcome: extend the compatibility surface with measured throughput, creative/admin
-  causes, modded inventory and automation, world/entity causes, cross-loader integration,
+- Outcome: deliver ItemGraph as a standalone replacement for GriefLogger. Native
+  capture, ItemGraph-owned storage, queries, permissions, and exports must work with
+  no GriefLogger jar or database. M9 adds measured throughput, creative/admin causes,
+  modded inventory and automation, world/entity causes, cross-loader integration,
   tamper-evident exports, first-class uncertainty, and component-aware/absolute-time
   investigation queries.
-- Scope boundary: staging and CI proof only. Every extension preserves evidence classes,
+- Scope boundary: CI/local proof plus authorized staging proof where production-like
+  budgets or server behavior are claimed. Every feature preserves evidence classes,
   quantity conservation, privacy, bounded queues, and asynchronous database work.
 - Dependencies: M8 compatibility profile and native proof precede the M9 extensions;
   #32–#37, #44, #45, and #55–#58 own the implementation slices. Issue #35 is the
   event-taxonomy tracker for #55, #56, and #57.
 - Acceptance evidence: reproducible benchmark output, cross-loader fixtures, malformed and
   opaque evidence cases, export verification, and read-only auditor review.
+- Execution order: complete #32's measurement contract before using its results in #58;
+  establish the shared event registry in #35 before implementing #33, #34, and #55–#57;
+  then finish #36, #37, #44, and #45 against the resulting evidence and query contracts.
+  Research and prioritize the milestone as one batch; then close issues in this dependency
+  order, each through its own reviewed PR and merge receipt. Do not rerun research or create
+  another milestone until this one has no remaining issues.
+- Verification cadence: do not run tests after individual edit passes. For each issue,
+  finish its implementation batch first, then run the issue's complete relevant acceptance
+  suite and final CI before review and merge. At M9 completion, run the full cross-loader,
+  backend, GameTest, benchmark, and export matrix. Repair failures as a focused correction
+  batch and rerun affected checks plus final CI. No distributable artifact or version bump
+  is part of M9 verification.
+- Current evidence: PR #119 merged as `22b892e` and repairs the Fabric durability GameTest;
+  PR #120's previous head passed CI with nine validated report scenarios. Head `7c93be1`
+  added six one-second idle reports; its 15-report CI run 37132314252 is still in progress.
+  The local validator now passes 38 tests, and local NeoForge compile/unit tests plus Fabric
+  main, unit-test, and GameTest compilation succeed. The updated correlation workload adds
+  500 malformed component-payload repetitions with one decode-cache insertion and 499 hits;
+  the current head still needs CI report validation. Local NeoForge and Fabric GameTest runs
+  were interrupted before complete suite results: NeoForge correlation and idle probes passed
+  but queue-burst remains unverified; Fabric completed six of seven tests before the runner
+  was stopped. #32 remains open: staging-derived budgets, representative third-party adapter
+  workloads, and production-like live-server tick-impact evidence are still missing.
+  CI/local measurements are regression evidence, not production budgets.
+  Numeric thresholds stay unset until measured in authorized staging.
+- Batch research checkpoint (2026-10-02): existing GitHub milestone #5 remains the M9
+  boundary; its 12 open issues are #32–#37, #44–#45, and #55–#58. The pinned
+  `1.2.10-1.21.1` GriefLogger profile and prior M9 comparison found no additional
+  feature gap outside those tracked issues. CoreProtect separates command, inventory,
+  item, container, and block lookups into distinct action families; ItemGraph therefore
+  records administrative causes separately from command-attempt text and emits quantity
+  evidence only at confirmed mutation boundaries. NeoForge 1.21.1 `CommandEvent` is
+  cancellable and fires before execution, so it cannot prove a successful effect.
+  Visible-client inspector clicks remain unverified per the maintainer decision.
 
 ## M10: Native-only cutover and release hardening
 

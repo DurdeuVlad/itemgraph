@@ -2,6 +2,7 @@ package com.itemgraph.fabric;
 
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.InspectionService;
+import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.query.AuditLookupFilters;
 import com.itemgraph.query.QueryWindow;
 import com.mojang.brigadier.CommandDispatcher;
@@ -81,6 +82,17 @@ class FabricItemGraphCommandsParityTest {
         } finally {
             encoded.release();
         }
+    }
+
+    @Test
+    void lookupHelpUsesTheSharedAuditEventCatalogOnFabric() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        List<String> messages = captureSuccesses(source);
+
+        assertEquals(1, dispatcher.execute("itemgraph help lookup", source));
+        assertTrue(String.join("\n", messages).contains(
+                "eventType: " + String.join(", ", AuditEventQueryService.EVENT_TYPES) + "."));
     }
 
     @BeforeAll

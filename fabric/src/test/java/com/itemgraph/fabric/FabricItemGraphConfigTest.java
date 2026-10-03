@@ -29,6 +29,7 @@ class FabricItemGraphConfigTest {
                 database_ssl_mode=verify-full
                 database_connection_timeout_ms=7500
                 use_indexes=false
+                grieflogger_integration_enabled=true
                 grieflogger_database_path=database.db
                 ground_bridge_max_seconds=300
                 max_page_size=25
@@ -52,6 +53,7 @@ class FabricItemGraphConfigTest {
         assertEquals(7500, loaded.databaseSettings().connectionTimeoutMs());
         assertEquals("verify-full", loaded.databaseSettings().sslMode());
         assertFalse(loaded.databaseSettings().useIndexes());
+        assertTrue(loaded.griefLoggerIntegrationEnabled());
         assertEquals(25, loaded.operationalSettings().maxPageSize());
         assertTrue(loaded.operationalSettings().serverSideOnly());
         assertEquals(100, loaded.operationalSettings().queuePollIntervalMs());
@@ -75,6 +77,7 @@ class FabricItemGraphConfigTest {
         assertEquals(100, loaded.operationalSettings().maxBatchSize());
         assertEquals(30_000, loaded.operationalSettings().databaseHeartbeatIntervalMs());
         assertTrue(loaded.operationalSettings().captureEnabled());
+        assertFalse(loaded.griefLoggerIntegrationEnabled());
         assertEquals("indefinite", loaded.operationalSettings().rawEvidenceRetention());
     }
 
@@ -141,6 +144,15 @@ class FabricItemGraphConfigTest {
         assertTrue(databasePathError.getMessage().contains("general.database_path must not be blank"));
 
         Files.writeString(file, "grieflogger_database_path=\n");
+        FabricItemGraphConfig nativeOnly = FabricItemGraphConfig.load(tempDir, config);
+        assertFalse(nativeOnly.griefLoggerIntegrationEnabled());
+        assertEquals(tempDir.resolve("database.db"), nativeOnly.griefLoggerDatabasePath());
+
+        Files.writeString(file, "grieflogger_database_path=\\u0000-invalid-path\n");
+        FabricItemGraphConfig invalidSourcePathIgnored = FabricItemGraphConfig.load(tempDir, config);
+        assertEquals(tempDir.resolve("database.db"), invalidSourcePathIgnored.griefLoggerDatabasePath());
+
+        Files.writeString(file, "grieflogger_integration_enabled=true\ngrieflogger_database_path=\n");
         IOException griefLoggerPathError = assertThrows(IOException.class,
                 () -> FabricItemGraphConfig.load(tempDir, config));
         assertTrue(griefLoggerPathError.getMessage().contains("general.grieflogger_database_path must not be blank"));
@@ -181,7 +193,9 @@ class FabricItemGraphConfigTest {
         Path file = config.resolve("itemgraph.properties");
         List<InvalidSetting> invalidSettings = List.of(
                 new InvalidSetting("server_side_only=1\n", "operations.server_side_only", "must be true or false"),
-                new InvalidSetting("capture_enabled=yes\n", "capture.enabled", "must be true or false"));
+                new InvalidSetting("capture_enabled=yes\n", "capture.enabled", "must be true or false"),
+                new InvalidSetting("grieflogger_integration_enabled=enabled\n",
+                        "general.grieflogger_integration_enabled", "must be true or false"));
 
         for (InvalidSetting invalid : invalidSettings) {
             Files.writeString(file, invalid.properties());

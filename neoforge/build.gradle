@@ -2,6 +2,10 @@ plugins {
     id 'net.neoforged.moddev' version '2.0.78'
 }
 
+def gameTestDirectory = providers.gradleProperty('itemgraphGameTestDirectory')
+        .map { project.file(it) }
+        .getOrElse(rootProject.file('build/gametest'))
+
 version = rootProject.mod_version
 group = rootProject.mod_group_id
 
@@ -25,7 +29,7 @@ neoForge {
         gameTestServer {
             type = 'gameTestServer'
             systemProperty 'neoforge.enabledGameTestNamespaces', rootProject.mod_id
-            gameDirectory = rootProject.file('build/gametest')
+            gameDirectory = gameTestDirectory
         }
     }
 

@@ -12,6 +12,7 @@ import java.util.Properties;
 
 /** Simple editable properties file; Fabric does not provide a server config system. */
 record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLoggerDatabasePath,
+                             boolean griefLoggerIntegrationEnabled,
                              int groundBridgeMaxSeconds, ItemGraphOperationalSettings operationalSettings) {
     static FabricItemGraphConfig load(Path gameDirectory, Path configDirectory) throws IOException {
         Path configFile = configDirectory.resolve("itemgraph.properties");
@@ -32,6 +33,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             properties.setProperty("database_ssl_mode", "disable");
             properties.setProperty("database_connection_timeout_ms", "5000");
             properties.setProperty("use_indexes", "true");
+            properties.setProperty("grieflogger_integration_enabled", "false");
             properties.setProperty("grieflogger_database_path", "database.db");
             properties.setProperty("ground_bridge_max_seconds", "300");
             properties.setProperty("max_page_size", Integer.toString(ItemGraphOperationalSettings.DEFAULT_MAX_PAGE_SIZE));
@@ -102,10 +104,17 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             throw new IOException("Invalid database settings in " + configFile + ": " + e.getMessage(), e);
         }
 
+        boolean griefLoggerIntegrationEnabled = parseBoolean(
+                properties, "grieflogger_integration_enabled", false, configFile);
+        Path griefLoggerDatabasePath = griefLoggerIntegrationEnabled
+                ? resolve(gameDirectory, properties.getProperty("grieflogger_database_path", "database.db"),
+                        "general.grieflogger_database_path", configFile)
+                : gameDirectory.resolve("database.db");
+
         return new FabricItemGraphConfig(
                 databaseSettings,
-                resolve(gameDirectory, properties.getProperty("grieflogger_database_path", "database.db"),
-                        "general.grieflogger_database_path", configFile),
+                griefLoggerDatabasePath,
+                griefLoggerIntegrationEnabled,
                 groundBridgeMaxSeconds,
                 operationalSettings);
     }
@@ -140,6 +149,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             case "database_port" -> "general.database_port";
             case "database_connection_timeout_ms" -> "general.database_connection_timeout_ms";
             case "use_indexes" -> "storage.use_indexes";
+            case "grieflogger_integration_enabled" -> "general.grieflogger_integration_enabled";
             case "ground_bridge_max_seconds" -> "correlation.ground_bridge_max_seconds";
             case "max_page_size" -> "query.max_page_size";
             case "poll_interval_ms" -> "ingestion.poll_interval_ms";

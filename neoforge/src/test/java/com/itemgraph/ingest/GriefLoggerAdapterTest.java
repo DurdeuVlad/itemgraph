@@ -9,7 +9,9 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.lang.reflect.Proxy;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -115,6 +117,37 @@ class GriefLoggerAdapterTest {
                 stmt.execute("CREATE TABLE test_write (id INT)");
             });
         }
+    }
+
+    @Test
+    void disabledIntegrationIgnoresAnExistingLegacyDatabase() throws Exception {
+        GriefLoggerAdapter adapter = new GriefLoggerAdapter(dbPath, false);
+
+        assertFalse(adapter.isIntegrationEnabled());
+        assertFalse(adapter.isDatabaseAvailable());
+        assertFalse(adapter.isSupportedSchemaAvailable());
+        assertThrows(SQLException.class, adapter::openReadOnlyConnection);
+    }
+
+    @Test
+    void defaultAdapterDoesNotEnableLegacySourceAccess() {
+        assertFalse(new GriefLoggerAdapter().isIntegrationEnabled());
+    }
+
+    @Test
+    void disabledAdapterDoesNotEvenInspectTheConfiguredSourcePath() {
+        AtomicInteger pathMethodCalls = new AtomicInteger();
+        Path guardedPath = (Path) Proxy.newProxyInstance(Path.class.getClassLoader(), new Class<?>[]{Path.class},
+                (proxy, method, args) -> {
+                    pathMethodCalls.incrementAndGet();
+                    throw new AssertionError("disabled integration inspected the legacy source path");
+                });
+        GriefLoggerAdapter adapter = new GriefLoggerAdapter(guardedPath, false);
+
+        assertFalse(adapter.isDatabaseAvailable());
+        assertFalse(adapter.isSupportedSchemaAvailable());
+        assertThrows(SQLException.class, adapter::openReadOnlyConnection);
+        assertEquals(0, pathMethodCalls.get());
     }
 
     @Test

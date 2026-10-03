@@ -11,8 +11,13 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -53,6 +58,61 @@ class DatabaseManagerTest {
         assertFalse(error.contains("database-secret"), "database diagnostics must redact the password");
         assertFalse(error.contains("private_database"), "database diagnostics must redact the database name");
         assertFalse(error.contains("private_user"), "database diagnostics must redact the username");
+    }
+
+    @Test
+    void jdbcCloseThatIgnoresInterruptCannotHoldServerShutdown(@TempDir Path tempDir) throws Exception {
+        DatabaseManager database = DatabaseManager.getInstance();
+        database.initialize(tempDir.resolve("close-stall.db"));
+        Connection original = database.getConnection();
+        CountDownLatch closeStarted = new CountDownLatch(1);
+        CountDownLatch releaseClose = new CountDownLatch(1);
+        CountDownLatch closeFinished = new CountDownLatch(1);
+        AtomicReference<Thread> closeWorker = new AtomicReference<>();
+        Connection blockedClose = (Connection) Proxy.newProxyInstance(
+                Connection.class.getClassLoader(), new Class<?>[]{Connection.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("close")) {
+                        closeWorker.set(Thread.currentThread());
+                        closeStarted.countDown();
+                        boolean interrupted = false;
+                        while (releaseClose.getCount() != 0) {
+                            try {
+                                releaseClose.await();
+                            } catch (InterruptedException ignored) {
+                                interrupted = true;
+                            }
+                        }
+                        try {
+                            return method.invoke(original, args);
+                        } catch (InvocationTargetException invocationFailure) {
+                            throw invocationFailure.getCause();
+                        } finally {
+                            closeFinished.countDown();
+                            if (interrupted) Thread.currentThread().interrupt();
+                        }
+                    }
+                    try {
+                        return method.invoke(original, args);
+                    } catch (InvocationTargetException invocationFailure) {
+                        throw invocationFailure.getCause();
+                    }
+                });
+        java.lang.reflect.Field connectionField = DatabaseManager.class.getDeclaredField("connection");
+        connectionField.setAccessible(true);
+        connectionField.set(database, blockedClose);
+
+        long began = System.nanoTime();
+        try {
+            database.close();
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began);
+            assertTrue(closeStarted.await(1, TimeUnit.SECONDS));
+            assertTrue(elapsedMs < 1_500, "DatabaseManager.close must have a fixed upper bound");
+            assertFalse(database.isInitialized(), "closed state must be visible before the driver close completes");
+            assertTrue(closeWorker.get().isAlive(), "a stuck close runs only on its daemon cleanup worker");
+        } finally {
+            releaseClose.countDown();
+            assertTrue(closeFinished.await(2, TimeUnit.SECONDS));
+        }
     }
 
     @AfterEach

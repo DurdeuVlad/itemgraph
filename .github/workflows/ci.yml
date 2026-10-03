@@ -81,8 +81,14 @@ jobs:
       - name: Test normalized differential replay report comparator
         run: python3 tools/test_itemgraph_differential_report.py
 
+      - name: Test native feature coverage report
+        run: python3 tools/test_itemgraph_feature_coverage.py
+
       - name: Test native GameTest report normalization
         run: python3 tools/test_normalize_itemgraph_gametest_report.py
+
+      - name: Test ItemGraph performance report validation
+        run: python3 tools/test_validate_itemgraph_performance_report.py
 
       - name: Validate exact GriefLogger 1.21.1 release fixture
         env:
@@ -92,6 +98,7 @@ jobs:
       - name: Test all loaders without packaging distributable mod jars
         env:
           ITEMGRAPH_DIFFERENTIAL_REPORT_DIR: ${{ runner.temp }}/itemgraph-differential-reports/raw
+          ITEMGRAPH_PERFORMANCE_REPORT_DIR: ${{ runner.temp }}/itemgraph-performance-reports/raw
           ITEMGRAPH_TEST_MARIADB_URL: jdbc:mariadb://127.0.0.1:3306/itemgraph
           ITEMGRAPH_TEST_MARIADB_USER: itemgraph
           ITEMGRAPH_TEST_MARIADB_PASSWORD: itemgraph
@@ -100,7 +107,35 @@ jobs:
           ITEMGRAPH_TEST_MYSQL_PASSWORD: itemgraph
         run: |
           mkdir -p "$ITEMGRAPH_DIFFERENTIAL_REPORT_DIR"
+          mkdir -p "$ITEMGRAPH_PERFORMANCE_REPORT_DIR"
           ./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest
+
+      - name: Verify final disconnect evidence drains before database close
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          logs = {
+              "NeoForge": Path("build/gametest/logs/latest.log"),
+              "Fabric": Path("fabric/build/run/gameTest/logs/latest.log"),
+          }
+          for loader, path in logs.items():
+              if not path.is_file():
+                  sys.exit(f"{loader} GameTest log is missing: {path}")
+              lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+              rejected = [line for line in lines if "Rejected " in line
+                          and "after shutdown admission closed" in line]
+              disconnects = [index for index, line in enumerate(lines)
+                             if "test-mock-player left the game" in line]
+              closes = [index for index, line in enumerate(lines)
+                        if "ItemGraph database connection closed" in line]
+              if rejected:
+                  sys.exit(f"{loader} rejected final shutdown observations: {rejected[-1]}")
+              if not disconnects or not closes or closes[-1] <= disconnects[-1]:
+                  sys.exit(f"{loader} did not close ItemGraph storage after the final player disconnect")
+              print(f"{loader}: final disconnect preceded database close; no shutdown evidence was rejected")
+          PY
 
       - name: Normalize and validate native-only replay reports
         env:
@@ -116,6 +151,9 @@ jobs:
               --validate-only "$REPORT_DIR/normalized/itemgraph-$loader.json" \
               --expected-system itemgraph \
               --expected-loader "$loader"
+            python3 tools/itemgraph_feature_coverage.py \
+              --input "$REPORT_DIR/normalized/itemgraph-$loader.json" \
+              --output "$REPORT_DIR/normalized/itemgraph-$loader-coverage.json"
           done
 
       - name: Upload redacted replay reports
@@ -123,6 +161,17 @@ jobs:
         with:
           name: itemgraph-native-replay-reports
           path: ${{ runner.temp }}/itemgraph-differential-reports/normalized/*.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Validate redacted performance reports
+        run: python3 tools/validate_itemgraph_performance_report.py --input-dir "${{ runner.temp }}/itemgraph-performance-reports/raw"
+
+      - name: Upload redacted performance reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: itemgraph-performance-reports
+          path: ${{ runner.temp }}/itemgraph-performance-reports/raw/*.json
           if-no-files-found: error
           retention-days: 14
 

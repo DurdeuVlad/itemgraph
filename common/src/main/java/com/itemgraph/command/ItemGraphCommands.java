@@ -9,6 +9,7 @@ import com.itemgraph.ingest.IngestionService;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.SourceCheckpoint;
 import com.itemgraph.listener.ContainerInteractionTracker;
+import com.itemgraph.metrics.OperationalMetrics;
 import com.itemgraph.query.EventQueryService;
 import com.itemgraph.query.ExplainQueryService;
 import com.itemgraph.query.AuditEventQueryService;
@@ -1050,19 +1051,45 @@ public final class ItemGraphCommands {
                 lines = QueryFormatter.formatAuditEvents(events, filter);
                 returnedRows = events.size();
             }
-            List<QueryDispatcher.QueryAction> actions = new java.util.ArrayList<>();
-            if (standaloneCommand && effectivePage > 1) {
-                actions.add(new QueryDispatcher.QueryAction("Previous",
-                        standalonePageCommand(effectivePage - 1, session.sessionId())));
-            }
-            if (standaloneCommand && shouldOfferNextAuditPage(effectivePage, clampedLimit, offset,
-                    returnedRows)) {
-                actions.add(new QueryDispatcher.QueryAction("Next",
-                        standalonePageCommand(effectivePage + 1, session.sessionId())));
-            }
-            return QueryDispatcher.QueryOutput.found(
-                    lines, actions);
+            boolean hasNextPage = standaloneCommand
+                    && canCheckNextAuditPage(effectivePage, clampedLimit, offset, returnedRows)
+                    && hasNextAuditPage(conn, session, effectivePage, clampedLimit, offset);
+            return QueryDispatcher.QueryOutput.found(lines,
+                    auditPageActions(session, effectivePage, hasNextPage, standaloneCommand));
         });
+    }
+
+    static List<QueryDispatcher.QueryAction> auditPageActions(
+            AuditPageSession session, int effectivePage, boolean hasNextPage, boolean standaloneCommand) {
+        if (!standaloneCommand) {
+            return List.of();
+        }
+        List<QueryDispatcher.QueryAction> actions = new java.util.ArrayList<>(2);
+        if (effectivePage > 1) {
+            actions.add(new QueryDispatcher.QueryAction("Previous",
+                    standalonePageCommand(effectivePage - 1, session.sessionId())));
+        }
+        if (hasNextPage) {
+            actions.add(new QueryDispatcher.QueryAction("Next",
+                    standalonePageCommand(effectivePage + 1, session.sessionId())));
+        }
+        return List.copyOf(actions);
+    }
+
+    static boolean hasNextAuditPage(java.sql.Connection conn, AuditPageSession session,
+                                    int effectivePage, int limit, int offset) throws java.sql.SQLException {
+        int nextOffset = QueryLimits.clampPageOffset(effectivePage + 1, limit);
+        if (session.filters() != null) {
+            return !UNIFIED_EVIDENCE_QUERIES.findFiltered(conn, session.filters(), session.levelId(),
+                    session.centerX(), session.centerY(), session.centerZ(), 1, nextOffset).isEmpty();
+        }
+        if (session.exactPositions() != null && !session.exactPositions().isEmpty()) {
+            return !UNIFIED_EVIDENCE_QUERIES.findExact(conn, session.levelId(),
+                    session.exactPositions(), 1, nextOffset).isEmpty();
+        }
+        return !AUDIT_EVENT_QUERIES.find(conn, session.eventType(), session.playerName(),
+                session.window(), session.levelId(), session.centerX(), session.centerY(),
+                session.centerZ(), session.radius(), 1, nextOffset).isEmpty();
     }
 
     static void rememberPageSession(CommandSourceStack source, AuditPageSession session) {
@@ -1171,8 +1198,8 @@ public final class ItemGraphCommands {
         return "/ig page " + Math.max(1, page) + " " + sessionId;
     }
 
-    static boolean shouldOfferNextAuditPage(int effectivePage, int clampedLimit,
-                                             int offset, int returnedRows) {
+    static boolean canCheckNextAuditPage(int effectivePage, int clampedLimit,
+                                          int offset, int returnedRows) {
         if (returnedRows != clampedLimit) {
             return false;
         }
@@ -1203,11 +1230,11 @@ public final class ItemGraphCommands {
     private static int status(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
         String modVersion = runtimeInformation.modVersion();
-        boolean griefLoggerLoaded = runtimeInformation.isModLoaded("grieflogger");
-        boolean glDbAvailable = IngestionService.getInstance().getAdapter().isSupportedSchemaAvailable();
-        String glStatus = !griefLoggerLoaded ? "DISABLED (not installed)"
-                : glDbAvailable ? "ENABLED (database reachable)"
-                : "DISABLED (mod present but database not found)";
+        var sourceAdapter = IngestionService.getInstance().getAdapter();
+        String glStatus = !sourceAdapter.isIntegrationEnabled()
+                ? "DISABLED (native-only; enable the GriefLogger integration in ItemGraph config to opt in)"
+                : sourceAdapter.isSupportedSchemaAvailable() ? "ENABLED (read-only source available)"
+                : "ENABLED (read-only source unavailable)";
 
         DatabaseManager db = DatabaseManager.getInstance();
         boolean dbConnected = db.isInitialized();
@@ -1247,6 +1274,7 @@ public final class ItemGraphCommands {
                 rs.next();
                 totalAuditEvents = rs.getLong(1);
             }
+            OperationalMetrics.Snapshot metrics = OperationalMetrics.getInstance().snapshot();
             long activeEdges = 0;
             long supersededEdges = 0;
             try (var stmt = conn.createStatement();
@@ -1303,6 +1331,27 @@ public final class ItemGraphCommands {
                             + " capabilityQueueRejections=" + capabilityQueueRejections
                             + " transformations=" + internalObs.getTotalTransformations()
                             + " auditEvents=" + internalObs.getTotalAuditEvents(),
+                    "[ItemGraph] performance: enqueueCount=" + metrics.enqueue().count()
+                            + " enqueueP95=" + latencyP95(metrics.enqueue())
+                            + " enqueueFailed=" + metrics.enqueue().failed()
+                            + " persistBatches=" + metrics.persistenceCommit().count()
+                            + " persistFailedBatches=" + metrics.persistenceFailures()
+                            + " persistedItems=" + metrics.persistedItems()
+                            + " largestBatch=" + metrics.largestBatchSize()
+                            + " commitP95=" + latencyP95(metrics.persistenceCommit())
+                            + " commitMaxMs=" + metrics.persistenceCommit().maxMillis()
+                            + " queryCount=" + metrics.query().count()
+                            + " queryP95=" + latencyP95(metrics.query())
+                            + " queryFailed=" + metrics.query().failed()
+                            + " correlationCount=" + metrics.correlation().count()
+                            + " correlationP95=" + latencyP95(metrics.correlation())
+                            + " correlationFailed=" + metrics.correlation().failed()
+                            + " queuePeak=" + metrics.peakQueueDepth()
+                            + " queueRejectedItems=" + metrics.queueRejectedItems()
+                            + " decodeFailureCacheInsertions=" + metrics.decodeFailureCacheInsertions()
+                            + " decodeCacheHits=" + metrics.decodeCacheHits()
+                            + " heapUsedBytes=" + metrics.heapUsedBytes()
+                            + " heapMaxBytes=" + metrics.heapMaxBytes(),
                     "[ItemGraph] entity tracking: active=" + entityTracker.getActiveEntityCount()
                             + " drops=" + entityTracker.getDropCount()
                             + " pickups=" + entityTracker.getPickupCount()
@@ -1311,9 +1360,20 @@ public final class ItemGraphCommands {
         });
     }
 
+    private static String latencyP95(OperationalMetrics.LatencySnapshot snapshot) {
+        return snapshot.count() == 0 ? "n/a"
+                : snapshot.p95UpperBoundNanos() == Long.MAX_VALUE
+                ? ">10000ms" : "<=" + snapshot.p95UpperBoundMillis() + "ms";
+    }
+
     private static int ingestNow(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
-        if (!IngestionService.getInstance().requestIngestionAsync()) {
+        IngestionService ingestion = IngestionService.getInstance();
+        if (!ingestion.getAdapter().isIntegrationEnabled()) {
+            source.sendFailure(Component.literal("[ItemGraph] GriefLogger source integration is disabled; enable it in ItemGraph config to use this migration command."));
+            return 0;
+        }
+        if (!ingestion.requestIngestionAsync()) {
             source.sendFailure(Component.literal("[ItemGraph] Manual ingestion was not queued: the worker is stopped or a manual cycle is already queued."));
             return 0;
         }
@@ -1324,7 +1384,12 @@ public final class ItemGraphCommands {
 
     private static int ingestHistory(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
-        if (!IngestionService.getInstance().requestHistoricalImportAsync()) {
+        IngestionService ingestion = IngestionService.getInstance();
+        if (!ingestion.getAdapter().isIntegrationEnabled()) {
+            source.sendFailure(Component.literal("[ItemGraph] GriefLogger source integration is disabled; enable it in ItemGraph config to use this migration command."));
+            return 0;
+        }
+        if (!ingestion.requestHistoricalImportAsync()) {
             source.sendFailure(Component.literal("[ItemGraph] Historical GriefLogger import was not queued: the worker is stopped or an import is already queued."));
             return 0;
         }

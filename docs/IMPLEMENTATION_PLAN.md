@@ -46,16 +46,17 @@ No complex inference yet.
 
 Implement:
 
-- read-only GriefLogger adapter
-- incremental checkpointing
-- source deduplication
-- canonical observation model
-- minimal supplemental hooks only for verified gaps
+- native ItemGraph event capture as the primary evidence source
+- ItemGraph-owned durable raw evidence and incremental persistence
+- canonical observation model with explicit observed, inferred, ambiguous, and unresolved classes
+- an optional read-only GriefLogger importer for historical migration evidence, isolated from native capture
+- narrowly scoped compatibility adapters only where the exact 1.21.1 release contract requires them
 
 Acceptance:
 
-- selected source events appear in ItemGraph's own observation store
-- GriefLogger remains unchanged
+- supported native events persist to ItemGraph's own store and remain queryable with GriefLogger absent
+- native capture and storage do not open, poll, or modify the GriefLogger database
+- when explicitly enabled, the importer reads historical source evidence without modifying GriefLogger
 
 ## Phase 3 — Item canonicalization
 

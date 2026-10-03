@@ -1,6 +1,7 @@
 package com.itemgraph.config;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
+import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.db.DatabaseSettings;
 import net.neoforged.neoforge.common.ModConfigSpec;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,7 @@ class ItemGraphConfigTest {
         assertEquals(5_000, ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS.getDefault());
         assertEquals(Boolean.TRUE, ItemGraphConfig.USE_INDEXES.getDefault());
         assertEquals("disable", ItemGraphConfig.DATABASE_SSL_MODE.getDefault());
+        assertEquals(Boolean.FALSE, ItemGraphConfig.GRIEFLOGGER_INTEGRATION_ENABLED.getDefault());
         assertEquals("database.db", ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getDefault());
         assertEquals(300, ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getDefault());
         assertEquals(10, ItemGraphConfig.MAX_PAGE_SIZE.getDefault());
@@ -39,6 +41,8 @@ class ItemGraphConfigTest {
         assertEquals(List.of("general", "database_backend"), ItemGraphConfig.DATABASE_BACKEND.getPath());
         assertEquals(List.of("general", "database_connection_timeout_ms"), ItemGraphConfig.DATABASE_CONNECTION_TIMEOUT_MS.getPath());
         assertEquals(List.of("storage", "use_indexes"), ItemGraphConfig.USE_INDEXES.getPath());
+        assertEquals(List.of("general", "grieflogger_integration_enabled"),
+                ItemGraphConfig.GRIEFLOGGER_INTEGRATION_ENABLED.getPath());
         assertEquals(List.of("general", "grieflogger_database_path"), ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getPath());
         assertEquals(List.of("correlation", "ground_bridge_max_seconds"), ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getPath());
         assertEquals(List.of("query", "max_page_size"), ItemGraphConfig.MAX_PAGE_SIZE.getPath());
@@ -119,6 +123,17 @@ class ItemGraphConfigTest {
     }
 
     @Test
+    void blankLegacyPathIsIgnoredInNativeOnlyModeButRejectedWhenOptedIn() {
+        assertEquals(DatabaseManager.resolvePath("database.db"),
+                ItemGraphConfig.resolveGriefLoggerDatabasePath("  ", false));
+        assertEquals(DatabaseManager.resolvePath("database.db"),
+                ItemGraphConfig.resolveGriefLoggerDatabasePath("\u0000-invalid-path", false));
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ItemGraphConfig.resolveGriefLoggerDatabasePath("  ", true));
+        assertEquals("general.grieflogger_database_path must not be blank", error.getMessage());
+    }
+
+    @Test
     void networkDatabaseValidationNamesTheInvalidConfigKeyWithoutExposingCredentials() {
         assertNetworkDatabaseError("general.database_host must not be blank",
                 "", 3306, "itemgraph", "itemgraph", "secret", "disable");
@@ -166,7 +181,8 @@ class ItemGraphConfigTest {
                 ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS, ItemGraphConfig.MAX_PAGE_SIZE,
                 ItemGraphConfig.DATABASE_HEARTBEAT_INTERVAL_MS);
         assertConfigType(Boolean.class, ItemGraphConfig.USE_INDEXES,
-                ItemGraphConfig.CAPTURE_ENABLED, ItemGraphConfig.SERVER_SIDE_ONLY);
+                ItemGraphConfig.CAPTURE_ENABLED, ItemGraphConfig.SERVER_SIDE_ONLY,
+                ItemGraphConfig.GRIEFLOGGER_INTEGRATION_ENABLED);
     }
 
     private static void assertConfigType(Class<?> expected, ModConfigSpec.ConfigValue<?>... configValues) {
@@ -193,6 +209,7 @@ class ItemGraphConfigTest {
         assertTrue(ItemGraphConfig.SPEC.isCorrect(config), "Config populated by correct() must be correct");
         assertEquals("itemgraph/itemgraph.db", config.get(List.of("general", "database_path")));
         assertEquals("database.db", config.get(List.of("general", "grieflogger_database_path")));
+        assertEquals(Boolean.FALSE, config.get(List.of("general", "grieflogger_integration_enabled")));
         assertEquals(300, config.getInt(List.of("correlation", "ground_bridge_max_seconds")));
         assertEquals(10, config.getInt(List.of("query", "max_page_size")));
         assertEquals(Boolean.TRUE, config.get(List.of("operations", "server_side_only")));

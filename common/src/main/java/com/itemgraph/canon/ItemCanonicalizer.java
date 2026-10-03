@@ -1,6 +1,7 @@
 package com.itemgraph.canon;
 
 import io.netty.buffer.Unpooled;
+import com.itemgraph.metrics.OperationalMetrics;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
@@ -140,6 +141,7 @@ public class ItemCanonicalizer {
             String rawDataHash = sha256Hex(rawData);
             OpaqueDecodeKey decodeKey = new OpaqueDecodeKey(regAccess, rawDataHash);
             if (hasOpaqueDecodeFailure(decodeKey)) {
+                OperationalMetrics.getInstance().recordDecodeCacheHit();
                 return extractAndBuild(itemId, patch, null, rawDataHash);
             }
 
@@ -148,6 +150,7 @@ public class ItemCanonicalizer {
                 // Recheck after acquiring the stripe so failed payloads are truly
                 // single-flight rather than merely single-log.
                 if (hasOpaqueDecodeFailure(decodeKey)) {
+                    OperationalMetrics.getInstance().recordDecodeCacheHit();
                     return extractAndBuild(itemId, patch, null, rawDataHash);
                 }
                 RegistryFriendlyByteBuf buf = null;
@@ -161,7 +164,8 @@ public class ItemCanonicalizer {
                 } catch (Exception e) {
                     opaqueDataHash = rawDataHash;
                     if (rememberOpaqueDecodeFailure(decodeKey)) {
-                        LOGGER.debug("Could not decode GriefLogger DataComponentPatch for item '{}' ({} bytes); "
+                        OperationalMetrics.getInstance().recordDecodeFailureCacheInsertion();
+                        LOGGER.debug("Could not decode serialized DataComponentPatch for item '{}' ({} bytes); "
                                         + "raw data SHA-256={} and component metadata remain unresolved",
                                 itemId, rawData.length, opaqueDataHash, e);
                     }

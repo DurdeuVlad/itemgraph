@@ -1,5 +1,7 @@
 package com.itemgraph.command;
 
+import com.itemgraph.query.AuditEventQueryService;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -93,7 +95,7 @@ final class CommandHelp {
                 "[ItemGraph] Example: /ig page 2"));
         List<String> lookup = List.of(
                 "[ItemGraph] Syntax: /ig lookup <eventType> [limit] [sinceMinutes]",
-                "[ItemGraph] eventType: all, PLAYER_JOIN, PLAYER_QUIT, CHAT_MESSAGE, COMMAND_ATTEMPT, COMMAND_EXECUTED, PLACE_BLOCK, BREAK_BLOCK, INTERACT_BLOCK, INTERACT_BLOCK_ATTEMPT, INTERACT_ENTITY, INTERACT_ENTITY_COMPLETED, INTERACT_ENTITY_DENIED, INTERACT_ENTITY_UNRESOLVED, KILL_ENTITY, THROW_ITEM, SHOOT_ITEM, or PROJECTILE_SPAWN_ACCEPTED.",
+                "[ItemGraph] eventType: " + String.join(", ", AuditEventQueryService.EVENT_TYPES) + ".",
                 "[ItemGraph] Results are native OBSERVED evidence from ig_audit_events; limit defaults to 20 and is capped at 100.",
                 "[ItemGraph] /ig lookup near clamps radius to 1..1024 blocks and requires an exact dimension id.",
                 "[ItemGraph] Pages are 1-based; offsets are capped at 10,000 rows.",

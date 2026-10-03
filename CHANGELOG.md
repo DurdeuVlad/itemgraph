@@ -6,6 +6,13 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Issue #24 right-click inspector:** NeoForge and Fabric now ignore off-hand right-clicks while inspection mode is active and resolve ordinary block clicks to the clicked-face neighbor. ItemGraph keeps its documented clicked-position behavior for functional blocks, and clicked-position support for modded `Container` block entities is an extension; GriefLogger 1.2.10's implementation uses this fallback for functional blocks other than doors and containers. Inspection still consumes the interaction only when ItemGraph accepts the asynchronous history request. Mod version remains 0.3.2; no distributable jar is built.
+- **Issue #32 shutdown durability:** shutdown waits are bounded at 5 seconds graceful plus 5 seconds after interruption for each database worker, 5 seconds for an ItemGraph-owned recovery-file writer, and 1 second for JDBC connection close. Startup replay and shutdown recovery-file I/O run on daemon workers, not the loader lifecycle callback. New events remain bounded in the normal queues during replay, and recovered rows are placed before them. A completed snapshot replays idempotently by `ingest_event_uuid`; corrupt or unsupported primary recovery data is preserved, intake closes, and already-accepted records are saved to an adjacent `.overflow` recovery file without replacing the primary. Both files replay after the primary file is repaired. If the filesystem does not finish a snapshot within its deadline, ItemGraph logs critical evidence risk and counts the outstanding records; a late daemon write may finish only if the process remains alive and the filesystem returns.
+- **Issue #32 performance evidence:** correlation failures returned as result values now increment the failure counter. The MySQL and MariaDB CI probes now execute 20 registered `/ig lookup` commands alongside 20 raw-JDBC readers and 512 submitted events on both loaders, recording callback completion and p95/max latency. CI also enforces a 1,000 ms drain regression budget for the healthy NeoForge SQLite 10,000-event saturation fixture, based on five repeated local measurements.
+- **Issue #32 idle baseline:** CI adds one-second live tick-hook no-input samples for both loaders against SQLite and worker-only samples against MySQL and MariaDB. The validator requires zero queue, persistence, lookup, correlation, rejection, and heartbeat work; reports compare durable observation, audit, and transformation row counts and capture heap at the sample boundary. Network-backend samples do not represent live server ticks or production budgets.
+
 ### Added
 
 - **Issue #31 pickup coordinate rationale:** Documented the loader-specific
@@ -43,6 +50,78 @@ The project follows a simple pre-1.0 development changelog model.
   duplicate-free case IDs, exact owner issues and decisions, and declared
   Java-method or documentation anchors. Mod
   version remains 0.3.2; no jar is built.
+- **Issue #31 release-contract coverage inventory:** CI now emits a redacted
+  sidecar beside each native-only NeoForge and Fabric replay. It lists every
+  compatibility-registry action, exact-release writer disposition, ItemGraph
+  implementation classification, and the number of matching events in that
+  replay. `coverage_status` records whether an action was observed in this
+  replay; `release_writer_status` independently records whether GriefLogger's
+  exact release has a writer. This makes remaining coverage gaps explicit
+  without claiming full runtime parity. Tests and CI do not package
+  distributable mod jars; version remains 0.3.2.
+- **Issue #127 native-only default:** NeoForge and Fabric no longer inspect a
+  `database.db` file for GriefLogger data during normal operation. Read-only
+  source sync and historical import require the explicit
+  `grieflogger_integration_enabled=true` setting. Native capture, storage,
+  correlation, and queries remain independent, and scheduled native-only ticks
+  do not report the disabled source sync as an error. Mod version remains 0.3.2;
+  no distributable jar is built.
+- **Issue #32 operational metrics and queue probes:** `/ig status` reports
+  redacted enqueue, persistence, query, correlation, queue-pressure, component
+  decode-cache, and heap aggregates. CI emits validated 14-day reports for both
+  loaders on SQLite and on disposable MySQL/MariaDB, plus a NeoForge queue
+  saturation/shutdown durability report. Network probes run 20 read-only ledger
+  count queries across four readers against 512 synthetic events; the shutdown
+  probe persists all 10,000 accepted events in bounded worker batches and counts
+  one rejected over-capacity event explicitly. Reports contain aggregate values
+  without event or player identifiers. The real adapter workloads and
+  staging-derived production budgets remain open under #32. Mod version remains
+  0.3.2; no distributable jar is built.
+- **Issue #32 report provenance:** performance report fixtures record
+  `grieflogger_runtime_state` as `absent`, `present`, or `unavailable` instead
+  of treating an uninitialized NeoForge JUnit mod list as proof of absence.
+  Loader GameTests assert GriefLogger is absent; CI rejects `present` reports
+  and limits `unavailable` to NeoForge JUnit-only probes. The report schema is
+  version 2.
+- **Issue #32 malformed-component workload:** the SQLite correlation probes feed
+  one malformed serialized component payload to the canonicalizer 500 times and
+  record the first-decode and total elapsed time. CI requires one negative-cache
+  insertion, 499 cache hits, and the same opaque unresolved fingerprint for every
+  repetition. The decoder diagnostic now names the serialized component payload,
+  independent of the optional historical importer.
+- **Issue #33 administrative item evidence:** both loaders capture `/give`,
+  `/clear`, `/item` slot mutations, creative inventory slot changes, accepted
+  `/give` overflow, and negative-slot creative drops at vanilla mutation
+  boundaries. Creative block placement and destruction store authoritative
+  `CREATIVE_BLOCK_RESULT` events and explicitly report zero player-inventory
+  quantity delta. Paired GameTests cover creative placement and destruction plus
+  linked invalid-item failure outcomes. Attempts, outcomes, and observed deltas
+  share mutation IDs; `/item modify` persists explicit canonical transformations,
+  while creative packet and `/item replace` stack changes persist separate removal
+  and creation deltas without inferring a causal transformation. Bounded or failed
+  `/give` recipient snapshots retain an unresolved outcome and cannot fall through
+  to player-drop attribution; accepted overflow still records exact ground-output
+  evidence by target UUID, while rejected overflow records item, quantity,
+  fingerprint, and entity identity as unresolved evidence, including canceled
+  tosses. Unrelated players' drops remain independently
+  capturable during the command. `/item ... from block/entity` evidence
+  retains the copied-from slot and stack without treating a copy as source removal.
+  Nested `/execute as` outcomes keep the original issuer as actor and store a differing
+  effective entity as execution-context evidence. The implementation leaves clone
+  versus pick-block undifferentiated, records empty slots as unresolved before/after
+  evidence, keeps staff activity private, suppresses raw item-command and `/execute`
+  arguments, and contains capture exceptions without changing vanilla results.
+  Version remains 0.3.2; no distributable jar is built.
+
+- **Issue #35 shared event taxonomy:** introduced the versioned `EventTaxonomy`
+  for native audit, item observation, and transformation IDs. Audit command
+  types and unified lookup aliases now use the shared registry. Definitions
+  specify evidence class, capture reliability, endpoint and quantity semantics,
+  actor status, privacy class, loader support, evidence-ID contract, aliases,
+  and owning issue. #55–#57 event families and stable unresolved reason codes
+  are listed as planned until loader adapters and fixtures prove support. This
+  is a taxonomy version only; the ItemGraph mod remains 0.3.2 and no distributable
+  JAR is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus ten allowlisted audit
   events, including `PLACE_BLOCK`, `INTERACT_BLOCK_ATTEMPT`, and `KILL_ENTITY`,

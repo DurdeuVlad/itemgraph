@@ -9,6 +9,18 @@ lookup, pagination, and SQLite/MySQL storage.
 
 ## Branding contract
 
+- ItemGraph is the standalone product and the intended complete replacement for
+  GriefLogger. Normal operation requires neither the GriefLogger mod nor its
+  database; native ItemGraph capture and storage are authoritative.
+- The optional GriefLogger database importer is a read-only migration path for
+  historical evidence. It is not a runtime dependency and does not execute or
+  reuse GriefLogger code.
+- Compatible jars are temporary coexistence builds. Retire them only when the
+  native parity and cutover gates below are satisfied; after cutover, the
+  standalone loader jars are the only supported artifacts.
+- GriefLogger is a behavior reference only. Implement every feature with
+  ItemGraph-owned code, schemas, and event types; do not copy or patch
+  GriefLogger implementation code.
 - Supported commands are `/ig` and `/itemgraph`.
 - `/gl` and `/grieflogger` are not ItemGraph commands or aliases.
 - A GriefLogger database is a read-only source. ItemGraph never repairs,
@@ -32,6 +44,12 @@ meaning, loader, or backend contract changes. Documentation-only clarifications
 are patch changes; additive mappings with existing behavior are minor changes;
 renamed, removed, or incompatible mappings are major changes. The registry,
 this document, and the owning issue change together.
+
+This GriefLogger compatibility registry is separate from ItemGraph's
+[event taxonomy](EVENT_TAXONOMY.md), which defines ItemGraph-owned audit,
+observation, and transformation IDs, loader support, and privacy/evidence
+semantics. ItemGraph-only extensions do not become GriefLogger actions by being
+listed in that taxonomy.
 
 ## Published source surface
 
@@ -82,10 +100,11 @@ owns this fixture and any future release refresh.
 
 The fixture records two explicit unresolved differences: the target runtime
 metadata is Minecraft 1.21.1/Java 21 while the pinned source metadata is
-Minecraft 26.2/Java 25 (owned by #54), and observable native-only behavior still
-requires differential replay against that source profile (owned by
-[#31](https://github.com/DurdeuVlad/itemgraph/issues/31)). Neither difference
-is hidden behind a generic “compatible” label.
+Minecraft 26.2/Java 25 (owned by #54), and selected ItemGraph-only GameTests do
+not yet cover every release behavior (owned by
+[#31](https://github.com/DurdeuVlad/itemgraph/issues/31)). ItemGraph's tests
+run without GriefLogger; they do not claim live side-by-side equivalence.
+Neither difference is hidden behind a generic “compatible” label.
 
 ### Native action ID and release-writer matrix (#27)
 
@@ -99,8 +118,9 @@ unique, so the enum class is part of every source ID.
 
 This is static bytecode evidence that each listed class accesses an action
 constant. It does not prove that the path is reachable or that a row is
-persisted at runtime; runtime behavior remains subject to the loader replay
-and differential acceptance in #31.
+persisted at runtime; ItemGraph's isolated loader tests must exercise the
+corresponding feature before it is marked covered in #31. No GriefLogger
+runtime is required or implied by that local conformance test.
 
 | Source enum | 26.2 ID | Action | Exact 1.2.10-1.21.1 writer result | ItemGraph mapping |
 | --- | ---: | --- | --- | --- |
@@ -237,15 +257,23 @@ the 15 examples now checks both Brigadier command parsing and the normalized
 radius, and the fixed-clock time window. The command-tree parse also asserts
 that the `lookupFilters` argument retains the published expression through
 both roots. Both loaders cover aliases, filter
-bounds, suggestions, permission checks, inspect forms, invalid pages, and
-asynchronous no-result handling. Lookup pages keep
-per-player state, expire after 30 minutes, cap offset at 10,000 rows, and emit
-Previous/Next commands tied to the same session.
+bounds, suggestions, permission checks, inspect forms, and invalid pages.
+`QueryFormatterTest.emptyUnifiedLookupExplainsThatNoEvidenceMatchedTheFilters`
+asserts the empty unified-evidence message, and
+`FabricItemGraphPageDispatchTest.filteredLookupWithNoEvidenceReturnsItsDocumentedEmptyMessageOnFabric`
+executes a real filtered lookup against an empty ItemGraph database and asserts
+its server-thread output. `QueryDispatcherNoResultTest` separately asserts
+generic asynchronous failure delivery. `FabricItemGraphPageDispatchTest` verifies that generated
+Previous/Next controls carry the lookup session UUID, an exact 20-row dataset
+with limit 10 does not emit an empty page 3, and a capped offset cannot advance;
+existing dispatch tests separately verify that another player cannot use a
+copied token. Lookup pages keep per-player state, expire after 30 minutes, and
+cap offsets at 10,000 rows.
 Fabric and NeoForge dispatcher tests execute both inspector roots and verify
 the toggle, explicit `on`/`off`, `status`, and permission denial. Both assert
 the same seven exact chat receipts for the published toggle plus ItemGraph's
-explicit forms. These checks do not
-replace the required vanilla-client command replay. Both loader command suites
+explicit forms. The maintainer requested skipping the visible-client replay;
+client socket transport and rendered command output remain unverified. Both loader command suites
 also encode and decode the full tree through Minecraft 1.21.1's
 `ClientboundCommandsPacket` codec, then verify `/itemgraph` and `/ig` survive
 and `/gl` and `/grieflogger` remain absent. This exercises vanilla packet
@@ -258,7 +286,8 @@ timestamp fields, and unchanged JDBC value and Java type snapshots for every
 `ig_observations` cell. Their shared fixture reads ItemGraph's database only. These embedded
 mock-player tests establish handler-to-ledger behavior; they do not establish
 client socket transport, rendered command output, or GriefLogger differential
-parity. The required connected vanilla-client replay remains open under #24.
+parity. The connected vanilla-client replay is intentionally skipped under the
+maintainer's instruction and is not claimed as completed evidence.
 `pageSessionTokensAreIsolatedByPlayerAndExplicitlyClearable` and
 `lookupPageSessionCannotBeResolvedByAnotherPlayerAndCanBeCleared` verify a
 copied token cannot expose one player's page to another level-2 player and that
@@ -277,6 +306,21 @@ The Fabric callback registration and NeoForge event-bus registration remain
 source-inspected; these tests do not simulate socket disconnect transport. The
 output continues to label evidence source/type and retain evidence IDs; ItemGraph-only
 output remains an explicit extension.
+
+The checksum-verified GriefLogger 1.2.10-1.21.1 NeoForge and Fabric release
+artifacts were statically inspected for right-click target selection. Both
+ignore off-hand inspection clicks; doors and containers inspect their clicked
+structure, while other right-click targets fall back to the block on the
+clicked face. The published inspect documentation describes clicked-block
+history, so ItemGraph deliberately keeps clicked-position behavior for its
+built-in functional blocks; this is a documented-contract extension to the
+release implementation. ItemGraph also keeps clicked-position support for
+modded `Container` block entities. Unlike GriefLogger,
+ItemGraph consumes a click only after its bounded asynchronous history request
+is accepted, so queue rejection leaves the normal game interaction available.
+`InspectionListenerTest` and `FabricNativeAuditEventListenerTest` cover these
+branches locally. The maintainer skipped visible-client clicks, so client-side
+rendering and real packet transport remain unverified.
 
 Fabric `FabricItemGraphPageDispatchTest` also executes `/ig page` and
 `/itemgraph page` without an active session and checks the exact failure text,
@@ -383,27 +427,48 @@ the range 1–100. Raw evidence is retained indefinitely and is never automatica
 purged. `ingestion.queue_frequency_ticks` defaults to 20, accepts the source
 range 1–100, and flushes on server end tick through a background worker; bounded
 SQL batch passes continue until the backlog drains. The isolated local NeoForge
-21.1.248 GameTest on Minecraft 1.21.1 persisted 8,000 queued audit events with
-zero drops, zero backlog, and 8,000 matching durable rows; its queue peak was
-6,815 of 10,000 entries, and its slowest 400-event producer batch took 7.694 ms
-against a 50 ms server-thread budget. The run logged `flushEveryTicks=20`, took
-47.235 ms total to enqueue all 8,000 events, and completed all three NeoForge
-GameTests. The isolated Fabric run used a 20-tick cadence and persisted all 32
-accepted queue events after the end-tick callback with zero drops; all three
-registered Fabric GameTests passed in hosted CI. The local Fabric GameTest on
-this worktree previously failed to persist the queue probe within its logical
-tick window; that discrepancy is recorded in `docs/TEST_PLAN.md` and remains
-under investigation.
+21.1.248 GameTest on Minecraft 1.21.1 persisted 8,000 uniquely tagged queued
+audit events with zero drops, zero backlog, and exactly 8,000 matching durable
+rows. The latest local run recorded a queue peak of 7,900 across the three
+bounded queues and a slowest 400-event producer batch of 9.299 ms, below the
+existing 50 ms per-batch server-thread budget. The isolated Fabric GameTest used
+a 20-tick cadence and persisted all 32 accepted queue events after the end-tick
+callback with zero drops; all three registered Fabric GameTests passed locally.
+The operator-facing page-size, server-only, queue, retention, and reload
+controls are tracked under the completed [#30](https://github.com/DurdeuVlad/itemgraph/issues/30)
+acceptance; raw evidence has no destructive purge by default.
+CI uploads redacted reports for both loader SQLite probes, NeoForge and Fabric
+512-event probes against disposable MySQL and MariaDB services, and a NeoForge
+shutdown saturation probe. Each network probe runs 20 read-only ledger count
+queries across four worker threads and 20 registered `/ig lookup radius.20`
+commands while synthetic hopper, automation, and modded-inventory audit events
+are submitted. The command probe requires returned evidence and successful
+server-thread callbacks, and reports aggregate dispatch-to-callback latency. It
+uses mocked server/player objects; it does not measure live-client delivery,
+real server tick impact, or third-party adapter behavior. The shutdown probe
+rejects one event beyond the 10,000-item audit queue capacity and verifies every
+accepted event is durable after worker-owned shutdown draining. Idle baselines,
+adapter-specific load, and staging-derived latency/memory budgets remain open
+under [#32](https://github.com/DurdeuVlad/itemgraph/issues/32).
+Five isolated local NeoForge runs measured the 10,000-event SQLite shutdown
+drain at 626–666 ms; CI now applies a 1,000 ms regression budget to that exact
+healthy-database fixture. This is not a hard deadline for stalled JDBC I/O and
+does not establish a production budget.
+The metrics
+and current probe limits are documented in [configuration](CONFIGURATION.md)
+and the [test plan](TEST_PLAN.md); they do not establish staging budgets.
 `helloFrequency` defaults to 600 ticks
 (30,000 ms at 20 TPS); disposable MariaDB and MySQL CI services verify successful
 background JDBC heartbeats and reconnection after a closed connection. ItemGraph's
 `server_side_only=true` is an explicit invariant; false is unsupported and is
 classified as a strict ItemGraph extension to preserve vanilla-client support.
 
-## Native-only cutover and retention plan
+## Separate M10 operator cutover and retention plan
 
-The cutover decision is binary: ItemGraph may retire the compatible artifacts
-only after every M8 parity gate is closed and the evidence below is recorded.
+This is a separate deployment procedure, not an M8 feature-parity test.
+ItemGraph feature conformance is researched and tested locally with ItemGraph
+alone. Any later operator decision to retire the compatible artifacts requires
+the separate approval and deployment evidence below.
 Until then, the standard and compatible loader jars remain distinct so an
 operator can choose a dependency-safe migration path. After cutover, the
 standard ItemGraph jar is the only supported runtime artifact; GriefLogger is
@@ -416,12 +481,14 @@ checksummed historical database when an operator explicitly configures it.
 2. Run ItemGraph native-only with the GriefLogger JAR absent for a complete
    24-hour staging window. Verify the acceptance gates above and record the
    ItemGraph schema version and row-count report.
-3. Keep the immutable GriefLogger copy for 30 days after native-only cutover.
-   Store its checksum beside the backup and keep the original database read-only.
-4. After the 30-day retention window, keep the checksummed GriefLogger copy
-   under the operator's archive policy and remove only the GriefLogger JAR/config
-   after an operator approves the checksum and acceptance report. Leave
-   `grieflogger_database_path` unset for native-only operation.
+3. Keep ItemGraph raw evidence indefinitely. Store the GriefLogger source-copy
+   checksum beside that immutable backup; its archive and retention are governed
+   by the operator's policy, with no ItemGraph purge.
+4. Remove only the GriefLogger JAR/config after an operator approves the
+   checksum and acceptance report. The optional migration bridge is disabled by
+   default; set `general.grieflogger_integration_enabled=true` (NeoForge) or
+   `grieflogger_integration_enabled=true` (Fabric) only when migration sync or
+   historical import is required. This setting does not disable native capture.
 5. Rollback is bounded: restore the GriefLogger JAR and its immutable database
    copy, leave ItemGraph's database untouched, and re-run the staging checks
    before any production decision. The recorded rollback evidence is the source
@@ -443,16 +510,17 @@ artifact. The normalizer labels the output `system=itemgraph` and
 GriefLogger side-by-side comparison. The tools read exported JSON only; they do
 not open or modify either system's database. The GameTest event timestamps are
 the persisted observation timestamps and are not seeded; the integer seed
-identifies the deterministic scenario setup, not a fixed clock. These native
-exports validate the data contract and redaction but cannot be compared as a
-timestamp-exact paired replay. A future #31 capture must establish a shared
-replay clock or a documented timestamp comparison rule while retaining the
-original timestamps. Every normalized report is pinned to the
-`compatibility_version`, `source_profile_sha256`, and exact-release
-`release_fixture_sha256` from the checked-in registry and fixture. Reports
-must name the same loader, deterministic `scenario_id`, and integer `seed`, with
-GriefLogger captured in `grieflogger_present` mode and ItemGraph captured in
-`native_only` mode.
+identifies the deterministic scenario setup, not a fixed clock. The native
+exports validate only covered events, output shape, redaction, and invariants.
+They are not timestamp-exact paired evidence. M8 local conformance uses the
+profile-pinned release behavior and ItemGraph-only tests; the optional
+two-report comparator does not require or start GriefLogger. Every normalized
+report is pinned to the `compatibility_version`, `source_profile_sha256`, and
+exact-release `release_fixture_sha256` from the checked-in registry and fixture. Reports
+must name the same loader, deterministic `scenario_id`, and integer `seed`.
+When external GriefLogger captures are supplied, the optional comparison mode
+requires `grieflogger_present` and `native_only` modes respectively; CI's
+standalone conformance path validates ItemGraph reports only.
 
 Each native ItemGraph report also contains a read-only whole-database audit
 summary from `AuditService.audit`: observation, active-edge, allocation, and
@@ -571,11 +639,30 @@ requires the fixed scenario ID, seed,
 16 event records with pinned per-action and subject counts, unique event keys, and contiguous
 sequence, tests malformed inputs, and pins each report to its loader and source
 profile. The raw report schema is v5 and normalized report schema is v6. It does
-not start GriefLogger or compare its live database rows. A paired GriefLogger capture,
-issue-linked exception policy, the 24-hour native-only staging window, and
-rollback rehearsal remain open #31 acceptance criteria. The whole-database
+not start GriefLogger or compare its live database rows. Remaining #31 work is
+exact-release feature-category coverage and issue-linked dispositions for every
+extension or gap. This report does not establish live GriefLogger runtime
+equivalence or coverage for untested features. Staging soak, rollback rehearsal,
+and compatible-artifact retirement are separate M10 operator/release gates. The
+whole-database
 quantity and integrity audit is included in each native report and enforced as
-a zero-violation gate; it does not replace paired legacy/native replay.
+a zero-violation gate; it does not replace feature-category coverage.
+
+CI also uploads `itemgraph-<loader>-coverage.json`, generated by
+`tools/itemgraph_feature_coverage.py` from the profile-pinned normalized report.
+This schema-v1 sidecar lists every registry action, its source enum/ID when it
+has one, exact-release writer disposition, ItemGraph compatibility status and
+extensions, compatible source table, and count in the selected replay. The
+independent `coverage_status` reports `observed-in-replay` or
+`not-observed-in-replay` from that count. The separate `release_writer_status`
+reports whether the exact 1.2.10-1.21.1 artifact has a writer or verifies
+`unsupported-no-writer`. An ItemGraph extension can therefore be observed in
+this replay even when GriefLogger has no corresponding writer.
+`not-observed-in-replay` means only that the current selected scenario did not
+exercise that action. It does not mean the ItemGraph implementation is absent,
+and it does not satisfy #31's outstanding coverage criterion. The report is pinned to the same
+compatibility profile and exact-release fixture hashes, and contains no event
+IDs, player identity, raw payload, world position, or database row ID.
 
 ## Verification notes
 
@@ -606,9 +693,10 @@ a zero-violation gate; it does not replace paired legacy/native replay.
   raw audit event whose action, subject and projectile identifier match the
   snowball or arrow, with no second quantity claim. Every prior quantity row
   remains byte-for-byte present, and exactly two new quantity rows are
-  attributed to the replay player. These embedded mock-player GameTests validate the server hooks and
-  durable read path; they do not replace connected-client or #31 differential
-  replay evidence.
+  attributed to the replay player. These embedded mock-player GameTests validate
+  the server hooks and durable read path; they do not replace connected-client
+  checks or #31's remaining exact-release feature-category coverage. No live
+  GriefLogger comparison is performed.
 - **2026-09-29, Fabric native-only smoke:** the dedicated loopback staging server
   started with no GriefLogger JAR, applied the ItemGraph schema 13 migrations,
   loaded the Fabric mixins, and reached `Done` on port 27992. The ingestion worker
@@ -687,7 +775,7 @@ a zero-violation gate; it does not replace paired legacy/native replay.
 1. Native capture tests prove one immutable row for each event category and no row
    for canceled command, chat, death, or block actions; persistence failures must
    retain the batch or count its loss without incrementing persisted counters.
-2. A staging server with the GriefLogger JAR absent records join, quit, chat,
+2. An isolated local server with only ItemGraph records join, quit, chat,
    command attempt, block, entity-kill, container, consume, break, shoot, and item
    events in ItemGraph storage. Fabric's interaction callback records the observed
    callback attempt. Command rows remain `COMMAND_ATTEMPT` because GriefLogger also
@@ -701,11 +789,9 @@ a zero-violation gate; it does not replace paired legacy/native replay.
    the delivered native lookup/filter contract is tracked in [#25](https://github.com/DurdeuVlad/itemgraph/issues/25). Generic rows retained by the historical ledger are not returned by this query until the normalized projection in [#28](https://github.com/DurdeuVlad/itemgraph/issues/28) is complete.
 4. The existing item-flow tests remain green and the GriefLogger database is not
    opened by the native-only path.
-5. M8 is not complete while [#43](https://github.com/DurdeuVlad/itemgraph/issues/43),
-   [#24](https://github.com/DurdeuVlad/itemgraph/issues/24), [#26](https://github.com/DurdeuVlad/itemgraph/issues/26),
-   [#27](https://github.com/DurdeuVlad/itemgraph/issues/27), [#28](https://github.com/DurdeuVlad/itemgraph/issues/28),
-   [#29](https://github.com/DurdeuVlad/itemgraph/issues/29), [#30](https://github.com/DurdeuVlad/itemgraph/issues/30),
-   or [#31](https://github.com/DurdeuVlad/itemgraph/issues/31) still has an unresolved acceptance criterion.
+5. M8 is not complete while [#24](https://github.com/DurdeuVlad/itemgraph/issues/24)
+   or [#31](https://github.com/DurdeuVlad/itemgraph/issues/31) still has an
+   unresolved acceptance criterion.
 
 References: [GriefLogger feature overview](https://daqem.com/projects/grieflogger),
 [item usage](https://daqem.com/projects/grieflogger/wiki/player-actions/item-usage),

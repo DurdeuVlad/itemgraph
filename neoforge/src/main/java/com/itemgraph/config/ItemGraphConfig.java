@@ -17,6 +17,7 @@ public class ItemGraphConfig {
     public static final ModConfigSpec.ConfigValue<String> DATABASE_SSL_MODE;
     public static final ModConfigSpec.ConfigValue<Integer> DATABASE_CONNECTION_TIMEOUT_MS;
     public static final ModConfigSpec.ConfigValue<Boolean> USE_INDEXES;
+    public static final ModConfigSpec.ConfigValue<Boolean> GRIEFLOGGER_INTEGRATION_ENABLED;
     public static final ModConfigSpec.ConfigValue<String> GRIEFLOGGER_DATABASE_PATH;
     public static final ModConfigSpec.ConfigValue<Integer> GROUND_BRIDGE_MAX_SECONDS;
     public static final ModConfigSpec.ConfigValue<Integer> MAX_PAGE_SIZE;
@@ -60,8 +61,11 @@ public class ItemGraphConfig {
                 BUILDER.comment("Connection and socket timeout for MySQL/MariaDB in milliseconds"),
                 "database_connection_timeout_ms", "general.database_connection_timeout_ms", 5_000, 250, 120_000);
 
+        GRIEFLOGGER_INTEGRATION_ENABLED = defineBoolean(
+                BUILDER.comment("Enable optional read-only GriefLogger row sync and explicit historical import; disabled by default"),
+                "grieflogger_integration_enabled", "general.grieflogger_integration_enabled", false);
         GRIEFLOGGER_DATABASE_PATH = defineString(
-                BUILDER.comment("Path to GriefLogger SQLite database relative to game directory, or absolute path"),
+                BUILDER.comment("Path to GriefLogger SQLite database; used only when grieflogger_integration_enabled=true"),
                 "grieflogger_database_path", "general.grieflogger_database_path", "database.db");
 
         BUILDER.pop();
@@ -196,7 +200,11 @@ public class ItemGraphConfig {
     }
 
     public static java.nio.file.Path griefLoggerDatabasePath() {
-        return resolveGriefLoggerDatabasePath(GRIEFLOGGER_DATABASE_PATH.get());
+        return resolveGriefLoggerDatabasePath(GRIEFLOGGER_DATABASE_PATH.get(), GRIEFLOGGER_INTEGRATION_ENABLED.get());
+    }
+
+    public static boolean griefLoggerIntegrationEnabled() {
+        return GRIEFLOGGER_INTEGRATION_ENABLED.get();
     }
 
     static java.nio.file.Path resolveDatabasePath(String path) {
@@ -205,6 +213,13 @@ public class ItemGraphConfig {
 
     static java.nio.file.Path resolveGriefLoggerDatabasePath(String path) {
         return resolveConfiguredPath(path, "general.grieflogger_database_path");
+    }
+
+    static java.nio.file.Path resolveGriefLoggerDatabasePath(String path, boolean integrationEnabled) {
+        if (!integrationEnabled) {
+            return DatabaseManager.resolvePath("database.db");
+        }
+        return resolveGriefLoggerDatabasePath(path);
     }
 
     private static java.nio.file.Path resolveConfiguredPath(String path, String configKey) {

@@ -2,6 +2,7 @@ package com.itemgraph.command;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
 import net.neoforged.bus.api.EventPriority;
@@ -37,6 +38,9 @@ public class InspectionListener {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (event.getHand() != InteractionHand.MAIN_HAND) {
+            return;
+        }
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
@@ -48,10 +52,9 @@ public class InspectionListener {
             inspections.clear(player.getUUID());
             return;
         }
-        if (!BlockInspectionTargets.isInspectableRightClickTarget(level, event.getPos())) {
-            return;
-        }
-        if (blockHistoryOpener.open(player, level, event.getPos()) == 0) {
+        BlockPos target = BlockInspectionTargets.resolveRightClickTarget(
+                level, event.getPos(), event.getHitVec().getDirection());
+        if (blockHistoryOpener.open(player, level, target) == 0) {
             return;
         }
         event.setCancellationResult(InteractionResult.SUCCESS);

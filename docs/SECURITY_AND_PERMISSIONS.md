@@ -120,6 +120,23 @@ Queries should have:
 credentials accidentally typed into chat, so they must remain restricted to the
 audit permission and must never be included in player-facing flow views.
 
+Issue #33 administrative item-command and creative-inventory records are also
+staff-private. `/give`, `/clear`, and `/item` attempt rows retain only the command
+root and outcome; they do not copy selector expressions or command arguments.
+Generic command history also suppresses `/execute` text because it can contain a
+nested item mutation and private selectors or item arguments.
+Confirmed inventory deltas include item fingerprints, quantities, slot identifiers,
+and affected entity identifiers where needed to explain the observed mutation.
+For nested `/execute as`, `actor_uuid` and `actor_name` identify the original
+command issuer; a differing effective entity is retained separately as
+`execution_context_actor_*`. `/item ... from block/entity` records the copied-from
+endpoint and exact stack in staff-private evidence without implying that the source
+slot lost quantity.
+Keep `ADMIN_ITEM_COMMAND_*`, `CREATIVE_SLOT_*`, `CREATIVE_BLOCK_*`,
+`ADMIN_ITEM_*`, and `CREATIVE_ITEM_*` restricted to the audit permission. Do not
+surface these rows in player-facing flow views. A pre-execution loader callback is
+only an attempt; only a post-mutation slot comparison can produce item-flow evidence.
+
 The `/ig gui` browser remains level-2 only. `FlowBrowserMenu` rechecks permission while
 open and on every click, and the menu never delegates an item-movement action to
 `ChestMenu`; it handles only page navigation, flow selection, detail display, and close.

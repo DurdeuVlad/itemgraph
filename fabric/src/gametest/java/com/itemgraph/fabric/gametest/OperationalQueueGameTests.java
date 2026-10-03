@@ -1,16 +1,22 @@
 package com.itemgraph.fabric.gametest;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.gametest.CorrelationPerformanceFixture;
+import com.itemgraph.gametest.IdlePerformanceFixture;
+import com.itemgraph.gametest.PerformanceReportFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -18,15 +24,42 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class OperationalQueueGameTests implements FabricGameTest {
     private static final Logger LOGGER = LoggerFactory.getLogger("ItemGraphGameTests");
     private static final int EVENT_COUNT = 32;
+    private static final AtomicInteger END_TICK_CALLBACKS = new AtomicInteger();
 
-    @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zz_itemgraph_queue_flush", timeoutTicks = 400)
+    static {
+        ServerTickEvents.END_SERVER_TICK.register(server -> END_TICK_CALLBACKS.incrementAndGet());
+    }
+
+    @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zzzzzz_itemgraph_idle_baseline",
+            timeoutTicks = 300_000)
+    public void idleSqliteWorkerProducesNoEvidenceWork(GameTestHelper helper) {
+        boolean griefLoggerInstalled = FabricLoader.getInstance().isModLoaded("grieflogger");
+        helper.assertFalse(griefLoggerInstalled, "The isolated idle probe must run without GriefLogger installed");
+        IdlePerformanceFixture.run(helper, "fabric", griefLoggerInstalled ? "present" : "absent");
+    }
+
+    @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zzzz_itemgraph_correlation_burst",
+            timeoutTicks = 300_000)
+    public void correlationThroughputUsesPersistedQuantityEvidence(GameTestHelper helper) {
+        boolean griefLoggerInstalled = FabricLoader.getInstance().isModLoaded("grieflogger");
+        helper.assertFalse(griefLoggerInstalled,
+                "The isolated correlation probe must run without GriefLogger installed");
+        CorrelationPerformanceFixture.run(helper, "fabric", griefLoggerInstalled ? "present" : "absent");
+    }
+
+    @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zz_itemgraph_queue_flush", timeoutTicks = 300_000)
     public void endServerTickFlushPersistsAcceptedAuditEvents(GameTestHelper helper) {
+        boolean griefLoggerInstalled = FabricLoader.getInstance().isModLoaded("grieflogger");
+        helper.assertFalse(griefLoggerInstalled,
+                "The isolated queue probe must run without GriefLogger installed");
         InternalObservationService service = InternalObservationService.getInstance();
-        AtomicInteger endTickCallbacks = new AtomicInteger();
-        ServerTickEvents.END_SERVER_TICK.register(server -> endTickCallbacks.incrementAndGet());
+        service.stop();
+        service.clear();
+        service.start();
         String detailPrefix = "issue30-fabric-queue:" + UUID.randomUUID() + ":";
         long persistedBefore = service.getTotalPersisted();
         long droppedBefore = service.getTotalDropped();
+        int endTickCallbacksBefore = END_TICK_CALLBACKS.get();
         long startedAt = System.nanoTime();
 
         for (int sequence = 0; sequence < EVENT_COUNT; sequence++) {
@@ -44,35 +77,82 @@ public final class OperationalQueueGameTests implements FabricGameTest {
 
         int flushEveryTicks = service.getQueueFrequencyTicks();
         LOGGER.info("Issue #30 Fabric queue probe: flushEveryTicks={} accepted={}", flushEveryTicks, EVENT_COUNT);
-        awaitDurableProbe(helper, service, detailPrefix, endTickCallbacks, persistedBefore, droppedBefore,
-                flushEveryTicks, flushEveryTicks + 5, System.nanoTime() + TimeUnit.SECONDS.toNanos(10));
+        awaitDurableProbe(helper, service, detailPrefix, endTickCallbacksBefore, persistedBefore, droppedBefore,
+                flushEveryTicks, flushEveryTicks + 5,
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(10), enqueueNanos);
     }
 
     private static void awaitDurableProbe(GameTestHelper helper, InternalObservationService service,
-                                          String detailPrefix, AtomicInteger endTickCallbacks,
-                                          long persistedBefore, long droppedBefore, int flushEveryTicks,
-                                          int checkAtTick, long deadlineNanos) {
+                                          String detailPrefix, int endTickCallbacksBefore, long persistedBefore,
+                                          long droppedBefore, int flushEveryTicks, int checkAtTick,
+                                          long deadlineNanos, long enqueueNanos) {
         helper.runAtTickTime(checkAtTick, () -> {
-            long durableRows = countProbeRows(detailPrefix);
-            boolean persisted = durableRows == EVENT_COUNT
-                    && service.getTotalPersisted() >= persistedBefore + EVENT_COUNT
-                    && service.getTotalDropped() == droppedBefore;
-            if (!persisted && checkAtTick < flushEveryTicks + 205 && System.nanoTime() < deadlineNanos) {
-                // GameTests can advance logical ticks faster than the async writer gets CPU time.
-                awaitDurableProbe(helper, service, detailPrefix, endTickCallbacks, persistedBefore, droppedBefore,
-                        flushEveryTicks, checkAtTick + 5, deadlineNanos);
+            long persistedDelta = service.getTotalPersisted() - persistedBefore;
+            long droppedDelta = service.getTotalDropped() - droppedBefore;
+            int callbacksSinceProbe = END_TICK_CALLBACKS.get() - endTickCallbacksBefore;
+            boolean persisted = persistedDelta >= EVENT_COUNT && droppedDelta == 0
+                    && service.getQueueSize() == 0 && callbacksSinceProbe >= flushEveryTicks;
+            if (persisted) {
+                CompletableFuture<Long> ledgerRead = CompletableFuture.supplyAsync(
+                        () -> countProbeRows(detailPrefix));
+                awaitLedgerRead(helper, service, detailPrefix, ledgerRead, flushEveryTicks,
+                        checkAtTick + 1, deadlineNanos, enqueueNanos, persistedDelta,
+                        droppedDelta, callbacksSinceProbe);
                 return;
             }
+            if (droppedDelta > 0 || System.nanoTime() >= deadlineNanos) {
+                helper.fail("Fabric audit queue did not durably flush within the 10-second worker window: "
+                        + "persistedDelta=" + persistedDelta + ", droppedDelta=" + droppedDelta
+                        + ", queueDepth=" + service.getQueueSize()
+                        + ", endTickCallbacks=" + callbacksSinceProbe
+                        + ", flushEveryTicks=" + flushEveryTicks + ", expectedRows=" + EVENT_COUNT);
+                return;
+            }
+            awaitDurableProbe(helper, service, detailPrefix, endTickCallbacksBefore, persistedBefore,
+                    droppedBefore, flushEveryTicks, checkAtTick + flushEveryTicks,
+                    deadlineNanos, enqueueNanos);
+        });
+    }
 
-            helper.assertTrue(endTickCallbacks.get() >= flushEveryTicks,
-                    "Fabric server-end-tick callback did not run through the configured flush cadence");
-            helper.assertValueEqual((long) EVENT_COUNT, durableRows,
-                    "Fabric server-end-tick callback did not flush every accepted audit event after "
-                            + endTickCallbacks.get() + " ticks");
-            helper.assertTrue(service.getTotalPersisted() >= persistedBefore + EVENT_COUNT,
-                    "persisted counter must include the durable Fabric probe rows");
-            helper.assertValueEqual(droppedBefore, service.getTotalDropped(),
-                    "queue flush must not lose an accepted Fabric probe event");
+    private static void awaitLedgerRead(GameTestHelper helper, InternalObservationService service,
+                                        String detailPrefix, CompletableFuture<Long> ledgerRead,
+                                        int flushEveryTicks, int checkAtTick, long deadlineNanos,
+                                        long enqueueNanos, long persistedDelta, long droppedDelta,
+                                        int callbacksSinceProbe) {
+        helper.runAtTickTime(checkAtTick, () -> {
+            if (!ledgerRead.isDone()) {
+                if (System.nanoTime() >= deadlineNanos) {
+                    helper.fail("Fabric queue ledger read exceeded the 10-second worker window");
+                    return;
+                }
+                awaitLedgerRead(helper, service, detailPrefix, ledgerRead, flushEveryTicks,
+                        checkAtTick + 1, deadlineNanos, enqueueNanos, persistedDelta,
+                        droppedDelta, callbacksSinceProbe);
+                return;
+            }
+            long durableRows;
+            try {
+                durableRows = ledgerRead.join();
+            } catch (RuntimeException failure) {
+                helper.fail("Fabric queue durability probe could not read its ledger off the server thread: "
+                        + failure.getMessage());
+                return;
+            }
+            if (durableRows != EVENT_COUNT) {
+                helper.fail("Fabric queue ledger contains " + durableRows + " probe rows; expected "
+                        + EVENT_COUNT + ", persistedCounterDelta=" + persistedDelta);
+                return;
+            }
+            PerformanceReportFixture.writeIfRequested("fabric", "queue_flush_durability", Map.of(
+                    "accepted_events", (long) EVENT_COUNT,
+                    "persisted_counter_delta", persistedDelta,
+                    "dropped_counter_delta", droppedDelta,
+                    "durable_rows", durableRows,
+                    "queue_remaining", (long) service.getQueueSize(),
+                    "end_tick_callbacks", (long) callbacksSinceProbe,
+                    "flush_every_ticks", (long) flushEveryTicks,
+                    "enqueue_total_ns", enqueueNanos),
+                    FabricLoader.getInstance().isModLoaded("grieflogger") ? "present" : "absent");
             helper.succeed();
         });
     }

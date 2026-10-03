@@ -2,9 +2,12 @@ package com.itemgraph.listener;
 
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.ingest.InternalObservationService;
+import com.google.gson.JsonParser;
 import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.StringReader;
 import com.mojang.brigadier.context.CommandContextBuilder;
+import com.mojang.brigadier.context.ParsedCommandNode;
+import com.mojang.brigadier.tree.CommandNode;
 import net.minecraft.SharedConstants;
 import net.neoforged.neoforge.event.CommandEvent;
 import net.neoforged.neoforge.event.ServerChatEvent;
@@ -40,7 +43,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doReturn;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
 
 class NativeAuditEventListenerTest {
 
@@ -99,6 +104,7 @@ class NativeAuditEventListenerTest {
         when(parse.getContext()).thenReturn(context);
         when(parse.getReader()).thenReturn(new StringReader("give Alex dirt"));
         when(context.getSource()).thenReturn(source);
+        when(source.hasPermission(2)).thenReturn(true);
         when(source.getEntity()).thenReturn(player);
         when(player.level()).thenReturn(level);
         when(level.dimension()).thenReturn(Level.OVERWORLD);
@@ -108,6 +114,7 @@ class NativeAuditEventListenerTest {
         when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
 
         InternalObservationService service = mock(InternalObservationService.class);
+        when(service.submitAuditEvent(any())).thenReturn(true);
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             new NativeAuditEventListener().onCommand(new CommandEvent(parse));
@@ -116,7 +123,103 @@ class NativeAuditEventListenerTest {
         ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
                 ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
         verify(service).submitAuditEvent(captured.capture());
-        assertEquals("COMMAND_ATTEMPT", captured.getValue().eventType());
+        assertEquals("ADMIN_ITEM_COMMAND_ATTEMPT", captured.getValue().eventType());
+        String raw = new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8);
+        var payload = JsonParser.parseString(raw).getAsJsonObject();
+        assertTrue(payload.get("staff_private").getAsBoolean());
+        assertTrue(payload.get("mutation_event_id").getAsString().matches(
+                "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"));
+        org.junit.jupiter.api.Assertions.assertFalse(raw.contains("Alex dirt"));
+    }
+
+    @Test
+    void itemCommandAttemptRecordsLevelTwoPermissionDenial() {
+        ParseResults<CommandSourceStack> parse = mock(ParseResults.class);
+        CommandContextBuilder<CommandSourceStack> context = mock(CommandContextBuilder.class);
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        when(parse.getContext()).thenReturn(context);
+        when(parse.getReader()).thenReturn(new StringReader("give @p minecraft:diamond 1"));
+        when(context.getSource()).thenReturn(source);
+        when(source.hasPermission(2)).thenReturn(false);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        when(service.submitAuditEvent(any())).thenReturn(true);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onCommand(new CommandEvent(parse));
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service, org.mockito.Mockito.times(2)).submitAuditEvent(captured.capture());
+        assertEquals("ADMIN_ITEM_COMMAND_ATTEMPT", captured.getAllValues().get(0).eventType());
+        assertTrue(captured.getAllValues().get(0).detail().contains("outcome=permission_denied"));
+        assertEquals("ADMIN_ITEM_COMMAND_FAILURE", captured.getAllValues().get(1).eventType());
+        assertTrue(captured.getAllValues().get(1).detail().contains("outcome=permission_denied"));
+    }
+
+    @Test
+    void executeItemCommandStoresTypedAttemptWithoutRawArguments() {
+        ParseResults<CommandSourceStack> parse = mock(ParseResults.class);
+        CommandContextBuilder<CommandSourceStack> context = mock(CommandContextBuilder.class);
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        when(parse.getContext()).thenReturn(context);
+        when(parse.getReader()).thenReturn(new StringReader(
+                "execute as @a run give @s minecraft:diamond 64"));
+        when(context.getSource()).thenReturn(source);
+        when(source.hasPermission(2)).thenReturn(true);
+        List<ParsedCommandNode<CommandSourceStack>> parsedNodes = List.of(
+                parsedNode("execute"), parsedNode("as"), parsedNode("entities"),
+                parsedNode("run"), parsedNode("give"), parsedNode("targets"), parsedNode("item"));
+        when(context.getNodes()).thenReturn(parsedNodes);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        when(service.submitAuditEvent(any())).thenReturn(true);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onCommand(new CommandEvent(parse));
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("ADMIN_ITEM_COMMAND_ATTEMPT", captured.getValue().eventType());
+        assertEquals("give", captured.getValue().subjectId());
+        String raw = new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(raw.contains("mutation_event_id"));
+        org.junit.jupiter.api.Assertions.assertFalse(raw.contains("execute as @a"));
+        org.junit.jupiter.api.Assertions.assertFalse(raw.contains("@s minecraft:diamond 64"));
+    }
+
+    @Test
+    void executeArgumentNamedRunDoesNotMasqueradeAsNestedItemCommand() {
+        ParseResults<CommandSourceStack> parse = mock(ParseResults.class);
+        CommandContextBuilder<CommandSourceStack> context = mock(CommandContextBuilder.class);
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        when(parse.getContext()).thenReturn(context);
+        when(parse.getReader()).thenReturn(new StringReader(
+                "execute if score run give matches 0 run say ordinary"));
+        when(context.getSource()).thenReturn(source);
+        List<ParsedCommandNode<CommandSourceStack>> parsedNodes = List.of(parsedNode("execute"), parsedNode("if"),
+                parsedNode("score"), parsedNode("objective"), parsedNode("matches"),
+                parsedNode("integer"), parsedNode("run"), parsedNode("say"));
+        when(context.getNodes()).thenReturn(parsedNodes);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onCommand(new CommandEvent(parse));
+        }
+
+        verifyNoInteractions(service);
+    }
+
+    private static ParsedCommandNode<CommandSourceStack> parsedNode(String name) {
+        CommandNode<CommandSourceStack> commandNode = mock(CommandNode.class);
+        when(commandNode.getName()).thenReturn(name);
+        ParsedCommandNode<CommandSourceStack> parsed = mock(ParsedCommandNode.class);
+        when(parsed.getNode()).thenReturn(commandNode);
+        return parsed;
     }
 
     @Test

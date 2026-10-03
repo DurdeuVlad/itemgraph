@@ -1,5 +1,7 @@
 package com.itemgraph.query;
 
+import com.itemgraph.audit.EventTaxonomy;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -132,39 +134,9 @@ public record AuditLookupFilters(
             if ("all".equals(normalized)) {
                 return List.of();
             }
-            String eventType = switch (normalized) {
-                case "join", "player_join" -> "PLAYER_JOIN";
-                case "quit", "player_quit" -> "PLAYER_QUIT";
-                case "chat", "chat_message" -> "CHAT_MESSAGE";
-                case "command", "command_attempt" -> "COMMAND_ATTEMPT";
-                case "command_executed" -> "COMMAND_EXECUTED";
-                case "place_block" -> "PLACE_BLOCK";
-                case "break_block" -> "BREAK_BLOCK";
-                case "interact_block" -> "INTERACT_BLOCK_ATTEMPT";
-                case "interact_block_attempt" -> "INTERACT_BLOCK_ATTEMPT";
-                case "interact_entity" -> "INTERACT_ENTITY";
-                case "kill_entity" -> "KILL_ENTITY";
-                case "throw_item" -> "THROW_ITEM";
-                case "shoot_item" -> "SHOOT_ITEM";
-                case "projectile_spawn_accepted" -> "PROJECTILE_SPAWN_ACCEPTED";
-                case "add_item", "add" -> "ADD_ITEM";
-                case "remove_item", "remove" -> "REMOVE_ITEM";
-                case "drop_item", "drop" -> "DROP_ITEM";
-                case "pickup_item", "pickup" -> "PICKUP_ITEM";
-                case "craft", "craft_item" -> "CRAFT";
-                case "smelt" -> "SMELT";
-                case "anvil_rename", "anvil" -> "ANVIL_RENAME";
-                case "anvil_repair", "anvil_rename_repair" -> "ANVIL_REPAIR";
-                case "break_item", "item_break" -> "BREAK_ITEM";
-                case "consume_item", "consume" -> "CONSUME_ITEM";
-                case "hopper_insert" -> "HOPPER_INSERT";
-                case "hopper_extract" -> "HOPPER_EXTRACT";
-                case "death_drop" -> "DEATH_DROP";
-                case "add_item_ender" -> "ADD_ITEM_ENDER";
-                case "remove_item_ender" -> "REMOVE_ITEM_ENDER";
-                default -> throw new IllegalArgumentException("unsupported audit or item-flow action '" + action + "'");
-            };
-            if (eventType != null && !result.contains(eventType)) {
+            String eventType = EventTaxonomy.canonicalAction(normalized).orElseThrow(() ->
+                    new IllegalArgumentException("unsupported audit or item-flow action '" + action + "'"));
+            if (!result.contains(eventType)) {
                 result.add(eventType);
             }
         }
