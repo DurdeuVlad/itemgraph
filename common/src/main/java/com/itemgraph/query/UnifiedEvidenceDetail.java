@@ -7,7 +7,9 @@ package com.itemgraph.query;
  * independent integer sequences. The evidence id is prefixed (for example,
  * {@code observation#42}) so an operator can open the correct detail command without
  * confusing an audit row with an observation or transformation row. Every row returned by
- * this service is raw evidence and therefore carries the {@code OBSERVED} class.</n+ */
+ * this service is raw evidence and carries the class assigned by its taxonomy definition,
+ * including {@code UNRESOLVED} for unsupported legacy event types.
+ */
 public record UnifiedEvidenceDetail(
         String source,
         String evidenceId,
@@ -18,7 +20,7 @@ public record UnifiedEvidenceDetail(
         Double z,
         String playerName,
         String actionType,
-        int quantity,
+        Integer quantity,
         String subjectId,
         String detail,
         String evidenceClass,
@@ -27,7 +29,7 @@ public record UnifiedEvidenceDetail(
 
     public UnifiedEvidenceDetail(String source, String evidenceId, long timestampMs,
                                  String levelName, Double x, Double y, Double z,
-                                 String playerName, String actionType, int quantity,
+                                 String playerName, String actionType, Integer quantity,
                                  String subjectId, String detail, String evidenceClass) {
         this(source, evidenceId, timestampMs, levelName, x, y, z, playerName,
                 actionType, quantity, subjectId, detail, evidenceClass, null, null);

@@ -49,6 +49,8 @@ class EventTaxonomyTest {
                     definition.neoForge().reasonCode() == null, definition.id() + " NeoForge support");
         }
         assertTrue(EventTaxonomy.VERSION.matches("\\d+\\.\\d+\\.\\d+"));
+        assertEquals("2.0.0", EventTaxonomy.VERSION,
+                "removing the unsupported creative transformation from selectable actions is a taxonomy major change");
 
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
@@ -163,6 +165,24 @@ class EventTaxonomyTest {
             assertEquals(QuantitySemantics.SIGNED_DELTA, event.quantity());
         }
         assertTrue(EventTaxonomy.find("ADMIN_ITEM_TRANSFORM", Surface.TRANSFORMATION).isPresent());
-        assertTrue(EventTaxonomy.find("CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION).isPresent());
+        EventTaxonomy.Definition creativeTransform = EventTaxonomy
+                .find("CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION).orElseThrow();
+        assertEquals(LoaderStatus.UNSUPPORTED, creativeTransform.fabric().status());
+        assertEquals("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", creativeTransform.fabric().reasonCode());
+        assertEquals(LoaderStatus.UNSUPPORTED, creativeTransform.neoForge().status());
+        assertEquals("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", creativeTransform.neoForge().reasonCode());
+        assertEquals(EvidenceClass.UNRESOLVED, creativeTransform.evidenceClass());
+        assertEquals(EventTaxonomy.SourceReliability.UNRESOLVED_CAUSE,
+                creativeTransform.sourceReliability());
+        assertEquals(EventTaxonomy.EndpointSemantics.UNKNOWN, creativeTransform.endpoints());
+        assertEquals(QuantitySemantics.UNKNOWN, creativeTransform.quantity());
+        assertFalse(creativeTransform.queryableOn(EventTaxonomy.Loader.FABRIC));
+        assertFalse(creativeTransform.queryableOn(EventTaxonomy.Loader.NEOFORGE));
+        assertFalse(EventTaxonomy.unifiedLookupActions().contains("CREATIVE_ITEM_TRANSFORM"));
+        EventTaxonomy.definitions().stream()
+                .filter(definition -> definition.surface() == Surface.TRANSFORMATION)
+                .forEach(definition -> assertEquals(definition.fabric(), definition.neoForge(),
+                        "shared transformation queries need matching loader classifications: "
+                                + definition.id()));
     }
 }

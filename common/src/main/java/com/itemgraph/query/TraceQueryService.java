@@ -1,5 +1,7 @@
 package com.itemgraph.query;
 
+import com.itemgraph.audit.EventTaxonomy;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -744,6 +746,12 @@ public final class TraceQueryService {
             LEFT JOIN ig_item_fingerprints r_fp ON r_fp.id = t.result_fingerprint_id
             WHERE (t.source_fingerprint_id = ? OR t.result_fingerprint_id = ?)
         """);
+        List<String> unsupportedTransformations = EventTaxonomy.unsupportedTransformations();
+        if (!unsupportedTransformations.isEmpty()) {
+            sql.append(" AND UPPER(t.transformation_type) NOT IN (")
+                    .append(String.join(",", java.util.Collections.nCopies(unsupportedTransformations.size(), "?")))
+                    .append(")");
+        }
         if (window.sinceMs() != null) {
             sql.append(" AND t.timestamp_ms >= ?");
         }
@@ -760,6 +768,9 @@ public final class TraceQueryService {
             int idx = 1;
             pstmt.setLong(idx++, fingerprintId);
             pstmt.setLong(idx++, fingerprintId);
+            for (String unsupportedTransformation : unsupportedTransformations) {
+                pstmt.setString(idx++, unsupportedTransformation);
+            }
             if (window.sinceMs() != null) {
                 pstmt.setLong(idx++, window.sinceMs());
             }
