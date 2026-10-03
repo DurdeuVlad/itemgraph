@@ -260,9 +260,22 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   batch and rerun affected checks plus final CI. No distributable artifact or version bump
   is part of M9 verification.
 - Current evidence: PR #119 merged as `22b892e` and repairs the Fabric durability GameTest;
-  issue #32 remains open because the PR does not establish numeric budgets or the required
-  benchmark matrix. Its final performance thresholds must be based on measured results,
-  not guessed values.
+  PR #120's previous head passed CI with nine validated report scenarios. A current
+  draft update adds six one-second idle reports for a 15-report set; the latest local
+  Fabric GameTests and report validator passed, while the current NeoForge queue-burst
+  batch remains unverified. #32 remains open: staging-derived budgets, representative
+  third-party adapter workloads, and production-like live-server tick-impact evidence
+  are still missing. CI/local measurements are regression evidence, not production
+  budgets. Numeric thresholds stay unset until measured in authorized staging.
+- Batch research checkpoint (2026-10-02): existing GitHub milestone #5 remains the M9
+  boundary; its 12 open issues are #32–#37, #44–#45, and #55–#58. The pinned
+  `1.2.10-1.21.1` GriefLogger profile and prior M9 comparison found no additional
+  feature gap outside those tracked issues. CoreProtect separates command, inventory,
+  item, container, and block lookups into distinct action families; ItemGraph therefore
+  records administrative causes separately from command-attempt text and emits quantity
+  evidence only at confirmed mutation boundaries. NeoForge 1.21.1 `CommandEvent` is
+  cancellable and fires before execution, so it cannot prove a successful effect.
+  Visible-client inspector clicks remain unverified per the maintainer decision.
 
 ## M10: Native-only cutover and release hardening
 

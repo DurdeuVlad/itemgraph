@@ -38,6 +38,39 @@ The project follows a simple pre-1.0 development changelog model.
   Loader GameTests assert GriefLogger is absent; CI rejects `present` reports
   and limits `unavailable` to NeoForge JUnit-only probes. The report schema is
   version 2.
+- **Issue #33 administrative item evidence:** both loaders capture `/give`,
+  `/clear`, `/item` slot mutations, creative inventory slot changes, accepted
+  `/give` overflow, and negative-slot creative drops at vanilla mutation
+  boundaries. Creative block placement and destruction store authoritative
+  `CREATIVE_BLOCK_RESULT` events and explicitly report zero player-inventory
+  quantity delta. Paired GameTests cover creative placement and destruction plus
+  linked invalid-item failure outcomes. Attempts, outcomes, and observed deltas
+  share mutation IDs; `/item modify` persists explicit canonical transformations,
+  while creative packet and `/item replace` stack changes persist separate removal
+  and creation deltas without inferring a causal transformation. Bounded or failed
+  `/give` recipient snapshots retain an unresolved outcome and cannot fall through
+  to player-drop attribution; accepted overflow still records exact ground-output
+  evidence by target UUID, while rejected overflow records item, quantity,
+  fingerprint, and entity identity as unresolved evidence, including canceled
+  tosses. Unrelated players' drops remain independently
+  capturable during the command. `/item ... from block/entity` evidence
+  retains the copied-from slot and stack without treating a copy as source removal.
+  Nested `/execute as` outcomes keep the original issuer as actor and store a differing
+  effective entity as execution-context evidence. The implementation leaves clone
+  versus pick-block undifferentiated, records empty slots as unresolved before/after
+  evidence, keeps staff activity private, suppresses raw item-command and `/execute`
+  arguments, and contains capture exceptions without changing vanilla results.
+  Version remains 0.3.2; no distributable jar is built.
+
+- **Issue #35 shared event taxonomy:** introduced the versioned `EventTaxonomy`
+  for native audit, item observation, and transformation IDs. Audit command
+  types and unified lookup aliases now use the shared registry. Definitions
+  specify evidence class, capture reliability, endpoint and quantity semantics,
+  actor status, privacy class, loader support, evidence-ID contract, aliases,
+  and owning issue. #55–#57 event families and stable unresolved reason codes
+  are listed as planned until loader adapters and fixtures prove support. This
+  is a taxonomy version only; the ItemGraph mod remains 0.3.2 and no distributable
+  JAR is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus seven allowlisted audit
   events, including namespaced entity/block `subject_id`, and a count-only

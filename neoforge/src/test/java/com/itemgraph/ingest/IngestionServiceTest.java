@@ -490,6 +490,53 @@ class IngestionServiceTest {
         }
     }
 
+    @Test
+    void administrativeAndCreativeGroundCreationUseUnknownToGroundEndpoints() throws Exception {
+        InternalObservationService internal = InternalObservationService.getInstance();
+        internal.clear();
+        CanonicalItem item = com.itemgraph.canon.ItemCanonicalizer.canonicalize("minecraft:diamond", null);
+        String actorUuid = "00000000-0000-0000-0000-000000000033";
+        long timestamp = System.currentTimeMillis();
+        assertTrue(internal.submit(new InternalObservationService.InternalObservation(
+                timestamp, "ADMIN_ITEM_CREATE", actorUuid, "Admin", "minecraft:overworld", 10, 64, 20,
+                "minecraft:overworld", 10.0, 64.0, 20.0, "ADMIN_CREATE_GROUND",
+                item, 2, "00000000-0000-0000-0000-000000000034")));
+        assertTrue(internal.submit(new InternalObservationService.InternalObservation(
+                timestamp + 1, "CREATIVE_ITEM_CREATE", actorUuid, "Creative", "minecraft:overworld", 10, 64, 20,
+                "minecraft:overworld", 10.0, 64.0, 20.0, "CREATIVE_CREATE_GROUND",
+                item, 1, "00000000-0000-0000-0000-000000000035")));
+
+        internal.start();
+        internal.stop();
+
+        try (Statement stmt = dbManager.getConnection().createStatement();
+             ResultSet rs = stmt.executeQuery("""
+                     SELECT obs.action_type, origin.node_type AS origin_type,
+                            destination.node_type AS destination_type,
+                            destination.x, destination.y, destination.z
+                     FROM ig_observations obs
+                     JOIN ig_nodes origin ON origin.id = obs.node_id
+                     JOIN ig_nodes destination ON destination.id = obs.target_node_id
+                     WHERE obs.action_type IN ('ADMIN_ITEM_CREATE', 'CREATIVE_ITEM_CREATE')
+                     ORDER BY obs.timestamp_ms
+                     """)) {
+            assertTrue(rs.next());
+            assertEquals("ADMIN_ITEM_CREATE", rs.getString("action_type"));
+            assertEquals("UNKNOWN", rs.getString("origin_type"));
+            assertEquals("GROUND", rs.getString("destination_type"));
+            assertEquals(10.0, rs.getDouble("x"));
+            assertEquals(64.0, rs.getDouble("y"));
+            assertEquals(20.0, rs.getDouble("z"));
+            assertTrue(rs.next());
+            assertEquals("CREATIVE_ITEM_CREATE", rs.getString("action_type"));
+            assertEquals("UNKNOWN", rs.getString("origin_type"));
+            assertEquals("GROUND", rs.getString("destination_type"));
+            assertFalse(rs.next());
+        } finally {
+            internal.clear();
+        }
+    }
+
     /**
      * A withdrawal empties the container into the player: container -> player.
      * This direction was already correct before Phase 5 and must stay that way.

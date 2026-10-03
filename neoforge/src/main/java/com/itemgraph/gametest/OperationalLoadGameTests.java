@@ -18,11 +18,14 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Development-only operational checks. NeoForge release jar tasks exclude this package. */
 @GameTestHolder("itemgraph")
 @PrefixGameTestTemplate(false)
 public final class OperationalLoadGameTests {
+    private record ProbeRead(long durableRows, Throwable failure) { }
+
     private static final int EVENTS_PER_BATCH = 400;
     private static final int BATCH_COUNT = 20;
     private static final int EVENT_COUNT = EVENTS_PER_BATCH * BATCH_COUNT;
@@ -48,7 +51,7 @@ public final class OperationalLoadGameTests {
     }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zz_itemgraph_queue_burst",
-            timeoutTicks = 300_000)
+            timeoutTicks = 6_000)
     public static void nativeAuditQueueBurstPersistsOnWorkerWithoutBlockingServerThread(GameTestHelper helper) {
         helper.assertFalse(ModList.get().isLoaded("grieflogger"),
                 "The isolated operational probe must run without GriefLogger installed");
@@ -65,8 +68,6 @@ public final class OperationalLoadGameTests {
         long[] acceptedDurationNanos = {0L};
         long[] maxBatchDurationNanos = {0L};
         int[] peakQueueSize = {observations.getQueueSize()};
-        String serverThreadName = Thread.currentThread().getName();
-
         for (int batch = 0; batch < BATCH_COUNT; batch++) {
             final int batchNumber = batch;
             helper.runAtTickTime(batch + 1, () -> {
@@ -112,49 +113,59 @@ public final class OperationalLoadGameTests {
             });
         }
 
-        CompletableFuture.delayedExecutor(20, TimeUnit.SECONDS).execute(() ->
-                CompletableFuture.supplyAsync(() -> countProbeRows(detailPrefix))
-                        .whenComplete((durableRows, readFailure) -> server.execute(() -> {
-            try {
-                if (readFailure != null) {
-                    throw new IllegalStateException("Could not read durable probe rows off the server thread",
-                            readFailure);
-                }
-                helper.assertValueEqual(EVENT_COUNT, submitted.get(),
-                        "all scheduled server-thread batches must be submitted");
-                long persistedDelta = observations.getTotalPersisted() - persistedBefore;
-                long droppedDelta = observations.getTotalDropped() - droppedBefore;
-                int queueRemaining = observations.getQueueSize();
-                ItemGraph.LOGGER.info(
-                        "Issue #30 local NeoForge probe after worker-drain window: persistedDelta={} "
-                                + "droppedDelta={} queueRemaining={} durableProbeRows={}",
-                        persistedDelta, droppedDelta, queueRemaining, durableRows);
-                helper.assertTrue(maxBatchDurationNanos[0] < SERVER_TICK_BUDGET_NANOS,
-                        "one batch of bounded queue submissions exceeded the 50 ms server tick budget");
-                helper.assertValueEqual(0L, droppedDelta,
-                        "native audit queue load must not lose evidence");
-                helper.assertTrue(persistedDelta >= EVENT_COUNT,
-                        "background worker persisted only " + persistedDelta + " of " + EVENT_COUNT
-                                + " load-probe events; queueRemaining=" + queueRemaining);
-                helper.assertValueEqual(0, queueRemaining,
-                        "all native queues must drain after the probe");
-                helper.assertValueEqual((long) EVENT_COUNT, durableRows,
-                        "all accepted load-probe rows must be durable in ItemGraph's SQLite ledger");
-                PerformanceReportFixture.writeIfRequested("neoforge", "queue_burst", Map.of(
-                        "accepted_events", (long) EVENT_COUNT,
-                        "batch_count", (long) BATCH_COUNT,
-                        "batch_size", (long) EVENTS_PER_BATCH,
-                        "persisted_counter_delta", persistedDelta,
-                        "dropped_counter_delta", droppedDelta,
-                        "durable_rows", durableRows,
-                        "queue_remaining", (long) queueRemaining,
-                        "max_server_thread_batch_ns", maxBatchDurationNanos[0]),
-                        ModList.get().isLoaded("grieflogger") ? "present" : "absent");
-                helper.succeed();
-            } catch (Throwable failure) {
-                helper.fail("Issue #30 load probe failed: " + failure.getMessage());
-            }
-        })));
+        AtomicReference<ProbeRead> durableProbe = new AtomicReference<>();
+        helper.startSequence()
+                .thenWaitUntil(() -> {
+                    helper.assertValueEqual(EVENT_COUNT, submitted.get(),
+                            "all scheduled server-thread batches must be submitted");
+                    long persistedDelta = observations.getTotalPersisted() - persistedBefore;
+                    long droppedDelta = observations.getTotalDropped() - droppedBefore;
+                    int queueRemaining = observations.getQueueSize();
+                    helper.assertTrue(droppedDelta > 0 || (persistedDelta >= EVENT_COUNT && queueRemaining == 0),
+                            "background worker has not drained the load probe or reported evidence loss: persisted="
+                                    + persistedDelta + "/" + EVENT_COUNT + " dropped=" + droppedDelta
+                                    + " queueRemaining=" + queueRemaining);
+                })
+                .thenExecute(() -> CompletableFuture.supplyAsync(() -> countProbeRows(detailPrefix))
+                        .whenComplete((durableRows, readFailure) ->
+                                server.execute(() -> durableProbe.set(new ProbeRead(durableRows, readFailure)))))
+                .thenWaitUntil(() -> helper.assertTrue(durableProbe.get() != null,
+                        "durable load-probe row count has not returned"))
+                .thenExecute(() -> {
+                    ProbeRead read = durableProbe.get();
+                    helper.assertTrue(read.failure() == null,
+                            "Could not read durable probe rows off the server thread: " + read.failure());
+                    long durableRows = read.durableRows();
+                    long persistedDelta = observations.getTotalPersisted() - persistedBefore;
+                    long droppedDelta = observations.getTotalDropped() - droppedBefore;
+                    int queueRemaining = observations.getQueueSize();
+                    ItemGraph.LOGGER.info(
+                            "Issue #30 local NeoForge probe after worker drain: persistedDelta={} "
+                                    + "droppedDelta={} queueRemaining={} durableProbeRows={}",
+                            persistedDelta, droppedDelta, queueRemaining, durableRows);
+                    helper.assertTrue(maxBatchDurationNanos[0] < SERVER_TICK_BUDGET_NANOS,
+                            "one batch of bounded queue submissions exceeded the 50 ms server tick budget");
+                    helper.assertValueEqual(0L, droppedDelta,
+                            "native audit queue load must not lose evidence");
+                    helper.assertTrue(persistedDelta >= EVENT_COUNT,
+                            "background worker persisted only " + persistedDelta + " of " + EVENT_COUNT
+                                    + " load-probe events; queueRemaining=" + queueRemaining);
+                    helper.assertValueEqual(0, queueRemaining,
+                            "all native queues must drain after the probe");
+                    helper.assertValueEqual((long) EVENT_COUNT, durableRows,
+                            "all accepted load-probe rows must be durable in ItemGraph's SQLite ledger");
+                    PerformanceReportFixture.writeIfRequested("neoforge", "queue_burst", Map.of(
+                            "accepted_events", (long) EVENT_COUNT,
+                            "batch_count", (long) BATCH_COUNT,
+                            "batch_size", (long) EVENTS_PER_BATCH,
+                            "persisted_counter_delta", persistedDelta,
+                            "dropped_counter_delta", droppedDelta,
+                            "durable_rows", durableRows,
+                            "queue_remaining", (long) queueRemaining,
+                            "max_server_thread_batch_ns", maxBatchDurationNanos[0]),
+                            ModList.get().isLoaded("grieflogger") ? "present" : "absent");
+                })
+                .thenSucceed();
     }
 
     private static long countProbeRows(String detailPrefix) {

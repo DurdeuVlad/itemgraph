@@ -9,6 +9,18 @@ lookup, pagination, and SQLite/MySQL storage.
 
 ## Branding contract
 
+- ItemGraph is the standalone product and the intended complete replacement for
+  GriefLogger. Normal operation requires neither the GriefLogger mod nor its
+  database; native ItemGraph capture and storage are authoritative.
+- The optional GriefLogger database importer is a read-only migration path for
+  historical evidence. It is not a runtime dependency and does not execute or
+  reuse GriefLogger code.
+- Compatible jars are temporary coexistence builds. Retire them only when the
+  native parity and cutover gates below are satisfied; after cutover, the
+  standalone loader jars are the only supported artifacts.
+- GriefLogger is a behavior reference only. Implement every feature with
+  ItemGraph-owned code, schemas, and event types; do not copy or patch
+  GriefLogger implementation code.
 - Supported commands are `/ig` and `/itemgraph`.
 - `/gl` and `/grieflogger` are not ItemGraph commands or aliases.
 - A GriefLogger database is a read-only source. ItemGraph never repairs,
@@ -32,6 +44,12 @@ meaning, loader, or backend contract changes. Documentation-only clarifications
 are patch changes; additive mappings with existing behavior are minor changes;
 renamed, removed, or incompatible mappings are major changes. The registry,
 this document, and the owning issue change together.
+
+This GriefLogger compatibility registry is separate from ItemGraph's
+[event taxonomy](EVENT_TAXONOMY.md), which defines ItemGraph-owned audit,
+observation, and transformation IDs, loader support, and privacy/evidence
+semantics. ItemGraph-only extensions do not become GriefLogger actions by being
+listed in that taxonomy.
 
 ## Published source surface
 
@@ -397,7 +415,8 @@ classified as a strict ItemGraph extension to preserve vanilla-client support.
 ## Native-only cutover and retention plan
 
 The cutover decision is binary: ItemGraph may retire the compatible artifacts
-only after every M8 parity gate is closed and the evidence below is recorded.
+only after every tracked GriefLogger parity acceptance gate is closed and the
+evidence below is recorded.
 Until then, the standard and compatible loader jars remain distinct so an
 operator can choose a dependency-safe migration path. After cutover, the
 standard ItemGraph jar is the only supported runtime artifact; GriefLogger is
