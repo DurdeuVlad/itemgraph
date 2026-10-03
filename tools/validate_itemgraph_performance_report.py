@@ -12,7 +12,7 @@ from typing import Any
 
 TOP_LEVEL_FIELDS = {
     "schema_version", "loader", "scenario", "minecraft_version", "backend",
-    "grieflogger_installed", "workload", "queue", "latency", "persistence",
+    "grieflogger_runtime_state", "workload", "queue", "latency", "persistence",
     "components", "memory",
 }
 LOADERS = {"fabric", "neoforge"}
@@ -56,8 +56,8 @@ def _integer(value: Any, name: str, minimum: int = 0) -> int:
 
 def validate_report(report: Any) -> dict[str, Any]:
     value = _object(report, "performance report", TOP_LEVEL_FIELDS)
-    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
-        raise ReportError("schema_version must be integer 1")
+    if type(value["schema_version"]) is not int or value["schema_version"] != 2:
+        raise ReportError("schema_version must be integer 2")
     if value["loader"] not in LOADERS:
         raise ReportError("loader must be fabric or neoforge")
     if value["scenario"] not in {
@@ -70,8 +70,20 @@ def validate_report(report: Any) -> dict[str, Any]:
         raise ReportError("minecraft_version must be 1.21.1")
     if value["backend"] not in BACKENDS:
         raise ReportError("backend is not a supported ItemGraph backend label")
-    if value["grieflogger_installed"] is not False:
-        raise ReportError("isolated performance reports must record GriefLogger as absent")
+    grief_logger_state = value["grieflogger_runtime_state"]
+    if grief_logger_state not in {"absent", "present", "unavailable"}:
+        raise ReportError("grieflogger_runtime_state must be absent, present, or unavailable")
+    if grief_logger_state == "present":
+        raise ReportError("isolated performance reports must not run with GriefLogger installed")
+    no_loader_runtime = value["loader"] == "neoforge" and value["scenario"] in {
+        "backend_mariadb_matrix", "backend_mysql_matrix", "shutdown_saturation",
+    }
+    expected_grief_logger_state = "unavailable" if no_loader_runtime else "absent"
+    if grief_logger_state != expected_grief_logger_state:
+        raise ReportError(
+            f"{value['loader']} {value['scenario']} report must record GriefLogger state as "
+            f"{expected_grief_logger_state}"
+        )
 
     workload = value["workload"]
     if not isinstance(workload, dict) or not set(workload).issubset(WORKLOAD_FIELDS):

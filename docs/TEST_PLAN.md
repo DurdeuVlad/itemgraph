@@ -442,8 +442,15 @@ CI timings are measurements, not production budgets.
 
 The performance reports snapshot process-wide metrics. Each queue GameTest now
 stops and drains the prior worker, clears its counters, and restarts it before
-measuring; each GameTest has its own batch. The validator requires the enqueue
-sample count to equal this scenario's attempted-event count, and each network
+measuring; each GameTest has its own batch. Each report records the loader
+runtime's `grieflogger_runtime_state`: loader GameTests query the loader and
+assert absence, while NeoForge JUnit probes without an initialized mod list
+record `unavailable`. The validator requires `absent` for GameTest reports,
+rejects `present` everywhere, and permits `unavailable` only for those
+NeoForge JUnit scenarios. Reports use schema version 2 for this explicit
+three-state provenance.
+The validator requires the enqueue sample count to equal this scenario's
+attempted-event count, and each network
 report's query sample count to equal its 20 raw-JDBC plus 20 registered command
 lookups. It requires all 20 command callbacks to complete successfully and at
 least one callback to finish while submissions continue. Correlation reports

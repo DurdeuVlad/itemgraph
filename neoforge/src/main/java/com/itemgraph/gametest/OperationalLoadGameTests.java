@@ -32,9 +32,10 @@ public final class OperationalLoadGameTests {
     @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zzzzz_itemgraph_correlation_burst",
             timeoutTicks = 300_000)
     public static void correlationThroughputUsesPersistedQuantityEvidence(GameTestHelper helper) {
-        helper.assertFalse(ModList.get().isLoaded("grieflogger"),
+        boolean griefLoggerInstalled = ModList.get().isLoaded("grieflogger");
+        helper.assertFalse(griefLoggerInstalled,
                 "The isolated correlation probe must run without GriefLogger installed");
-        CorrelationPerformanceFixture.run(helper, "neoforge");
+        CorrelationPerformanceFixture.run(helper, "neoforge", griefLoggerInstalled ? "present" : "absent");
     }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zz_itemgraph_queue_burst",
@@ -138,7 +139,8 @@ public final class OperationalLoadGameTests {
                         "dropped_counter_delta", droppedDelta,
                         "durable_rows", durableRows,
                         "queue_remaining", (long) queueRemaining,
-                        "max_server_thread_batch_ns", maxBatchDurationNanos[0]));
+                        "max_server_thread_batch_ns", maxBatchDurationNanos[0]),
+                        ModList.get().isLoaded("grieflogger") ? "present" : "absent");
                 helper.succeed();
             } catch (Throwable failure) {
                 helper.fail("Issue #30 load probe failed: " + failure.getMessage());

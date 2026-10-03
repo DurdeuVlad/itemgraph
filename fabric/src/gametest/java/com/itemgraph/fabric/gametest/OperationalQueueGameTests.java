@@ -6,6 +6,7 @@ import com.itemgraph.gametest.PerformanceReportFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import org.slf4j.Logger;
@@ -31,11 +32,17 @@ public final class OperationalQueueGameTests implements FabricGameTest {
     @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zzzz_itemgraph_correlation_burst",
             timeoutTicks = 300_000)
     public void correlationThroughputUsesPersistedQuantityEvidence(GameTestHelper helper) {
-        CorrelationPerformanceFixture.run(helper, "fabric");
+        boolean griefLoggerInstalled = FabricLoader.getInstance().isModLoaded("grieflogger");
+        helper.assertFalse(griefLoggerInstalled,
+                "The isolated correlation probe must run without GriefLogger installed");
+        CorrelationPerformanceFixture.run(helper, "fabric", griefLoggerInstalled ? "present" : "absent");
     }
 
     @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zz_itemgraph_queue_flush", timeoutTicks = 300_000)
     public void endServerTickFlushPersistsAcceptedAuditEvents(GameTestHelper helper) {
+        boolean griefLoggerInstalled = FabricLoader.getInstance().isModLoaded("grieflogger");
+        helper.assertFalse(griefLoggerInstalled,
+                "The isolated queue probe must run without GriefLogger installed");
         InternalObservationService service = InternalObservationService.getInstance();
         service.stop();
         service.clear();
@@ -135,7 +142,8 @@ public final class OperationalQueueGameTests implements FabricGameTest {
                     "queue_remaining", (long) service.getQueueSize(),
                     "end_tick_callbacks", (long) callbacksSinceProbe,
                     "flush_every_ticks", (long) flushEveryTicks,
-                    "enqueue_total_ns", enqueueNanos));
+                    "enqueue_total_ns", enqueueNanos),
+                    griefLoggerInstalled ? "present" : "absent");
             helper.succeed();
         });
     }

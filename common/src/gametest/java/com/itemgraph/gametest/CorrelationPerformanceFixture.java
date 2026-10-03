@@ -37,9 +37,9 @@ public final class CorrelationPerformanceFixture {
 
     private CorrelationPerformanceFixture() { }
 
-    public static void run(GameTestHelper helper, String loader) {
+    public static void run(GameTestHelper helper, String loader, String griefLoggerRuntimeState) {
         var server = helper.getLevel().getServer();
-        Probe probe = new Probe(helper, loader);
+        Probe probe = new Probe(helper, loader, griefLoggerRuntimeState);
         helper.runAfterDelay(1, probe::completeOnGameTestTick);
         CompletableFuture.runAsync(probe::prepare)
                 .whenComplete((ignored, failure) -> server.execute(() -> {
@@ -58,6 +58,7 @@ public final class CorrelationPerformanceFixture {
         private final GameTestHelper helper;
         private final MinecraftServer server;
         private final String loader;
+        private final String griefLoggerRuntimeState;
         private final InternalObservationService observations = InternalObservationService.getInstance();
         private final IngestionService ingestion = IngestionService.getInstance();
         private final long startedNanos = System.nanoTime();
@@ -72,10 +73,11 @@ public final class CorrelationPerformanceFixture {
         private long droppedRows;
         private long durableRows;
 
-        private Probe(GameTestHelper helper, String loader) {
+        private Probe(GameTestHelper helper, String loader, String griefLoggerRuntimeState) {
             this.helper = helper;
             this.server = helper.getLevel().getServer();
             this.loader = loader;
+            this.griefLoggerRuntimeState = griefLoggerRuntimeState;
         }
 
         private void prepare() {
@@ -221,7 +223,8 @@ public final class CorrelationPerformanceFixture {
                             Map.entry("correlation_pairs", (long) (PASS_COUNT * PAIRS_PER_PASS)),
                             Map.entry("correlation_passes", (long) PASS_COUNT),
                             Map.entry("correlation_edges", rowCount.edges()),
-                            Map.entry("elapsed_ms", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos))));
+                            Map.entry("elapsed_ms", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos))),
+                            griefLoggerRuntimeState);
                     restoreWorkers();
                 } catch (Throwable verificationFailure) {
                     fail("correlation throughput report failed verification", verificationFailure);

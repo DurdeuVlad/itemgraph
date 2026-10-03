@@ -355,7 +355,8 @@ class NetworkBackendPerformanceIntegrationTest {
                             Map.entry("automation_events", (long) (EVENT_COUNT / 3)),
                             Map.entry("modded_inventory_events", (long) (EVENT_COUNT / 3 + 1)),
                             Map.entry("enqueue_total_ns", enqueueNanos),
-                            Map.entry("elapsed_ms", elapsedMillis)));
+                            Map.entry("elapsed_ms", elapsedMillis)),
+                    neoForgeGriefLoggerRuntimeState());
         } finally {
             try {
                 beginReadersCleanup(readers);
@@ -376,6 +377,11 @@ class NetworkBackendPerformanceIntegrationTest {
                 }
             }
         }
+    }
+
+    private static String neoForgeGriefLoggerRuntimeState() {
+        net.neoforged.fml.ModList modList = net.neoforged.fml.ModList.get();
+        return modList == null ? "unavailable" : modList.isLoaded("grieflogger") ? "present" : "absent";
     }
 
     private static CommandDispatcher<CommandSourceStack> registeredCommandDispatcher() {

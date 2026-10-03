@@ -705,7 +705,13 @@ class InternalObservationServiceTest {
                 "dropped_counter_delta", service.getTotalDropped(),
                 "durable_rows", durableRows,
                 "queue_remaining", (long) service.getQueueSize(),
-                "elapsed_ms", elapsedMillis));
+                "elapsed_ms", elapsedMillis),
+                neoForgeGriefLoggerRuntimeState());
+    }
+
+    private static String neoForgeGriefLoggerRuntimeState() {
+        net.neoforged.fml.ModList modList = net.neoforged.fml.ModList.get();
+        return modList == null ? "unavailable" : modList.isLoaded("grieflogger") ? "present" : "absent";
     }
 
     @Test

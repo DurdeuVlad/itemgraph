@@ -17,7 +17,8 @@ import java.util.TreeMap;
 final class FabricPerformanceReportFixture {
     private FabricPerformanceReportFixture() { }
 
-    public static void writeIfRequested(String loader, String scenario, Map<String, Long> workload) {
+    public static void writeIfRequested(String loader, String scenario, Map<String, Long> workload,
+                                        String griefLoggerRuntimeState) {
         String configuredDirectory = System.getenv("ITEMGRAPH_PERFORMANCE_REPORT_DIR");
         if (configuredDirectory == null || configuredDirectory.isBlank()) {
             return;
@@ -34,11 +35,11 @@ final class FabricPerformanceReportFixture {
         var settings = DatabaseManager.getInstance().getSettings();
         String backend = settings == null ? "unknown" : settings.backend().name().toLowerCase(java.util.Locale.ROOT);
         StringBuilder json = new StringBuilder(1_800);
-        json.append("{\n  \"schema_version\": 1,\n  \"loader\": ").append(quote(loader))
+        json.append("{\n  \"schema_version\": 2,\n  \"loader\": ").append(quote(loader))
                 .append(",\n  \"scenario\": ").append(quote(scenario))
                 .append(",\n  \"minecraft_version\": \"1.21.1\",")
                 .append("\n  \"backend\": ").append(quote(backend)).append(',')
-                .append("\n  \"grieflogger_installed\": false,")
+                .append("\n  \"grieflogger_runtime_state\": ").append(quote(griefLoggerRuntimeState)).append(',')
                 .append("\n  \"workload\": {");
         TreeMap<String, Long> orderedWorkload = new TreeMap<>(workload == null ? Map.of() : workload);
         int index = 0;

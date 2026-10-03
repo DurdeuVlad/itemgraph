@@ -73,12 +73,16 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             }),
         }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "loader": loader,
         "scenario": scenario,
         "minecraft_version": "1.21.1",
         "backend": "mysql_mariadb" if backend_matrix else "sqlite",
-        "grieflogger_installed": False,
+        "grieflogger_runtime_state": (
+            "unavailable" if loader == "neoforge" and scenario in {
+                "backend_mariadb_matrix", "backend_mysql_matrix", "shutdown_saturation",
+            } else "absent"
+        ),
         "workload": workload,
         "queue": {
             "depth": 0,
@@ -156,6 +160,24 @@ class PerformanceReportValidationTest(unittest.TestCase):
         candidate["latency"]["enqueue"]["count"] = 0
         with self.assertRaises(ReportError):
             validate_report(candidate)
+
+    def test_rejects_report_when_runtime_detects_grieflogger_installed(self) -> None:
+        candidate = report("fabric", "queue_flush_durability", 32)
+        candidate["grieflogger_runtime_state"] = "present"
+        with self.assertRaisesRegex(ReportError, "GriefLogger installed"):
+            validate_report(candidate)
+
+    def test_rejects_unavailable_grieflogger_state_for_loader_game_test(self) -> None:
+        candidate = report("fabric", "queue_flush_durability", 32)
+        candidate["grieflogger_runtime_state"] = "unavailable"
+        with self.assertRaisesRegex(ReportError, "must record GriefLogger state as absent"):
+            validate_report(candidate)
+
+    def test_records_unavailable_grieflogger_state_for_neoforge_junit_probe(self) -> None:
+        self.assertEqual(
+            "unavailable",
+            validate_report(report("neoforge", "shutdown_saturation", 10_000))["grieflogger_runtime_state"],
+        )
 
     def test_rejects_enqueue_samples_from_another_scenario(self) -> None:
         candidate = report("neoforge", "queue_burst", 8_000)

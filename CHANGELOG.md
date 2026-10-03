@@ -24,6 +24,12 @@ The project follows a simple pre-1.0 development changelog model.
   without event or player identifiers. Real adapter workloads, moderator
   command lookup, idle baseline, and staging-derived production budgets remain
   open under #32. Mod version remains 0.3.2; no distributable jar is built.
+- **Issue #32 report provenance:** performance report fixtures record
+  `grieflogger_runtime_state` as `absent`, `present`, or `unavailable` instead
+  of treating an uninitialized NeoForge JUnit mod list as proof of absence.
+  Loader GameTests assert GriefLogger is absent; CI rejects `present` reports
+  and limits `unavailable` to NeoForge JUnit-only probes. The report schema is
+  version 2.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus seven allowlisted audit
   events, including namespaced entity/block `subject_id`, and a count-only

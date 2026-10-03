@@ -355,7 +355,9 @@ class FabricNetworkBackendPerformanceIntegrationTest {
                             Map.entry("automation_events", (long) (EVENT_COUNT / 3)),
                             Map.entry("modded_inventory_events", (long) (EVENT_COUNT / 3 + 1)),
                             Map.entry("enqueue_total_ns", enqueueNanos),
-                            Map.entry("elapsed_ms", elapsedMillis)));
+                            Map.entry("elapsed_ms", elapsedMillis)),
+                    net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("grieflogger")
+                            ? "present" : "absent");
         } finally {
             try {
                 beginReadersCleanup(readers);
