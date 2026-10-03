@@ -3,6 +3,8 @@ package com.itemgraph.api;
 import com.itemgraph.command.QueryDispatcher;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.ingest.IngestionService;
+import com.itemgraph.query.ItemMetadataPredicate;
+import com.itemgraph.query.QueryWindow;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -10,6 +12,7 @@ import java.sql.ResultSet;
 import java.lang.reflect.Modifier;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -91,29 +94,35 @@ class ItemGraphApiTest {
         assertTrue(ApiVersion.PREVIEW_1.preview());
         assertEquals("preview-1", ApiVersion.PREVIEW_1.label());
         assertEquals(2, ApiVersion.PREVIEW_2.number());
-        assertEquals("preview-2", ItemGraphApi.API_VERSION.label());
-        assertEquals(ApiVersion.PREVIEW_2, service.apiVersion());
+        assertEquals(3, ApiVersion.PREVIEW_3.number());
+        assertEquals("preview-3", ItemGraphApi.API_VERSION.label());
+        assertEquals(ApiVersion.PREVIEW_3, service.apiVersion());
     }
 
     @Test
     void apiNegotiationRequiresAnExactPositivePreviewNumber() throws Exception {
         long evidenceBefore = observationCount();
-        ApiCompatibility compatible = ItemGraphApi.negotiate(2);
+        ApiCompatibility compatible = ItemGraphApi.negotiate(3);
         assertTrue(compatible.compatible());
         assertEquals(ApiCompatibility.Status.COMPATIBLE, compatible.status());
-        assertEquals(2, compatible.requiredVersion());
-        assertEquals(2, compatible.runtimeVersion());
+        assertEquals(3, compatible.requiredVersion());
+        assertEquals(3, compatible.runtimeVersion());
 
         ApiCompatibility oldVersion = ItemGraphApi.negotiate(1);
         assertFalse(oldVersion.compatible());
         assertEquals(ApiCompatibility.Status.INCOMPATIBLE, oldVersion.status());
-        assertEquals("ItemGraph API version mismatch: consumer requires preview-1 but runtime provides preview-2",
+        assertEquals("ItemGraph API version mismatch: consumer requires preview-1 but runtime provides preview-3",
                 oldVersion.message());
 
-        ApiCompatibility futureVersion = ItemGraphApi.negotiate(3);
+        ApiCompatibility oldPreviewVersion = ItemGraphApi.negotiate(2);
+        assertFalse(oldPreviewVersion.compatible());
+        assertEquals("ItemGraph API version mismatch: consumer requires preview-2 but runtime provides preview-3",
+                oldPreviewVersion.message());
+
+        ApiCompatibility futureVersion = ItemGraphApi.negotiate(4);
         assertFalse(futureVersion.compatible());
         assertEquals(ApiCompatibility.Status.INCOMPATIBLE, futureVersion.status());
-        assertEquals("ItemGraph API version mismatch: consumer requires preview-3 but runtime provides preview-2",
+        assertEquals("ItemGraph API version mismatch: consumer requires preview-4 but runtime provides preview-3",
                 futureVersion.message());
 
         ApiCompatibility invalidVersion = ItemGraphApi.negotiate(0);
@@ -137,7 +146,7 @@ class ItemGraphApiTest {
         assertEquals(RegistrationStatus.REGISTERED, first.status());
         assertEquals("testmod", first.source().modId());
         assertEquals("Test Mod", first.source().displayName());
-        assertEquals(ApiVersion.PREVIEW_2, first.source().apiVersion());
+        assertEquals(ApiVersion.PREVIEW_3, first.source().apiVersion());
 
         RegistrationResult unchanged = service.registerSource(
                 SourceRegistration.of("testmod", "Test Mod")).join();
@@ -191,7 +200,7 @@ class ItemGraphApiTest {
                 assertTrue(rs.getString(1).startsWith("EXTERNAL_API:"));
                 assertEquals("PENDING", rs.getString(2));
                 String raw = new String(rs.getBytes(3), java.nio.charset.StandardCharsets.UTF_8);
-                assertTrue(raw.contains("\"api_version\":2"));
+                assertTrue(raw.contains("\"api_version\":3"));
                 assertTrue(raw.contains("\"evidence_class\":\"OBSERVED\""));
                 assertTrue(raw.contains("\"source_reliability\":\"DIRECT_STATE_DELTA\""));
                 assertTrue(raw.contains("\"privacy_class\":\"SENSITIVE_LOCATION\""));
@@ -550,9 +559,36 @@ class ItemGraphApiTest {
         assertNull(hop.origin().location(), "a player inventory endpoint must not leak first-seen coordinates");
         assertEquals("minecraft:diamond", hop.item().itemId());
         assertNotNull(hop.item().fingerprintHash());
+        assertTrue(result.result().normalizedPredicate().contains("item.minecraft:diamond"));
+        assertFalse(result.result().metadataMatchUnconfirmed());
 
         assertThrows(UnsupportedOperationException.class,
                 () -> result.result().hops().add(hop));
+    }
+
+    @Test
+    void itemMetadataApiFilterReturnsAbsoluteWindowAndUnconfirmedPartialMetadata() {
+        SourceHandle source = register("testmod", "Test Mod");
+        PlayerEndpoint player = new PlayerEndpoint(PLAYER, "Tester");
+        UnknownEndpoint unknown = new UnknownEndpoint(Level.OVERWORLD, "fixture");
+        assertEquals(SubmissionStatus.PERSISTED, service.submitObservation(source,
+                observation(71, player, unknown, diamond(1))).join().status());
+
+        long now = System.currentTimeMillis();
+        QueryWindow window = new QueryWindow(now - 60_000L, now + 60_000L);
+        ItemMetadataPredicate predicate = new ItemMetadataPredicate(
+                ItemMetadataPredicate.Kind.DAMAGE, "minecraft:damage", "0");
+        QueryResult result = service.traceItem(
+                ItemQuery.itemId("minecraft:diamond").withMetadata(List.of(predicate)),
+                new QueryOptions(20, null, new TimeWindow(window.sinceMs(), window.untilMs()))).join();
+
+        assertEquals(QueryStatus.OK, result.status());
+        assertEquals(window.sinceMs(), result.result().window().sinceMs());
+        assertEquals(window.untilMs(), result.result().window().untilMs());
+        assertTrue(result.result().normalizedPredicate().contains("damage.0"));
+        assertTrue(result.result().normalizedPredicate().contains("window[since="));
+        assertTrue(result.result().metadataMatchUnconfirmed(),
+                "API submitted metadata is deliberately partial and cannot confirm component filters");
     }
 
     @Test
@@ -608,6 +644,12 @@ class ItemGraphApiTest {
                 ItemQuery.itemId("minecraft:diamond"), new QueryOptions(0, null)).join().status());
         assertEquals(QueryStatus.INVALID_INPUT, service.traceItem(
                 ItemQuery.itemId("minecraft:diamond"), new QueryOptions(20, 0L)).join().status());
+        QueryResult malformedPredicate = service.traceItem(
+                ItemQuery.itemId("minecraft:diamond").withMetadata(List.of(
+                        new ItemMetadataPredicate(ItemMetadataPredicate.Kind.ENCHANTMENT, "x", ""))),
+                null).join();
+        assertEquals(QueryStatus.INVALID_INPUT, malformedPredicate.status());
+        assertEquals("INVALID_QUERY", malformedPredicate.errorCode());
 
         QueryResult capped = service.traceItem(
                 ItemQuery.itemId("minecraft:diamond"), new QueryOptions(10_000, null)).join();
@@ -734,7 +776,7 @@ class ItemGraphApiTest {
 
         ItemGraphServiceImpl unavailable = new ItemGraphServiceImpl(null, 8);
         SourceHandle unavailableGeneration = new SourceHandle(
-                "testmod", "Test Mod", ApiVersion.PREVIEW_2, 8);
+                "testmod", "Test Mod", ApiVersion.PREVIEW_3, 8);
         unavailable.start();
         try {
             assertEquals(RegistrationStatus.DATABASE_UNAVAILABLE,

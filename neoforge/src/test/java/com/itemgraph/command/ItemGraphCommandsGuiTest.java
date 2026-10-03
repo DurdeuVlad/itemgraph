@@ -24,6 +24,7 @@ class ItemGraphCommandsGuiTest {
         CommandNode<CommandSourceStack> gui = root.getChild("gui");
         assertNotNull(gui);
         assertNotNull(gui.getChild("item").getChild("itemQuery"));
+        assertNotNull(gui.getChild("item-filtered").getChild("itemQuery").getChild("metadataFilters"));
         assertNotNull(gui.getChild("player").getChild("player"));
         CommandNode<CommandSourceStack> container = gui.getChild("container").getChild("dimension");
         assertNotNull(container.getChild("x").getChild("y").getChild("z").getChild("sinceMinutes"));

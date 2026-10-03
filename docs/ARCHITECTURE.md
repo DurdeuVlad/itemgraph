@@ -15,7 +15,7 @@ neoforge adapter┘
 ```
 
 - `core/` contains Java-only domain records (`CanonicalItem`, `CorrelationResult`, and `NodeType`) and loader-neutral ports. It must not import Minecraft, Brigadier, Fabric, NeoForge, SQLite, or JDBC packages. `verifyCoreArchitecture` enforces that source boundary.
-- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence, migrations, and GriefLogger's read-only adapter are shared runtime components here.
+- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence and migrations are shared runtime components; the GriefLogger reader is an optional read-only transition integration for supported-row sync and explicit historical import.
 - `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite and MariaDB Connector/J as nested Fabric jars; its compatible jar replaces the metadata, requires GriefLogger, and strips only the nested SQLite jar.
 - `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite and MariaDB Connector/J; its compatible jar requires GriefLogger, keeps MariaDB Connector/J, and omits the Jar-in-Jar SQLite module.
 
@@ -418,7 +418,7 @@ queue remains bounded and rejects additional requests.
 
 ### Preview mod-integration API worker
 
-`com.itemgraph.api.ItemGraphServiceImpl` exposes the `PREVIEW_2` API from shared code
+`com.itemgraph.api.ItemGraphServiceImpl` exposes the `PREVIEW_3` API from shared code
 packaged in both NeoForge and Fabric mod JARs. Both loader adapters install and stop the
 same `ItemGraphApiLifecycle`; CI consumer mods compile and run against each packaged API.
 Consumers negotiate their required API number before registration; preview versions require
@@ -542,8 +542,8 @@ Authoritative Minecraft `ItemEntity` UUIDs are tracked only after the entity is 
 
 ## Native Container & Ground Observation (M5, 0.2.0)
 
-When GriefLogger is absent (or as additive evidence when present), ItemGraph records
-its own `ITEMGRAPH_INTERNAL` observations via `InternalObservationService` (bounded
+ItemGraph records its native `ITEMGRAPH_INTERNAL` observations via
+`InternalObservationService` (bounded
 10,000-entry async queue, batch-persisted with `INSERT OR IGNORE`). V11 adds a
 destination-sensitive internal dedup index, interval end times, edge state, and derived
 cross-source source groups. Raw observations remain unchanged; a confirmed group has one
@@ -830,7 +830,10 @@ The `/ig audit` command runs this engine on the query worker and outputs a compr
 
 ### GriefLogger
 
-GriefLogger is an external read-only evidence source.
+ItemGraph is designed to run as a standalone replacement. A configured GriefLogger
+database is an optional read-only transition source for supported-row sync and
+explicit history import; it is not used for native capture, ItemGraph-owned
+storage, or normal queries.
 
 ItemGraph must not:
 
@@ -843,7 +846,7 @@ ItemGraph must not:
 
 ItemGraph owns:
 
-- supplemental observations
+- native observations
 - canonical fingerprints
 - source import checkpoints
 - graph nodes

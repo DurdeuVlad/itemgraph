@@ -7,6 +7,7 @@ import com.itemgraph.query.NodeRef;
 import com.itemgraph.query.QueryFormatter;
 import com.itemgraph.query.QueryLimits;
 import com.itemgraph.query.QueryWindow;
+import com.itemgraph.query.ItemMetadataPredicate;
 import com.itemgraph.query.TraceCursor;
 import com.itemgraph.query.TraceHop;
 import com.itemgraph.query.TracePage;
@@ -52,13 +53,15 @@ public final class FlowBrowserService {
         CONTAINER
     }
 
-    private record Target(TargetKind kind, String query, String dimension, int x, int y, int z,
+    private record Target(TargetKind kind, String query, List<ItemMetadataPredicate> metadataPredicates,
+                          String dimension, int x, int y, int z,
                           Long resolvedId) {
         TracePage load(Connection conn, QueryWindow window, TraceCursor cursor,
                        TracePage.Direction direction) throws SQLException {
             return switch (kind) {
                 case ITEM -> resolvedId == null
-                        ? TRACE_QUERIES.traceItemPage(conn, query, pageSize(), window, cursor, direction)
+                        ? TRACE_QUERIES.traceItemPage(conn, query, metadataPredicates,
+                                pageSize(), window, cursor, direction)
                         : TRACE_QUERIES.traceFingerprintPage(conn, resolvedId, pageSize(), window, cursor, direction);
                 case PLAYER -> resolvedId == null
                         ? TRACE_QUERIES.tracePlayerPage(conn, query, pageSize(), window, cursor, direction)
@@ -70,11 +73,11 @@ public final class FlowBrowserService {
         }
 
         Target forFingerprint(long fingerprintId) {
-            return new Target(TargetKind.ITEM, null, null, 0, 0, 0, fingerprintId);
+            return new Target(TargetKind.ITEM, null, metadataPredicates, null, 0, 0, 0, fingerprintId);
         }
 
         Target forNode(long nodeId) {
-            return new Target(kind, query, dimension, x, y, z, nodeId);
+            return new Target(kind, query, metadataPredicates, dimension, x, y, z, nodeId);
         }
 
         Target resolved(TracePage page) {
@@ -82,11 +85,11 @@ public final class FlowBrowserService {
                 return this;
             }
             if (kind == TargetKind.ITEM && page.fingerprint() != null) {
-                return new Target(kind, query, dimension, x, y, z, page.fingerprint().id());
+                return new Target(kind, query, metadataPredicates, dimension, x, y, z, page.fingerprint().id());
             }
             return page.targetNode() == null
                     ? this
-                    : new Target(kind, query, dimension, x, y, z, page.targetNode().id());
+                    : new Target(kind, query, metadataPredicates, dimension, x, y, z, page.targetNode().id());
         }
     }
 
@@ -96,6 +99,7 @@ public final class FlowBrowserService {
         TracePage page;
         int pageIndex;
         volatile boolean loading;
+        boolean metadataMatchUnconfirmed;
 
         BrowserSession(Target target, QueryWindow window) {
             this.target = target;
@@ -112,11 +116,24 @@ public final class FlowBrowserService {
     private FlowBrowserService() {}
 
     static int openItem(CommandSourceStack source, String query, Long sinceMinutes) {
-        return open(source, new Target(TargetKind.ITEM, query, null, 0, 0, 0, null), sinceMinutes);
+        return openItem(source, query, sinceMinutes, List.of());
+    }
+
+    static int openItem(CommandSourceStack source, String query, Long sinceMinutes,
+                        List<ItemMetadataPredicate> metadataPredicates) {
+        return open(source, new Target(TargetKind.ITEM, query, List.copyOf(metadataPredicates),
+                null, 0, 0, 0, null), sinceMinutes);
+    }
+
+    static int openItem(CommandSourceStack source, String query,
+                        List<ItemMetadataPredicate> metadataPredicates, QueryWindow window) {
+        return open(source, new Target(TargetKind.ITEM, query, List.copyOf(metadataPredicates),
+                null, 0, 0, 0, null), window);
     }
 
     static int openPlayer(CommandSourceStack source, String playerName, Long sinceMinutes) {
-        return open(source, new Target(TargetKind.PLAYER, playerName, null, 0, 0, 0, null), sinceMinutes);
+        return open(source, new Target(TargetKind.PLAYER, playerName, List.of(),
+                null, 0, 0, 0, null), sinceMinutes);
     }
 
     /**
@@ -126,17 +143,24 @@ public final class FlowBrowserService {
      */
     public static int openContainer(CommandSourceStack source, String dimension, int x, int y, int z,
                                     Long sinceMinutes) {
-        return open(source, new Target(TargetKind.CONTAINER, null, dimension, x, y, z, null), sinceMinutes);
+        return open(source, new Target(TargetKind.CONTAINER, null, List.of(), dimension, x, y, z, null), sinceMinutes);
     }
 
     private static int open(CommandSourceStack source, Target target, Long sinceMinutes) {
-        if (!(source.getEntity() instanceof ServerPlayer) || !source.hasPermission(2)) {
-            source.sendFailure(Component.literal("[ItemGraph] The flow browser requires a permission-level-2 player."));
-            return 0;
-        }
         QueryWindow window = sinceMinutes == null
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
+        return open(source, target, window);
+    }
+
+    private static int open(CommandSourceStack source, Target target, QueryWindow window) {
+        if (!(source.getEntity() instanceof ServerPlayer) || !source.hasPermission(2)
+                || (!target.metadataPredicates().isEmpty() && !source.hasPermission(4))) {
+            source.sendFailure(Component.literal(!target.metadataPredicates().isEmpty()
+                    ? "[ItemGraph] Item metadata filters require permission level 4."
+                    : "[ItemGraph] The flow browser requires a permission-level-2 player."));
+            return 0;
+        }
         BrowserSession session = new BrowserSession(target, window);
         source.sendSuccess(() -> Component.literal("[ItemGraph] Loading read-only flow browser..."), false);
         return loadPage(source, session, null, TracePage.Direction.FORWARD, 0);
@@ -154,7 +178,8 @@ public final class FlowBrowserService {
                 (returnedSource, page) -> {
                     session.loading = false;
                     if (!(returnedSource.getEntity() instanceof ServerPlayer player)
-                            || !returnedSource.hasPermission(2) || player.containerMenu != expectedMenu) {
+                            || !returnedSource.hasPermission(session.target.metadataPredicates().isEmpty() ? 2 : 4)
+                            || player.containerMenu != expectedMenu) {
                         return;
                     }
                     if (isStaleEmptyContinuation(cursor, page)) {
@@ -164,6 +189,8 @@ public final class FlowBrowserService {
                     }
                     session.pageIndex = pageIndex;
                     session.page = page;
+                    session.metadataMatchUnconfirmed |= page.fingerprint() != null
+                            && page.fingerprint().componentIndexUnresolved();
                     session.target = session.target.resolved(page);
                     showPage(player, session);
                 }, () -> session.loading = false);
@@ -217,6 +244,15 @@ public final class FlowBrowserService {
                 hasPrevious ? new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.PREVIOUS_PAGE, 0) : null);
         List<String> pageLore = new ArrayList<>(List.of(page.targetDescription(),
                 "Window: " + page.window().describe()));
+        if (session.metadataMatchUnconfirmed) {
+            pageLore.add("COMPONENT_FILTER_UNRESOLVED: possible candidate; metadata match unconfirmed.");
+        }
+        if (!session.target.metadataPredicates().isEmpty()) {
+            pageLore.add("Filters: " + session.target.metadataPredicates().stream()
+                    .map(ItemMetadataPredicate::normalizedToken)
+                    .collect(java.util.stream.Collectors.joining(" ")));
+            pageLore.add("Exact time bounds: " + session.window.normalizedPredicate());
+        }
         pageLore.add(page.resolution() == TracePage.Resolution.AMBIGUOUS
                 ? "Candidate list capped at 10 matches."
                 : "Up to " + pageSize() + " timeline entries per page.");
@@ -231,11 +267,13 @@ public final class FlowBrowserService {
                         ? new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.NEXT_PAGE, 0) : null);
 
         openMenu(player, menuTitle(page), items, actions,
+                session.target.metadataPredicates().isEmpty() ? 2 : 4,
                 (clickingPlayer, action) -> handlePageAction(clickingPlayer, session, action));
     }
 
     private static void handlePageAction(ServerPlayer player, BrowserSession session, FlowBrowserMenu.Action action) {
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!player.createCommandSourceStack().hasPermission(
+                session.target.metadataPredicates().isEmpty() ? 2 : 4)) {
             player.closeContainer();
             return;
         }
@@ -291,7 +329,8 @@ public final class FlowBrowserService {
                 conn -> detailLines(conn, hop),
                 (source, lines) -> {
                     browser.loading = false;
-                    if (source.getEntity() instanceof ServerPlayer viewer && source.hasPermission(2)
+                    if (source.getEntity() instanceof ServerPlayer viewer
+                            && source.hasPermission(browser.target.metadataPredicates().isEmpty() ? 2 : 4)
                             && viewer.containerMenu == expectedMenu) {
                         DetailSession detail = new DetailSession(browser, detailTitle(hop), lines, 0);
                         showDetails(viewer, detail);
@@ -355,12 +394,14 @@ public final class FlowBrowserService {
                 hasNext ? "Next detail page" : "Next detail page unavailable",
                 hasNext ? new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.DETAIL_NEXT, 0) : null);
         openMenu(player, detail.title(), items, actions,
+                detail.browser().target.metadataPredicates().isEmpty() ? 2 : 4,
                 (clickingPlayer, action) -> handleDetailAction(clickingPlayer, detail, action));
     }
 
     private static void handleDetailAction(ServerPlayer player, DetailSession detail,
                                            FlowBrowserMenu.Action action) {
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!player.createCommandSourceStack().hasPermission(
+                detail.browser().target.metadataPredicates().isEmpty() ? 2 : 4)) {
             player.closeContainer();
             return;
         }
@@ -448,6 +489,9 @@ public final class FlowBrowserService {
         if (fingerprint.fingerprintHash() != null) {
             lore.add("Hash: " + fingerprint.fingerprintHash());
         }
+        if (fingerprint.componentIndexUnresolved()) {
+            lore.add("COMPONENT_FILTER_UNRESOLVED: possible candidate; metadata match unconfirmed.");
+        }
         lore.add("Select to open this item's flow.");
         return display(icon(fingerprint), "Select " + fingerprint.describe(), lore);
     }
@@ -507,14 +551,15 @@ public final class FlowBrowserService {
 
     private static void openMenu(ServerPlayer player, String title, List<ItemStack> items,
                                  Map<Integer, FlowBrowserMenu.Action> actions,
+                                 int requiredPermission,
                                  java.util.function.BiConsumer<ServerPlayer, FlowBrowserMenu.Action> handler) {
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!player.createCommandSourceStack().hasPermission(requiredPermission)) {
             player.closeContainer();
             return;
         }
         boolean opened = player.openMenu(new SimpleMenuProvider(
                 (containerId, inventory, ignored) -> new FlowBrowserMenu(
-                        containerId, inventory, items, actions, handler),
+                        containerId, inventory, items, actions, handler, requiredPermission),
                 Component.literal(title))).isPresent();
         if (!opened) {
             player.sendSystemMessage(Component.literal("[ItemGraph] Could not open the flow browser."));

@@ -121,15 +121,15 @@ class ItemGraphCommandsHelpTest {
         assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect", "export"),
                 root.getChildren().stream().map(CommandNode::getName).collect(Collectors.toSet()));
         assertEquals(Set.of("now", "history"), childNames(root, "ingest"));
-        assertEquals(Set.of("item", "player", "container"), childNames(root, "trace"));
-        assertEquals(Set.of("item", "player", "container"), childNames(root, "gui"));
+        assertEquals(Set.of("item", "item-filtered", "player", "container"), childNames(root, "trace"));
+        assertEquals(Set.of("item", "item-filtered", "player", "container"), childNames(root, "gui"));
         assertEquals(Set.of("on", "off", "status"), childNames(root, "inspect"));
 
         for (String topLevel : Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect")) {
             assertNotNull(CommandHelp.topicLines(topLevel), "missing help topic for /ig " + topLevel);
         }
-        for (String path : List.of("ingest now", "ingest history", "trace item", "trace player", "trace container",
-                "gui item", "gui player", "gui container")) {
+        for (String path : List.of("ingest now", "ingest history", "trace item", "trace item-filtered",
+                "trace player", "trace container", "gui item", "gui item-filtered", "gui player", "gui container")) {
             List<String> lines = CommandHelp.topicLines(path);
             assertNotNull(lines, "missing help topic for /ig " + path);
             assertTrue(String.join("\n", lines).contains("/ig " + path),
@@ -180,7 +180,7 @@ class ItemGraphCommandsHelpTest {
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help lookup filters", source));
         String filteredLookupHelp = String.join("\n", successes);
-        assertTrue(filteredLookupHelp.contains("Syntax: /ig lookup <filter1>"));
+        assertTrue(filteredLookupHelp.contains("Syntax: /ig lookup <name.value>"));
         assertTrue(filteredLookupHelp.contains("default to 10 rows"));
     }
 
@@ -504,8 +504,10 @@ class ItemGraphCommandsHelpTest {
                 new InvalidLookup("action.break_block a.join radius.10", "filter 'action' may be used once"),
                 new InvalidLookup("include.stone exclude.dirt radius.10",
                         "include and exclude filters cannot be combined"),
-                new InvalidLookup("action.break_block user.Alex include.stone time.1h radius.10 state.observed action.join",
-                        "at most 6 filters are allowed"));
+                new InvalidLookup("radius.10 component.example:a=1 component.example:b=1 component.example:c=1 "
+                        + "component.example:d=1 component.example:e=1 component.example:f=1 component.example:g=1 "
+                        + "component.example:h=1 component.example:i=1 component.example:j=1 component.example:k=1 "
+                        + "component.example:l=1", "at most 12 filters are allowed"));
 
         for (String root : List.of("ig", "itemgraph")) {
             for (String lookupPrefix : List.of(root + " lookup ", root + " lookup filters ")) {

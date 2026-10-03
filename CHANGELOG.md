@@ -7,6 +7,17 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #45 component-aware filters (implementation in progress):** filtered lookup parses
+  exact item ID, fingerprint hash, custom name, damage, armor trim, enchantment, lore,
+  persistent component JSON, and absolute UTC windows. ItemGraph migration v22 adds an
+  ItemGraph-owned deterministic persistent-component index; unsupported or incomplete
+  serialization stays explicitly unresolved. Metadata filter entry points require
+  permission level 4. The preview Java API advances to PREVIEW_3 with item metadata selectors
+  and absolute query windows. Local validation passed 614 unit tests and 8 required GameTests
+  on each loader. SQLite cursor parity passed locally; the equivalent MySQL/MariaDB fixture is
+  in CI, and measured #32 latency budgets remain pending.
+  No version bump or distributable JAR was created.
+
 - **Issue #37 bounded incident bundles:** added `/ig export`, level-4 `/ig export full`,
   `/ig export verify`, and owner/operator `/ig export cancel`. Bundles contain up to 100
   observed evidence rows and 100 linked inferred edges, preserve GriefLogger source and

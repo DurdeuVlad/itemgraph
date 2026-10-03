@@ -287,6 +287,19 @@ A deterministic hash over selected canonical components.
 
 The canonicalization rules must be versioned.
 
+The schema-v22 query projection stores persistent codec values in
+`ig_fingerprint_components(fingerprint_id, component_id, value_hash, canonical_value)`.
+The component ID is the registered Minecraft or mod component key; `canonical_value` is
+registry-aware JSON with object keys sorted, arrays left ordered, and numbers normalized.
+`ig_item_fingerprints.component_index_state` is `COMPLETE`, `PARTIAL`, or
+`LEGACY_UNKNOWN`. Non-persistent codecs, decode failures, raw component patches over
+1 MiB, and index size limits leave the state partial or unknown. The projection is an
+ItemGraph-owned search index, not a second evidence source and not an item UUID. Raw source
+evidence remains available for rebuilding or explaining the derived fingerprint. When a raw
+patch decodes but one or more values cannot be canonically serialized, its SHA-256 is added
+to the partial fingerprint as a conservative discriminator; equal known fields cannot make
+two different raw patches appear to be the same fingerprint.
+
 ## Quantity model
 
 Quantity is part of evidence.

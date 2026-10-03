@@ -97,6 +97,8 @@ class DatabaseManagerTest {
         assertTrue(tables.contains("ig_observation_group_members"), "ig_observation_group_members table must exist");
         assertTrue(tables.contains("ig_observation_match_checks"), "ig_observation_match_checks table must exist");
         assertTrue(tables.contains("ig_api_sources"), "ig_api_sources table must exist");
+        assertTrue(tables.contains("ig_fingerprint_components"),
+                "component metadata index must remain ItemGraph-owned");
 
         List<String> nodeColumns = new ArrayList<>();
         try (Statement stmt = conn.createStatement();
@@ -106,6 +108,16 @@ class DatabaseManagerTest {
             }
         }
         assertTrue(nodeColumns.contains("external_key"), "ig_nodes.external_key must exist");
+
+        List<String> fingerprintColumns = new ArrayList<>();
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("PRAGMA table_info(ig_item_fingerprints)")) {
+            while (rs.next()) {
+                fingerprintColumns.add(rs.getString("name"));
+            }
+        }
+        assertTrue(fingerprintColumns.contains("component_index_state"),
+                "legacy and partial component index state must be explicit");
 
         // Verify unique constraint on ig_observations(source_type, source_event_id)
         try (Statement stmt = conn.createStatement()) {

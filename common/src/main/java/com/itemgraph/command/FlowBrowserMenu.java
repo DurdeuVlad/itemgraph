@@ -35,13 +35,21 @@ final class FlowBrowserMenu extends ChestMenu {
 
     private final Map<Integer, Action> actions;
     private final BiConsumer<ServerPlayer, Action> actionHandler;
+    private final int requiredPermission;
 
     FlowBrowserMenu(int containerId, Inventory playerInventory, List<ItemStack> displayItems,
                           Map<Integer, Action> actions,
                           BiConsumer<ServerPlayer, Action> actionHandler) {
+        this(containerId, playerInventory, displayItems, actions, actionHandler, 2);
+    }
+
+    FlowBrowserMenu(int containerId, Inventory playerInventory, List<ItemStack> displayItems,
+                    Map<Integer, Action> actions,
+                    BiConsumer<ServerPlayer, Action> actionHandler, int requiredPermission) {
         super(MenuType.GENERIC_9x6, containerId, playerInventory, new SimpleContainer(MENU_SLOT_COUNT), 6);
         this.actions = Map.copyOf(actions);
         this.actionHandler = actionHandler;
+        this.requiredPermission = requiredPermission;
         for (int slot = 0; slot < Math.min(displayItems.size(), MENU_SLOT_COUNT); slot++) {
             ItemStack stack = displayItems.get(slot);
             if (!stack.isEmpty()) {
@@ -53,7 +61,7 @@ final class FlowBrowserMenu extends ChestMenu {
     @Override
     public void clicked(int slotId, int button, ClickType clickType, Player player) {
         if (!(player instanceof ServerPlayer serverPlayer)
-                || !serverPlayer.createCommandSourceStack().hasPermission(2)) {
+                || !serverPlayer.createCommandSourceStack().hasPermission(requiredPermission)) {
             if (player instanceof ServerPlayer serverPlayer) {
                 serverPlayer.closeContainer();
             }
@@ -91,6 +99,6 @@ final class FlowBrowserMenu extends ChestMenu {
     @Override
     public boolean stillValid(Player player) {
         return player instanceof ServerPlayer serverPlayer
-                && serverPlayer.createCommandSourceStack().hasPermission(2);
+                && serverPlayer.createCommandSourceStack().hasPermission(requiredPermission);
     }
 }

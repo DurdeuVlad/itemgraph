@@ -403,7 +403,9 @@ public final class QueryFormatter {
         List<String> lines = new ArrayList<>();
         lines.add(PREFIX + "Query '" + query + "' matched " + candidates.size() + " item fingerprints:");
         for (FingerprintRef c : candidates) {
-            lines.add("  #" + c.id() + ": " + c.describe() + " [hash=" + c.fingerprintHash() + "]");
+            lines.add("  #" + c.id() + ": " + c.describe() + " [hash=" + c.fingerprintHash() + "]"
+                    + (c.componentIndexUnresolved()
+                    ? " COMPONENT_FILTER_UNRESOLVED: possible candidate, metadata match unconfirmed." : ""));
         }
         lines.add("  Use /ig trace item \"id:<id>\" or /ig gui item \"id:<id>\" to select a specific fingerprint.");
         return lines;
