@@ -15,6 +15,15 @@ The project follows a simple pre-1.0 development changelog model.
   correlation, and queries remain independent. Mod version remains 0.3.2; no
   distributable jar is built.
 
+- **Issue #35 shared event taxonomy:** introduced the versioned `EventTaxonomy`
+  for native audit, item observation, and transformation IDs. Audit command
+  types and unified lookup aliases now use the shared registry. Definitions
+  specify evidence class, capture reliability, endpoint and quantity semantics,
+  actor status, privacy class, loader support, evidence-ID contract, aliases,
+  and owning issue. #55–#57 event families and stable unresolved reason codes
+  are listed as planned until loader adapters and fixtures prove support. This
+  is a taxonomy version only; the ItemGraph mod remains 0.3.2 and no distributable
+  JAR is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus seven allowlisted audit
   events, including namespaced entity/block `subject_id`, and a count-only

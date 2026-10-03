@@ -1,5 +1,7 @@
 package com.itemgraph.query;
 
+import com.itemgraph.audit.EventTaxonomy;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -30,15 +32,9 @@ public final class UnifiedEvidenceQueryService {
                     .thenComparing(UnifiedEvidenceQueryService::compareEvidenceIds);
 
     /** Canonical values accepted by the GriefLogger-style filtered lookup. */
-    public static final List<String> ACTION_TYPES = List.of(
-            "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_ATTEMPT",
-            "COMMAND_EXECUTED", "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK_ATTEMPT",
-            "INTERACT_ENTITY", "INTERACT_ENTITY_COMPLETED", "INTERACT_ENTITY_DENIED",
-            "INTERACT_ENTITY_UNRESOLVED", "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "ADD_ITEM", "REMOVE_ITEM",
-            "DROP_ITEM", "PICKUP_ITEM", "CRAFT", "SMELT", "ANVIL_RENAME", "ANVIL_REPAIR", "BREAK_ITEM",
-            "CONSUME_ITEM", "HOPPER_INSERT", "HOPPER_EXTRACT", "DEATH_DROP",
-            "PROJECTILE_SPAWN_ACCEPTED",
-            "ADD_ITEM_ENDER", "REMOVE_ITEM_ENDER");
+    public static final List<String> ACTION_TYPES = java.util.stream.Stream
+            .concat(java.util.stream.Stream.of("all"), EventTaxonomy.unifiedLookupActions().stream())
+            .toList();
 
     private static final String OBSERVATION_ACTION = "CASE WHEN UPPER(o.action_type) = 'CRAFT_ITEM' THEN 'CRAFT' ELSE UPPER(o.action_type) END";
     private static final String TRANSFORMATION_ACTION = "UPPER(t.transformation_type)";
@@ -300,7 +296,10 @@ public final class UnifiedEvidenceQueryService {
                             rs.getString("level_id"),
                             nullableDouble(rs, "x"), nullableDouble(rs, "y"), nullableDouble(rs, "z"),
                             firstNonBlank(rs.getString("player_name"), rs.getString("player_uuid")),
-                            rs.getString("event_type"), 0, rs.getString("subject_id"), detail, "OBSERVED"));
+                            rs.getString("event_type"), 0, rs.getString("subject_id"), detail,
+                            EventTaxonomy.find(rs.getString("event_type"), EventTaxonomy.Surface.AUDIT_EVENT)
+                                    .map(definition -> definition.evidenceClass().name())
+                                    .orElse(EventTaxonomy.UNCLASSIFIED_EVIDENCE)));
                 }
             }
         }

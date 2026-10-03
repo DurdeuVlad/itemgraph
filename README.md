@@ -209,6 +209,7 @@ The complete boundary and authorization rules are in [Preview integration API](d
 - [Architecture](docs/ARCHITECTURE.md)
 - [Preview integration API](docs/API.md)
 - [Evidence model](docs/EVIDENCE_MODEL.md)
+- [ItemGraph event taxonomy](docs/EVENT_TAXONOMY.md)
 - [GriefLogger integration](docs/GRIEFLOGGER_INTEGRATION.md)
 - [Query model](docs/QUERY_MODEL.md)
 - [Security and permissions](docs/SECURITY_AND_PERMISSIONS.md)

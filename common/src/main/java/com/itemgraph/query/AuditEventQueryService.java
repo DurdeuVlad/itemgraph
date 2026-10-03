@@ -1,5 +1,7 @@
 package com.itemgraph.query;
 
+import com.itemgraph.audit.EventTaxonomy;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -12,12 +14,9 @@ import java.util.Locale;
 public final class AuditEventQueryService {
     public static final double MAX_RADIUS_BLOCKS = 1_024.0;
     public record ExactPosition(double x, double y, double z) {}
-    public static final List<String> EVENT_TYPES = List.of(
-            "all", "PLAYER_JOIN", "PLAYER_QUIT", "CHAT_MESSAGE", "COMMAND_ATTEMPT", "COMMAND_EXECUTED",
-            "PLACE_BLOCK", "BREAK_BLOCK", "INTERACT_BLOCK", "INTERACT_BLOCK_ATTEMPT", "INTERACT_ENTITY",
-            "INTERACT_ENTITY_COMPLETED", "INTERACT_ENTITY_DENIED",
-            "INTERACT_ENTITY_UNRESOLVED",
-            "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM", "PROJECTILE_SPAWN_ACCEPTED");
+    public static final List<String> EVENT_TYPES = java.util.stream.Stream
+            .concat(java.util.stream.Stream.of("all"), EventTaxonomy.auditLookupTypes().stream())
+            .toList();
 
     public List<AuditEventDetail> find(Connection conn, String eventType, String playerName,
                                        QueryWindow window, int requestedLimit) throws SQLException {

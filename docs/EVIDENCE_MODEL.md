@@ -6,6 +6,13 @@ ItemGraph must make a strict distinction between what the server **knows** and w
 
 This is necessary for trustworthy moderation.
 
+Event IDs and their evidence, quantity, source-reliability, endpoint, actor,
+privacy, loader-support, and issue-ownership contracts are cataloged in the
+[ItemGraph Event Taxonomy](EVENT_TAXONOMY.md). The taxonomy is versioned
+independently from the mod and GriefLogger compatibility registry. A catalog
+entry does not prove an adapter is implemented: only an `IMPLEMENTED` loader
+status backed by its fixtures establishes capture support.
+
 ## Evidence classes
 
 ### 1. Observed
