@@ -228,6 +228,9 @@ class IngestionServiceTest {
             nativeOnly.start();
             assertFalse(nativeOnly.requestIngestionAsync());
             assertFalse(nativeOnly.requestHistoricalImportAsync());
+            nativeOnly.runIngestionSafely();
+            assertNull(nativeOnly.getLastResult(),
+                    "a scheduled native-only worker tick must skip the disabled source without reporting an error");
             assertTrue(nativeOnly.runCorrelation().success(),
                     "native correlation must remain available in native-only mode");
             IngestionResult skipped = nativeOnly.runIngestion();

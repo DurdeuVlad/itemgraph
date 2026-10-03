@@ -206,11 +206,13 @@ public class IngestionService {
      * without waiting a full cycle and correlation can never overlap ingestion on the
      * shared database connection.
      */
-    private void runIngestionSafely() {
-        try {
-            runIngestion();
-        } catch (Throwable t) {
-            LOGGER.error("Unexpected error in ItemGraph scheduled ingestion cycle", t);
+    void runIngestionSafely() {
+        if (adapter.isIntegrationEnabled()) {
+            try {
+                runIngestion();
+            } catch (Throwable t) {
+                LOGGER.error("Unexpected error in ItemGraph scheduled ingestion cycle", t);
+            }
         }
         runCorrelationSafely();
     }
