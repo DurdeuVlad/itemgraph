@@ -28,6 +28,8 @@ WORKLOAD_FIELDS = {
     "registered_lookup_dispatch_callback_p95_ns",
     "automation_events", "modded_inventory_events", "elapsed_ms", "attempted_events",
     "correlation_pairs", "correlation_passes", "correlation_edges",
+    "malformed_payload_repetitions", "malformed_cache_insertions", "malformed_cache_hits",
+    "malformed_first_decode_ns", "malformed_total_elapsed_ns",
     "idle_window_ms", "database_heartbeat_delta", "enqueue_samples", "persistence_samples",
     "query_samples", "correlation_samples", "heap_used_before_bytes", "heap_used_after_bytes",
 }
@@ -210,6 +212,22 @@ def validate_report(report: Any) -> dict[str, Any]:
         if (latency["correlation"]["count"] != workload["correlation_passes"]
                 or latency["correlation"]["failed"] != 0):
             raise ReportError("correlation_burst must report five successful measured correlation passes")
+        repetitions = _integer(workload.get("malformed_payload_repetitions"),
+                               "workload.malformed_payload_repetitions", 1)
+        insertions = _integer(workload.get("malformed_cache_insertions"),
+                              "workload.malformed_cache_insertions")
+        cache_hits = _integer(workload.get("malformed_cache_hits"), "workload.malformed_cache_hits")
+        first_decode_ns = _integer(workload.get("malformed_first_decode_ns"),
+                                   "workload.malformed_first_decode_ns", 1)
+        total_elapsed_ns = _integer(workload.get("malformed_total_elapsed_ns"),
+                                     "workload.malformed_total_elapsed_ns", 1)
+        if repetitions != 500 or insertions != 1 or cache_hits != repetitions - 1:
+            raise ReportError("correlation_burst must decode one malformed component payload and hit cache 499 times")
+        if total_elapsed_ns < first_decode_ns:
+            raise ReportError("malformed payload workload elapsed time is shorter than its first decode")
+        if (components["decode_failure_cache_insertions"] != insertions
+                or components["negative_cache_hits"] != cache_hits):
+            raise ReportError("malformed payload workload counters disagree with component metrics")
     network_scenarios = {"backend_mariadb_matrix", "backend_mysql_matrix",
                          "backend_fabric_mariadb_matrix", "backend_fabric_mysql_matrix"}
     if value["scenario"] in network_scenarios:

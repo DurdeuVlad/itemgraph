@@ -165,7 +165,7 @@ public class ItemCanonicalizer {
                     opaqueDataHash = rawDataHash;
                     if (rememberOpaqueDecodeFailure(decodeKey)) {
                         OperationalMetrics.getInstance().recordDecodeFailureCacheInsertion();
-                        LOGGER.debug("Could not decode GriefLogger DataComponentPatch for item '{}' ({} bytes); "
+                        LOGGER.debug("Could not decode serialized DataComponentPatch for item '{}' ({} bytes); "
                                         + "raw data SHA-256={} and component metadata remain unresolved",
                                 itemId, rawData.length, opaqueDataHash, e);
                     }

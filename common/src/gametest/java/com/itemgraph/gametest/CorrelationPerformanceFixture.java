@@ -7,12 +7,14 @@ import com.itemgraph.ingest.IngestionService;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.metrics.OperationalMetrics;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.server.MinecraftServer;
 
 import java.sql.SQLException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
+import java.util.HexFormat;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -24,6 +26,7 @@ public final class CorrelationPerformanceFixture {
     private static final int PAIRS_PER_PASS = 50;
     private static final int PASS_COUNT = 5;
     private static final int OBSERVATION_COUNT = PAIRS_PER_PASS * PASS_COUNT * 2;
+    private static final int MALFORMED_PAYLOAD_REPETITIONS = 500;
     private static final long SOURCE_EVENT_FLOOR = 91_000_000_000L;
     private static final long CLOSED_WINDOW_AGE_MS = TimeUnit.MINUTES.toMillis(10);
     private static final long COMPLETION_DEADLINE_NANOS = TimeUnit.MINUTES.toNanos(3);
@@ -59,6 +62,7 @@ public final class CorrelationPerformanceFixture {
         private final MinecraftServer server;
         private final String loader;
         private final String griefLoggerRuntimeState;
+        private final RegistryAccess registryAccess;
         private final InternalObservationService observations = InternalObservationService.getInstance();
         private final IngestionService ingestion = IngestionService.getInstance();
         private final long startedNanos = System.nanoTime();
@@ -72,12 +76,17 @@ public final class CorrelationPerformanceFixture {
         private long persistedRows;
         private long droppedRows;
         private long durableRows;
+        private long malformedPayloadElapsedNanos;
+        private long malformedFirstDecodeNanos;
+        private long malformedCacheInsertions;
+        private long malformedCacheHits;
 
         private Probe(GameTestHelper helper, String loader, String griefLoggerRuntimeState) {
             this.helper = helper;
             this.server = helper.getLevel().getServer();
             this.loader = loader;
             this.griefLoggerRuntimeState = griefLoggerRuntimeState;
+            this.registryAccess = helper.getLevel().registryAccess();
         }
 
         private void prepare() {
@@ -87,7 +96,46 @@ public final class CorrelationPerformanceFixture {
             ingestion.stop();
             observations.stop();
             observations.clear();
+            OperationalMetrics metrics = OperationalMetrics.getInstance();
+            ItemCanonicalizer.setRegistryAccess(registryAccess);
             observations.start();
+            // start() resets the shared metrics. Run after it so the report retains
+            // the malformed-decode insertion and cache-hit measurements.
+            runMalformedPayloadProbe(metrics);
+        }
+
+        private void runMalformedPayloadProbe(OperationalMetrics metrics) {
+            byte[] malformedPayload = HexFormat.of().parseHex("0500000004");
+            long insertionsBefore = metrics.snapshot().decodeFailureCacheInsertions();
+            long hitsBefore = metrics.snapshot().decodeCacheHits();
+            long startedNanos = System.nanoTime();
+            String expectedFingerprint = null;
+            for (int iteration = 0; iteration < MALFORMED_PAYLOAD_REPETITIONS; iteration++) {
+                long decodeStartedNanos = System.nanoTime();
+                CanonicalItem item = ItemCanonicalizer.canonicalize(
+                        "minecraft:diamond_sword", malformedPayload, registryAccess);
+                long decodeElapsedNanos = System.nanoTime() - decodeStartedNanos;
+                if (iteration == 0) {
+                    malformedFirstDecodeNanos = decodeElapsedNanos;
+                }
+                if (item.componentSummary() == null
+                        || !item.componentSummary().contains("component_decode=UNRESOLVED")) {
+                    throw new IllegalStateException("malformed component payload did not remain unresolved");
+                }
+                if (expectedFingerprint == null) {
+                    expectedFingerprint = item.fingerprintHash();
+                } else if (!expectedFingerprint.equals(item.fingerprintHash())) {
+                    throw new IllegalStateException("cached malformed payload changed its opaque fingerprint");
+                }
+            }
+            malformedPayloadElapsedNanos = System.nanoTime() - startedNanos;
+            malformedCacheInsertions = metrics.snapshot().decodeFailureCacheInsertions() - insertionsBefore;
+            malformedCacheHits = metrics.snapshot().decodeCacheHits() - hitsBefore;
+            if (malformedCacheInsertions != 1
+                    || malformedCacheHits != MALFORMED_PAYLOAD_REPETITIONS - 1L) {
+                throw new IllegalStateException("malformed payload cache workload did not decode once: insertions="
+                        + malformedCacheInsertions + ", hits=" + malformedCacheHits);
+            }
         }
 
         private void schedulePass(int passNumber) {
@@ -223,6 +271,11 @@ public final class CorrelationPerformanceFixture {
                             Map.entry("correlation_pairs", (long) (PASS_COUNT * PAIRS_PER_PASS)),
                             Map.entry("correlation_passes", (long) PASS_COUNT),
                             Map.entry("correlation_edges", rowCount.edges()),
+                            Map.entry("malformed_payload_repetitions", (long) MALFORMED_PAYLOAD_REPETITIONS),
+                            Map.entry("malformed_cache_insertions", malformedCacheInsertions),
+                            Map.entry("malformed_cache_hits", malformedCacheHits),
+                            Map.entry("malformed_first_decode_ns", malformedFirstDecodeNanos),
+                            Map.entry("malformed_total_elapsed_ns", malformedPayloadElapsedNanos),
                             Map.entry("elapsed_ms", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos))),
                             griefLoggerRuntimeState);
                     restoreWorkers();

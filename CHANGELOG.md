@@ -38,6 +38,12 @@ The project follows a simple pre-1.0 development changelog model.
   Loader GameTests assert GriefLogger is absent; CI rejects `present` reports
   and limits `unavailable` to NeoForge JUnit-only probes. The report schema is
   version 2.
+- **Issue #32 malformed-component workload:** the SQLite correlation probes feed
+  one malformed serialized component payload to the canonicalizer 500 times and
+  record the first-decode and total elapsed time. CI requires one negative-cache
+  insertion, 499 cache hits, and the same opaque unresolved fingerprint for every
+  repetition. The decoder diagnostic now names the serialized component payload,
+  independent of the optional historical importer.
 - **Issue #33 administrative item evidence:** both loaders capture `/give`,
   `/clear`, `/item` slot mutations, creative inventory slot changes, accepted
   `/give` overflow, and negative-slot creative drops at vanilla mutation

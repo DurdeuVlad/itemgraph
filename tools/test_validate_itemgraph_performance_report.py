@@ -45,6 +45,11 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             "correlation_pairs": 250,
             "correlation_passes": 5,
             "correlation_edges": 250,
+            "malformed_payload_repetitions": 500,
+            "malformed_cache_insertions": 1,
+            "malformed_cache_hits": 499,
+            "malformed_first_decode_ns": 10_000,
+            "malformed_total_elapsed_ns": 510_000,
             "elapsed_ms": 1_000,
         }
     elif backend_matrix:
@@ -130,7 +135,10 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             "failed_batches": 0,
             "largest_batch": 0 if idle_baseline else min(accepted, 100 if shutdown_saturation else 1_000),
         },
-        "components": {"decode_failure_cache_insertions": 0, "negative_cache_hits": 0},
+        "components": {
+            "decode_failure_cache_insertions": 1 if correlation_burst else 0,
+            "negative_cache_hits": 499 if correlation_burst else 0,
+        },
         "memory": {"heap_used_bytes": 1, "heap_max_bytes": -1},
     }
 
@@ -312,6 +320,19 @@ class PerformanceReportValidationTest(unittest.TestCase):
         candidate = report("fabric", "correlation_burst", 500)
         candidate["latency"]["correlation"]["count"] = 4
         with self.assertRaisesRegex(ReportError, "five successful measured correlation passes"):
+            validate_report(candidate)
+
+    def test_rejects_correlation_report_that_redecodes_malformed_component_payloads(self) -> None:
+        candidate = report("fabric", "correlation_burst", 500)
+        candidate["workload"]["malformed_cache_insertions"] = 2
+        candidate["components"]["decode_failure_cache_insertions"] = 2
+        with self.assertRaisesRegex(ReportError, "decode one malformed component payload"):
+            validate_report(candidate)
+
+    def test_rejects_malformed_component_cache_counter_mismatch(self) -> None:
+        candidate = report("neoforge", "correlation_burst", 500)
+        candidate["components"]["negative_cache_hits"] = 498
+        with self.assertRaisesRegex(ReportError, "counters disagree with component metrics"):
             validate_report(candidate)
 
     def test_rejects_shutdown_saturation_report_when_accepted_rows_are_not_durable(self) -> None:

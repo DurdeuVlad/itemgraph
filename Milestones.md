@@ -236,11 +236,14 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 
 - Status: in progress; GitHub milestone
   https://github.com/DurdeuVlad/itemgraph/milestone/5.
-- Outcome: extend the compatibility surface with measured throughput, creative/admin
-  causes, modded inventory and automation, world/entity causes, cross-loader integration,
+- Outcome: deliver ItemGraph as a standalone replacement for GriefLogger. Native
+  capture, ItemGraph-owned storage, queries, permissions, and exports must work with
+  no GriefLogger jar or database. M9 adds measured throughput, creative/admin causes,
+  modded inventory and automation, world/entity causes, cross-loader integration,
   tamper-evident exports, first-class uncertainty, and component-aware/absolute-time
   investigation queries.
-- Scope boundary: staging and CI proof only. Every extension preserves evidence classes,
+- Scope boundary: CI/local proof plus authorized staging proof where production-like
+  budgets or server behavior are claimed. Every feature preserves evidence classes,
   quantity conservation, privacy, bounded queues, and asynchronous database work.
 - Dependencies: M8 compatibility profile and native proof precede the M9 extensions;
   #32–#37, #44, #45, and #55–#58 own the implementation slices. Issue #35 is the
@@ -260,13 +263,18 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   batch and rerun affected checks plus final CI. No distributable artifact or version bump
   is part of M9 verification.
 - Current evidence: PR #119 merged as `22b892e` and repairs the Fabric durability GameTest;
-  PR #120's previous head passed CI with nine validated report scenarios. A current
-  draft update adds six one-second idle reports for a 15-report set; the latest local
-  Fabric GameTests and report validator passed, while the current NeoForge queue-burst
-  batch remains unverified. #32 remains open: staging-derived budgets, representative
-  third-party adapter workloads, and production-like live-server tick-impact evidence
-  are still missing. CI/local measurements are regression evidence, not production
-  budgets. Numeric thresholds stay unset until measured in authorized staging.
+  PR #120's previous head passed CI with nine validated report scenarios. Head `7c93be1`
+  added six one-second idle reports; its 15-report CI run 37132314252 is still in progress.
+  The local validator now passes 38 tests, and local NeoForge compile/unit tests plus Fabric
+  main, unit-test, and GameTest compilation succeed. The updated correlation workload adds
+  500 malformed component-payload repetitions with one decode-cache insertion and 499 hits;
+  the current head still needs CI report validation. Local NeoForge and Fabric GameTest runs
+  were interrupted before complete suite results: NeoForge correlation and idle probes passed
+  but queue-burst remains unverified; Fabric completed six of seven tests before the runner
+  was stopped. #32 remains open: staging-derived budgets, representative third-party adapter
+  workloads, and production-like live-server tick-impact evidence are still missing.
+  CI/local measurements are regression evidence, not production budgets.
+  Numeric thresholds stay unset until measured in authorized staging.
 - Batch research checkpoint (2026-10-02): existing GitHub milestone #5 remains the M9
   boundary; its 12 open issues are #32–#37, #44–#45, and #55–#58. The pinned
   `1.2.10-1.21.1` GriefLogger profile and prior M9 comparison found no additional
