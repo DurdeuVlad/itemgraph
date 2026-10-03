@@ -4,6 +4,7 @@ import com.itemgraph.audit.AdminMutationCapture;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.tracker.ItemEntityTracker;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
@@ -133,7 +134,8 @@ public class ItemEntityEventListener {
         if (player == null || itemEntity == null || player.level().isClientSide()) {
             return;
         }
-        if (AdminMutationCapture.isItemGraphManagedDropInProgress()) {
+        if (player instanceof ServerPlayer serverPlayer
+                && AdminMutationCapture.isItemGraphManagedDropInProgress(serverPlayer)) {
             return;
         }
         // A canceled toss removes the item from inventory but never adds the entity to the world.

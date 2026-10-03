@@ -82,6 +82,12 @@ public final class AdminMutationConformanceFixture {
                 "item replace entity @s armor.head with minecraft:iron_helmet");
         helper.assertTrue(player.getInventory().getItem(39).is(Items.IRON_HELMET),
                 "/item replace must set the selected entity equipment slot");
+        player.getInventory().setItem(0, new ItemStack(Items.DIAMOND, 3));
+        commands.performPrefixedCommand(commandSource,
+                "item replace entity @s weapon.mainhand with minecraft:iron_ingot 4");
+        helper.assertTrue(player.getInventory().getItem(0).is(Items.IRON_INGOT)
+                        && player.getInventory().getItem(0).getCount() == 4,
+                "/item replace must replace an occupied slot with the exact new stack");
         ArmorStand targetStand = EntityType.ARMOR_STAND.create(helper.getLevel());
         helper.assertTrue(targetStand != null, "could not create the non-player entity fixture");
         String targetStandTag = "itemgraph_issue33_" + targetStand.getUUID().toString().replace("-", "");
@@ -197,6 +203,7 @@ public final class AdminMutationConformanceFixture {
                         && helper.getLevel().getBlockState(creativeBreakPos).isAir(),
                 "creative block-break fixture must remove the block and return success");
         // The player menu's hotbar starts at slot 36; packet slot 1 is the crafting grid.
+        player.getInventory().setItem(0, new ItemStack(Items.DIAMOND, 3));
         var creativePacket = new ServerboundSetCreativeModeSlotPacket(36, new ItemStack(Items.IRON_INGOT, 4));
         player.connection.handleSetCreativeModeSlot(creativePacket);
         helper.assertTrue(player.getInventory().getItem(0).is(Items.IRON_INGOT)
@@ -246,7 +253,7 @@ public final class AdminMutationConformanceFixture {
             assertItemDeltas(helper, watermark.observationId(), playerUuid, mutationIds, containerPos,
                     targetStand.getUUID().toString());
             assertTransformations(helper, watermark.transformationId(), mutationIds);
-            assertCreativeTransformations(helper, watermark.transformationId(), mutationIds);
+            assertNoCreativeTransformations(helper, watermark.transformationId());
             assertRawCommandHistorySuppressesItemCommands(helper, watermark.auditId(), playerUuid);
             assertManagedDropsAreNotDuplicated(helper, watermark.observationId(), playerUuid);
                 })
@@ -332,6 +339,14 @@ public final class AdminMutationConformanceFixture {
                     helper.assertTrue(attempt.mutationId().equals(payload.get("mutation_event_id").getAsString())
                                     && attempt.root().equals(row.subjectId()),
                             "command completion must reuse the matching attempt mutation ID and command root");
+                    if ("item".equals(row.subjectId())
+                            && ("ADMIN_ITEM_COMMAND_EFFECT".equals(row.eventType())
+                            || payload.has("mutation_kind"))) {
+                        helper.assertTrue(payload.has("mutation_kind")
+                                        && Set.of("item_replace", "item_modify")
+                                        .contains(payload.get("mutation_kind").getAsString()),
+                                "item completion must retain its specific mutation kind under the stable item command root");
+                    }
                     String linkedAttempt = payload.get("command_attempt_event_id").getAsString();
                     if (invalidItemAttemptEvents.contains(linkedAttempt)) {
                         helper.assertTrue("ADMIN_ITEM_COMMAND_FAILURE".equals(row.eventType()),
@@ -446,11 +461,11 @@ public final class AdminMutationConformanceFixture {
                 default -> helper.fail("unexpected issue #33 audit event " + row.eventType());
             }
         }
-        helper.assertTrue(giveAttempts == 4 && clearAttempts == 3 && itemAttempts == 9,
+        helper.assertTrue(giveAttempts == 4 && clearAttempts == 3 && itemAttempts == 10,
                 "denied, invalid-item, nested, overflow, clear, and item commands must retain typed attempts");
         helper.assertTrue(invalidItemAttemptEvents.size() == 1 && invalidItemFailures == 1,
                 "invalid item parse must link exactly one failed outcome to its typed attempt");
-        helper.assertTrue(effects == 12 && failures == 3 && unresolvedEntitySlots == 2
+        helper.assertTrue(effects == 13 && failures == 3 && unresolvedEntitySlots == 2
                         && unresolvedNoDeltaResults == 1,
                 "confirmed, permission-denied, and failed command outcomes must remain distinct; observed effects="
                         + effects + " failures=" + failures + " unresolvedEntitySlots=" + unresolvedEntitySlots
@@ -485,7 +500,8 @@ public final class AdminMutationConformanceFixture {
                 JOIN ig_item_fingerprints fingerprint ON fingerprint.id = obs.fingerprint_id
                 WHERE obs.id > ?
                   AND obs.source_type = 'ITEMGRAPH_INTERNAL'
-                  AND obs.action_type IN ('ADMIN_ITEM_CREATE', 'ADMIN_ITEM_REMOVE', 'CREATIVE_ITEM_CREATE')
+                  AND obs.action_type IN ('ADMIN_ITEM_CREATE', 'ADMIN_ITEM_REMOVE',
+                                          'CREATIVE_ITEM_CREATE', 'CREATIVE_ITEM_REMOVE')
                 ORDER BY obs.id
                 """;
         List<ItemDelta> rows = new ArrayList<>();
@@ -506,7 +522,7 @@ public final class AdminMutationConformanceFixture {
             throw new IllegalStateException("Could not read issue #33 item deltas", failure);
         }
 
-        helper.assertTrue(rows.size() == 12, "issue #33 must persist exactly twelve quantity deltas");
+        helper.assertTrue(rows.size() == 15, "issue #33 must persist exactly fifteen quantity deltas");
         helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("ADMIN_ITEM_CREATE")
                         && row.amount() == 5 && row.itemId().equals("minecraft:diamond")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
@@ -560,10 +576,52 @@ public final class AdminMutationConformanceFixture {
                         && row.amount() == 1 && row.itemId().equals("minecraft:iron_helmet")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
                 "/item replace must persist the exact equipment-slot creation");
+        ItemDelta replacedDiamondStack = rows.stream().filter(row -> row.action().equals("ADMIN_ITEM_REMOVE")
+                && row.amount() == 3 && row.itemId().equals("minecraft:diamond")
+                && row.sourceType().equals("PLAYER") && row.targetType().equals("UNKNOWN"))
+                .findFirst().orElse(null);
+        ItemDelta replacementIronStack = rows.stream().filter(row -> row.action().equals("ADMIN_ITEM_CREATE")
+                && row.amount() == 4 && row.itemId().equals("minecraft:iron_ingot")
+                && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER"))
+                .findFirst().orElse(null);
+        helper.assertTrue(replacedDiamondStack != null && replacementIronStack != null,
+                "/item replace must record the old and new occupied-slot stacks as separate quantity deltas");
+        if (replacedDiamondStack != null && replacementIronStack != null) {
+            JsonObject removed = JsonParser.parseString(replacedDiamondStack.rawData()).getAsJsonObject();
+            JsonObject created = JsonParser.parseString(replacementIronStack.rawData()).getAsJsonObject();
+            String attemptId = removed.get("command_attempt_event_id").getAsString();
+            Attempt attempt = mutationIds.commands().get(attemptId);
+            helper.assertTrue(removed.get("mutation_event_id").getAsString()
+                            .equals(created.get("mutation_event_id").getAsString())
+                            && "item_replace".equals(removed.get("mutation_kind").getAsString())
+                            && "item_replace".equals(created.get("mutation_kind").getAsString())
+                            && attempt != null && "item".equals(attempt.root())
+                            && attempt.mutationId().equals(removed.get("mutation_event_id").getAsString()),
+                    "/item replace deltas must share their mutation ID while retaining the stable item command root");
+        }
+        ItemDelta removedCreativeStack = rows.stream().filter(row -> row.action().equals("CREATIVE_ITEM_REMOVE")
+                && row.amount() == 3 && row.itemId().equals("minecraft:diamond")
+                && row.sourceType().equals("PLAYER") && row.targetType().equals("UNKNOWN"))
+                .findFirst().orElse(null);
         helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("CREATIVE_ITEM_CREATE")
-                        && row.amount() == 1 && row.itemId().equals("minecraft:iron_ingot")
+                        && row.amount() == 4 && row.itemId().equals("minecraft:iron_ingot")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER")),
-                "creative slot replacement must persist the one new ingot after matching transformed quantity");
+                "creative slot replacement must persist the full new ingot stack independently");
+        ItemDelta createdCreativeStack = rows.stream().filter(row -> row.action().equals("CREATIVE_ITEM_CREATE")
+                && row.amount() == 4 && row.itemId().equals("minecraft:iron_ingot")
+                && row.sourceType().equals("UNKNOWN") && row.targetType().equals("PLAYER"))
+                .findFirst().orElse(null);
+        helper.assertTrue(removedCreativeStack != null && createdCreativeStack != null,
+                "creative replacement must persist both exact before and after slot quantities");
+        if (removedCreativeStack != null && createdCreativeStack != null) {
+            JsonObject removed = JsonParser.parseString(removedCreativeStack.rawData()).getAsJsonObject();
+            JsonObject created = JsonParser.parseString(createdCreativeStack.rawData()).getAsJsonObject();
+            helper.assertTrue(removed.get("mutation_event_id").getAsString()
+                            .equals(created.get("mutation_event_id").getAsString())
+                            && "undifferentiated".equals(removed.get("cause_status").getAsString())
+                            && "undifferentiated".equals(created.get("cause_status").getAsString()),
+                    "creative packet replacement must retain one shared event ID and unknown causal subtype");
+        }
         helper.assertTrue(rows.stream().anyMatch(row -> row.action().equals("CREATIVE_ITEM_CREATE")
                         && row.amount() == 3 && row.itemId().equals("minecraft:gold_nugget")
                         && row.sourceType().equals("UNKNOWN") && row.targetType().equals("GROUND")),
@@ -653,7 +711,7 @@ public final class AdminMutationConformanceFixture {
                                 && result.getString("result_item").equals("minecraft:iron_helmet")
                                 && !result.getString("source_hash").equals(result.getString("result_hash")),
                         "component transformation must preserve item type and quantity while changing fingerprint");
-                helper.assertTrue(details.contains("cause=item")
+                helper.assertTrue(details.contains("cause=item_modify")
                                 && details.contains("mutation_event_id=" + (attempt == null ? "" : attempt.mutationId()))
                                 && attempt != null && "item".equals(attempt.root()),
                         "component transformation must link its cause and shared attempt mutation ID");
@@ -665,8 +723,7 @@ public final class AdminMutationConformanceFixture {
         }
     }
 
-    private static void assertCreativeTransformations(GameTestHelper helper, long watermark,
-                                                       MutationIds mutationIds) {
+    private static void assertNoCreativeTransformations(GameTestHelper helper, long watermark) {
         String sql = """
                 SELECT transformation.quantity, transformation.details,
                        source.item_id AS source_item, result.item_id AS result_item
@@ -681,21 +738,11 @@ public final class AdminMutationConformanceFixture {
              var statement = connection.prepareStatement(sql)) {
             statement.setLong(1, watermark);
             try (var result = statement.executeQuery()) {
-                helper.assertTrue(result.next(),
-                        "creative replacement of a matching stack must persist its exact transformation");
-                String details = result.getString("details");
-                String mutationId = detailsValue(details, "mutation_event_id=");
-                helper.assertTrue(result.getInt("quantity") == 3
-                                && result.getString("source_item").equals("minecraft:diamond")
-                                && result.getString("result_item").equals("minecraft:iron_ingot")
-                                && details.contains("cause=creative_slot")
-                                && mutationIds.creative().contains(mutationId),
-                        "creative transformation must conserve three items and link its slot mutation ID");
                 helper.assertTrue(!result.next(),
-                        "the fixture must produce exactly one creative item transformation");
+                        "an undifferentiated creative replacement must not claim an item transformation");
             }
         } catch (SQLException failure) {
-            throw new IllegalStateException("Could not verify issue #33 creative transformations", failure);
+            throw new IllegalStateException("Could not verify absence of issue #33 creative transformations", failure);
         }
     }
 

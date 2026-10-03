@@ -567,6 +567,12 @@ public final class FabricNativeAuditEventListener {
                 || AdminMutationCapture.captureCreativeDrop(player, itemEntity, true)) {
             return;
         }
+        // A bounded or failed command snapshot may not identify the recipient of
+        // an accepted overflow entity. Keep it under the unresolved command
+        // outcome instead of misattributing it as a player-initiated drop.
+        if (AdminMutationCapture.isItemGraphManagedDropInProgress(player)) {
+            return;
+        }
         if (player == null || itemEntity == null || originalStack == null || originalStack.isEmpty()
                 || actionType == null || player.level().isClientSide() || itemEntity.isRemoved()) {
             return;

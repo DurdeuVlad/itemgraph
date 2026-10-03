@@ -1026,8 +1026,15 @@ shared capture service in one paired GameTest run:
   as unresolved;
 - `/clear` includes crafting-grid slots in its before/after snapshot and records
   the exact signed removal when a crafting slot matches;
-- replacing three remaining diamonds with four iron ingots records a three-item
-  creative transformation and one explicit creative creation, preserving count;
+- a `/give` target snapshot above the 128-target bound and a failed inventory
+  snapshot each produce unresolved outcomes and suppress ordinary player-drop
+  attribution for their recipients on Fabric, while preserving an unrelated
+  player's drop in the same synchronous scope;
+- replacing three diamonds with four iron ingots by creative packet records a
+  three-item removal and four-item creation sharing one mutation ID, with no
+  inferred transformation; replacing an occupied slot with `/item replace` uses
+  the same separate-delta contract, while `/item modify` alone emits the explicit
+  transformation;
 - creative inventory evidence records `cause=creative_inventory_packet` and
   `cause_status=undifferentiated`; it does not guess clone versus pick-block;
 - `/item replace block` records the exact created quantity at the selected

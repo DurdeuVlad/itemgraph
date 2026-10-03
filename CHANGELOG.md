@@ -22,8 +22,12 @@ The project follows a simple pre-1.0 development changelog model.
   `CREATIVE_BLOCK_RESULT` events and explicitly report zero player-inventory
   quantity delta. Paired GameTests cover creative placement and destruction plus
   linked invalid-item failure outcomes. Attempts, outcomes, and observed deltas
-  share mutation IDs; `/item modify` and creative slot replacements persist canonical
-  transformations and conserve quantity. `/item ... from block/entity` evidence
+  share mutation IDs; `/item modify` persists explicit canonical transformations,
+  while creative packet and `/item replace` stack changes persist separate removal
+  and creation deltas without inferring a causal transformation. Bounded or failed
+  `/give` recipient snapshots retain an unresolved outcome and cannot fall through
+  to player-drop attribution; unrelated players' drops remain independently
+  capturable during the command. `/item ... from block/entity` evidence
   retains the copied-from slot and stack without treating a copy as source removal.
   Nested `/execute as` outcomes keep the original issuer as actor and store a differing
   effective entity as execution-context evidence. The implementation leaves clone

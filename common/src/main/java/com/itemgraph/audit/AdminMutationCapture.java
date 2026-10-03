@@ -22,10 +22,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -78,6 +80,7 @@ public final class AdminMutationCapture {
         private final Boolean commandActorPermission;
         private final Endpoint copySource;
         private final List<Endpoint> endpoints;
+        private final Set<UUID> giveTargetUuids = new HashSet<>();
         private final List<ItemEntity> acceptedDrops = new ArrayList<>();
         private int rejectedEvidence;
         private String incompleteReason;
@@ -114,20 +117,34 @@ public final class AdminMutationCapture {
                                           Collection<ServerPlayer> targets) {
         PendingCommand pending = claimPendingCommand(source, operation);
         List<Endpoint> endpoints = new ArrayList<>();
+        Set<UUID> scopeTargetIds = new HashSet<>();
         String captureFailure = null;
-        try {
-            if (targets != null && targets.size() <= MAX_TARGETS) {
+        if ("give".equals(operation) && targets != null) {
+            try {
                 for (ServerPlayer target : targets) {
-                    if (target != null && !target.level().isClientSide()) {
+                    if (target != null) scopeTargetIds.add(target.getUUID());
+                }
+            } catch (RuntimeException failure) {
+                captureFailure = "target_identity_snapshot_failed:" + failure.getClass().getSimpleName();
+            }
+        }
+        try {
+            if (captureFailure == null && targets != null && targets.size() <= MAX_TARGETS) {
+                for (ServerPlayer target : targets) {
+                    if (target == null) continue;
+                    if (!target.level().isClientSide()) {
                         endpoints.add(snapshotPlayer(target));
                     }
                 }
             }
         } catch (RuntimeException failure) {
             endpoints.clear();
-            captureFailure = "snapshot_failed:" + failure.getClass().getSimpleName();
+            if (captureFailure == null) {
+                captureFailure = "snapshot_failed:" + failure.getClass().getSimpleName();
+            }
         }
         MutationScope scope = commandScope(operation, source, endpoints, pending);
+        scope.giveTargetUuids.addAll(scopeTargetIds);
         if (pending != null && !pending.attemptPersisted()) {
             scope.incompleteReason = "command_attempt_queue_rejected";
         }
@@ -153,7 +170,7 @@ public final class AdminMutationCapture {
     private static PendingCommand claimPendingCommand(CommandSourceStack source, String operation) {
         PendingCommand pending = PENDING_COMMAND.get();
         if (pending == null) return null;
-        if (!pending.root().equals(operation)
+        if (!pending.root().equals(commandRoot(operation))
                 || (!pending.nestedExecute() && !Objects.equals(pending.actorUuid(), actorUuid(source)))) {
             PENDING_COMMAND.remove();
             return null;
@@ -311,10 +328,15 @@ public final class AdminMutationCapture {
         return scopes != null && scopes.stream().anyMatch(scope -> "give".equals(scope.operation));
     }
 
-    public static boolean isItemGraphManagedDropInProgress() {
+    /** Returns whether a give/creative scope owns a drop from this exact player. */
+    public static boolean isItemGraphManagedDropInProgress(ServerPlayer player) {
+        if (player == null) return false;
         Deque<MutationScope> scopes = SCOPES.get();
-        return scopes != null && scopes.stream().anyMatch(scope -> "give".equals(scope.operation)
-                || "creative_slot".equals(scope.operation));
+        if (scopes == null) return false;
+        UUID playerUuid = player.getUUID();
+        return scopes.stream().anyMatch(scope -> "creative_slot".equals(scope.operation)
+                ? scope.creativePlayer == player
+                : "give".equals(scope.operation) && scope.giveTargetUuids.contains(playerUuid));
     }
 
     /** Called only after the loader has confirmed the dropped entity entered the world. */
@@ -725,7 +747,7 @@ public final class AdminMutationCapture {
             return;
         }
         if (scope.incompleteReason != null || scope.rejectedEvidence > 0) {
-            recordScopedOutcome(scope, "ADMIN_ITEM_COMMAND_UNRESOLVED", scope.operation,
+            recordScopedOutcome(scope, "ADMIN_ITEM_COMMAND_UNRESOLVED", commandRoot(scope.operation),
                     "outcome=unresolved reason=" + (scope.incompleteReason == null
                             ? "evidence_queue_rejected:" + scope.rejectedEvidence : scope.incompleteReason)
                             + " result=" + result + " target_count=" + scope.endpoints.size()
@@ -736,7 +758,7 @@ public final class AdminMutationCapture {
             String unresolvedReason = completed
                     ? "command_reported_effect_without_captured_delta"
                     : "mutation_observed_before_command_exception";
-            recordScopedOutcome(scope, "ADMIN_ITEM_COMMAND_UNRESOLVED", scope.operation,
+            recordScopedOutcome(scope, "ADMIN_ITEM_COMMAND_UNRESOLVED", commandRoot(scope.operation),
                     "outcome=unresolved reason=" + unresolvedReason + " result=" + result
                             + " target_count=" + scope.endpoints.size()
                             + " observed_mutations=" + observedChanges);
@@ -744,7 +766,7 @@ public final class AdminMutationCapture {
         }
         String eventType = completed && observedChanges > 0
                 ? "ADMIN_ITEM_COMMAND_EFFECT" : "ADMIN_ITEM_COMMAND_FAILURE";
-        recordScopedOutcome(scope, eventType, scope.operation,
+        recordScopedOutcome(scope, eventType, commandRoot(scope.operation),
                 "outcome=" + (completed ? "confirmed_effect" : reason)
                         + " result=" + result + " target_count=" + scope.endpoints.size()
                         + " mutation_count=" + observedChanges);
@@ -788,12 +810,16 @@ public final class AdminMutationCapture {
             return;
         }
         if (before != null && after != null && !before.item().fingerprintHash().equals(after.item().fingerprintHash())) {
-            int transformed = Math.min(before.count(), after.count());
+            // A completed /item modify operation establishes a transformation. A
+            // replacement command or creative packet proves only the before/after
+            // slot deltas, so retain independent removal and creation evidence.
+            int transformed = "item_modify".equals(scope.operation)
+                    ? Math.min(before.count(), after.count()) : 0;
             if (transformed > 0 && endpoint.player() != null) {
                 UUID event = UUID.randomUUID();
                 boolean accepted = InternalObservationService.getInstance().submitTransformation(
                         new InternalObservationService.InternalTransformation(System.currentTimeMillis(),
-                                "creative_slot".equals(scope.operation) ? "CREATIVE_ITEM_TRANSFORM" : "ADMIN_ITEM_TRANSFORM",
+                                "ADMIN_ITEM_TRANSFORM",
                                 scopeActorUuid(scope), scopeActorName(scope),
                                 endpoint.level(), endpoint.x(), endpoint.y(), endpoint.z(),
                                 before.item(), after.item(), transformed,
@@ -1044,6 +1070,12 @@ public final class AdminMutationCapture {
         raw.addProperty("evidence", eventType.toLowerCase(java.util.Locale.ROOT));
         raw.addProperty("subject", bounded(subject));
         raw.addProperty("detail", bounded(detail));
+        if (scope != null) {
+            raw.addProperty("operation", commandRoot(scope.operation));
+            if (!commandRoot(scope.operation).equals(scope.operation)) {
+                raw.addProperty("mutation_kind", scope.operation);
+            }
+        }
         raw.addProperty("has_operator_permission", scope != null && scope.commandActorPermission != null
                 ? scope.commandActorPermission : source.hasPermission(2));
         raw.addProperty("actor_kind", scope == null ? actorKind(source) : scopeActorKind(scope));
@@ -1124,7 +1156,10 @@ public final class AdminMutationCapture {
         if (scope.commandAttemptEventId != null) {
             raw.addProperty("command_attempt_event_id", scope.commandAttemptEventId);
         }
-        raw.addProperty("operation", scope.operation);
+        raw.addProperty("operation", commandRoot(scope.operation));
+        if (!commandRoot(scope.operation).equals(scope.operation)) {
+            raw.addProperty("mutation_kind", scope.operation);
+        }
         if ("creative_slot".equals(scope.operation)) {
             raw.addProperty("cause", "creative_inventory_packet");
             raw.addProperty("cause_status", "undifferentiated");
@@ -1143,6 +1178,10 @@ public final class AdminMutationCapture {
         if (scope.copySource != null) raw.add("copy_source", endpointEvidenceJson(scope.copySource));
         raw.addProperty("staff_private", true);
         return raw;
+    }
+
+    private static String commandRoot(String operation) {
+        return "item_replace".equals(operation) || "item_modify".equals(operation) ? "item" : operation;
     }
 
     private static JsonObject endpointEvidenceJson(Endpoint endpoint) {

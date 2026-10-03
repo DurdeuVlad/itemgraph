@@ -82,14 +82,14 @@ abstract class AdminItemMutationMixin {
     @WrapMethod(method = "setBlockItem")
     private static int itemgraph$captureSetBlock(CommandSourceStack source, BlockPos pos, int slot,
             ItemStack stack, Operation<Integer> original) throws Throwable {
-        return itemgraph$captureBlock(source, pos, slot, "item",
+        return itemgraph$captureBlock(source, pos, slot, "item_replace",
                 () -> original.call(source, pos, slot, stack));
     }
 
     @WrapMethod(method = "modifyBlockItem")
     private static int itemgraph$captureModifyBlock(CommandSourceStack source, BlockPos pos, int slot,
             Holder<LootItemFunction> modifier, Operation<Integer> original) throws Throwable {
-        return itemgraph$captureBlock(source, pos, slot, "item",
+        return itemgraph$captureBlock(source, pos, slot, "item_modify",
                 () -> original.call(source, pos, slot, modifier));
     }
 
@@ -97,7 +97,7 @@ abstract class AdminItemMutationMixin {
     private static int itemgraph$captureSetEntity(CommandSourceStack source,
             Collection<? extends Entity> targets, int slot, ItemStack stack, Operation<Integer> original)
             throws Throwable {
-        return itemgraph$captureEntities(source, targets, slot, "item",
+        return itemgraph$captureEntities(source, targets, slot, "item_replace",
                 () -> original.call(source, targets, slot, stack));
     }
 
@@ -105,7 +105,7 @@ abstract class AdminItemMutationMixin {
     private static int itemgraph$captureModifyEntity(CommandSourceStack source,
             Collection<? extends Entity> targets, int slot, Holder<LootItemFunction> modifier,
             Operation<Integer> original) throws Throwable {
-        return itemgraph$captureEntities(source, targets, slot, "item",
+        return itemgraph$captureEntities(source, targets, slot, "item_modify",
                 () -> original.call(source, targets, slot, modifier));
     }
 
