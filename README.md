@@ -36,8 +36,11 @@ keep their original GriefLogger database under their own archive policy.
 
 To import historical data, configure `grieflogger_database_path` in
 `config/itemgraph.properties` on Fabric or the corresponding NeoForge config.
-Leave it unset for native-only operation. The legacy database remains read-only
-from ItemGraph. ItemGraph-owned storage defaults to SQLite; set `database_backend=mysql_mariadb`
+Both configs default this path to `database.db`; if that file is absent, the
+legacy importer is inactive and ItemGraph runs natively. Point it at a known
+missing file for native-only operation on a server where another `database.db`
+exists. The legacy database remains read-only from ItemGraph. ItemGraph-owned
+storage defaults to SQLite; set `database_backend=mysql_mariadb`
 plus `database_host`, `database_port`, `database_name`, `database_username`,
 `database_password`, `database_ssl_mode`, and `database_connection_timeout_ms` to
 use the shared MySQL/MariaDB storage contract. Optional non-unique lookup
@@ -132,14 +135,19 @@ GriefLogger / Minecraft / Mod hooks
        Query + explanation UI
 ```
 
-GriefLogger is treated as a read-only evidence source. ItemGraph maintains its own storage for supplemental observations and derived data. Confirmed cross-source copies preserve both raw rows but contribute one quantity capacity; uncertain matches remain ambiguous. Container GUI observations are session net deltas with explicit time bounds, not click history, and generic `IItemHandler` rows keep caller/cause identity UNKNOWN.
+ItemGraph owns native observations, its evidence ledger, and derived data.
+During migration, a configured GriefLogger database can be read as a legacy
+source; imported rows retain provenance, confirmed cross-source copies contribute
+one quantity capacity, and uncertain matches remain ambiguous. Container GUI
+observations are session net deltas with explicit time bounds, not click history,
+and generic `IItemHandler` rows keep caller/cause identity UNKNOWN.
 
 ## MVP goals
 
 The first useful vertical slice should:
 
-1. Read relevant GriefLogger evidence without mutating it.
-2. Record only missing high-value inventory events where necessary.
+1. Capture native ItemGraph evidence without requiring another mod.
+2. Optionally import legacy GriefLogger history read-only during migration.
 3. Canonicalize an item fingerprint.
 4. Represent inventories as graph nodes.
 5. Represent raw observations separately from inferred movement.

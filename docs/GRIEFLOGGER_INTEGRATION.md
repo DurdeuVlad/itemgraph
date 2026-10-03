@@ -12,12 +12,13 @@ read-only historical importer and temporary coexistence artifact only.
 | GriefLogger installation | ItemGraph behavior |
 |---|---|
 | Absent | ItemGraph runs its native capture, own database, graph reconstruction, and queries. Exact coverage limits are tracked in the parity matrix. |
-| Present, importer unset | Same native-only behavior. The GriefLogger database is not opened. |
+| Present, configured source file absent | Same native-only behavior. Both loader configs default the source path to `database.db`; a missing file disables historical import. |
 | Present, importer configured | ItemGraph can read legacy SQLite evidence through read-only connections for historical migration and comparison. ItemGraph owns the imported copy and never writes to the source database. |
 
 The importer is a migration facility, not a runtime dependency or source of
 ongoing ItemGraph capture. Imported rows retain their source labels and
-provenance.
+provenance. The config path cannot be blank; when another `database.db` exists,
+set the path to a known missing file to disable import explicitly.
 
 ## Artifact selection and SQLite module compatibility
 
