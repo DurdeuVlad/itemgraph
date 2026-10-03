@@ -211,37 +211,37 @@ public final class ApiQueryBridge {
         return explanations;
     }
 
-    private static List<FingerprintRef> resolveFingerprints(Connection conn, ItemQuery query)
+    static List<FingerprintRef> resolveFingerprints(Connection conn, ItemQuery query)
             throws SQLException {
         String column;
         String value;
         boolean fuzzyName = false;
         if (query.itemId() != null) {
-            column = "item_id = ?";
+            column = "f.item_id = ?";
             value = query.itemId();
         } else if (query.customName() != null) {
-            column = "(custom_name = ? OR custom_name LIKE ?)";
+            column = "(f.custom_name = ? OR f.custom_name LIKE ?)";
             value = query.customName();
             fuzzyName = true;
         } else {
-            column = "fingerprint_hash = ?";
+            column = "f.fingerprint_hash = ?";
             value = query.fingerprintHash();
         }
 
         boolean componentPredicate = query.metadataPredicates().stream().anyMatch(predicate ->
                 predicate.kind() != com.itemgraph.query.ItemMetadataPredicate.Kind.ITEM_ID
                         && predicate.kind() != com.itemgraph.query.ItemMetadataPredicate.Kind.FINGERPRINT);
-        StringBuilder sql = new StringBuilder("SELECT id, item_id, custom_name, fingerprint_hash, component_index_state "
-                + "FROM ig_item_fingerprints WHERE " + column);
+        StringBuilder sql = new StringBuilder("SELECT f.id, f.item_id, f.custom_name, f.fingerprint_hash, "
+                + "f.component_index_state FROM ig_item_fingerprints f WHERE " + column);
         List<Object> args = new ArrayList<>();
         args.add(value);
         if (fuzzyName) {
             args.add("%" + value + "%");
         }
-        ItemMetadataSql.append(sql, args, query.metadataPredicates(), "id", "item_id", "fingerprint_hash");
+        ItemMetadataSql.append(sql, args, query.metadataPredicates(), "f.id", "f.item_id", "f.fingerprint_hash");
         sql.append(componentPredicate
-                ? " ORDER BY CASE WHEN component_index_state = 'COMPLETE' THEN 0 ELSE 1 END, id ASC LIMIT 10"
-                : " ORDER BY id ASC LIMIT 10");
+                ? " ORDER BY CASE WHEN f.component_index_state = 'COMPLETE' THEN 0 ELSE 1 END, f.id ASC LIMIT 10"
+                : " ORDER BY f.id ASC LIMIT 10");
         List<FingerprintRef> candidates = new ArrayList<>();
         try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
             for (int index = 0; index < args.size(); index++) {
