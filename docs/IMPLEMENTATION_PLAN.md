@@ -393,8 +393,12 @@ including accepted projectile-spawn evidence.
   third-party backpack or modded capability implementation; arbitrary mods must opt in,
   and their implementation-specific compatibility remains a follow-up. In the same batch,
   exercise retry executor saturation and concurrent `QUEUE_FULL` submissions, proving the
-  128-entry bound, visible rejection result, and stable retry identity. Update API docs and
-  the issue acceptance report with the evidence and this coverage limit. Do not build
+  128-entry bound, visible rejection result, and stable retry identity. Also fill the
+  10,000-row primary observation queue, verify committed native captures remain bounded in
+  the additional 1,024-row queue, and prove the worker persists deferred hopper evidence
+  after primary-queue saturation. Expose and test the exhaustion counter in `/ig status`.
+  Update API docs and the issue acceptance report with the evidence and this coverage limit.
+  Do not build
   distributable JARs or change the project version. Run both loader unit suites, both loader
   GameTest suites, and the compatibility/differential validators together after all code and
   docs are complete; rerun only if a later code correction changes their inputs.

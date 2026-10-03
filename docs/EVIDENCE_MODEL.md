@@ -170,6 +170,16 @@ row connects the exact source block position to the ground node and retains the 
 They do not cover projectile launches, bucket/container behavior, custom behaviors that do not
 use the default item spawn path, or rejected entity insertion.
 
+Committed hopper and accepted dispenser/dropper observations enter the primary bounded
+observation queue, followed by a separate bounded 1,024-row overflow queue when the primary
+queue is saturated or has deferred native work. Failed database batches retry into either
+bounded queue. One asynchronous worker drains both.
+If both bounded queues are full, ItemGraph counts the evidence as dropped and exposes the
+exhaustion count and pending overflow-queue occupancy in `/ig status`; the loader hook emits
+a throttled warning. That occupancy can include rows requeued after a failed database write.
+Shutdown attempts one write for pending rows; a failed final write is counted as dropped.
+This backpressure buffer is in-memory and does not survive a process crash.
+
 An integration using `AutomationTransferAdapter` may emit `TRANSFER_ITEM` only after its
 native operation's outermost transaction commits. The reported amount is the quantity the
 native API accepted; simulation, zero acceptance, rejection, and rollback emit no movement

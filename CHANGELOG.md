@@ -61,6 +61,10 @@ The project follows a simple pre-1.0 development changelog model.
   vanilla/API fixtures, not third-party backpack integrations. Arbitrary modded
   inventories still require an exercised supported adapter. Bounded queue saturation
   and concurrent rejection tests verify the 128-entry queue and visible `QUEUE_FULL`.
+  Native hopper/dispenser captures use an additional 1,024-entry bounded backpressure
+  queue on the same database worker; `/ig status` reports pending rows and explicit
+  exhaustion, and shutdown flushes both queues. Saturation tests verify native capture
+  retention and persistence after the primary 10,000-entry observation queue fills.
   No version bump or distributable JAR was produced.
 
 - **Issue #35 shared event taxonomy:** introduced the versioned `EventTaxonomy`

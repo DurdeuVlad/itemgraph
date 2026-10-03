@@ -83,7 +83,7 @@ public final class VanillaDispenserCapture {
             String entityUuid = entity.getUUID().toString();
             String raw = "{\"capture\":\"vanilla_dispenser_item_entity\",\"source\":\""
                     + source.pos().toShortString() + "\",\"item_entity_uuid\":\"" + entityUuid + "\"}";
-            boolean accepted = InternalObservationService.getInstance().submit(
+            boolean accepted = InternalObservationService.getInstance().submitNativeCapture(
                     new InternalObservationService.InternalObservation(
                             System.currentTimeMillis(), source.action(),
                             ContainerInteractionTracker.UNKNOWN_CALLER_UUID,
@@ -93,7 +93,7 @@ public final class VanillaDispenserCapture {
                             "GROUND", item.itemId(), raw.getBytes(StandardCharsets.UTF_8), item,
                             entity.getItem().getCount(), entityUuid, null));
             if (!accepted) {
-                reportFailure("bounded observation queue rejected dispenser item entity");
+                reportFailure("native capture backpressure queue exhausted for dispenser item entity");
             }
         } catch (RuntimeException failure) {
             reportFailure(failure.toString());

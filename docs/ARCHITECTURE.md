@@ -684,6 +684,16 @@ ItemGraph JDBC connection.
   same source event ID and immutable observation. One daemon worker and a 128-entry
   pending queue bound retry memory; other statuses are not retried. Retries are
   in-memory only and can be interrupted by process shutdown.
+- Committed vanilla hopper/dispenser observations use `InternalObservationService.submitNativeCapture`.
+  The primary observation queue holds 10,000 rows; a second bounded 1,024-row queue retains
+  native captures when the primary queue is full or already has deferred native captures.
+  The same asynchronous worker drains both queues with alternating priority, preserving
+  throughput for ordinary observations. Failed database batches retry into either bounded
+  queue, so the deferred queue's `/ig status` size is lane occupancy, not a native-origin
+  count. `/ig status` also reports `nativeCaptureBackpressureExhausted`; direct native
+  capture rejection after both queues fill is counted as dropped evidence. Shutdown makes
+  one persistence attempt for rows in both queues and counts a failed final write as dropped.
+  This is bounded in-memory backpressure, not crash-durable storage.
 - If an integration cannot identify the opposite endpoint or stable slot policy, it must
   preserve an UNKNOWN endpoint or omit the observation. It must not infer a player from
   proximity or report simulated/rolled-back movement as observed.

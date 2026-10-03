@@ -103,7 +103,7 @@ public final class NeoForgeHopperCapture {
                     .getBytes(StandardCharsets.UTF_8);
             boolean accepted;
             try {
-                accepted = InternalObservationService.getInstance().submit(
+                accepted = InternalObservationService.getInstance().submitNativeCapture(
                     new InternalObservationService.InternalObservation(
                             System.currentTimeMillis(), action,
                             ContainerInteractionTracker.UNKNOWN_CALLER_UUID,
@@ -117,7 +117,7 @@ public final class NeoForgeHopperCapture {
                 continue;
             }
             if (!accepted) {
-                reportCaptureFailure("bounded observation queue rejected a hopper delta");
+                reportCaptureFailure("native capture backpressure queue exhausted for a hopper delta");
             }
         }
     }

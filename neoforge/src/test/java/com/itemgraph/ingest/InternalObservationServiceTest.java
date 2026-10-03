@@ -482,6 +482,62 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void nativeCaptureBackpressureIsBoundedAndCountsExhaustion() {
+        for (int i = 0; i < 10_000; i++) {
+            assertTrue(service.submit(createDummyObservation(i)));
+        }
+
+        int retryCapacity = service.getNativeCaptureBackpressureCapacity();
+        for (int i = 0; i < retryCapacity; i++) {
+            assertTrue(service.submitNativeCapture(createDummyObservation(20_000 + i)),
+                    "committed native evidence must be retained in the bounded backpressure queue");
+        }
+        assertFalse(service.submitNativeCapture(createDummyObservation(30_000)),
+                "native evidence must be rejected visibly after both bounded queues fill");
+
+        assertEquals(10_000 + retryCapacity, service.getQueueSize());
+        assertEquals(retryCapacity, service.getNativeCaptureBackpressureQueueSize());
+        assertEquals(1, service.getNativeCaptureBackpressureExhausted());
+        assertEquals(1, service.getTotalDropped());
+        assertEquals(10_000 + retryCapacity, service.getTotalEnqueued());
+    }
+
+    @Test
+    void workerPersistsNativeCaptureFromBackpressureQueueAfterPrimaryQueueSaturates() throws Exception {
+        initializeTopologyDatabase();
+        service.configureOperations(10, 1, 1_000, 30_000, true);
+        for (int i = 0; i < 10_000; i++) {
+            assertTrue(service.submit(createDummyObservation(i)));
+        }
+        assertTrue(service.submitNativeCapture(new InternalObservation(
+                System.currentTimeMillis(), "HOPPER_INSERT", null, null,
+                "minecraft:overworld", 10, 64, -20,
+                "minecraft:overworld", 11.0, 64.0, -20.0,
+                "CONTAINER", DIAMOND, 3, null)),
+                "the saturated primary queue must defer rather than lose committed native evidence");
+        assertEquals(1, service.getNativeCaptureBackpressureQueueSize());
+
+        service.start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+        while (service.getTotalPersisted() < 10_001 && System.nanoTime() < deadline) {
+            service.onServerTick();
+            Thread.sleep(5);
+        }
+
+        assertEquals(10_001, service.getTotalPersisted(),
+                "primary and deferred observations must both reach the worker database");
+        assertEquals(0, service.getQueueSize());
+        assertEquals(0, service.getNativeCaptureBackpressureQueueSize());
+        assertEquals(0, service.getNativeCaptureBackpressureExhausted());
+        try (Statement statement = conn.createStatement();
+             ResultSet rows = statement.executeQuery(
+                     "SELECT COUNT(*) FROM ig_observations WHERE action_type = 'HOPPER_INSERT'")) {
+            assertTrue(rows.next());
+            assertEquals(1, rows.getInt(1), "deferred hopper evidence must be persisted exactly once");
+        }
+    }
+
+    @Test
     void atomicObservationBatchCannotBePartiallyAcceptedDuringWorkerRequeue() throws Exception {
         for (int i = 0; i < 9_999; i++) {
             assertTrue(service.submit(createDummyObservation(i)));

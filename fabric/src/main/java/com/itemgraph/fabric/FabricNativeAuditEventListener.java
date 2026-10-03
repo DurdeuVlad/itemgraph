@@ -877,7 +877,7 @@ public final class FabricNativeAuditEventListener {
         byte[] rawData = "{\"capture\":\"fabric_hopper_net_delta\",\"endpoint\":\"unknown\"}"
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8);
         try {
-            boolean accepted = InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+            boolean accepted = InternalObservationService.getInstance().submitNativeCapture(new InternalObservationService.InternalObservation(
                 System.currentTimeMillis(), delta.inserted() ? "HOPPER_INSERT" : "HOPPER_EXTRACT",
                 com.itemgraph.listener.ContainerInteractionTracker.UNKNOWN_CALLER_UUID,
                 com.itemgraph.listener.ContainerInteractionTracker.UNKNOWN_CALLER_NAME, levelName,
@@ -886,7 +886,7 @@ public final class FabricNativeAuditEventListener {
                 (double) containerPos.getZ(), "CONTAINER", delta.item().itemId(), rawData,
                 delta.item(), delta.amount(), null, null));
             if (!accepted) {
-                reportHopperCaptureFailure("bounded observation queue rejected a hopper delta");
+                reportHopperCaptureFailure("native capture backpressure queue exhausted for a hopper delta");
             }
         } catch (RuntimeException failure) {
             reportHopperCaptureFailure("observation submission failed: " + failure);
