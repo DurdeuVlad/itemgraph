@@ -104,6 +104,33 @@ jobs:
           mkdir -p "$ITEMGRAPH_PERFORMANCE_REPORT_DIR"
           ./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest
 
+      - name: Verify final disconnect evidence drains before database close
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          logs = {
+              "NeoForge": Path("build/gametest/logs/latest.log"),
+              "Fabric": Path("fabric/build/run/gameTest/logs/latest.log"),
+          }
+          for loader, path in logs.items():
+              if not path.is_file():
+                  sys.exit(f"{loader} GameTest log is missing: {path}")
+              lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+              rejected = [line for line in lines if "Rejected " in line
+                          and "after shutdown admission closed" in line]
+              disconnects = [index for index, line in enumerate(lines)
+                             if "test-mock-player left the game" in line]
+              closes = [index for index, line in enumerate(lines)
+                        if "ItemGraph database connection closed" in line]
+              if rejected:
+                  sys.exit(f"{loader} rejected final shutdown observations: {rejected[-1]}")
+              if not disconnects or not closes or closes[-1] <= disconnects[-1]:
+                  sys.exit(f"{loader} did not close ItemGraph storage after the final player disconnect")
+              print(f"{loader}: final disconnect preceded database close; no shutdown evidence was rejected")
+          PY
+
       - name: Normalize and validate native-only replay reports
         env:
           REPORT_DIR: ${{ runner.temp }}/itemgraph-differential-reports
