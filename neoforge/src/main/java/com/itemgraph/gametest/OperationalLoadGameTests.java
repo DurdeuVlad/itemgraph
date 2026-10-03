@@ -10,8 +10,6 @@ import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
 import java.sql.SQLException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Development-only operational checks. NeoForge release jar tasks exclude this package. */
@@ -26,7 +24,7 @@ public final class OperationalLoadGameTests {
 
     private OperationalLoadGameTests() { }
 
-    @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 300_000)
+    @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 6_000)
     public static void nativeAuditQueueBurstPersistsOnWorkerWithoutBlockingServerThread(GameTestHelper helper) {
         helper.assertFalse(ModList.get().isLoaded("grieflogger"),
                 "The isolated operational probe must run without GriefLogger installed");
@@ -88,35 +86,42 @@ public final class OperationalLoadGameTests {
             });
         }
 
-        var server = helper.getLevel().getServer();
-        CompletableFuture.delayedExecutor(20, TimeUnit.SECONDS).execute(() -> server.execute(() -> {
-            try {
-                helper.assertValueEqual(EVENT_COUNT, submitted.get(),
-                        "all scheduled server-thread batches must be submitted");
-                long persistedDelta = observations.getTotalPersisted() - persistedBefore;
-                long droppedDelta = observations.getTotalDropped() - droppedBefore;
-                int queueRemaining = observations.getQueueSize();
-                long durableRows = countProbeRows();
-                ItemGraph.LOGGER.info(
-                        "Issue #30 local NeoForge probe after worker-drain window: persistedDelta={} "
-                                + "droppedDelta={} queueRemaining={} durableProbeRows={}",
-                        persistedDelta, droppedDelta, queueRemaining, durableRows);
-                helper.assertTrue(maxBatchDurationNanos[0] < SERVER_TICK_BUDGET_NANOS,
-                        "one batch of bounded queue submissions exceeded the 50 ms server tick budget");
-                helper.assertValueEqual(0L, droppedDelta,
-                        "native audit queue load must not lose evidence");
-                helper.assertTrue(persistedDelta >= EVENT_COUNT,
-                        "background worker persisted only " + persistedDelta + " of " + EVENT_COUNT
-                                + " load-probe events; queueRemaining=" + queueRemaining);
-                helper.assertValueEqual(0, queueRemaining,
-                        "all native queues must drain after the probe");
-                helper.assertValueEqual(priorRows + EVENT_COUNT, durableRows,
-                        "all accepted load-probe rows must be durable in ItemGraph's SQLite ledger");
-                helper.succeed();
-            } catch (Throwable failure) {
-                helper.fail("Issue #30 load probe failed: " + failure.getMessage());
-            }
-        }));
+        helper.startSequence()
+                .thenWaitUntil(() -> {
+                    helper.assertValueEqual(EVENT_COUNT, submitted.get(),
+                            "all scheduled server-thread batches must be submitted");
+                    long persistedDelta = observations.getTotalPersisted() - persistedBefore;
+                    long droppedDelta = observations.getTotalDropped() - droppedBefore;
+                    int queueRemaining = observations.getQueueSize();
+                    helper.assertTrue(droppedDelta > 0 || (persistedDelta >= EVENT_COUNT && queueRemaining == 0),
+                            "background worker has not drained the load probe or reported evidence loss: persisted="
+                                    + persistedDelta + "/" + EVENT_COUNT + " dropped=" + droppedDelta
+                                    + " queueRemaining=" + queueRemaining);
+                })
+                .thenExecute(() -> {
+                    long persistedDelta = observations.getTotalPersisted() - persistedBefore;
+                    long droppedDelta = observations.getTotalDropped() - droppedBefore;
+                    int queueRemaining = observations.getQueueSize();
+                    long durableRows = countProbeRows();
+                    ItemGraph.LOGGER.info(
+                            "Issue #30 local NeoForge probe after worker drain: persistedDelta={} "
+                                    + "droppedDelta={} queueRemaining={} durableProbeRows={}",
+                            persistedDelta, droppedDelta, queueRemaining, durableRows);
+                    helper.assertTrue(maxBatchDurationNanos[0] < SERVER_TICK_BUDGET_NANOS,
+                            "one batch of bounded queue submissions exceeded the 50 ms server tick budget");
+                    helper.assertValueEqual(EVENT_COUNT, submitted.get(),
+                            "all scheduled server-thread batches must be submitted");
+                    helper.assertValueEqual(0L, droppedDelta,
+                            "native audit queue load must not lose evidence");
+                    helper.assertTrue(persistedDelta >= EVENT_COUNT,
+                            "background worker persisted only " + persistedDelta + " of " + EVENT_COUNT
+                                    + " load-probe events; queueRemaining=" + queueRemaining);
+                    helper.assertValueEqual(0, queueRemaining,
+                            "all native queues must drain after the probe");
+                    helper.assertValueEqual(priorRows + EVENT_COUNT, durableRows,
+                            "all accepted load-probe rows must be durable in ItemGraph's SQLite ledger");
+                })
+                .thenSucceed();
     }
 
     private static long countProbeRows() {
