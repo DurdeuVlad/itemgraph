@@ -236,6 +236,10 @@ class IngestionServiceTest {
             IngestionResult skipped = nativeOnly.runIngestion();
             assertFalse(skipped.success());
             assertEquals("GriefLogger source integration is disabled by configuration", skipped.errorMessage());
+            nativeOnly.stop();
+            nativeOnly.start();
+            assertNull(nativeOnly.getLastResult(),
+                    "a new worker lifecycle must not expose the previous source sync result");
         } finally {
             nativeOnly.stop();
         }

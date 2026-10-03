@@ -131,6 +131,7 @@ public class IngestionService {
 
             manualIngestionQueued.set(false);
             historicalImportQueued.set(false);
+            lastResult = null;
             running.set(true);
             // Schedule every 60 seconds, with an initial delay of 5 seconds
             executor.scheduleWithFixedDelay(this::runIngestionSafely, 5, 60, TimeUnit.SECONDS);
