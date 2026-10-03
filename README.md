@@ -4,9 +4,9 @@
 
 ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **Fabric and NeoForge 1.21.1**.
 
-Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time, while retaining a native audit ledger for non-item events. It does **not** assign a permanent UUID to every item. Instead, it combines raw evidence from native server hooks and optional existing logging systems such as GriefLogger, then builds an explainable temporal item-flow graph.
+Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time, while retaining a native audit ledger for non-item events. It does **not** assign a permanent UUID to every item. ItemGraph captures its own native raw evidence and builds an explainable temporal item-flow graph.
 
-**GriefLogger is optional.** The NeoForge and Fabric builds record native item-flow and supported audit events and can also read GriefLogger's SQLite database strictly read-only. Native parity coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
+**ItemGraph runs without GriefLogger.** The NeoForge and Fabric builds own their event capture, database, graph reconstruction, and queries. The optional read-only GriefLogger importer exists only to bring historical records across during migration. Native replacement coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
 
 ItemGraph records vanilla hopper, dispenser, and dropper movement on both loaders.
 Other mods can opt into exact transfer evidence through the Fabric Transfer API or
@@ -14,7 +14,7 @@ NeoForge `IItemHandler` adapter documented in [the Java API guide](docs/API.md).
 Portable inventories must provide a stable opaque inventory ID. Arbitrary third-party
 inventory calls are not globally intercepted; the owning mod must integrate the adapter.
 
-Each loader has a standard build and a GriefLogger-compatible build. For GriefLogger
+Each loader has a standard build and a temporary GriefLogger-compatible coexistence build. The standard build runs without GriefLogger. For GriefLogger
 `1.2.10-1.21.1`, install the artifact ending in
 `-<loader>-grieflogger-compatible.jar`; it omits only ItemGraph's SQLite dependency,
 keeps the MariaDB Connector/J driver for ItemGraph-owned MySQL/MariaDB storage, and
@@ -26,17 +26,18 @@ is absent. The four release files are:
 - `itemgraph-<version>-neoforge.jar`
 - `itemgraph-<version>-neoforge-grieflogger-compatible.jar`
 
-The compatible variants are a migration bridge while the M8 parity gates remain
-open. ItemGraph will switch to the standard loader jar as the only supported
-artifact only after every M8 acceptance gate, the differential replay, the
-native-only 24-hour staging window, and the recorded rollback rehearsal in [the
-cutover plan](docs/GRIEFLOGGER_PARITY.md) are complete. That cutover retires the
-GriefLogger jar dependency; it does not change the read-only importer or delete
-the retained source database copy.
+The compatible variants are a temporary migration bridge while parity gates
+remain open. They let servers run both mods during migration despite their
+bundled SQLite class conflict. Once the parity acceptance gates and native-only
+cutover evidence in [the cutover plan](docs/GRIEFLOGGER_PARITY.md) are complete,
+the standard ItemGraph jar becomes the only supported artifact. The optional
+read-only historical importer is separate from runtime event capture; operators
+keep their original GriefLogger database under their own archive policy.
 
-On Fabric, configure `grieflogger_database_path` in `config/itemgraph.properties`
-to point at GriefLogger's database file. The database remains read-only from
-ItemGraph. ItemGraph-owned storage defaults to SQLite; set `database_backend=mysql_mariadb`
+To import historical data, configure `grieflogger_database_path` in
+`config/itemgraph.properties` on Fabric or the corresponding NeoForge config.
+Leave it unset for native-only operation. The legacy database remains read-only
+from ItemGraph. ItemGraph-owned storage defaults to SQLite; set `database_backend=mysql_mariadb`
 plus `database_host`, `database_port`, `database_name`, `database_username`,
 `database_password`, `database_ssl_mode`, and `database_connection_timeout_ms` to
 use the shared MySQL/MariaDB storage contract. Optional non-unique lookup

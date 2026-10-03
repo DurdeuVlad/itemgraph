@@ -24,9 +24,9 @@ automated guilt determination.
 
 ## Solution shape
 
-ItemGraph is a server-side NeoForge mod for Minecraft 1.21.1. It combines
-read-only GriefLogger evidence with selected supplemental Minecraft event
-observations and stores an explainable temporal directed multigraph:
+ItemGraph is a server-side Minecraft mod for NeoForge and Fabric 1.21.1. It
+captures native server evidence and stores an explainable temporal directed
+multigraph. Its normal runtime needs neither GriefLogger nor its database:
 
 1. raw observations are captured or imported;
 2. item metadata is canonicalized into deterministic fingerprints;
@@ -42,9 +42,10 @@ observations and stores an explainable temporal directed multigraph:
 - Moderator: runs privileged queries and evaluates the evidence.
 - Player: may be affected by a moderation investigation; player-facing access
   must remain permission-scoped.
-- GriefLogger: supplies an external, read-only evidence source.
-- ItemGraph: owns supplemental observations, derived graph state, and
+- ItemGraph: owns native observations, raw evidence, derived graph state, and
   explanations.
+- GriefLogger: optional legacy source for read-only historical import during
+  migration; never a runtime requirement for ItemGraph capture or queries.
 - Contributor: proposes code, tests, documentation, or integrations through a
   pull request.
 - Maintainer: reviews changes, controls releases, and protects credentials.
@@ -67,7 +68,8 @@ authoritative evidence
 - Attributed outgoing quantity cannot exceed compatible available quantity
   unless creation, transformation, or destruction evidence exists.
 - A named item is distinctive evidence, not a guaranteed permanent identity.
-- GriefLogger is read-only.
+- Any configured legacy GriefLogger database is read-only; ItemGraph stores its
+  own evidence and derived data.
 - Sensitive graph access is default-deny and permission-gated.
 - Heavy queries and database work stay off the Minecraft server thread.
 
@@ -101,7 +103,7 @@ It must not silently invent a path, identity, quantity, or authorization.
 - Automated accusations or irreversible moderation decisions.
 - Public exposure of hidden inventories, bases, faction storage, or unrelated
   player identities.
-- Mutation, repair, or migration of the GriefLogger database.
+- Mutation, repair, or schema migration of a legacy GriefLogger database.
 - A client-side inventory tracker as the primary source of truth.
 
 ## Measurable outcomes
