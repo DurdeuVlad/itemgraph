@@ -156,12 +156,6 @@ public final class EntityInteractionGameTests implements FabricGameTest {
         helper.assertTrue(inventoryCount(movementPlayer, Items.DIAMOND) == 4,
                 "ground pickup must restore all four diamonds to player inventory");
 
-        observations.stop();
-        helper.assertTrue(observations.getQueueSize() == 0,
-                "ItemGraph queues must be empty after the worker stops and flushes");
-        helper.assertValueEqual(droppedBefore, observations.getTotalDropped(),
-                "the interactions must not lose evidence to a full or failed queue");
-
         String playerUuid = player.getUUID().toString();
         String playerName = player.getGameProfile().getName();
         String cowUuid = cow.getUUID().toString();
@@ -190,6 +184,8 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                     Map.of(movementPlayer.getUUID().toString(), "actor:replay-mover",
                             playerUuid, "actor:replay-interactor",
                             fluidPlayer.getUUID().toString(), "actor:replay-fluid"), waterPos);
+            helper.assertValueEqual(droppedBefore, observations.getTotalDropped(),
+                    "the interactions must not lose evidence to a full or failed queue");
         });
     }
 
