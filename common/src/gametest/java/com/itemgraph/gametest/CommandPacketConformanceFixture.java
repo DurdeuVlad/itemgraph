@@ -5,7 +5,6 @@ import net.minecraft.gametest.framework.GameTestHelper;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 
 /** Shared durable expectations for command packets executed by both loader servers. */
@@ -27,37 +26,21 @@ public final class CommandPacketConformanceFixture {
         }
     }
 
-    public static List<List<String>> snapshotQuantityObservations() {
+    public static long observationWatermark() {
         try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
              var statement = connection.createStatement();
-             var rows = statement.executeQuery("SELECT * FROM ig_observations ORDER BY id")) {
-            int columnCount = rows.getMetaData().getColumnCount();
-            List<List<String>> snapshot = new ArrayList<>();
-            while (rows.next()) {
-                List<String> values = new ArrayList<>(columnCount);
-                for (int column = 1; column <= columnCount; column++) {
-                    Object value = rows.getObject(column);
-                    values.add(encodeJdbcValue(value));
-                }
-                snapshot.add(List.copyOf(values));
-            }
-            return List.copyOf(snapshot);
-        } catch (SQLException e) {
-            throw new IllegalStateException("Could not snapshot ItemGraph quantity observations", e);
+             var rows = statement.executeQuery("SELECT COALESCE(MAX(id), 0) FROM ig_observations")) {
+            return rows.next() ? rows.getLong(1) : 0L;
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not read the ItemGraph quantity observation watermark", failure);
         }
     }
 
-    private static String encodeJdbcValue(Object value) {
-        if (value == null) {
-            return "<NULL>";
-        }
-        if (value instanceof byte[] bytes) {
-            return "byte[]:" + Base64.getEncoder().encodeToString(bytes);
-        }
-        return value.getClass().getName() + ":" + value;
+    public static List<List<String>> snapshotQuantityObservations() {
+        return EntityInteractionConformanceFixture.snapshotQuantityObservations();
     }
 
-    public static void assertPersisted(GameTestHelper helper, long watermark,
+    public static void assertPersisted(GameTestHelper helper, long watermark, long observationWatermark,
                                        String playerUuid, String playerName,
                                        List<List<String>> observationsBefore) {
         try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
@@ -95,7 +78,26 @@ public final class CommandPacketConformanceFixture {
             throw new IllegalStateException("Could not query the ItemGraph command conformance fixture", e);
         }
 
-        helper.assertValueEqual(observationsBefore, snapshotQuantityObservations(),
-                "command packets must not create or mutate item quantity observations");
+        EntityInteractionConformanceFixture.assertQuantityObservationsUnchanged(helper, observationsBefore);
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM ig_observations obs
+                     WHERE obs.id > ? AND (
+                         EXISTS (SELECT 1 FROM ig_nodes source WHERE source.id = obs.node_id
+                                 AND source.owner_uuid = ?)
+                         OR EXISTS (SELECT 1 FROM ig_nodes target WHERE target.id = obs.target_node_id
+                                    AND target.owner_uuid = ?))
+                     """)) {
+            statement.setLong(1, observationWatermark);
+            statement.setString(2, playerUuid);
+            statement.setString(3, playerUuid);
+            try (var rows = statement.executeQuery()) {
+                helper.assertTrue(rows.next(), "could not count quantity evidence from the command sender");
+                helper.assertValueEqual(0, rows.getInt(1),
+                        "command packets must not create quantity evidence for the sending player");
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not verify command packet quantity evidence", failure);
+        }
     }
 }

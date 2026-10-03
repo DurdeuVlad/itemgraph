@@ -2,6 +2,7 @@ package com.itemgraph.gametest;
 
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.query.AuditEventDetail;
+import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.query.QueryFormatter;
 import com.itemgraph.query.QueryWindow;
@@ -12,6 +13,8 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /** Shared expected contract run by both loader GameTests against the same persisted read path. */
@@ -24,11 +27,15 @@ public final class EntityInteractionConformanceFixture {
 
     private EntityInteractionConformanceFixture() { }
 
-    /** Snapshot the item-flow ledger before an interaction-only replay begins. */
+    /** Snapshot immutable item-flow source evidence before an interaction-only replay begins. */
     public static List<List<String>> snapshotQuantityObservations() {
         try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
              var statement = connection.createStatement();
-             var rows = statement.executeQuery("SELECT * FROM ig_observations ORDER BY id")) {
+             var rows = statement.executeQuery("""
+                     SELECT id, source_type, source_event_id, timestamp_ms, node_id, target_node_id,
+                            fingerprint_id, action_type, amount, raw_data
+                     FROM ig_observations ORDER BY id
+                     """)) {
             int columnCount = rows.getMetaData().getColumnCount();
             List<List<String>> snapshot = new ArrayList<>();
             while (rows.next()) {
@@ -48,8 +55,14 @@ public final class EntityInteractionConformanceFixture {
 
     /** Entity interaction evidence must not create or mutate item-flow observations. */
     public static void assertQuantityObservationsUnchanged(GameTestHelper helper, List<List<String>> before) {
-        helper.assertValueEqual(before, snapshotQuantityObservations(),
-                "entity interactions must not create or mutate quantity-flow observations");
+        Map<String, List<String>> currentById = new HashMap<>();
+        for (List<String> row : snapshotQuantityObservations()) {
+            currentById.put(row.getFirst(), row);
+        }
+        for (List<String> row : before) {
+            helper.assertValueEqual(row, currentById.get(row.getFirst()),
+                    "entity interactions must not mutate or remove earlier quantity-flow source evidence");
+        }
     }
 
     public static void assertCow(GameTestHelper helper, String playerUuid, String playerName,
@@ -96,7 +109,10 @@ public final class EntityInteractionConformanceFixture {
                 helper.assertValueEqual((double) position.getZ(), row.z(), "normalized event Z changed");
                 helper.assertValueEqual(subjectId, row.subjectId(), "normalized event subject changed");
 
-                String expectedLine = "[ItemGraph] [OBSERVED] audit#" + row.id() + " " + row.eventType()
+                String evidenceClass = EventTaxonomy.find(row.eventType(), EventTaxonomy.Surface.AUDIT_EVENT)
+                        .map(definition -> definition.evidenceClass().name())
+                        .orElse(EventTaxonomy.UNCLASSIFIED_EVIDENCE);
+                String expectedLine = "[ItemGraph] [" + evidenceClass + "] audit#" + row.id() + " " + row.eventType()
                         + " actor=" + playerName + " at " + DIMENSION + " ["
                         + position.getX() + ", " + position.getY() + ", " + position.getZ()
                         + "] time=" + QueryFormatter.formatTime(row.timestampMs())

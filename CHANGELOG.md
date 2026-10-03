@@ -44,10 +44,26 @@ The project follows a simple pre-1.0 development changelog model.
   types and unified lookup aliases now use the shared registry. Definitions
   specify evidence class, capture reliability, endpoint and quantity semantics,
   actor status, privacy class, loader support, evidence-ID contract, aliases,
-  and owning issue. #55–#57 event families and stable unresolved reason codes
-  are listed as planned until loader adapters and fixtures prove support. This
-  is a taxonomy version only; the ItemGraph mod remains 0.3.2 and no distributable
-  JAR is built.
+  and owning issue. Issue #55 now has paired Fabric and NeoForge capture for
+  explosions, pistons, flowing fluids, fire, Enderman block movement, and
+  falling blocks. Issues #56–#57 remain planned until loader adapters and
+  fixtures prove support. This is a taxonomy version only; the ItemGraph mod
+  remains 0.3.2 and no distributable JAR is built.
+
+- **Issue #55 world and environmental causes:** both loaders record confirmed
+  explosion, piston, fluid, fire, Enderman block-movement, and falling-block
+  state changes into ItemGraph-owned storage. Bounded snapshots preserve
+  confirmed deltas and emit classified unresolved evidence when coverage is
+  partial or callbacks fail. Blocked piston results are recorded as attempts,
+  separately from direct state deltas. Events do not invent player actors or
+  item quantities. CI now emits redacted cross-loader reports for explosion,
+  piston, and environmental replays; it requires exact explosion/piston
+  sequences, deterministic environmental multisets, matching fire/Enderman
+  evidence contracts, and zero whole-graph conservation or integrity
+  violations. Report audits run off-thread on a consistent read snapshot, and
+  only allowlisted cause aliases enter artifacts. Full #55 replay/conservation,
+  privacy, and incident-export acceptance remains open.
+  Mod version remains 0.3.2; no distributable JAR is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus seven allowlisted audit
   events, including namespaced entity/block `subject_id`, and a count-only

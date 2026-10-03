@@ -12,6 +12,54 @@ Testing should focus on correctness, explainability, quantity conservation, temp
 - integration tests where feasible
 - staging server controlled scenarios
 
+## Issue #55 world-cause capture conformance
+
+NeoForge and Fabric GameTests use the shared
+`ExplosionWorldEventConformanceFixture`, `PistonWorldEventConformanceFixture`,
+and `EnvironmentalWorldEventConformanceFixture` against ItemGraph's own database. The
+successful case requires a confirmed before/after block-state delta, dimension
+and block endpoint, one stable cause ID shared across affected blocks, unique
+ItemGraph evidence IDs, an unknown actor, and `quantity=NONE`. A no-block-effect
+explosion must leave no confirmed-change row. Partial snapshot coverage must
+emit `WORLD_EFFECT_UNRESOLVED` with `WORLD_EFFECT_PARTIAL`. No game-thread code
+may perform database queries or load chunks to complete the snapshot.
+The partial case builds a bounded snapshot from one loaded, one distant,
+unloaded, and one invalid candidate so the unresolved-row writer and its coverage counts are
+deterministic; it does not simulate a native explosion exceeding the candidate
+or row caps.
+
+The piston fixture triggers a real powered extension and a blocked extension.
+It checks the world result, persisted source/destination state deltas, unique
+evidence IDs, one cause ID shared across changed positions, actor absence, and
+`quantity=NONE`. Confirmed `PISTON_BLOCK_MOVE` rows require a real state delta
+and `DIRECT_STATE_DELTA` reliability. The blocked fixture persists
+`PISTON_BLOCK_ATTEMPT` with `UNCHANGED` and `GAME_CALLBACK_ATTEMPT` reliability,
+without before/after state fields. The exceptional fixture simulates a throw after one sampled block
+changes and verifies that the confirmed delta links to a
+`WORLD_EFFECT_UNRESOLVED` row with reason `WORLD_EFFECT_PARTIAL` and
+`callback_exception_count=1`. NeoForge cancellation semantics remain
+result-only unless the event source reports cancellation explicitly.
+
+**Two-loader runtime result (2026-10-03):** the consolidated command
+`:neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`
+passed. Fabric GameTest source compilation is a dependency of `:fabric:runGameTest`.
+Each isolated runtime loaded ItemGraph 0.3.2, Minecraft 1.21.1,
+and its own loader without GriefLogger; all required GameTests passed (7 on
+NeoForge and 8 on Fabric). The fixtures cover confirmed, no-effect, partial-coverage, and
+over-cap explosion snapshots; piston extension and blocked results; fluid
+spread; fire block changes; Enderman block take/place; and falling-block source
+and landing states. It also simulates a thrown fluid callback after a block
+delta and a falling-block source removal before an entity return; both must
+persist an observed delta linked to an unresolved row, and the falling source
+must not invent an entity UUID. A separate early falling-block throw must emit
+only an unresolved row without a source-removal claim. The environmental fixture removes continuing
+fire/fluid effects before the queue throughput probe. Fixture reads wait for
+durable rows at unique world coordinates because earlier queued events may
+become durable later. These results verify the named vanilla capture paths
+without GriefLogger.
+Issue #55 still has broader replay/conservation, privacy, and incident-export
+acceptance to complete; this run does not close the issue.
+
 Never use production as the primary test environment.
 
 ## Local NeoForge operations check (2026-09-30)
@@ -523,7 +571,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ItemGraphApiTest` | service-issued `SourceHandle`, registration idempotency/spoof rejection, deduplication, endpoint/field validation, malformed-map/custom-name validation, stale-source/database/shutdown outcomes, coordinate-less external inventories, opaque evidence refs, ambiguity, player-coordinate suppression, limit/window conversion, canonical separator-forgery resistance, provenance, explanation/supporting evidence, and lifecycle (15 tests) |
 | `V12PreviewApiSourcesAndExternalNodesTest` | `ig_api_sources`, `ig_nodes.external_key`, unique external identity, and coordinate-less `EXTERNAL_INVENTORY` schema (3 tests) |
 
-Last passing full loader test run: **487 tests, 0 failures, 3 skipped** (`:neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`, 2026-10-01); each loader's required GameTest passed. A later Fabric run on the same date failed the queue probe; see the native queue section below. The skipped tests require local MySQL/MariaDB services; hosted CI runs those integration tests against MariaDB 10.11 and MySQL 8.0.
+Last passing full loader test run before the 2026-10-03 consolidated issue #55 run: **487 tests, 0 failures, 3 skipped** (`:neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`, 2026-10-01); each loader's required GameTest passed. The 2026-10-03 run is recorded in the issue #55 section above. A later Fabric run on 2026-10-01 failed the queue probe; see the native queue section below. The skipped tests require local MySQL/MariaDB services; hosted CI runs those integration tests against MariaDB 10.11 and MySQL 8.0.
 
 ## M8 issue #24: command semantics and page ownership
 
@@ -984,7 +1032,7 @@ Automated tests cover these server-side boundaries:
 - `EntityInteractionEvidenceTest` verifies consuming results become `INTERACT_ENTITY_COMPLETED`, `FAIL` becomes `INTERACT_ENTITY_DENIED`, the fallback `Entity.interact` `PASS` becomes `INTERACT_ENTITY_UNRESOLVED` because later entity-use steps may still run; the intermediate `ArmorStand.interactAt` `PASS` does not create a second method-result row, missing target UUIDs are omitted, attempt metadata contains only held item ID/count/fingerprint, non-armor targets are rejected by the armor-stand result recorder, and client-side calls do not emit evidence.
 - `NativeAuditEventListenerTest` verifies the NeoForge armor-stand specific callback records one normalized attempt, canceled specific and generic callbacks are retained, canceled non-armor specifics are retained, missing target UUIDs are omitted, and the non-canceled generic armor-stand event path does not duplicate the attempt.
 - `FabricNativeAuditEventListenerTest` verifies Fabric attempt detail uses the target UUID when available, hand, target type, position, held item metadata, and completion coverage fields. `FabricUseEntityCallbackAuditTest` verifies aggregate callback order and one final non-`PASS` result when an earlier callback short-circuits before ItemGraph or a later callback returns a handled result after ItemGraph returns `PASS`.
-- NeoForge `:neoforge:runGameTestServer` and Fabric `:fabric:runGameTest` run equivalent isolated server GameTests with the ItemGraph loader integration enabled. Each creates a mock server player, records the full read-only `ig_observations` row snapshot, sends `ServerboundInteractPacket` instances through `ServerGamePacketListenerImpl.handleInteract` for an unsupported cow and an armor stand, equips diamond boots, then removes them with an empty hand. Each test separately calls inherited `ArmorStand.interact` directly and checks its `PASS` result to exercise the method return hook; that call is not attributed to a packet. Each test verifies the resulting armor-stand equipment state, stops and joins the ItemGraph worker to flush pending writes, opens ItemGraph's audit database read-only, and requires one cow attempt plus exactly two armor-stand packet attempts, two handled `interactAt` results, and one unresolved direct `interact` method result, with no duplicate rows. It requires every `ig_observations` row and column to remain identical before and after. The tests assert held-stack details and hand on attempts, `target_support=callback_only` plus `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT` for cow evidence, and `target_support=armor_stand_method_result` for armor-stand evidence. The shared fixture verifies the same normalized query rows and formatter output in both loader runs. NeoForge test classes and structure data are excluded from both NeoForge jar tasks; Fabric tests use Loom's separate `gametest` source set and test mod. CI runs both server GameTests beside both loader unit suites without packaging distributable mod jars. This validates both local packet-to-callback-to-durable-ledger paths and the direct return-hook boundary; it does not validate a live client's socket transport.
+- NeoForge `:neoforge:runGameTestServer` and Fabric `:fabric:runGameTest` run equivalent isolated server GameTests with the ItemGraph loader integration enabled. Each creates a mock server player, records immutable `ig_observations` source columns (`id`, source/event identity, timestamp, endpoints, fingerprint, action, amount, and raw payload), sends `ServerboundInteractPacket` instances through `ServerGamePacketListenerImpl.handleInteract` for an unsupported cow and an armor stand, equips diamond boots, then removes them with an empty hand. Each test separately calls inherited `ArmorStand.interact` directly and checks its `PASS` result to exercise the method return hook; that call is not attributed to a packet. Each test verifies the resulting armor-stand equipment state, stops and joins the ItemGraph worker to flush pending writes, opens ItemGraph's audit database read-only, and requires one cow attempt plus exactly two armor-stand packet attempts, two handled `interactAt` results, and one unresolved direct `interact` method result, with no duplicate rows. It requires pre-existing immutable quantity-source evidence to remain unchanged; derived `correlation_status` is allowed to advance. The tests assert held-stack details and hand on attempts, `target_support=callback_only` plus `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT` for cow evidence, and `target_support=armor_stand_method_result` for armor-stand evidence. The shared fixture verifies the same normalized query rows and formatter output in both loader runs. NeoForge test classes and structure data are excluded from both NeoForge jar tasks; Fabric tests use Loom's separate `gametest` source set and test mod. CI runs both server GameTests beside both loader unit suites without packaging distributable mod jars. This validates both local packet-to-callback-to-durable-ledger paths and the direct return-hook boundary; it does not validate a live client's socket transport.
 - `InternalObservationServiceTest.entityInteractionOutcomeSurvivesDatabaseRestartWithoutQuantityObservation` submits the denied result through the bounded audit queue, calls `stop()` without starting a worker (covering its synchronous shutdown-flush path), closes and reopens the ItemGraph SQLite database, verifies the immutable row and held fingerprint remain queryable, and asserts that no `ig_observations` quantity row was written. This does not cover worker-thread interrupt/join or a server restart.
 - `V20UnverifiedArmorStandInteractionEvidenceTest` upgrades a simulated v19 database, retains raw legacy callbacks with a disposition, supersedes linked active edges, hides disposed evidence from current flow queries, keeps `/ig event` explicit, remains idempotent, and leaves `/ig audit` healthy. The MariaDB/MySQL contract seeds equivalent legacy evidence for hosted CI.
 
@@ -997,7 +1045,8 @@ evidence/reliability/endpoint/quantity/actor/privacy/loader/owner fields,
 reason-code uniqueness, version shape, and unknown-ID behavior. It also checks
 the legacy unified-lookup aliases (including the `interact_block` mapping),
 that each shared query choice is implemented or historical-queryable on both
-loaders, and that planned #55–#57 definitions do not claim runtime support.
+loaders, and that implemented #55 definitions match their writers and planned
+#56–#57 definitions do not claim runtime support.
 They validate the shared taxonomy contract; they do not prove loader event capture,
 database persistence of new event families, or runtime parity. Those checks
 belong to the child issue fixtures and the consolidated M9 acceptance pass.

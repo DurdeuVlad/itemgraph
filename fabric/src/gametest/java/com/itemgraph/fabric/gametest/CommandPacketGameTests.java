@@ -19,6 +19,7 @@ public final class CommandPacketGameTests implements FabricGameTest {
     public void inspectCommandsExecuteFromClientPacketsAndPersistAttempts(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         long watermark = CommandPacketConformanceFixture.auditWatermark();
+        long observationWatermark = CommandPacketConformanceFixture.observationWatermark();
         List<List<String>> quantityRowsBefore = CommandPacketConformanceFixture.snapshotQuantityObservations();
 
         var ops = player.getServer().getPlayerList().getOps();
@@ -43,7 +44,8 @@ public final class CommandPacketGameTests implements FabricGameTest {
         }
 
         helper.succeedWhen(() -> CommandPacketConformanceFixture.assertPersisted(
-                helper, watermark, player.getUUID().toString(), player.getGameProfile().getName(),
+                helper, watermark, observationWatermark, player.getUUID().toString(),
+                player.getGameProfile().getName(),
                 quantityRowsBefore));
     }
 }
