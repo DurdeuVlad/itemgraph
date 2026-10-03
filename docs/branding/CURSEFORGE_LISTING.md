@@ -162,5 +162,5 @@ Displays live operational health, background ingestion checkpoints, correlation 
 - **Java**: Java 21+
 - **Environment**: **Server-Side Only**. Players do not need ItemGraph installed on their clients to join.
 - **Required**: NeoForge 1.21.1 and Java 21+.
-- **Optional Integration**: [GriefLogger](https://www.curseforge.com/minecraft/mc-mods/grieflogger) (`1.2.10+` for 1.21.1) can be installed alongside ItemGraph as an additive read-only evidence source. ItemGraph does not require GriefLogger or GriefLogger's own dependencies to start or record its supported native observations.
+- **Standalone operation**: ItemGraph records its supported native observations without GriefLogger. Installing GriefLogger does not enable or change ItemGraph's behavior. Operators can explicitly enable the read-only GriefLogger migration bridge with the loader config setting `general.grieflogger_integration_enabled` (NeoForge) or `grieflogger_integration_enabled` (Fabric).
 ```

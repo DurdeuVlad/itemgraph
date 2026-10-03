@@ -15,7 +15,7 @@ neoforge adapter┘
 ```
 
 - `core/` contains Java-only domain records (`CanonicalItem`, `CorrelationResult`, and `NodeType`) and loader-neutral ports. It must not import Minecraft, Brigadier, Fabric, NeoForge, SQLite, or JDBC packages. `verifyCoreArchitecture` enforces that source boundary.
-- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence, migrations, and GriefLogger's read-only adapter are shared runtime components here.
+- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence and migrations are shared runtime components here. The optional GriefLogger read-only migration adapter is disabled by default.
 - `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite and MariaDB Connector/J as nested Fabric jars; its compatible jar replaces the metadata, requires GriefLogger, and strips only the nested SQLite jar.
 - `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite and MariaDB Connector/J; its compatible jar requires GriefLogger, keeps MariaDB Connector/J, and omits the Jar-in-Jar SQLite module.
 
@@ -46,7 +46,7 @@ into the shared ledger. Both loaders
 share the read-only `FlowBrowserService` for coordinate inspection; GriefLogger ingestion
 remains optional and read-only on both loaders.
 
-The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the jars that require GriefLogger `1.2.10-1.21.1`.
+The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the temporary coexistence jars that require GriefLogger `1.2.10-1.21.1`.
 
 The architecture is designed around four requirements:
 
@@ -297,7 +297,7 @@ The exact factor values, candidate counts, both observation IDs, both player nam
 - A **drop** is stamped once it produces an edge, or once its window has closed with no match (a recorded negative result).
 - A drop whose window is **still open is left pending on purpose**: the pickup that explains it may simply not have been ingested yet — ingestion runs every 60s while the window is minutes long. That deferral is what stops the engine from permanently writing off drops purely for arriving near a cycle boundary.
 
-Correlation runs on the **existing ingestion worker thread**, from the same scheduled executor, immediately after each ingestion cycle completes (`IngestionService.runIngestionSafely`). Before candidate search, cross-source matching checks at most 500 unchecked ground observations; `loadPendingGroundObservations` only admits checked rows. `/ig ingest now` queues one complete ingest-and-correlate cycle with `requestIngestionAsync`; it does not read GriefLogger or search candidates on the server thread. Internal persistence, GriefLogger batch writes, and correlation transactions synchronize on the shared ItemGraph JDBC connection, preventing `autoCommit`/commit state interleaving. GriefLogger's database is not touched by correlation at all: accepted bridges write the edge, corroborating evidence rows and quantity allocations to ItemGraph's own tables in a single transaction.
+Correlation runs on the **existing ingestion worker thread**, from the same scheduled executor, after each worker cycle (`IngestionService.runIngestionSafely`). The optional GriefLogger source sync runs before correlation only when explicitly enabled. Before candidate search, cross-source matching checks at most 500 unchecked ground observations; `loadPendingGroundObservations` only admits checked rows. `/ig ingest now` queues one complete migration sync-and-correlate cycle with `requestIngestionAsync`; it does not read GriefLogger or search candidates on the server thread. Internal persistence, enabled GriefLogger batch writes, and correlation transactions synchronize on the shared ItemGraph JDBC connection, preventing `autoCommit`/commit state interleaving. GriefLogger's database is not touched by correlation at all: accepted bridges write the edge, corroborating evidence rows and quantity allocations to ItemGraph's own tables in a single transaction.
 
 ## Query execution: off-thread, reported back on-thread (Phase 6)
 
@@ -494,8 +494,8 @@ Authoritative Minecraft `ItemEntity` UUIDs are tracked only after the entity is 
 
 ## Native Container & Ground Observation (M5, 0.2.0)
 
-When GriefLogger is absent (or as additive evidence when present), ItemGraph records
-its own `ITEMGRAPH_INTERNAL` observations via `InternalObservationService` (bounded
+ItemGraph records its own `ITEMGRAPH_INTERNAL` observations via
+`InternalObservationService` (bounded
 10,000-entry async queue, batch-persisted with `INSERT OR IGNORE`). V11 adds a
 destination-sensitive internal dedup index, interval end times, edge state, and derived
 cross-source source groups. Raw observations remain unchanged; a confirmed group has one
@@ -714,7 +714,10 @@ The `/ig audit` command runs this engine on the query worker and outputs a compr
 
 ### GriefLogger
 
-GriefLogger is an external read-only evidence source.
+The GriefLogger source bridge is disabled by default. ItemGraph's native
+observation service, storage, correlation, and query paths do not probe or read a
+GriefLogger database. When an operator enables migration mode, ItemGraph uses
+read-only source connections for supported-row sync and explicit history import.
 
 ItemGraph must not:
 

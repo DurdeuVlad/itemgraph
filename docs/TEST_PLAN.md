@@ -410,6 +410,13 @@ Verify that ItemGraph reports authoritative inventory evidence independent of cl
 
 ## Performance tests
 
+Native-only startup must be tested with a valid GriefLogger-compatible SQLite
+file named `database.db` present in the game directory while
+`grieflogger_integration_enabled=false`. Verify the ItemGraph server reaches
+`Done`, native event rows persist to ItemGraph's own database, and no GriefLogger
+database connection is opened. Repeat with the setting `true` to verify the
+read-only migration path while source write attempts still fail.
+
 Measure:
 
 - event ingestion rate

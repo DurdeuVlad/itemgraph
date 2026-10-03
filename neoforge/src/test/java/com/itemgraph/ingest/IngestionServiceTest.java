@@ -182,6 +182,24 @@ class IngestionServiceTest {
     }
 
     @Test
+    void nativeOnlyModeSkipsLegacySyncAndRejectsManualMigrationRequests() {
+        IngestionService nativeOnly = new IngestionService(
+                new GriefLoggerAdapter(griefLoggerDbPath, false), dbManager);
+        try {
+            nativeOnly.start();
+            assertFalse(nativeOnly.requestIngestionAsync());
+            assertFalse(nativeOnly.requestHistoricalImportAsync());
+            assertTrue(nativeOnly.runCorrelation().success(),
+                    "native correlation must remain available in native-only mode");
+            IngestionResult skipped = nativeOnly.runIngestion();
+            assertFalse(skipped.success());
+            assertEquals("GriefLogger source integration is disabled by configuration", skipped.errorMessage());
+        } finally {
+            nativeOnly.stop();
+        }
+    }
+
+    @Test
     void testDeduplicationWhenCheckpointRewound() throws Exception {
         ingestionService.runIngestion();
         assertEquals(1, ingestionService.getTotalObservationsCount());
