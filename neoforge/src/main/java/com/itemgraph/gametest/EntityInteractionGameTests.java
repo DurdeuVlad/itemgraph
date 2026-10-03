@@ -39,7 +39,8 @@ import java.util.Map;
 public final class EntityInteractionGameTests {
     private EntityInteractionGameTests() { }
 
-    @GameTest(templateNamespace = "itemgraph", template = "empty", timeoutTicks = 2_000)
+    @GameTest(templateNamespace = "itemgraph", template = "empty",
+            batch = "zz_itemgraph_entity_interactions", timeoutTicks = 300_000)
     public static void serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         ServerPlayer fluidPlayer = helper.makeMockServerPlayerInLevel();
@@ -53,6 +54,7 @@ public final class EntityInteractionGameTests {
         player.teleportTo(targetPos.getX() + 1.0, targetPos.getY(), targetPos.getZ() + 0.5);
         player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STICK));
         InternalObservationService observations = InternalObservationService.getInstance();
+        long enqueuedBefore = observations.getTotalEnqueued();
         long persistedBefore = observations.getTotalPersisted();
         long droppedBefore = observations.getTotalDropped();
         var quantityObservationsBefore = EntityInteractionConformanceFixture.snapshotQuantityObservations();
@@ -174,7 +176,16 @@ public final class EntityInteractionGameTests {
         String targetUuid = target.getUUID().toString();
         String armorStandUuid = armorStand.getUUID().toString();
         String playerName = player.getGameProfile().getName();
-        helper.runAtTickTime(200, () -> {
+        helper.startSequence()
+                .thenWaitUntil(() -> {
+                    long enqueuedDelta = observations.getTotalEnqueued() - enqueuedBefore;
+                    long completedDelta = observations.getTotalPersisted() - persistedBefore
+                            + observations.getTotalDropped() - droppedBefore;
+                    helper.assertTrue(observations.getQueueSize() == 0 && completedDelta >= enqueuedDelta,
+                            "ItemGraph's accepted evidence did not drain: queued=" + observations.getQueueSize()
+                                    + " enqueued=" + enqueuedDelta + " completed=" + completedDelta);
+                })
+                .thenExecute(() -> {
             helper.assertTrue(observations.getTotalPersisted() > persistedBefore,
                     "server interaction packet did not persist an audit event");
             helper.assertValueEqual(droppedBefore, observations.getTotalDropped(),
@@ -294,8 +305,8 @@ public final class EntityInteractionGameTests {
                     Map.of(movementPlayer.getUUID().toString(), "actor:replay-mover",
                             playerUuid, "actor:replay-interactor",
                             fluidPlayer.getUUID().toString(), "actor:replay-fluid"), waterPos);
-            helper.succeed();
-        });
+                })
+                .thenSucceed();
     }
 
     private static int inventoryCount(ServerPlayer player, Item item) {

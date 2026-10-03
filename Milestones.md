@@ -266,6 +266,15 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   live-server tick-impact evidence. PR #120 remains draft; CI and local isolated probes
   are regression evidence, not production budgets. Numeric thresholds stay unset until
   measured in an authorized staging environment.
+- Batch research checkpoint (2026-10-02): existing GitHub milestone #5 remains the M9
+  boundary; its 12 open issues are #32–#37, #44–#45, and #55–#58. The pinned
+  `1.2.10-1.21.1` GriefLogger profile and prior M9 comparison found no additional
+  feature gap outside those tracked issues. CoreProtect separates command, inventory,
+  item, container, and block lookups into distinct action families; ItemGraph therefore
+  records administrative causes separately from command-attempt text and emits quantity
+  evidence only at confirmed mutation boundaries. NeoForge 1.21.1 `CommandEvent` is
+  cancellable and fires before execution, so it cannot prove a successful effect.
+  Visible-client inspector clicks remain unverified per the maintainer decision.
 
 ## M10: Native-only cutover and release hardening
 
