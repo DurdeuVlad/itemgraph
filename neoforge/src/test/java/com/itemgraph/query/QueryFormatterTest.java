@@ -139,6 +139,17 @@ class QueryFormatterTest {
     }
 
     @Test
+    void emptyUnifiedLookupExplainsThatNoEvidenceMatchedTheFilters() {
+        List<String> lines = QueryFormatter.formatUnifiedEvidence(List.of(),
+                "action=break_block page=1 limit=10");
+
+        assertEquals(2, lines.size());
+        assertTrue(lines.get(0).contains("action=break_block page=1 limit=10"));
+        assertEquals("[ItemGraph] No audit, item-flow, transformation, or imported evidence matched the requested filters.",
+                lines.get(1));
+    }
+
+    @Test
     void sessionNetDeltaTraceHopShowsItsFullTimeInterval() {
         NodeRef container = new NodeRef(1, "CONTAINER", null, "minecraft:overworld", 10.0, 64.0, -20.0);
         NodeRef player = new NodeRef(2, "PLAYER", "Steve", "minecraft:overworld", null, null, null);

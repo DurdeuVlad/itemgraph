@@ -1051,19 +1051,45 @@ public final class ItemGraphCommands {
                 lines = QueryFormatter.formatAuditEvents(events, filter);
                 returnedRows = events.size();
             }
-            List<QueryDispatcher.QueryAction> actions = new java.util.ArrayList<>();
-            if (standaloneCommand && effectivePage > 1) {
-                actions.add(new QueryDispatcher.QueryAction("Previous",
-                        standalonePageCommand(effectivePage - 1, session.sessionId())));
-            }
-            if (standaloneCommand && shouldOfferNextAuditPage(effectivePage, clampedLimit, offset,
-                    returnedRows)) {
-                actions.add(new QueryDispatcher.QueryAction("Next",
-                        standalonePageCommand(effectivePage + 1, session.sessionId())));
-            }
-            return QueryDispatcher.QueryOutput.found(
-                    lines, actions);
+            boolean hasNextPage = standaloneCommand
+                    && canCheckNextAuditPage(effectivePage, clampedLimit, offset, returnedRows)
+                    && hasNextAuditPage(conn, session, effectivePage, clampedLimit, offset);
+            return QueryDispatcher.QueryOutput.found(lines,
+                    auditPageActions(session, effectivePage, hasNextPage, standaloneCommand));
         });
+    }
+
+    static List<QueryDispatcher.QueryAction> auditPageActions(
+            AuditPageSession session, int effectivePage, boolean hasNextPage, boolean standaloneCommand) {
+        if (!standaloneCommand) {
+            return List.of();
+        }
+        List<QueryDispatcher.QueryAction> actions = new java.util.ArrayList<>(2);
+        if (effectivePage > 1) {
+            actions.add(new QueryDispatcher.QueryAction("Previous",
+                    standalonePageCommand(effectivePage - 1, session.sessionId())));
+        }
+        if (hasNextPage) {
+            actions.add(new QueryDispatcher.QueryAction("Next",
+                    standalonePageCommand(effectivePage + 1, session.sessionId())));
+        }
+        return List.copyOf(actions);
+    }
+
+    static boolean hasNextAuditPage(java.sql.Connection conn, AuditPageSession session,
+                                    int effectivePage, int limit, int offset) throws java.sql.SQLException {
+        int nextOffset = QueryLimits.clampPageOffset(effectivePage + 1, limit);
+        if (session.filters() != null) {
+            return !UNIFIED_EVIDENCE_QUERIES.findFiltered(conn, session.filters(), session.levelId(),
+                    session.centerX(), session.centerY(), session.centerZ(), 1, nextOffset).isEmpty();
+        }
+        if (session.exactPositions() != null && !session.exactPositions().isEmpty()) {
+            return !UNIFIED_EVIDENCE_QUERIES.findExact(conn, session.levelId(),
+                    session.exactPositions(), 1, nextOffset).isEmpty();
+        }
+        return !AUDIT_EVENT_QUERIES.find(conn, session.eventType(), session.playerName(),
+                session.window(), session.levelId(), session.centerX(), session.centerY(),
+                session.centerZ(), session.radius(), 1, nextOffset).isEmpty();
     }
 
     static void rememberPageSession(CommandSourceStack source, AuditPageSession session) {
@@ -1172,8 +1198,8 @@ public final class ItemGraphCommands {
         return "/ig page " + Math.max(1, page) + " " + sessionId;
     }
 
-    static boolean shouldOfferNextAuditPage(int effectivePage, int clampedLimit,
-                                             int offset, int returnedRows) {
+    static boolean canCheckNextAuditPage(int effectivePage, int clampedLimit,
+                                          int offset, int returnedRows) {
         if (returnedRows != clampedLimit) {
             return false;
         }

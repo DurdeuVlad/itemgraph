@@ -60,9 +60,9 @@ class ItemGraphCommandsHelpTest {
 
     @Test
     void cappedAuditPageDoesNotOfferARepeatingNextControl() {
-        assertTrue(ItemGraphCommands.shouldOfferNextAuditPage(1, 30, 0, 30));
-        assertFalse(ItemGraphCommands.shouldOfferNextAuditPage(334, 30, 9_990, 30));
-        assertFalse(ItemGraphCommands.shouldOfferNextAuditPage(334, 30, 9_990, 29));
+        assertTrue(ItemGraphCommands.canCheckNextAuditPage(1, 30, 0, 30));
+        assertFalse(ItemGraphCommands.canCheckNextAuditPage(334, 30, 9_990, 30));
+        assertFalse(ItemGraphCommands.canCheckNextAuditPage(334, 30, 9_990, 29));
     }
 
     @Test

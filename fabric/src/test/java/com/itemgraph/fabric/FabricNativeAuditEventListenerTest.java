@@ -277,6 +277,59 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
+    void rightClickInspectionPassesDoorAndDoubleChestTargetsIntoUnifiedHistoryOpener() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos chest = new BlockPos(10, 64, 10);
+        var leftChest = Blocks.CHEST.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                        net.minecraft.world.level.block.state.properties.ChestType.LEFT)
+                .setValue(net.minecraft.world.level.block.ChestBlock.FACING, Direction.NORTH);
+        BlockPos chestPartner = chest.relative(
+                net.minecraft.world.level.block.ChestBlock.getConnectedDirection(leftChest));
+        var rightChest = Blocks.CHEST.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                        net.minecraft.world.level.block.state.properties.ChestType.RIGHT)
+                .setValue(net.minecraft.world.level.block.ChestBlock.FACING, Direction.NORTH);
+        BlockPos door = new BlockPos(20, 64, 20);
+        when(level.getBlockState(chest)).thenReturn(leftChest);
+        when(level.getBlockState(chestPartner)).thenReturn(rightChest);
+        when(level.getBlockState(door)).thenReturn(Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.DoorBlock.HALF,
+                        net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER));
+        when(level.getBlockState(door.above())).thenReturn(Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.DoorBlock.HALF,
+                        net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER));
+
+        Map<BlockPos, List<com.itemgraph.query.AuditEventQueryService.ExactPosition>> opened =
+                new LinkedHashMap<>();
+        FabricNativeAuditEventListener.BlockHistoryOpener opener = (openingPlayer, openingLevel, clicked) -> {
+            opened.put(clicked, BlockInspectionTargets.resolve(openingLevel, clicked));
+            return 1;
+        };
+
+        assertEquals(InteractionResult.SUCCESS, FabricNativeAuditEventListener.handleBlockUse(
+                inspections, opener, player, level, InteractionHand.MAIN_HAND, chestPartner, Direction.UP));
+        assertEquals(InteractionResult.SUCCESS, FabricNativeAuditEventListener.handleBlockUse(
+                inspections, opener, player, level, InteractionHand.MAIN_HAND, door.above(), Direction.NORTH));
+
+        assertEquals(List.of(
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(chestPartner.getX(),
+                                chestPartner.getY(), chestPartner.getZ()),
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(chest.getX(),
+                                chest.getY(), chest.getZ())),
+                opened.get(chestPartner), "the clicked chest half must resolve both exact evidence positions");
+        assertEquals(List.of(
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(door.getX(),
+                                door.getY() + 1, door.getZ()),
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(door.getX(),
+                                door.getY(), door.getZ())),
+                opened.get(door.above()), "clicking the upper door must resolve the full two-block door");
+    }
+
+    @Test
     void acceptedBlockInspectionDoesNotEmitGameplayInteractionEvidence() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
