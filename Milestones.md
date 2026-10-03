@@ -137,14 +137,19 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 - Risk: external source identity, inventory identity, backpressure, and sensitive query
   results require explicit contracts and consumer-side permission checks.
 
-## M8: Drop-in GriefLogger parity
+## M8: Standalone GriefLogger replacement parity
 
 - Status: in progress; GitHub milestone
   https://github.com/DurdeuVlad/itemgraph/milestone/4.
-- Outcome: ItemGraph keeps `/ig` and `/itemgraph` while matching GriefLogger behavior
-  for commands, filters, inspector, events, read-only history import, storage, and
-  operations. `/gl` and `/grieflogger` are not aliases. ItemGraph owns the native audit
-  evidence needed to retire GriefLogger as a runtime dependency.
+- Outcome: ItemGraph is a standalone replacement for the documented and exact-release
+  GriefLogger 1.2.10-1.21.1 feature profile. Native capture, storage, reconstruction,
+  and queries work without the GriefLogger JAR or database; the legacy read-only
+  importer is optional and disabled by default. M8 parity is proved through
+  exact-release/source research, ItemGraph-only isolated local NeoForge tests, and
+  cross-loader CI reports. No GriefLogger runtime, staging/production access, live GUI
+  click, or release publication is required or claimed. Remaining acceptance work is
+  #24 and #31. Deployment soak, rollback, and compatible-artifact retirement are
+  separate M10 operator/release gates.
 - Delivered: V13 native audit ledger and bounded `/ig lookup` for NeoForge, shared
   Fabric capture for its supported audit events, asynchronous persistence, action/player/
   time/radius lookup, item-flow and transformation capture, read-only container
@@ -229,8 +234,9 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   retention is indefinite, and queue flush cadence is tick-configurable.
   Issue #27 is decomposed into #73 (projectile outcomes),
   #74 (block interaction outcomes), #75 (entity interaction outcomes, completed
-  in PR #86), and #76 (Ender action writer determination). Compatibility artifacts remain supported
-  until the M8 gate and the native-only cutover evidence pass.
+  in PR #86), and #76 (Ender action writer determination). Compatibility artifacts
+  remain supported until the M8 parity gates and separate M10 cutover approvals pass;
+  these checks do not make the GriefLogger runtime a dependency.
 
 ## M9: ItemGraph audit++ performance and extra events
 
