@@ -13,7 +13,7 @@ public final class AdminMutationGameTests {
     private AdminMutationGameTests() { }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty",
-            batch = "zz_itemgraph_admin_mutations", timeoutTicks = 300_000)
+            batch = "zz_itemgraph_admin_mutations", timeoutTicks = 6_000)
     @SuppressWarnings("removal")
     public static void commandsAndCreativeSlotsPersistCanonicalDeltas(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();

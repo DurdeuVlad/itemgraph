@@ -34,7 +34,7 @@ public final class OperationalLoadGameTests {
     private OperationalLoadGameTests() { }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zzzzzz_itemgraph_idle_baseline",
-            timeoutTicks = 300_000)
+            timeoutTicks = 60_000)
     public static void idleSqliteWorkerProducesNoEvidenceWork(GameTestHelper helper) {
         boolean griefLoggerInstalled = ModList.get().isLoaded("grieflogger");
         helper.assertFalse(griefLoggerInstalled, "The isolated idle probe must run without GriefLogger installed");
@@ -42,7 +42,7 @@ public final class OperationalLoadGameTests {
     }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zzzzz_itemgraph_correlation_burst",
-            timeoutTicks = 300_000)
+            timeoutTicks = 60_000)
     public static void correlationThroughputUsesPersistedQuantityEvidence(GameTestHelper helper) {
         boolean griefLoggerInstalled = ModList.get().isLoaded("grieflogger");
         helper.assertFalse(griefLoggerInstalled,

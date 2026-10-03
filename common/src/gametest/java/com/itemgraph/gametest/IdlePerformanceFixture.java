@@ -199,9 +199,9 @@ public final class IdlePerformanceFixture {
             // Keep ingestion stopped through this test server's shutdown so it cannot
             // add correlation work to the measured idle window.
             if (failureMessage != null) {
-                helper.fail(failureMessage);
+                helper.runAfterDelay(1, () -> helper.fail(failureMessage));
             } else {
-                helper.succeed();
+                helper.runAfterDelay(1, helper::succeed);
             }
         }
 
