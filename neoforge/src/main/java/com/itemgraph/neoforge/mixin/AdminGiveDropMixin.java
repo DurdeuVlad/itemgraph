@@ -23,8 +23,6 @@ public abstract class AdminGiveDropMixin {
     private void itemgraph$captureAcceptedDrop(ItemEntity entity) {
         ServerPlayer player = (ServerPlayer) (Object) this;
         boolean accepted = entity != null && entity.isAddedToLevel();
-        if (!AdminMutationCapture.captureGiveDrop(player, entity, accepted)) {
-            AdminMutationCapture.captureCreativeDrop(player, entity, accepted);
-        }
+        AdminMutationCapture.captureCreativeDrop(player, entity, accepted);
     }
 }

@@ -26,7 +26,10 @@ The project follows a simple pre-1.0 development changelog model.
   while creative packet and `/item replace` stack changes persist separate removal
   and creation deltas without inferring a causal transformation. Bounded or failed
   `/give` recipient snapshots retain an unresolved outcome and cannot fall through
-  to player-drop attribution; unrelated players' drops remain independently
+  to player-drop attribution; accepted overflow still records exact ground-output
+  evidence by target UUID, while rejected overflow records item, quantity,
+  fingerprint, and entity identity as unresolved evidence, including canceled
+  tosses. Unrelated players' drops remain independently
   capturable during the command. `/item ... from block/entity` evidence
   retains the copied-from slot and stack without treating a copy as source removal.
   Nested `/execute as` outcomes keep the original issuer as actor and store a differing

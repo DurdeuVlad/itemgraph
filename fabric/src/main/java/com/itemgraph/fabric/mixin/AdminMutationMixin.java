@@ -1,7 +1,9 @@
 package com.itemgraph.fabric.mixin;
 
 import com.itemgraph.audit.AdminMutationCapture;
+import com.itemgraph.fabric.FabricNativeAuditEventListener;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.item.ItemInput;
@@ -14,6 +16,7 @@ import net.minecraft.server.commands.ItemCommands;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.storage.loot.functions.LootItemFunction;
 import org.spongepowered.asm.mixin.Mixin;
@@ -27,6 +30,22 @@ import java.util.function.Predicate;
 /** Captures item-command and creative-slot deltas at vanilla mutation boundaries. */
 @Mixin(GiveCommand.class)
 abstract class AdminGiveMutationMixin {
+    @WrapOperation(method = "giveItem", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/server/level/ServerPlayer;drop(Lnet/minecraft/world/item/ItemStack;Z)Lnet/minecraft/world/entity/item/ItemEntity;"))
+    private static ItemEntity itemgraph$captureExactOverflowDrop(ServerPlayer player, ItemStack stack,
+            boolean dropAround, Operation<ItemEntity> original) throws Throwable {
+        boolean began = AdminMutationCapture.beginGiveDropSafely(player, stack);
+        ItemEntity entity = null;
+        try {
+            entity = original.call(player, stack, dropAround);
+            return entity;
+        } finally {
+            var deferred = AdminMutationCapture.finishGiveDropSafely(began, player, stack, entity,
+                    AdminMutationCapture.wasGiveDropAcceptedSafely(player, stack, entity));
+            FabricNativeAuditEventListener.replayDeferredGiveDrops(deferred);
+        }
+    }
+
     @WrapMethod(method = "giveItem")
     private static int itemgraph$capture(CommandSourceStack source, ItemInput input,
             Collection<ServerPlayer> targets, int count, Operation<Integer> original) throws Throwable {

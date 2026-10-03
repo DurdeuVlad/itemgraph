@@ -443,6 +443,9 @@ public final class FabricNativeAuditEventListener {
 
     /** Associates a successful server-level item insertion with the current drop call. */
     public static void onItemEntityAdded(Entity entity, boolean added) {
+        if (added && entity instanceof ItemEntity acceptedItem) {
+            AdminMutationCapture.recordGiveDropEntityAdmissionSafely(acceptedItem, true);
+        }
         if (!added || !(entity instanceof ItemEntity itemEntity)) {
             return;
         }
@@ -563,14 +566,12 @@ public final class FabricNativeAuditEventListener {
 
     private static void onItemDropped(ServerPlayer player, ItemEntity itemEntity,
                                       ItemStack originalStack, String actionType) {
-        if (AdminMutationCapture.captureGiveDrop(player, itemEntity)
-                || AdminMutationCapture.captureCreativeDrop(player, itemEntity, true)) {
+        if (AdminMutationCapture.captureCreativeDrop(player, itemEntity, true)) {
             return;
         }
-        // A bounded or failed command snapshot may not identify the recipient of
-        // an accepted overflow entity. Keep it under the unresolved command
-        // outcome instead of misattributing it as a player-initiated drop.
-        if (AdminMutationCapture.isItemGraphManagedDropInProgress(player)) {
+        // Defer same-player drops until the wrapped GiveCommand call returns its
+        // entity identity; reentrant drops are replayed as ordinary evidence.
+        if (AdminMutationCapture.deferGiveDropSafely(player, itemEntity, originalStack)) {
             return;
         }
         if (player == null || itemEntity == null || originalStack == null || originalStack.isEmpty()
@@ -593,6 +594,16 @@ public final class FabricNativeAuditEventListener {
                 "GROUND", canonical, amount, itemEntity.getUUID().toString());
         if (submitted && "DEATH_DROP".equals(actionType)) {
             markDeathEntityRecorded(itemEntity);
+        }
+    }
+
+    /** Replays non-command item entities deferred until the wrapped /give drop returned. */
+    public static void replayDeferredGiveDrops(
+            java.util.List<AdminMutationCapture.DeferredGiveDrop> deferredDrops) {
+        if (deferredDrops == null) return;
+        for (AdminMutationCapture.DeferredGiveDrop deferred : deferredDrops) {
+            if (!deferred.accepted()) continue;
+            onItemDropped(deferred.player(), deferred.entity(), deferred.stack(), "DROP_ITEM");
         }
     }
 

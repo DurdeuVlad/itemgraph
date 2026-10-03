@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
-import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +38,7 @@ public final class AdminMutationCapture {
     private static final AtomicLong UNPERSISTED_OUTCOME_DIAGNOSTICS = new AtomicLong();
     private static final AtomicLong CAPTURE_FAILURE_DIAGNOSTICS = new AtomicLong();
     private static final ThreadLocal<Deque<MutationScope>> SCOPES = new ThreadLocal<>();
+    private static final ThreadLocal<Deque<GiveDropInvocation>> GIVE_DROP_INVOCATIONS = new ThreadLocal<>();
     private static final ThreadLocal<PendingCommand> PENDING_COMMAND = new ThreadLocal<>();
     private static final ThreadLocal<Endpoint> PENDING_ITEM_COPY_SOURCE = new ThreadLocal<>();
     private static final ThreadLocal<Deque<PendingCreativeBlockBreak>> CREATIVE_BLOCK_BREAKS = new ThreadLocal<>();
@@ -53,6 +54,10 @@ public final class AdminMutationCapture {
 
     public record SlotState(String slot, StackState stack) { }
 
+    private record AcceptedDrop(ItemEntity entity, String targetPlayerUuid) { }
+    public record DeferredGiveDrop(ServerPlayer player, ItemEntity entity, ItemStack stack,
+                                   boolean accepted, boolean canceled) { }
+
     private record Endpoint(String kind, String level, double x, double y, double z,
                             ServerPlayer player, Entity entity, Container container,
                             Map<String, StackState> slots) { }
@@ -64,6 +69,20 @@ public final class AdminMutationCapture {
 
     private record PendingCreativeBlockBreak(ServerPlayer player, String subjectId, BlockPos position,
                                              String level, String eventId) { }
+
+    private static final class GiveDropInvocation {
+        private final ServerPlayer player;
+        private final ItemStack stack;
+        private final MutationScope scope;
+        private final Set<ItemEntity> acceptedEntities = Collections.newSetFromMap(new IdentityHashMap<>());
+        private final List<DeferredGiveDrop> deferredDrops = new ArrayList<>();
+
+        private GiveDropInvocation(ServerPlayer player, ItemStack stack, MutationScope scope) {
+            this.player = player;
+            this.stack = stack;
+            this.scope = scope;
+        }
+    }
 
     private static final class MutationScope {
         private final String operation;
@@ -80,8 +99,9 @@ public final class AdminMutationCapture {
         private final Boolean commandActorPermission;
         private final Endpoint copySource;
         private final List<Endpoint> endpoints;
-        private final Set<UUID> giveTargetUuids = new HashSet<>();
-        private final List<ItemEntity> acceptedDrops = new ArrayList<>();
+        private final List<AcceptedDrop> acceptedDrops = new ArrayList<>();
+        private final List<JsonObject> giveOutputRejectionDetails = new ArrayList<>();
+        private int giveOutputRejectionOmitted;
         private int rejectedEvidence;
         private String incompleteReason;
 
@@ -117,19 +137,9 @@ public final class AdminMutationCapture {
                                           Collection<ServerPlayer> targets) {
         PendingCommand pending = claimPendingCommand(source, operation);
         List<Endpoint> endpoints = new ArrayList<>();
-        Set<UUID> scopeTargetIds = new HashSet<>();
         String captureFailure = null;
-        if ("give".equals(operation) && targets != null) {
-            try {
-                for (ServerPlayer target : targets) {
-                    if (target != null) scopeTargetIds.add(target.getUUID());
-                }
-            } catch (RuntimeException failure) {
-                captureFailure = "target_identity_snapshot_failed:" + failure.getClass().getSimpleName();
-            }
-        }
         try {
-            if (captureFailure == null && targets != null && targets.size() <= MAX_TARGETS) {
+            if (targets != null && targets.size() <= MAX_TARGETS) {
                 for (ServerPlayer target : targets) {
                     if (target == null) continue;
                     if (!target.level().isClientSide()) {
@@ -144,7 +154,6 @@ public final class AdminMutationCapture {
             }
         }
         MutationScope scope = commandScope(operation, source, endpoints, pending);
-        scope.giveTargetUuids.addAll(scopeTargetIds);
         if (pending != null && !pending.attemptPersisted()) {
             scope.incompleteReason = "command_attempt_queue_rejected";
         }
@@ -328,36 +337,140 @@ public final class AdminMutationCapture {
         return scopes != null && scopes.stream().anyMatch(scope -> "give".equals(scope.operation));
     }
 
-    /** Returns whether a give/creative scope owns a drop from this exact player. */
-    public static boolean isItemGraphManagedDropInProgress(ServerPlayer player) {
+    /** Records the authoritative addFreshEntity result for the active Give drop invocation. */
+    public static void recordGiveDropEntityAdmissionSafely(ItemEntity entity, boolean accepted) {
+        try {
+            if (entity == null) return;
+            Deque<GiveDropInvocation> invocations = GIVE_DROP_INVOCATIONS.get();
+            if (accepted && invocations != null && !invocations.isEmpty()) {
+                invocations.peek().acceptedEntities.add(entity);
+            }
+        } catch (Throwable failure) {
+            if (failure instanceof ThreadDeath fatal) throw fatal;
+            recordCaptureFailure("give_drop_acceptance", "give", failure);
+        }
+    }
+
+    /** Returns true only when addFreshEntity accepted the exact entity returned by this Give call. */
+    public static boolean wasGiveDropAcceptedSafely(ServerPlayer player, ItemStack stack, ItemEntity entity) {
+        if (player == null || stack == null || entity == null) return false;
+        Deque<GiveDropInvocation> invocations = GIVE_DROP_INVOCATIONS.get();
+        if (invocations == null || invocations.isEmpty()) return false;
+        GiveDropInvocation invocation = invocations.peek();
+        return invocation.player == player && invocation.stack == stack
+                && invocation.acceptedEntities.contains(entity);
+    }
+
+    /** Defers a same-player drop until the exact GiveCommand return entity is known. */
+    public static boolean deferGiveDropSafely(ServerPlayer player, ItemEntity entity, ItemStack stack) {
+        return deferGiveDropSafely(player, entity, stack, false);
+    }
+
+    /** Defers a same-player drop and preserves cancellation while the Give result is unresolved. */
+    public static boolean deferGiveDropSafely(ServerPlayer player, ItemEntity entity, ItemStack stack,
+                                              boolean canceled) {
+        try {
+            if (player == null || entity == null || stack == null || stack.isEmpty()) return false;
+            Deque<GiveDropInvocation> invocations = GIVE_DROP_INVOCATIONS.get();
+            if (invocations == null || invocations.isEmpty()) return false;
+            GiveDropInvocation invocation = invocations.peek();
+            if (invocation.player != player) return false;
+            invocation.deferredDrops.add(new DeferredGiveDrop(player, entity, stack.copy(), false, canceled));
+            return true;
+        } catch (Throwable failure) {
+            if (failure instanceof ThreadDeath fatal) throw fatal;
+            recordCaptureFailure("give_drop_defer", "give", failure);
+            return false;
+        }
+    }
+
+    /** Returns whether a creative packet for this exact player may produce a drop. */
+    public static boolean isCreativeSlotDropInProgress(ServerPlayer player) {
         if (player == null) return false;
         Deque<MutationScope> scopes = SCOPES.get();
         if (scopes == null) return false;
-        UUID playerUuid = player.getUUID();
         return scopes.stream().anyMatch(scope -> "creative_slot".equals(scope.operation)
-                ? scope.creativePlayer == player
-                : "give".equals(scope.operation) && scope.giveTargetUuids.contains(playerUuid));
+                && scope.creativePlayer == player);
     }
 
-    /** Called only after the loader has confirmed the dropped entity entered the world. */
-    public static boolean captureGiveDrop(ServerPlayer player, ItemEntity itemEntity) {
-        return captureGiveDrop(player, itemEntity, itemEntity != null && !itemEntity.isRemoved());
-    }
-
-    /** Loader adapters pass their authoritative entity-add result explicitly. */
-    public static boolean captureGiveDrop(ServerPlayer player, ItemEntity itemEntity, boolean acceptedByWorld) {
-        if (player == null || itemEntity == null || !acceptedByWorld) return false;
-        Deque<MutationScope> scopes = SCOPES.get();
-        if (scopes == null) return false;
-        for (MutationScope scope : scopes) {
-            if (!"give".equals(scope.operation)) continue;
-            boolean isTarget = scope.endpoints.stream().anyMatch(endpoint -> endpoint.player() == player);
-            if (isTarget) {
-                scope.acceptedDrops.add(itemEntity);
-                return true;
+    /** Marks the exact GiveCommand call-site drop before the loader enters Player.drop. */
+    public static boolean beginGiveDropSafely(ServerPlayer player, ItemStack stack) {
+        try {
+            if (player == null || stack == null || stack.isEmpty()) return false;
+            Deque<MutationScope> scopes = SCOPES.get();
+            if (scopes == null) return false;
+            MutationScope scope = scopes.stream()
+                    .filter(candidate -> "give".equals(candidate.operation))
+                    .findFirst().orElse(null);
+            if (scope == null) return false;
+            Deque<GiveDropInvocation> invocations = GIVE_DROP_INVOCATIONS.get();
+            if (invocations == null) {
+                invocations = new ArrayDeque<>();
+                GIVE_DROP_INVOCATIONS.set(invocations);
             }
+            invocations.push(new GiveDropInvocation(player, stack, scope));
+            return true;
+        } catch (Throwable failure) {
+            if (failure instanceof ThreadDeath fatal) throw fatal;
+            recordCaptureFailure("give_drop_begin", "give", failure);
+            return false;
         }
-        return false;
+    }
+
+    /** Stores only the entity returned by GiveCommand's exact drop invocation. */
+    public static List<DeferredGiveDrop> finishGiveDropSafely(boolean began, ServerPlayer player, ItemStack stack,
+                                            ItemEntity itemEntity, boolean acceptedByWorld) {
+        try {
+            if (!began) return List.of();
+            Deque<GiveDropInvocation> invocations = GIVE_DROP_INVOCATIONS.get();
+            if (invocations == null || invocations.isEmpty()) return List.of();
+            GiveDropInvocation invocation = invocations.peek();
+            if (invocation.player != player || invocation.stack != stack) return List.of();
+            invocations.pop();
+            if (invocations.isEmpty()) GIVE_DROP_INVOCATIONS.remove();
+            if (itemEntity != null && acceptedByWorld) {
+                invocation.scope.acceptedDrops.add(new AcceptedDrop(itemEntity, player.getUUID().toString()));
+            } else if (itemEntity != null) {
+                boolean canceled = invocation.deferredDrops.stream()
+                        .anyMatch(deferred -> deferred.entity() == itemEntity && deferred.canceled());
+                recordGiveOutputRejection(invocation.scope, player, stack, itemEntity,
+                        canceled ? "item_toss_event_canceled"
+                                : "server_level_add_fresh_entity_returned_false");
+            }
+            List<DeferredGiveDrop> replay = new ArrayList<>();
+            for (DeferredGiveDrop deferred : invocation.deferredDrops) {
+                if (deferred.entity() != itemEntity) {
+                    replay.add(new DeferredGiveDrop(deferred.player(), deferred.entity(), deferred.stack(),
+                            invocation.acceptedEntities.contains(deferred.entity()), deferred.canceled()));
+                }
+            }
+            return List.copyOf(replay);
+        } catch (Throwable failure) {
+            if (failure instanceof ThreadDeath fatal) throw fatal;
+            recordCaptureFailure("give_drop_finish", "give", failure);
+            return List.of();
+        }
+    }
+
+    private static void recordGiveOutputRejection(MutationScope scope, ServerPlayer player,
+                                                   ItemStack stack, ItemEntity entity, String reason) {
+        CanonicalItem rejectedItem = ItemCanonicalizer.canonicalizeStack(stack.copy());
+        JsonObject rejection = new JsonObject();
+        rejection.addProperty("outcome", "rejected_ground_output");
+        rejection.addProperty("reason", reason);
+        rejection.addProperty("item_id", rejectedItem.itemId());
+        rejection.addProperty("quantity", stack.getCount());
+        rejection.addProperty("fingerprint", rejectedItem.fingerprintHash());
+        rejection.addProperty("item_entity_uuid", entity.getUUID().toString());
+        rejection.addProperty("target_player_uuid", player.getUUID().toString());
+        if (scope.giveOutputRejectionDetails.size() < MAX_TARGETS) {
+            scope.giveOutputRejectionDetails.add(rejection);
+        } else {
+            scope.giveOutputRejectionOmitted++;
+        }
+        if (scope.incompleteReason == null) {
+            scope.incompleteReason = "give_overflow_output_rejected";
+        }
     }
 
     /** Captures a creative slot packet's negative-slot item drop after world insertion. */
@@ -368,7 +481,7 @@ public final class AdminMutationCapture {
         if (scopes == null) return false;
         for (MutationScope scope : scopes) {
             if (!"creative_slot".equals(scope.operation) || scope.creativePlayer != player) continue;
-            scope.acceptedDrops.add(itemEntity);
+            scope.acceptedDrops.add(new AcceptedDrop(itemEntity, player.getUUID().toString()));
             return true;
         }
         return false;
@@ -714,13 +827,15 @@ public final class AdminMutationCapture {
             observedChanges += recordEndpointDiff(scope, endpoint, after);
         }
         if ("give".equals(scope.operation) || "creative_slot".equals(scope.operation)) {
-            for (ItemEntity entity : scope.acceptedDrops) {
+            for (AcceptedDrop acceptedDrop : scope.acceptedDrops) {
+                ItemEntity entity = acceptedDrop.entity();
                 ItemStack stack = entity.getItem();
                 if (stack == null || stack.isEmpty()) continue;
                 if (entity.hasPickUpDelay() && entity.getAge() > 0) {
                     continue; // GiveCommand marks its fake display entity never-pickup and near expiry.
                 }
-                recordGroundCreation(scope, entity, stack, "creative_slot".equals(scope.operation));
+                recordGroundCreation(scope, entity, stack, "creative_slot".equals(scope.operation),
+                        acceptedDrop.targetPlayerUuid());
                 observedChanges++;
             }
         }
@@ -914,7 +1029,7 @@ public final class AdminMutationCapture {
     }
 
     private static void recordGroundCreation(MutationScope scope, ItemEntity entity, ItemStack stack,
-                                             boolean creative) {
+                                             boolean creative, String targetPlayerUuid) {
         CanonicalItem item = ItemCanonicalizer.canonicalizeStack(stack.copy());
         UUID eventId = UUID.randomUUID();
         String action = creative ? "CREATIVE_ITEM_CREATE" : "ADMIN_ITEM_CREATE";
@@ -926,6 +1041,7 @@ public final class AdminMutationCapture {
         raw.addProperty("quantity", stack.getCount());
         raw.addProperty("item_entity_uuid", entity.getUUID().toString());
         raw.addProperty("target_type", "GROUND");
+        raw.addProperty("target_player_uuid", targetPlayerUuid);
         boolean accepted = InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
                 System.currentTimeMillis(), action, scopeActorUuid(scope), scopeActorName(scope),
                 entity.level().dimension().location().toString(), entity.getX(), entity.getY(), entity.getZ(),
@@ -1081,6 +1197,14 @@ public final class AdminMutationCapture {
         raw.addProperty("actor_kind", scope == null ? actorKind(source) : scopeActorKind(scope));
         raw.addProperty("actor_uuid", scope == null ? actorUuid(source) : scopeActorUuid(scope));
         raw.addProperty("actor_name", scope == null ? actorName(source) : scopeActorName(scope));
+        if (scope != null && !scope.giveOutputRejectionDetails.isEmpty()) {
+            com.google.gson.JsonArray rejectedOutputs = new com.google.gson.JsonArray();
+            scope.giveOutputRejectionDetails.forEach(details -> rejectedOutputs.add(details.deepCopy()));
+            raw.add("give_output_rejections", rejectedOutputs);
+            if (scope.giveOutputRejectionOmitted > 0) {
+                raw.addProperty("give_output_rejection_omitted_count", scope.giveOutputRejectionOmitted);
+            }
+        }
         addCommandEntityIdentity(raw, source, scope);
         addExecutionContext(raw, scope);
         if (scope != null && scope.copySource != null) {

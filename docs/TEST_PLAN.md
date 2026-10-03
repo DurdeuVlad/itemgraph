@@ -1027,9 +1027,16 @@ shared capture service in one paired GameTest run:
 - `/clear` includes crafting-grid slots in its before/after snapshot and records
   the exact signed removal when a crafting slot matches;
 - a `/give` target snapshot above the 128-target bound and a failed inventory
-  snapshot each produce unresolved outcomes and suppress ordinary player-drop
-  attribution for their recipients on Fabric, while preserving an unrelated
-  player's drop in the same synchronous scope;
+  snapshot each produce unresolved outcomes, preserve accepted overflow as exact
+  `ADMIN_ITEM_CREATE` ground observations with item IDs, quantities, fingerprints,
+  and entity UUIDs; the exact returned `/give` entity is not duplicated as
+  `DROP_ITEM`, while same-player equal-stack reentrant drops and unrelated
+  players' drops remain ordinary `DROP_ITEM` observations on Fabric. A rejected
+  or canceled overflow entity must retain item ID, quantity, fingerprint, and
+  entity UUID in `ADMIN_ITEM_COMMAND_UNRESOLVED` evidence for every recipient;
+  rejected outputs are kept in a bounded ordered list, and a canceled same-player
+  entity that is not identical to the wrapped `/give` return is replayed as
+  separate `DROP_CANCELLED` evidence rather than attached to the command;
 - replacing three diamonds with four iron ingots by creative packet records a
   three-item removal and four-item creation sharing one mutation ID, with no
   inferred transformation; replacing an occupied slot with `/item replace` uses
