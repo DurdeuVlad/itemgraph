@@ -69,11 +69,49 @@ from each queue per worker pass; if a backlog remains, additional bounded passes
 continue on the worker until the queues are empty. `poll_interval_ms` is only the
 maximum idle wait used for worker housekeeping and database heartbeat deadlines.
 A failed transformation write is retried through its bounded queue with backoff.
-If the queue fills while re-queuing, or shutdown cannot persist pending records,
-the dropped count is incremented and the server log reports evidence loss. During
-server shutdown, ItemGraph waits for the active worker write to finish before it
-flushes the queues and closes the database. There is no hard deadline for this
-wait: a stalled JDBC operation can delay shutdown. `database_connection_timeout_ms`
+If the queue fills while re-queuing, or a producer submits after shutdown closes
+admission, the dropped count is incremented and the server log reports evidence
+loss. Shutdown waits up to 5 seconds for each database worker, interrupts it,
+then waits up to 5 more seconds. If the internal evidence worker remains blocked,
+ItemGraph snapshots its queued and in-flight observations, transformations, and
+audit events into `itemgraph-pending-evidence.json` beside the SQLite database
+(or under `./itemgraph/` for a network database). Snapshot serialization and
+file I/O run on a daemon writer; the lifecycle callback waits at most 5 seconds
+for it. The writer uses a temporary file, forces it to disk, and atomically
+replaces the recovery file where the filesystem supports it. JDBC connection
+close also has a 1-second deadline. If the recovery-file write misses its
+deadline or fails, ItemGraph logs a critical error and counts the outstanding
+records as at risk; the daemon may finish a late write only if the process stays
+alive and the filesystem returns. The callback does not wait indefinitely on
+JDBC, file I/O, or connection close.
+
+On the next start, ItemGraph replays the recovery file on its evidence worker,
+not on the loader lifecycle callback. New evidence remains bounded in the
+normal queues while recovery runs; recovered records are placed ahead of those
+new records before persistence. A malformed or unsupported file is preserved,
+then intake closes and any records accepted during validation are saved in the
+adjacent `.overflow` file. Intake stays closed until the primary recovery file
+is repaired.
+`ingest_event_uuid` keeps replay idempotent when a commit succeeded but the JDBC
+acknowledgement was lost. The file remains until every recovered record has a
+confirmed database commit, then ItemGraph removes it. Recovery files are limited to 256 MiB; a larger
+existing file is preserved and capture remains disabled. If recovery encounters
+already-accepted events while that primary file cannot be read, ItemGraph
+preserves them in the adjacent `itemgraph-pending-evidence.json.overflow` file
+without replacing the primary file. Both files replay after the primary recovery
+file is repaired; ItemGraph removes them only after every record commits. If a
+shutdown snapshot cannot be written within the size limit or because storage
+fails, ItemGraph logs a critical error and reports the outstanding count as at risk.
+
+For the healthy local SQLite saturation profile, five isolated NeoForge runs drained a
+full 10,000-event audit queue in 626–666 ms. CI enforces a 1,000 ms regression
+budget for that exact workload (`max_batch_size=100`, one explicit over-capacity
+rejection, all accepted rows durable). This is a deterministic fixture budget,
+not a production latency claim or a shutdown timeout. The measured profile and limits are in
+the [performance test plan](TEST_PLAN.md#measured-local-performance-profile).
+Failures before transaction start and failures followed by confirmed rollback count as
+definite loss. If commit and rollback both leave the durable result uncertain, ItemGraph
+increments the separate persistence-outcome-unknown count. `database_connection_timeout_ms`
 limits connection establishment, not an already-running write.
 
 GriefLogger's `helloFrequency` is a database connection keepalive, not a status
@@ -87,6 +125,34 @@ retries initialization. SQLite does not need a network heartbeat. Network
 database heartbeat behavior is covered by the CI integration tests against
 disposable MariaDB and MySQL services. Local SQLite tests do not exercise that
 network path.
+
+## Operational metrics
+
+`/itemgraph status` (alias `/ig status`) reports aggregate enqueue, persistence,
+query, and correlation counts, failures, and bounded p95 latency upper bounds. It
+also reports queue peak/rejected-item totals, persisted item and batch totals,
+decode-failure cache insertion/hit totals, and current JVM heap use. These
+counters contain no item payloads, player names, UUIDs, coordinates, or database
+credentials. They reset when the ingestion service starts.
+
+CI stores redacted JSON reports for the NeoForge SQLite 8,000-event burst, the
+Fabric SQLite 32-event tick-flush probe, NeoForge and Fabric network probes
+against disposable MySQL and MariaDB services, and a NeoForge shutdown
+saturation probe. Each network probe submits 512 synthetic audit events and runs
+20 read-only ledger count queries across four workers, requiring at least one
+query to overlap the remaining submission window. The shutdown probe accepts
+10,000 audit events, explicitly rejects the next event, then verifies all
+accepted rows reached SQLite through worker-owned batches before shutdown
+returns. No database operation runs in the loader lifecycle callback.
+
+The NeoForge and Fabric server-thread submission limits remain 50 ms per probe
+and are enforced by CI. These are operational safeguards, not staging-derived
+production budgets. CI exercises the registered `/ig lookup` handler against
+disposable MySQL and MariaDB databases with mocked server/player objects; live
+client delivery, real server tick impact, actual modded-inventory adapters, an
+idle baseline, and staging latency/memory budgets remain unverified. The queue
+remains capped at 10,000 entries per queue, flush cadence remains 1–100 ticks,
+and SQL batches remain capped at 1,000 records.
 
 ## Secret-safe status
 

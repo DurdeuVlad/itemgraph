@@ -40,7 +40,7 @@ public final class EntityInteractionGameTests {
     private EntityInteractionGameTests() { }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty",
-            batch = "zz_itemgraph_entity_interactions", timeoutTicks = 300_000)
+            batch = "zz_itemgraph_entity_interactions", timeoutTicks = 6_000)
     public static void serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         ServerPlayer fluidPlayer = helper.makeMockServerPlayerInLevel();

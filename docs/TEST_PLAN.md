@@ -14,6 +14,48 @@ Testing should focus on correctness, explainability, quantity conservation, temp
 
 Never use production as the primary test environment.
 
+## Stalled JDBC shutdown and pending-evidence recovery
+
+- `InternalObservationServiceTest.stalledJdbcShutdownReturnsAndRecoversTheAcceptedEvent`
+  blocks an audit insert while ignoring interruption, verifies shutdown returns
+  within the 10-second worker wait plus the 5-second recovery-writer wait and margin, verifies the in-flight event is
+  present in ItemGraph's recovery file, then reopens SQLite and proves the event
+  appears exactly once and the recovery file is removed only after commit.
+- `InternalObservationServiceTest.replayAfterCommittedBatchLostAcknowledgementDoesNotDuplicateEvidence`
+  commits an observation to SQLite, throws after `Connection.commit()` to simulate
+  a lost acknowledgement, replays the immutable record, and verifies one durable
+  row for observations, transformations, and audit events.
+- `InternalObservationServiceTest.failedRecoveryLoadClosesAdmissionAndPreservesOriginalFile`
+  starts with a malformed primary recovery file and an already-accepted event,
+  verifies later submissions are rejected and counted, then verifies recovery
+  saves the accepted event to the adjacent `.overflow` file without changing the
+  malformed original. After the primary file is repaired, restart replays the
+  overflow event once and removes that file only after commit.
+- `InternalObservationServiceTest.startupRecoveryIoRunsOffCallerAndPersistsSavedEventsBeforeNewEvents`
+  holds the recovery-file lock while `start()` returns, then submits a new event
+  and verifies the saved event persists first.
+- `InternalObservationServiceTest.producerRacingCorruptRecoveryIsEitherDurablyPreservedOrRejected`
+  holds the queue lock to force a producer that passed its first gate check to
+  race failed recovery; the event must either be durably written to overflow or
+  rejected and counted.
+- `InternalObservationServiceTest.observationBatchIsRejectedAtomicallyWhenRecoveredQueueExceedsProducerLimit`
+  restores a queue at the recovery capacity and verifies a later observation
+  batch is wholly rejected and fully counted, with no partial enqueue.
+- `InternalObservationServiceTest.failedTransformationBatchIsSpooledAndReplayedAfterDatabaseReturns`
+  covers a definite failure before transaction start and confirms transformation
+  recovery uses the same path.
+- `PendingEvidenceSpoolTest` round-trips observations, transformations, audit
+  events, canonical components, raw byte payloads, and supersession positions;
+  it also verifies malformed files are preserved and the shutdown caller returns
+  within its deadline when the recovery-file worker simulates an interrupt-ignoring
+  filesystem stall.
+- `DatabaseManagerTest.jdbcCloseThatIgnoresInterruptCannotHoldServerShutdown`
+  holds `Connection.close()` past its bound and verifies database state is marked
+  closed while the daemon cleanup worker finishes later.
+- This test injects the stall locally; it does not claim that every JDBC vendor
+  has identical interruption or close behavior. The recovery file is ItemGraph
+  owned and does not read or modify a GriefLogger database.
+
 ## Local NeoForge operations check (2026-09-30)
 
 - Runtime: Minecraft 1.21.1, NeoForge 21.1.248, ItemGraph 0.3.2, Java 21;
@@ -410,12 +452,158 @@ Verify that ItemGraph reports authoritative inventory evidence independent of cl
 
 ## Performance tests
 
+CI integration tests and GameTests emit redacted performance JSON under
+`ITEMGRAPH_PERFORMANCE_REPORT_DIR`. `tools/validate_itemgraph_performance_report.py`
+checks the pinned report schema, loader/backend identity, exact durable row
+counts, queue accounting, and existing server-thread submission ceilings.
+`tools/test_validate_itemgraph_performance_report.py` covers malformed schemas,
+rejection accounting, and the complete artifact set. CI uploads the validated
+`itemgraph-performance-reports` artifact for 14 days.
+
+The fifteen-report set covers NeoForge SQLite burst (8,000 events), Fabric SQLite
+flush (32 events), NeoForge and Fabric each against disposable MySQL and MariaDB
+(512 synthetic events, 20 concurrent raw-JDBC ledger lookups, and 20 registered
+`/ig lookup radius.20` command queries per backend),
+plus one-second live tick-hook idle samples for NeoForge and Fabric against
+SQLite, and worker-only idle samples against MySQL and MariaDB. All idle reports
+compare durable `ig_observations`, `ig_audit_events`, and
+`ig_item_transformations` row counts before and after the sample, assert zero
+accepted, persisted, rejected, queued, queried, correlated, or heartbeat work,
+and record heap snapshots at the sample boundary.
+Network-backend samples do not represent live server ticks. These are CI
+baselines, not production memory budgets.
+NeoForge shutdown saturation (10,000 accepted audit events, one explicitly
+rejected over-capacity submission, worker-owned bounded drain, and exact durable
+row verification), and a cross-loader SQLite correlation workload (500 accepted
+observations, five passes over 50 drop/pickup pairs each, and 250 quantity-
+conserving inferred edges). The correlation reports verify durable source rows,
+finalized observations, edge totals, and source/destination allocation totals.
+The network probes require both raw-JDBC and registered command-query overlap
+with event submissions and include labeled synthetic automation and
+modded-inventory events. The command workload runs Brigadier parsing, the shared
+`ItemGraphCommands` lookup handler, JDBC query dispatch, and queued result
+delivery with mocked Minecraft server/player objects. It returns matching
+synthetic audit rows and reports redacted completion, failure, overlap, total,
+maximum, and p95 dispatch-to-callback latency. This measures the application
+lookup path on disposable CI databases; it does not measure live-client delivery,
+real server tick impact, or third-party adapter behavior. Adapter-specific load
+and staging-derived latency/memory budgets remain open; CI timings are measurements,
+not production budgets.
+
+The performance reports snapshot process-wide metrics. Each queue GameTest now
+stops and drains the prior worker, clears its counters, and restarts it before
+measuring; each GameTest has its own batch. Each report records the loader
+runtime's `grieflogger_runtime_state`: loader GameTests query the loader and
+assert absence, while NeoForge JUnit probes without an initialized mod list
+record `unavailable`. The validator requires `absent` for GameTest reports,
+rejects `present` everywhere, and permits `unavailable` only for those
+NeoForge JUnit scenarios. Reports use schema version 2 for this explicit
+three-state provenance.
+The validator requires the enqueue sample count to equal this scenario's
+attempted-event count, and each network
+report's query sample count to equal its 20 raw-JDBC plus 20 registered command
+lookups. It requires all 20 command callbacks to complete successfully and at
+least one callback to finish while submissions continue. Correlation reports
+must contain exactly five successful passes and the expected durable quantity
+allocations. This catches metrics accidentally carried in from another test.
+Reports still contain one CI run per scenario; their latency and heap fields are
+diagnostic rather than statistical regression baselines. `heap_used_bytes` is a
+point-in-time snapshot, not peak memory or allocation rate. The latency histogram
+reports coarse upper-bound buckets, so it cannot support narrow p95 regression
+gates.
+
 Native-only startup must be tested with a valid GriefLogger-compatible SQLite
 file named `database.db` present in the game directory while
 `grieflogger_integration_enabled=false`. Verify the ItemGraph server reaches
 `Done`, native event rows persist to ItemGraph's own database, and no GriefLogger
 database connection is opened. Repeat with the setting `true` to verify the
 read-only migration path while source write attempts still fail.
+
+Two redacted CI artifacts show why those limits matter. Runs
+[36944915206](https://github.com/DurdeuVlad/itemgraph/actions/runs/36944915206)
+and [37011138142](https://github.com/DurdeuVlad/itemgraph/actions/runs/37011138142)
+used the same pinned 8,000-event NeoForge burst, but the reported slowest
+server-thread batch was 12.85 ms and 20.40 ms, respectively. Their NeoForge
+MySQL query average was 30.82 ms and 42.04 ms, with histogram p95 upper bounds
+of 50 ms and 100 ms. The first artifact also counted 8,025 enqueue samples for
+8,000 events in the NeoForge queue report and 36 for 32 events in the Fabric
+queue report; these mismatches exposed cross-test metric contamination. The
+GameTests and validator now isolate and reject that condition.
+
+GitHub documents each standard hosted runner job as a new virtual machine
+(public `ubuntu-latest`: 4 CPUs and 16 GB RAM; [runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)),
+so consecutive CI runs do not share a calibrated machine. [Google Benchmark's
+guide](https://github.com/google/benchmark/blob/main/docs/user_guide.md) uses
+warmups, repeated runs, and random interleaving, with [statistical
+comparison](https://github.com/google/benchmark/blob/main/docs/tools.md) to
+separate performance change from machine noise. [OpenJDK JMH](https://github.com/openjdk/jmh)
+recommends a standalone harness setup for more reliable JVM measurements. These
+practices support repeated, environment-matched staging runs for ItemGraph.
+They do not supply ItemGraph's production budgets. Until those measurements
+exist, CI gates the established 50 ms server-thread submission ceiling, exact
+queue bounds, durability/loss accounting, and report-shape/workload invariants.
+The separate five-second application command-query cancellation deadline is not
+a measured command-latency budget; the CI fixture uses a 30-second callback
+completion wait. CI does not invent persistence, correlation, query, or memory
+budgets.
+
+### Consolidated local validation (2026-10-02)
+
+- One Gradle invocation ran `:neoforge:test`, `:neoforge:runGameTestServer`,
+  `:fabric:test`, and `:fabric:runGameTest`. It completed successfully. NeoForge
+  and Fabric each passed all 3 required GameTests. The NeoForge probe accepted
+  8,000 events, measured a 9.299 ms slowest 400-event submission batch, peaked
+  at 7,900 queued events, and verified exactly 8,000 matching durable rows,
+  zero drops, and an empty queue. Fabric verified exactly 32 matching durable
+  rows after its end-tick flush. NeoForge used a fresh temporary GameTest
+  directory through `-PitemgraphGameTestDirectory`; the default project path is
+  unchanged.
+- `python -B tools/test_validate_itemgraph_performance_report.py` passed all 12
+  validator cases, including rejection of a missing queue-depth measurement;
+  `git diff --check` passed. Local GameTests did not write performance JSON
+  because `ITEMGRAPH_PERFORMANCE_REPORT_DIR` was unset. Both network backend
+  integration tests compiled and were skipped by their GitHub Actions-only
+  guard. CI artifact upload and MySQL/MariaDB performance reports therefore
+  remain unverified locally.
+- These runs use ItemGraph 0.3.2 and build no distributable mod jar. They are
+  isolated SQLite checks and do not establish staging latency or memory budgets.
+
+### Consolidated local validation (2026-10-03)
+
+- `:neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`
+  completed successfully without packaging a distributable mod JAR. JUnit XML
+  reports 471 NeoForge tests and 67 Fabric tests, with zero failures/errors;
+  six NeoForge and two Fabric tests were skipped. The four MySQL/MariaDB
+  performance probes are intentionally GitHub Actions-only, so their registered
+  command path still requires the next hosted CI run for runtime evidence.
+- `python -B tools/test_validate_itemgraph_performance_report.py` passed all 28
+  cases, including the registered command callback count, overlap, and latency
+  invariants; `git diff --check` passed. The command report records aggregates
+  only, with no player identity or evidence detail.
+
+### Measured local performance profile
+
+- Environment: Windows 11 x64, OpenJDK 21.0.12.1, Minecraft 1.21.1,
+  NeoForge 21.1.248, ItemGraph only, and a fresh temporary SQLite database and
+  GameTest directory for every sample. GriefLogger was absent.
+- Five separate `:neoforge:runGameTestServer` runs passed all four registered
+  GameTests. The 8,000-event burst persisted exactly 8,000 rows with zero drops
+  on each run. The slowest measured server-thread producer batch ranged from
+  3.95 ms to 5.39 ms; the existing 50 ms guard passed each run.
+- Five separate
+  `:neoforge:test --tests com.itemgraph.ingest.InternalObservationServiceTest.saturatedQueueDrainsOnWorkerDuringShutdownAndReportsExplicitRejection`
+  executions were forced with `--rerun-tasks` so Gradle did not reuse a cached
+  test result. Each accepted 10,000 audit records, rejected one extra record,
+  persisted all 10,000 accepted rows, and emptied the queue. Measured graceful
+  drain times were 626, 627, 650, 647, and 666 ms; batches remained capped at
+  100 records.
+- The shutdown report is a single elapsed-time sample per run, not a worst-case
+  driver-stall test. The 1,000 ms CI threshold is a regression budget for this
+  exact healthy SQLite fixture, derived from the 666 ms maximum observed across
+  five local repetitions and checked against hosted CI. It does not bound a
+  stalled database operation or establish production/staging latency or memory
+  budgets. The server continues waiting for active writes to finish to preserve
+  accepted evidence.
 
 Measure:
 
@@ -490,7 +678,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `QuantityFlowTest` | stack splits/merges, partial transfers, windows, capacity limits, competing candidates, idempotency, restart continuity, and rollback atomicity (19 tests) |
 | `TransformationEventListenerTest` | anvil rename/repair, crafting matrix fallback, smelting, client guards, and empty-stack handling (12 tests) |
 | `EntityInteractionEvidenceTest` | Armor stand method outcomes, target UUID, actor/position/dimension, and client-side suppression; interaction attempts are queried separately from completed results |
-| `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue, 2,000-record worker persistence, shutdown flush and failure accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
+| `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue/stop admission race, 2,000-record worker persistence, shutdown flush, confirmed-loss and unknown-commit accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
 | `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
 | `ItemGraphConfigTest` | default values, config paths and metadata, strict NeoForge type/range rejection, and NightConfig default correction without clamping invalid supplied values (8 tests) |
@@ -503,7 +691,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `CorrelationEngineTest` | ground bridging/scoring, cross-source confirmed/ambiguous groups, canceled-source conflicts, legacy edge supersession, temporal ordering, and MVP chain (24 tests) |
 | `ItemCanonicalizerTest` | fingerprint determinism and DataComponent decoding (Phase 3) |
 | `NodeManagerTest` | node identity resolution (Phase 4) |
-| `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction, and concurrent shared-connection transaction isolation (5 + 10 tests) |
+| `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction, worker termination before stop returns, and concurrent shared-connection transaction isolation (5 + 11 tests) |
 | `GriefLoggerHistoricalImporterTest` | all 11 source tables, all 18 action IDs, opaque binary retention, source-byte immutability, supported-schema rejection, independent-writer concurrency, durable failed-run counts, per-table checkpoints, and idempotent replay |
 | `DatabaseManagerTest` | migrations V1–V14, interval/group/edge-state schema, API source/external-key schema, historical import provenance/checkpoints, dedup constraints, read-only query connection, and independent writer configuration |
 | `EventQueryServiceTest` | found/not-found, dangling references rendering as "no such row", OBSERVED labelling |

@@ -9,8 +9,6 @@ import net.minecraft.server.players.ServerOpListEntry;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
-import java.util.List;
-
 /** NeoForge server packet coverage for the published command roots. */
 @GameTestHolder("itemgraph")
 @PrefixGameTestTemplate(false)
@@ -22,32 +20,45 @@ public final class CommandPacketGameTests {
     @SuppressWarnings("removal")
     public static void inspectCommandsExecuteFromClientPacketsAndPersistAttempts(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
-        long watermark = CommandPacketConformanceFixture.auditWatermark();
-        List<List<String>> quantityRowsBefore = CommandPacketConformanceFixture.snapshotQuantityObservations();
+        CommandPacketConformanceFixture.run(helper, player, complete -> {
+            var ops = player.getServer().getPlayerList().getOps();
+            ops.add(new ServerOpListEntry(player.getGameProfile(), 4, false));
+            Runnable cleanup = () -> {
+                ops.remove(player.getGameProfile());
+                InspectionService.getInstance().clear(player.getUUID());
+            };
+            runWithCleanup(cleanup, () -> {
+                helper.assertTrue(player.createCommandSourceStack().hasPermission(2),
+                        "mock client must have permission level 2 for the published inspector commands");
+                helper.runAfterDelay(1, () -> runWithCleanup(cleanup, () -> {
+                    player.connection.handleChatCommand(new ServerboundChatCommandPacket("itemgraph inspect on"));
+                    helper.runAfterDelay(1, () -> runWithCleanup(cleanup, () -> {
+                        helper.assertTrue(InspectionService.getInstance().isEnabled(player.getUUID()),
+                                "full command root did not enable inspection through the server packet handler");
+                        player.connection.handleChatCommand(new ServerboundChatCommandPacket("ig inspect status"));
+                        helper.runAfterDelay(1, () -> runWithCleanup(cleanup, () -> {
+                            helper.assertTrue(InspectionService.getInstance().isEnabled(player.getUUID()),
+                                    "status command packet must report state without toggling inspection off");
+                            player.connection.handleChatCommand(new ServerboundChatCommandPacket("ig inspect off"));
+                            helper.runAfterDelay(1, () -> runWithCleanup(cleanup, () -> {
+                                helper.assertFalse(InspectionService.getInstance().isEnabled(player.getUUID()),
+                                        "short command root did not disable inspection through the server packet handler");
+                                cleanup.run();
+                                complete.run();
+                            }));
+                        }));
+                    }));
+                }));
+            });
+        });
+    }
 
-        var ops = player.getServer().getPlayerList().getOps();
-        ops.add(new ServerOpListEntry(player.getGameProfile(), 4, false));
+    private static void runWithCleanup(Runnable cleanup, Runnable action) {
         try {
-            helper.assertTrue(player.createCommandSourceStack().hasPermission(2),
-                    "mock client must have permission level 2 for the published inspector commands");
-            player.connection.handleChatCommand(new ServerboundChatCommandPacket("itemgraph inspect on"));
-            helper.assertTrue(InspectionService.getInstance().isEnabled(player.getUUID()),
-                    "full command root did not enable inspection through the server packet handler");
-
-            player.connection.handleChatCommand(new ServerboundChatCommandPacket("ig inspect status"));
-            helper.assertTrue(InspectionService.getInstance().isEnabled(player.getUUID()),
-                    "status command packet must report state without toggling inspection off");
-
-            player.connection.handleChatCommand(new ServerboundChatCommandPacket("ig inspect off"));
-            helper.assertFalse(InspectionService.getInstance().isEnabled(player.getUUID()),
-                    "short command root did not disable inspection through the server packet handler");
-        } finally {
-            ops.remove(player.getGameProfile());
-            InspectionService.getInstance().clear(player.getUUID());
+            action.run();
+        } catch (RuntimeException | Error failure) {
+            cleanup.run();
+            throw failure;
         }
-
-        helper.succeedWhen(() -> CommandPacketConformanceFixture.assertPersisted(
-                helper, watermark, player.getUUID().toString(), player.getGameProfile().getName(),
-                quantityRowsBefore));
     }
 }

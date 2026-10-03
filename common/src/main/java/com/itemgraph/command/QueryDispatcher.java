@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.metrics.OperationalMetrics;
 import com.itemgraph.query.QueryFormatter;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.ChatFormatting;
@@ -347,41 +348,49 @@ public final class QueryDispatcher {
     }
 
     private static <T> T executeReadOnly(ConnectionQuery<T> query, QueryCancellation cancellation) {
-        try (Connection conn = DatabaseManager.getInstance().openReadOnlyConnection()) {
-            SQLiteConnection sqliteConnection = cancellation.attach(conn);
-            if (cancellation.isCancelled()) {
-                throw new SQLException("query cancelled before execution began");
-            }
-            boolean progressHandlerSet = false;
-            try {
-                if (sqliteConnection != null) {
-                    ProgressHandler.setHandler(sqliteConnection, 10_000, new ProgressHandler() {
-                        @Override
-                        protected int progress() {
-                            return cancellation.isCancelled() ? 1 : 0;
-                        }
-                    });
-                    progressHandlerSet = true;
-                }
+        long started = System.nanoTime();
+        boolean succeeded = false;
+        try {
+            T result;
+            try (Connection conn = DatabaseManager.getInstance().openReadOnlyConnection()) {
+                SQLiteConnection sqliteConnection = cancellation.attach(conn);
                 if (cancellation.isCancelled()) {
                     throw new SQLException("query cancelled before execution began");
                 }
-                T result = query.run(cancellation.instrument(conn));
-                if (!cancellation.finish()) {
-                    throw new SQLException("query cancelled before completion");
-                }
-                return result;
-            } finally {
+                boolean progressHandlerSet = false;
                 try {
-                    if (progressHandlerSet) {
-                        ProgressHandler.clearHandler(conn);
+                    if (sqliteConnection != null) {
+                        ProgressHandler.setHandler(sqliteConnection, 10_000, new ProgressHandler() {
+                            @Override
+                            protected int progress() {
+                                return cancellation.isCancelled() ? 1 : 0;
+                            }
+                        });
+                        progressHandlerSet = true;
+                    }
+                    if (cancellation.isCancelled()) {
+                        throw new SQLException("query cancelled before execution began");
+                    }
+                    result = query.run(cancellation.instrument(conn));
+                    if (!cancellation.finish()) {
+                        throw new SQLException("query cancelled before completion");
                     }
                 } finally {
-                    cancellation.detach(conn);
+                    try {
+                        if (progressHandlerSet) {
+                            ProgressHandler.clearHandler(conn);
+                        }
+                    } finally {
+                        cancellation.detach(conn);
+                    }
                 }
             }
+            succeeded = true;
+            return result;
         } catch (SQLException e) {
             throw new QueryFailure(e);
+        } finally {
+            OperationalMetrics.getInstance().recordQuery(System.nanoTime() - started, succeeded);
         }
     }
 

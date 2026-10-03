@@ -6,15 +6,44 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Issue #32 shutdown durability:** shutdown waits are bounded at 5 seconds graceful plus 5 seconds after interruption for each database worker, 5 seconds for an ItemGraph-owned recovery-file writer, and 1 second for JDBC connection close. Startup replay and shutdown recovery-file I/O run on daemon workers, not the loader lifecycle callback. New events remain bounded in the normal queues during replay, and recovered rows are placed before them. A completed snapshot replays idempotently by `ingest_event_uuid`; corrupt or unsupported primary recovery data is preserved, intake closes, and already-accepted records are saved to an adjacent `.overflow` recovery file without replacing the primary. Both files replay after the primary file is repaired. If the filesystem does not finish a snapshot within its deadline, ItemGraph logs critical evidence risk and counts the outstanding records; a late daemon write may finish only if the process remains alive and the filesystem returns.
+- **Issue #32 performance evidence:** correlation failures returned as result values now increment the failure counter. The MySQL and MariaDB CI probes now execute 20 registered `/ig lookup` commands alongside 20 raw-JDBC readers and 512 submitted events on both loaders, recording callback completion and p95/max latency. CI also enforces a 1,000 ms drain regression budget for the healthy NeoForge SQLite 10,000-event saturation fixture, based on five repeated local measurements.
+- **Issue #32 idle baseline:** CI adds one-second live tick-hook no-input samples for both loaders against SQLite and worker-only samples against MySQL and MariaDB. The validator requires zero queue, persistence, lookup, correlation, rejection, and heartbeat work; reports compare durable observation, audit, and transformation row counts and capture heap at the sample boundary. Network-backend samples do not represent live server ticks or production budgets.
+
 ### Added
 
 - **Issue #127 native-only default:** NeoForge and Fabric no longer inspect a
   `database.db` file for GriefLogger data during normal operation. Read-only
   source sync and historical import require the explicit
   `grieflogger_integration_enabled=true` setting. Native capture, storage,
-  correlation, and queries remain independent. Mod version remains 0.3.2; no
-  distributable jar is built.
-
+  correlation, and queries remain independent, and scheduled native-only ticks
+  do not report the disabled source sync as an error. Mod version remains 0.3.2;
+  no distributable jar is built.
+- **Issue #32 operational metrics and queue probes:** `/ig status` reports
+  redacted enqueue, persistence, query, correlation, queue-pressure, component
+  decode-cache, and heap aggregates. CI emits validated 14-day reports for both
+  loaders on SQLite and on disposable MySQL/MariaDB, plus a NeoForge queue
+  saturation/shutdown durability report. Network probes run 20 read-only ledger
+  count queries across four readers against 512 synthetic events; the shutdown
+  probe persists all 10,000 accepted events in bounded worker batches and counts
+  one rejected over-capacity event explicitly. Reports contain aggregate values
+  without event or player identifiers. The real adapter workloads and
+  staging-derived production budgets remain open under #32. Mod version remains
+  0.3.2; no distributable jar is built.
+- **Issue #32 report provenance:** performance report fixtures record
+  `grieflogger_runtime_state` as `absent`, `present`, or `unavailable` instead
+  of treating an uninitialized NeoForge JUnit mod list as proof of absence.
+  Loader GameTests assert GriefLogger is absent; CI rejects `present` reports
+  and limits `unavailable` to NeoForge JUnit-only probes. The report schema is
+  version 2.
+- **Issue #32 malformed-component workload:** the SQLite correlation probes feed
+  one malformed serialized component payload to the canonicalizer 500 times and
+  record the first-decode and total elapsed time. CI requires one negative-cache
+  insertion, 499 cache hits, and the same opaque unresolved fingerprint for every
+  repetition. The decoder diagnostic now names the serialized component payload,
+  independent of the optional historical importer.
 - **Issue #33 administrative item evidence:** both loaders capture `/give`,
   `/clear`, `/item` slot mutations, creative inventory slot changes, accepted
   `/give` overflow, and negative-slot creative drops at vanilla mutation

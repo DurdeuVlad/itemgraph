@@ -9,6 +9,7 @@ import com.itemgraph.ingest.IngestionService;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.ingest.SourceCheckpoint;
 import com.itemgraph.listener.ContainerInteractionTracker;
+import com.itemgraph.metrics.OperationalMetrics;
 import com.itemgraph.query.EventQueryService;
 import com.itemgraph.query.ExplainQueryService;
 import com.itemgraph.query.AuditEventQueryService;
@@ -1247,6 +1248,7 @@ public final class ItemGraphCommands {
                 rs.next();
                 totalAuditEvents = rs.getLong(1);
             }
+            OperationalMetrics.Snapshot metrics = OperationalMetrics.getInstance().snapshot();
             long activeEdges = 0;
             long supersededEdges = 0;
             try (var stmt = conn.createStatement();
@@ -1303,12 +1305,39 @@ public final class ItemGraphCommands {
                             + " capabilityQueueRejections=" + capabilityQueueRejections
                             + " transformations=" + internalObs.getTotalTransformations()
                             + " auditEvents=" + internalObs.getTotalAuditEvents(),
+                    "[ItemGraph] performance: enqueueCount=" + metrics.enqueue().count()
+                            + " enqueueP95=" + latencyP95(metrics.enqueue())
+                            + " enqueueFailed=" + metrics.enqueue().failed()
+                            + " persistBatches=" + metrics.persistenceCommit().count()
+                            + " persistFailedBatches=" + metrics.persistenceFailures()
+                            + " persistedItems=" + metrics.persistedItems()
+                            + " largestBatch=" + metrics.largestBatchSize()
+                            + " commitP95=" + latencyP95(metrics.persistenceCommit())
+                            + " commitMaxMs=" + metrics.persistenceCommit().maxMillis()
+                            + " queryCount=" + metrics.query().count()
+                            + " queryP95=" + latencyP95(metrics.query())
+                            + " queryFailed=" + metrics.query().failed()
+                            + " correlationCount=" + metrics.correlation().count()
+                            + " correlationP95=" + latencyP95(metrics.correlation())
+                            + " correlationFailed=" + metrics.correlation().failed()
+                            + " queuePeak=" + metrics.peakQueueDepth()
+                            + " queueRejectedItems=" + metrics.queueRejectedItems()
+                            + " decodeFailureCacheInsertions=" + metrics.decodeFailureCacheInsertions()
+                            + " decodeCacheHits=" + metrics.decodeCacheHits()
+                            + " heapUsedBytes=" + metrics.heapUsedBytes()
+                            + " heapMaxBytes=" + metrics.heapMaxBytes(),
                     "[ItemGraph] entity tracking: active=" + entityTracker.getActiveEntityCount()
                             + " drops=" + entityTracker.getDropCount()
                             + " pickups=" + entityTracker.getPickupCount()
                             + " continuityMatches=" + entityTracker.getContinuityMatchCount()
             ));
         });
+    }
+
+    private static String latencyP95(OperationalMetrics.LatencySnapshot snapshot) {
+        return snapshot.count() == 0 ? "n/a"
+                : snapshot.p95UpperBoundNanos() == Long.MAX_VALUE
+                ? ">10000ms" : "<=" + snapshot.p95UpperBoundMillis() + "ms";
     }
 
     private static int ingestNow(CommandContext<CommandSourceStack> ctx) {

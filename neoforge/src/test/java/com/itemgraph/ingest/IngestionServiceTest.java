@@ -4,6 +4,7 @@ import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.correlation.CorrelationEngine;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.graph.NodeManager;
+import com.itemgraph.metrics.OperationalMetrics;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import net.neoforged.fml.loading.LoadingModList;
@@ -22,6 +23,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -124,6 +126,43 @@ class IngestionServiceTest {
     }
 
     @Test
+    void stopWaitsForQueuedWorkerTaskBeforeReturning() throws Exception {
+        ingestionService.start();
+        java.lang.reflect.Field executorField = IngestionService.class.getDeclaredField("executor");
+        executorField.setAccessible(true);
+        ScheduledExecutorService worker = (ScheduledExecutorService) executorField.get(ingestionService);
+        CountDownLatch taskStarted = new CountDownLatch(1);
+        CountDownLatch releaseTask = new CountDownLatch(1);
+        worker.execute(() -> {
+            taskStarted.countDown();
+            try {
+                releaseTask.await();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertTrue(taskStarted.await(5, TimeUnit.SECONDS));
+
+        ExecutorService stopper = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> stopped = stopper.submit(ingestionService::stop);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!worker.isShutdown() && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertTrue(worker.isShutdown(), "stop should shut down admission to the worker");
+            assertFalse(stopped.isDone(), "stop must wait while a worker task can still use the database");
+            releaseTask.countDown();
+            stopped.get(5, TimeUnit.SECONDS);
+            assertTrue(worker.isTerminated());
+        } finally {
+            releaseTask.countDown();
+            stopper.shutdownNow();
+            assertTrue(stopper.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
     void testEndToEndIngestion() throws Exception {
         IngestionResult result = ingestionService.runIngestion();
 
@@ -189,11 +228,18 @@ class IngestionServiceTest {
             nativeOnly.start();
             assertFalse(nativeOnly.requestIngestionAsync());
             assertFalse(nativeOnly.requestHistoricalImportAsync());
+            nativeOnly.runIngestionSafely();
+            assertNull(nativeOnly.getLastResult(),
+                    "a scheduled native-only worker tick must skip the disabled source without reporting an error");
             assertTrue(nativeOnly.runCorrelation().success(),
                     "native correlation must remain available in native-only mode");
             IngestionResult skipped = nativeOnly.runIngestion();
             assertFalse(skipped.success());
             assertEquals("GriefLogger source integration is disabled by configuration", skipped.errorMessage());
+            nativeOnly.stop();
+            nativeOnly.start();
+            assertNull(nativeOnly.getLastResult(),
+                    "a new worker lifecycle must not expose the previous source sync result");
         } finally {
             nativeOnly.stop();
         }
@@ -571,6 +617,19 @@ class IngestionServiceTest {
         IngestionResult result = service.runIngestion();
         assertFalse(result.success());
         assertTrue(result.errorMessage().contains("not found"));
+    }
+
+    @Test
+    void correlationMetricsRecordReturnedFailureAsFailure() {
+        OperationalMetrics metrics = OperationalMetrics.getInstance();
+        metrics.reset();
+        dbManager.close();
+
+        var result = ingestionService.runCorrelation();
+
+        assertFalse(result.success());
+        assertEquals(1, metrics.snapshot().correlation().count());
+        assertEquals(1, metrics.snapshot().correlation().failed());
     }
 
     @Test
