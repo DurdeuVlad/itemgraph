@@ -542,8 +542,8 @@ Authoritative Minecraft `ItemEntity` UUIDs are tracked only after the entity is 
 
 ## Native Container & Ground Observation (M5, 0.2.0)
 
-When GriefLogger is absent (or as additive evidence when present), ItemGraph records
-its own `ITEMGRAPH_INTERNAL` observations via `InternalObservationService` (bounded
+ItemGraph records its native `ITEMGRAPH_INTERNAL` observations via
+`InternalObservationService` (bounded
 10,000-entry async queue, batch-persisted with `INSERT OR IGNORE`). V11 adds a
 destination-sensitive internal dedup index, interval end times, edge state, and derived
 cross-source source groups. Raw observations remain unchanged; a confirmed group has one
@@ -830,7 +830,9 @@ The `/ig audit` command runs this engine on the query worker and outputs a compr
 
 ### GriefLogger
 
-GriefLogger is an external read-only evidence source.
+ItemGraph is designed to run as a standalone replacement. A configured GriefLogger
+database is an optional read-only historical import source during migration; it is
+not used for native capture, ItemGraph-owned storage, or normal queries.
 
 ItemGraph must not:
 
@@ -843,7 +845,7 @@ ItemGraph must not:
 
 ItemGraph owns:
 
-- supplemental observations
+- native observations
 - canonical fingerprints
 - source import checkpoints
 - graph nodes

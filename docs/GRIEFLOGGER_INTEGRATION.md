@@ -2,16 +2,22 @@
 
 ## Purpose
 
-GriefLogger has been an **optional additive evidence source** for ItemGraph since version 0.2.0.
+ItemGraph is the standalone product and intended complete replacement for
+GriefLogger. Native capture, storage, reconstruction, and queries require neither
+the GriefLogger jar nor its database. This document describes the optional,
+read-only historical importer and temporary coexistence artifact only.
 
 ## Supported modes
 
 | GriefLogger installation | ItemGraph behavior |
 |---|---|
-| Absent | ItemGraph boots with its own database and records its supported native NeoForge observations and registered vanilla `IItemHandler` changes. Coverage remains limited: container observations are open/close session net deltas, capability callers/causes are UNKNOWN, private ender chests are not natively watched, and non-vanilla inventories need dedicated adapters. |
-| Present | The same ItemGraph-native capture remains enabled. ItemGraph additionally ingests GriefLogger's SQLite evidence through read-only connections. Raw rows from both sources are preserved; confirmed copies share one capacity group and uncertain matches remain ambiguous. |
+| Absent | ItemGraph runs its native capture, own database, graph reconstruction, and queries. Exact coverage limits are tracked in the parity matrix. |
+| Present, importer unset | Same native-only behavior. The GriefLogger database is not opened. |
+| Present, importer configured | ItemGraph can read legacy SQLite evidence through read-only connections for historical migration and comparison. ItemGraph owns the imported copy and never writes to the source database. |
 
-These are additive modes, not an either/or switch. GriefLogger is not required for ItemGraph to boot or run.
+The importer is a migration facility, not a runtime dependency or source of
+ongoing ItemGraph capture. Imported rows retain their source labels and
+provenance.
 
 ## Artifact selection and SQLite module compatibility
 
@@ -22,7 +28,7 @@ artifacts load, Java module resolution sees two modules exporting `org.sqlite.ut
 and aborts server startup. Jar-in-Jar version negotiation cannot remove classes
 embedded in GriefLogger's main JAR.
 
-For servers running GriefLogger `1.2.10-1.21.1`, use
+For temporary coexistence with servers running GriefLogger `1.2.10-1.21.1`, use
 `itemgraph-<version>-grieflogger-compatible.jar`. It omits ItemGraph's SQLite
 Jar-in-Jar dependency, keeps ItemGraph's MariaDB Connector/J driver, uses GriefLogger's SQLite classes, and declares that exact
 GriefLogger version as required in `META-INF/neoforge.mods.toml`. Do not install
@@ -60,15 +66,18 @@ separately.
 The CI-only MySQL fixture explicitly enables `allowPublicKeyRetrieval` with dummy
 credentials to exercise the disposable service.
 
-The compatibility artifact's tested scope is GriefLogger `1.2.10-1.21.1` on
+This artifact is a temporary bridge while tracked replacement gates remain
+open; it is not required when running ItemGraph alone. Its tested scope is
+GriefLogger `1.2.10-1.21.1` on
 Minecraft 1.21.1 / NeoForge 21.1.248. Other GriefLogger versions need a separate
 compatibility check before widening this artifact's declared version range.
 
 ## Integration principle
 
 ```text
-GriefLogger (optional) = external audit evidence (additive)
-ItemGraph               = native event coverage, reconstruction, and graph inference
+ItemGraph            = native event capture, owned evidence, reconstruction, and queries
+GriefLogger importer = optional read-only historical migration path
+Compatible artifact  = temporary coexistence bridge for SQLite class conflicts
 ```
 
 GriefLogger must always be treated as read-only. Ingestion skips gracefully with no log spam when the database is absent.
