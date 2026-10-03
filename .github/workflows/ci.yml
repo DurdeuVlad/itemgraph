@@ -78,6 +78,9 @@ jobs:
       - name: Test normalized differential replay report comparator
         run: python3 tools/test_itemgraph_differential_report.py
 
+      - name: Test native feature coverage report
+        run: python3 tools/test_itemgraph_feature_coverage.py
+
       - name: Test native GameTest report normalization
         run: python3 tools/test_normalize_itemgraph_gametest_report.py
 
@@ -145,6 +148,9 @@ jobs:
               --validate-only "$REPORT_DIR/normalized/itemgraph-$loader.json" \
               --expected-system itemgraph \
               --expected-loader "$loader"
+            python3 tools/itemgraph_feature_coverage.py \
+              --input "$REPORT_DIR/normalized/itemgraph-$loader.json" \
+              --output "$REPORT_DIR/normalized/itemgraph-$loader-coverage.json"
           done
 
       - name: Upload redacted replay reports

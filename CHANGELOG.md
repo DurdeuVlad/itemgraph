@@ -15,6 +15,15 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #31 release-contract coverage inventory:** CI now emits a redacted
+  sidecar beside each native-only NeoForge and Fabric replay. It lists every
+  compatibility-registry action, exact-release writer disposition, ItemGraph
+  implementation classification, and the number of matching events in that
+  replay. `coverage_status` records whether an action was observed in this
+  replay; `release_writer_status` independently records whether GriefLogger's
+  exact release has a writer. This makes remaining coverage gaps explicit
+  without claiming full runtime parity. Tests and CI do not package
+  distributable mod jars; version remains 0.3.2.
 - **Issue #127 native-only default:** NeoForge and Fabric no longer inspect a
   `database.db` file for GriefLogger data during normal operation. Read-only
   source sync and historical import require the explicit

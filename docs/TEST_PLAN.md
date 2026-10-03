@@ -417,10 +417,10 @@ the artifact contains profile-normalized action identities, fixture-relative
 coordinates, namespaced subjects, and replay actor aliases, with no player
 UUIDs, names, database row IDs, audit detail, or raw payloads. CI validates
 separate native-only Fabric and NeoForge reports and uploads only the normalized
-JSON. This export validates report
-shape and redaction; it does not establish GriefLogger equivalence or complete
-the paired replay, 24-hour soak, or rollback criteria in
-#31. The raw schema-v3 report also contains an `AuditService.audit` summary from
+JSON. This export validates covered events, report shape, redaction, and
+database invariants; it does not establish live GriefLogger runtime equivalence
+or complete exact-release feature coverage in #31. The raw schema-v3 report
+also contains an `AuditService.audit` summary from
 one read-only transaction snapshot over the complete isolated GameTest
 database. Every active edge must have SOURCE and DESTINATION allocation sums
 equal to its amount, linked evidence with matching fingerprints, actions, and
@@ -433,6 +433,14 @@ this count-only summary without database IDs or violation details. Comparator
 fixtures verify that profile-linked native extensions remain visible with an
 issue URL and stable reason while passing the difference gate; unlinked field
 mismatches, including quantity changes, remain failures.
+
+For each loader, `tools/itemgraph_feature_coverage.py` also emits a separate
+redacted sidecar for every compatibility-registry action. It records the
+exact-release writer disposition, ItemGraph implementation classification,
+profile source table, and count found in the selected replay. The sidecar
+explicitly separates a feature absent from this replay from an action that the
+verified release has no writer for; the current 13-event scenario still leaves
+additional covered-feature testing open under #31.
 - explanation available
 
 ## Coffer/modded inventory test
@@ -1091,7 +1099,7 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   and the Ender action constants to remain enum-only with their stable
   no-writer reason.
 - These are source/binary mapping checks; they do not replace the full
-  loader replay or the differential acceptance owned by #31.
+  ItemGraph-only loader conformance matrix owned by #31.
 - The paired NeoForge and Fabric `EntityInteractionGameTests` also perform an
   actual server-side water-bucket use against a source block. The shared
   `BucketPickupConformanceFixture` requires one durable `BREAK_BLOCK` audit row

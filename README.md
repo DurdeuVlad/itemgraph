@@ -22,9 +22,10 @@ is absent. The four release files are:
 
 The compatible variants are a migration bridge while the M8 parity gates remain
 open. ItemGraph will switch to the standard loader jar as the only supported
-artifact only after every M8 acceptance gate, the differential replay, the
-native-only 24-hour staging window, and the recorded rollback rehearsal in [the
-cutover plan](docs/GRIEFLOGGER_PARITY.md) are complete. That cutover retires the
+artifact only after every M8 feature-parity gate and the separate M10 operator
+cutover checks in [the cutover plan](docs/GRIEFLOGGER_PARITY.md) are approved.
+Those later operational checks do not make the GriefLogger JAR or database
+runtime dependencies. That cutover retires the
 GriefLogger jar dependency; it does not change the read-only importer or delete
 the retained source database copy.
 
