@@ -27,7 +27,8 @@ initialization logs also identify the selected backend.
 | Network DB TLS mode | `general.database_ssl_mode` | `database_ssl_mode` | string / `disable` | `disable`, `trust`, `verify-ca`, `verify-full` | Restart |
 | Network DB timeout | `general.database_connection_timeout_ms` | `database_connection_timeout_ms` | integer / `5000` | `[250,120000]` milliseconds | Restart |
 | Optional indexes | `storage.use_indexes` | `use_indexes` | boolean / `true` | `true` or `false`; migration-owned unique and required foreign-key indexes remain | Restart |
-| GriefLogger source path | `general.grieflogger_database_path` | `grieflogger_database_path` | string / `database.db` | Non-empty relative or absolute path; source remains read-only | Restart |
+| GriefLogger source integration | `general.grieflogger_integration_enabled` | `grieflogger_integration_enabled` | boolean / `false` | `false` keeps native-only operation and does not probe a source database; `true` enables read-only migration sync/import | Restart |
+| GriefLogger source path | `general.grieflogger_database_path` | `grieflogger_database_path` | string / `database.db` | Required and non-empty when source integration is enabled; ignored in native-only mode; source remains read-only | Restart |
 | Ground bridge window | `correlation.ground_bridge_max_seconds` | `ground_bridge_max_seconds` | integer / `300` | `[1,86400]` seconds | Restart |
 
 ## Operations and forensic retention
@@ -40,7 +41,7 @@ initialization logs also identify the selected backend.
 | Queue flush cadence | `ingestion.queue_frequency_ticks` | `queue_frequency_ticks` | integer / `20` | `[1,100]` server ticks between scheduled evidence flushes; default and range match GriefLogger `queueFrequency` | Restart |
 | Maximum batch size | `ingestion.max_batch_size` | `max_batch_size` | integer / `100` | `[1,1000]` records drained per queue per worker pass | Restart |
 | Network database keepalive | `operations.database_heartbeat_interval_ms` | `database_heartbeat_interval_ms` | integer / `30000` | `[1000,3600000]` milliseconds; best-effort validation of the shared MySQL/MariaDB connection on the ItemGraph worker; SQLite does not send heartbeats | Restart |
-| Native capture | `capture.enabled` | `capture_enabled` | boolean / `true` | `true` or `false`; false suppresses new ItemGraph-native records and does not stop GriefLogger read-only ingestion | Restart |
+| Native capture | `capture.enabled` | `capture_enabled` | boolean / `true` | `true` or `false`; false suppresses new ItemGraph-native records and does not change the separately configured GriefLogger migration bridge | Restart |
 | Raw evidence retention | `retention.raw_evidence` | `raw_evidence_retention` | string / `indefinite` | `indefinite`; no automatic purge is implemented | Restart |
 
 The raw evidence retention value is a safety invariant, not a purge scheduler.

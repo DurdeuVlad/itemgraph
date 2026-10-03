@@ -20,7 +20,7 @@ PROBES = (
     ("general.database_path", "database_path", '[general]\ndatabase_path = ""\n',
      "general.database_path must not be blank"),
     ("general.grieflogger_database_path", "grieflogger_database_path",
-     '[general]\ngrieflogger_database_path = ""\n',
+     '[general]\ngrieflogger_integration_enabled = true\ngrieflogger_database_path = ""\n',
      "general.grieflogger_database_path must not be blank"),
     ("general.database_backend", "database_backend",
      '[general]\ndatabase_backend = "jdbc:mysql://user:backend-secret@db/test"\n',

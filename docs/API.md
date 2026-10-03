@@ -755,4 +755,4 @@ fingerprint candidates.
   ItemGraph's deterministic correlation must remain the only inference authority.
 - **Use `UNKNOWN` for coordinate-less inventories:** rejected because a stable modded
   inventory identity must remain distinguishable and traceable.
-- **GriefLogger API:** rejected; GriefLogger remains optional, additive, and read-only.
+- **GriefLogger API:** rejected; ItemGraph operates independently. Its optional read-only migration bridge is disabled by default and must be enabled explicitly in loader configuration.

@@ -134,7 +134,8 @@ public class IngestionService {
             running.set(true);
             // Schedule every 60 seconds, with an initial delay of 5 seconds
             executor.scheduleWithFixedDelay(this::runIngestionSafely, 5, 60, TimeUnit.SECONDS);
-            LOGGER.info("ItemGraph ingestion service started (ingest + correlate every 60s, ground bridge window {}s).",
+            LOGGER.info("ItemGraph worker started (native correlation every 60s, GriefLogger read-only sync {}, ground bridge window {}s).",
+                    adapter.isIntegrationEnabled() ? "enabled" : "disabled",
                     correlationEngine.getWindowSeconds());
         }
     }
@@ -255,7 +256,8 @@ public class IngestionService {
     /** Queues one manual ingest-and-correlate pass; false means the worker is stopped or already has a manual request queued. */
     public boolean requestIngestionAsync() {
         ScheduledExecutorService current = executor;
-        if (!running.get() || current == null || !manualIngestionQueued.compareAndSet(false, true)) {
+        if (!adapter.isIntegrationEnabled() || !running.get() || current == null
+                || !manualIngestionQueued.compareAndSet(false, true)) {
             return false;
         }
         try {
@@ -276,7 +278,8 @@ public class IngestionService {
     /** Queues one complete read-only import of the eleven GriefLogger source tables. */
     public boolean requestHistoricalImportAsync() {
         ScheduledExecutorService current = executor;
-        if (!running.get() || current == null || !historicalImportQueued.compareAndSet(false, true)) {
+        if (!adapter.isIntegrationEnabled() || !running.get() || current == null
+                || !historicalImportQueued.compareAndSet(false, true)) {
             return false;
         }
         try {
@@ -303,6 +306,9 @@ public class IngestionService {
     /** Runs the historical import on the caller's worker thread; never call from a tick handler. */
     public synchronized GriefLoggerHistoricalImporter.ImportReport runHistoricalImport()
             throws java.io.IOException, SQLException {
+        if (!adapter.isIntegrationEnabled()) {
+            throw new java.io.IOException("GriefLogger source integration is disabled; enable it in ItemGraph config first");
+        }
         return new GriefLoggerHistoricalImporter(adapter, dbManager).importAll();
     }
 
@@ -317,6 +323,12 @@ public class IngestionService {
     public synchronized IngestionResult runIngestion() {
         long startTime = System.currentTimeMillis();
         lastRunTimestamp = startTime;
+
+        if (!adapter.isIntegrationEnabled()) {
+            lastResult = new IngestionResult(false, 0, 0, 0,
+                    "GriefLogger source integration is disabled by configuration");
+            return lastResult;
+        }
 
         if (!dbManager.isInitialized()) {
             String error = "ItemGraph database is not initialized";

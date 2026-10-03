@@ -13,6 +13,12 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #127 native-only default:** NeoForge and Fabric no longer inspect a
+  `database.db` file for GriefLogger data during normal operation. Read-only
+  source sync and historical import require the explicit
+  `grieflogger_integration_enabled=true` setting. Native capture, storage,
+  correlation, and queries remain independent. Mod version remains 0.3.2; no
+  distributable jar is built.
 - **Issue #32 operational metrics and queue probes:** `/ig status` reports
   redacted enqueue, persistence, query, correlation, queue-pressure, component
   decode-cache, and heap aggregates. CI emits validated 14-day reports for both

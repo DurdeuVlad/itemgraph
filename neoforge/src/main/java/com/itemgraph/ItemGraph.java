@@ -72,19 +72,19 @@ public class ItemGraph {
         ItemCanonicalizer.setRegistryAccess(event.getServer().registryAccess());
         var operationalSettings = ItemGraphConfig.operationalSettings();
         var databaseSettings = ItemGraphConfig.databaseSettings();
+        var griefLoggerIntegrationEnabled = ItemGraphConfig.griefLoggerIntegrationEnabled();
         var griefLoggerDatabasePath = ItemGraphConfig.griefLoggerDatabasePath();
         operationalSettings.apply();
         CorrelationEngine.setDefaultWindowSeconds(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.get());
         DatabaseManager.getInstance().initialize(databaseSettings);
         com.itemgraph.ingest.InternalObservationService.getInstance().start();
         com.itemgraph.ingest.IngestionService.getInstance().setAdapter(
-                new com.itemgraph.ingest.GriefLoggerAdapter(griefLoggerDatabasePath));
+                new com.itemgraph.ingest.GriefLoggerAdapter(griefLoggerDatabasePath, griefLoggerIntegrationEnabled));
         com.itemgraph.ingest.IngestionService.getInstance().start();
         com.itemgraph.api.ItemGraphApiLifecycle.start(event.getServer());
-        boolean glPresent = net.neoforged.fml.ModList.get().isLoaded("grieflogger");
-        LOGGER.info("GriefLogger integration: {}", glPresent
-                ? "ENABLED — reading from GriefLogger database as additive evidence source"
-                : "DISABLED — GriefLogger not installed; ItemGraph using supported native event and capability observations");
+        LOGGER.info("GriefLogger source integration: {}", griefLoggerIntegrationEnabled
+                ? "ENABLED (read-only migration sync/import)"
+                : "DISABLED by default; ItemGraph using native capture and owned storage");
     }
 
     private void onServerStopping(ServerStoppingEvent event) {

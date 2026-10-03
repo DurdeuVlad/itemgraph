@@ -1204,11 +1204,11 @@ public final class ItemGraphCommands {
     private static int status(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
         String modVersion = runtimeInformation.modVersion();
-        boolean griefLoggerLoaded = runtimeInformation.isModLoaded("grieflogger");
-        boolean glDbAvailable = IngestionService.getInstance().getAdapter().isSupportedSchemaAvailable();
-        String glStatus = !griefLoggerLoaded ? "DISABLED (not installed)"
-                : glDbAvailable ? "ENABLED (database reachable)"
-                : "DISABLED (mod present but database not found)";
+        var sourceAdapter = IngestionService.getInstance().getAdapter();
+        String glStatus = !sourceAdapter.isIntegrationEnabled()
+                ? "DISABLED (native-only; enable the GriefLogger integration in ItemGraph config to opt in)"
+                : sourceAdapter.isSupportedSchemaAvailable() ? "ENABLED (read-only source available)"
+                : "ENABLED (read-only source unavailable)";
 
         DatabaseManager db = DatabaseManager.getInstance();
         boolean dbConnected = db.isInitialized();
@@ -1342,7 +1342,12 @@ public final class ItemGraphCommands {
 
     private static int ingestNow(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
-        if (!IngestionService.getInstance().requestIngestionAsync()) {
+        IngestionService ingestion = IngestionService.getInstance();
+        if (!ingestion.getAdapter().isIntegrationEnabled()) {
+            source.sendFailure(Component.literal("[ItemGraph] GriefLogger source integration is disabled; enable it in ItemGraph config to use this migration command."));
+            return 0;
+        }
+        if (!ingestion.requestIngestionAsync()) {
             source.sendFailure(Component.literal("[ItemGraph] Manual ingestion was not queued: the worker is stopped or a manual cycle is already queued."));
             return 0;
         }
@@ -1353,7 +1358,12 @@ public final class ItemGraphCommands {
 
     private static int ingestHistory(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
-        if (!IngestionService.getInstance().requestHistoricalImportAsync()) {
+        IngestionService ingestion = IngestionService.getInstance();
+        if (!ingestion.getAdapter().isIntegrationEnabled()) {
+            source.sendFailure(Component.literal("[ItemGraph] GriefLogger source integration is disabled; enable it in ItemGraph config to use this migration command."));
+            return 0;
+        }
+        if (!ingestion.requestHistoricalImportAsync()) {
             source.sendFailure(Component.literal("[ItemGraph] Historical GriefLogger import was not queued: the worker is stopped or an import is already queued."));
             return 0;
         }

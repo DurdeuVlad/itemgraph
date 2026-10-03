@@ -462,6 +462,13 @@ point-in-time snapshot, not peak memory or allocation rate. The latency histogra
 reports coarse upper-bound buckets, so it cannot support narrow p95 regression
 gates.
 
+Native-only startup must be tested with a valid GriefLogger-compatible SQLite
+file named `database.db` present in the game directory while
+`grieflogger_integration_enabled=false`. Verify the ItemGraph server reaches
+`Done`, native event rows persist to ItemGraph's own database, and no GriefLogger
+database connection is opened. Repeat with the setting `true` to verify the
+read-only migration path while source write attempts still fail.
+
 Two redacted CI artifacts show why those limits matter. Runs
 [36944915206](https://github.com/DurdeuVlad/itemgraph/actions/runs/36944915206)
 and [37011138142](https://github.com/DurdeuVlad/itemgraph/actions/runs/37011138142)

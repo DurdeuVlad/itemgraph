@@ -143,7 +143,7 @@ public final class OperationalQueueGameTests implements FabricGameTest {
                     "end_tick_callbacks", (long) callbacksSinceProbe,
                     "flush_every_ticks", (long) flushEveryTicks,
                     "enqueue_total_ns", enqueueNanos),
-                    griefLoggerInstalled ? "present" : "absent");
+                    FabricLoader.getInstance().isModLoaded("grieflogger") ? "present" : "absent");
             helper.succeed();
         });
     }

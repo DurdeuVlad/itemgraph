@@ -64,7 +64,8 @@ public final class ItemGraphFabric implements ModInitializer {
         CorrelationEngine.setDefaultWindowSeconds(config.groundBridgeMaxSeconds());
         DatabaseManager.getInstance().initialize(config.databaseSettings());
         InternalObservationService.getInstance().start();
-        IngestionService.getInstance().setAdapter(new GriefLoggerAdapter(config.griefLoggerDatabasePath()));
+        IngestionService.getInstance().setAdapter(new GriefLoggerAdapter(
+                config.griefLoggerDatabasePath(), config.griefLoggerIntegrationEnabled()));
         IngestionService.getInstance().start();
         ItemGraphApiLifecycle.start(server);
     }
