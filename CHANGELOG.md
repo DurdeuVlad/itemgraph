@@ -57,7 +57,7 @@ The project follows a simple pre-1.0 development changelog model.
   partial or callbacks fail. Blocked piston results are recorded as attempts,
   separately from direct state deltas. Events do not invent player actors or
   item quantities. The consolidated isolated NeoForge and Fabric run passed
-  all seven required GameTests per loader with GriefLogger absent. Full #55
+  all required GameTests with GriefLogger absent (NeoForge: 7; Fabric: 8). Full #55
   replay/conservation, privacy, and incident-export acceptance remains open.
   Mod version remains 0.3.2; no distributable JAR is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
