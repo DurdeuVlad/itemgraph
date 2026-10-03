@@ -404,6 +404,9 @@ bounded queues and a slowest 400-event producer batch of 9.299 ms, below the
 existing 50 ms per-batch server-thread budget. The isolated Fabric GameTest used
 a 20-tick cadence and persisted all 32 accepted queue events after the end-tick
 callback with zero drops; all three registered Fabric GameTests passed locally.
+The operator-facing page-size, server-only, queue, retention, and reload
+controls are tracked under the completed [#30](https://github.com/DurdeuVlad/itemgraph/issues/30)
+acceptance; raw evidence has no destructive purge by default.
 CI uploads redacted reports for both loader SQLite probes, NeoForge and Fabric
 512-event probes against disposable MySQL and MariaDB services, and a NeoForge
 shutdown saturation probe. Each network probe runs 20 read-only ledger count
