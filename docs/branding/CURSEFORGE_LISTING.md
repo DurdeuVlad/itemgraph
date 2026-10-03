@@ -52,7 +52,7 @@ CurseForge projects with 3–5 clean screenshots convert substantially higher. T
    - **Content**: Run `/ig audit` reporting `HEALTHY (ALL INVARIANTS SATISFIED)`.
 
 5. **Screenshot 5: Server Status & Telemetry (`/ig status`)**
-   - **Caption**: *Operational status showing GriefLogger detection, ingestion throughput, and entity tracking.*
+   - **Caption**: *Operational status showing ItemGraph capture, queue throughput, and entity tracking.*
    - **Content**: Run `/ig status`.
 
 ---
@@ -68,7 +68,7 @@ CurseForge projects with 3–5 clean screenshots convert substantially higher. T
 
 ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **NeoForge 1.21.1**.
 
-Existing loggers (like GriefLogger or CoreProtect) are exceptional at telling you *what happened at a single coordinate*—who opened a chest, who broke a block, or who picked up an item. But when items disappear across players, ground drops, and containers, server admins are left manually cross-referencing timestamps.
+ItemGraph is a standalone server-side evidence and reconstruction mod. It records supported native server events and reconstructs plausible item movement across players, ground drops, and containers, with each inference linked to its supporting observations.
 
 **ItemGraph adds that missing reconstruction layer.**
 
@@ -83,7 +83,7 @@ Instead of assigning artificial, invasive UUIDs to every Minecraft item, ItemGra
 1. **No Synthetic Per-Item UUIDs**: Works with vanilla and modded items without altering item NBT or bloating world save files.
 2. **Strict Quantity Conservation**: The engine never manufactures quantity ($\sum \text{allocated} \le \text{evidenced capacity}$). Stack splits (1-to-many) and merges (many-to-1) are tracked through an explicit allocation ledger.
 3. **Explicit Provenance**: Chat and logs strictly distinguish `[OBSERVED]` raw evidence from `[INFERRED conf=...]` transfers.
-4. **Read-Only Integration**: GriefLogger's SQLite database is strictly read-only (`PRAGMA query_only = ON`). ItemGraph owns its own isolated SQLite storage (`run/itemgraph/itemgraph.db`).
+4. **Owned Evidence**: ItemGraph captures and stores its own raw observations and derived graph data. An optional read-only GriefLogger importer is available only for historical migration; normal operation does not require its jar or database.
 5. **Zero Server Lag**: Graph traversals, heavy historical scans, and invariant audits execute exclusively on asynchronous worker threads.
 
 ---
@@ -96,7 +96,7 @@ Instead of assigning artificial, invasive UUIDs to every Minecraft item, ItemGra
 - **Armor Stand & Container Integration**: Records the server's completed armor-stand interaction result without claiming an item transfer; supports standard chest, barrel, and hopper inventories.
 - **Vanilla Flow Browser (`/ig gui`)**: Opens a six-row chest GUI for item, player, or container timelines on a vanilla client; menu interactions are display-only and cannot move items.
 - **Container Inspector (`/ig inspect`)**: Lets a moderator right-click supported containers to inspect the exact dimension/position without opening or mutating the normal inventory.
-- **Block interaction audit**: Records the same main-hand attempts on GriefLogger's supported vanilla functional blocks. These are attempt records; ItemGraph does not label a pre-use callback as a completed interaction.
+- **Block interaction audit**: Records supported vanilla functional-block interaction attempts. These are attempt records; ItemGraph does not label a pre-use callback as a completed interaction.
 - **Moderator Help (`/ig help`)**: Documents every command topic with syntax, permissions, evidence semantics, limits, and examples.
 - **Preview Integration API**: Trusted NeoForge mods can register an evidence source, submit direct observations, and query bounded flows through `com.itemgraph.api` `PREVIEW_3`.
 - **Live Invariant Auditor (`/ig audit`)**: Self-diagnosing auditor verifies database health, quantity conservation, and relational integrity on demand.
@@ -162,5 +162,5 @@ Displays live operational health, background ingestion checkpoints, correlation 
 - **Java**: Java 21+
 - **Environment**: **Server-Side Only**. Players do not need ItemGraph installed on their clients to join.
 - **Required**: NeoForge 1.21.1 and Java 21+.
-- **Optional Integration**: [GriefLogger](https://www.curseforge.com/minecraft/mc-mods/grieflogger) (`1.2.10+` for 1.21.1) can be installed alongside ItemGraph as an additive read-only evidence source. ItemGraph does not require GriefLogger or GriefLogger's own dependencies to start or record its supported native observations.
+- **Standalone operation**: ItemGraph captures native evidence and stores it in its own database. GriefLogger is not required. Its database can be imported read-only during migration; temporary compatible artifacts are for servers that run both mods while the SQLite class conflict coexistence bridge remains supported.
 ```
