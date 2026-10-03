@@ -51,7 +51,7 @@ class EventTaxonomyTest {
         }
         assertTrue(EventTaxonomy.VERSION.matches("\\d+\\.\\d+\\.\\d+"));
         assertEquals("2.1.0", EventTaxonomy.VERSION,
-                "adding the container-break event family is a taxonomy minor change");
+                "taxonomy extension remains at the expected event-contract version");
 
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
@@ -96,9 +96,11 @@ class EventTaxonomyTest {
         assertTrue(EventTaxonomy.unifiedLookupActions().contains("INTERACT_BLOCK_ATTEMPT"));
         assertFalse(EventTaxonomy.unifiedLookupActions().contains("INTERACT_BLOCK"));
         assertTrue(EventTaxonomy.unifiedLookupActions().contains("COMMAND_EXECUTED"));
-        assertFalse(EventTaxonomy.auditLookupTypes().contains("EXPLOSION_BLOCK_CHANGE"));
+        assertTrue(EventTaxonomy.auditLookupTypes().contains("EXPLOSION_BLOCK_CHANGE"));
+        assertTrue(EventTaxonomy.auditLookupTypes().contains("PISTON_BLOCK_MOVE"));
+        assertTrue(EventTaxonomy.auditLookupTypes().contains("PISTON_BLOCK_ATTEMPT"));
         assertFalse(EventTaxonomy.auditLookupTypes().contains("TRADE"));
-        assertFalse(EventTaxonomy.unifiedLookupActions().contains("EXPLOSION_BLOCK_CHANGE"));
+        assertTrue(EventTaxonomy.unifiedLookupActions().contains("EXPLOSION_BLOCK_CHANGE"));
         assertTrue(EventTaxonomy.canonicalAction("trade").isEmpty());
         assertTrue(EventTaxonomy.auditLookupTypes().stream().allMatch(id -> {
             return EventTaxonomy.find(id, Surface.AUDIT_EVENT)
@@ -116,10 +118,45 @@ class EventTaxonomyTest {
                 .orElseThrow();
         assertEquals(55, explosion.ownerIssue());
         assertEquals(EvidenceClass.OBSERVED, explosion.evidenceClass());
-        assertEquals(QuantitySemantics.UNKNOWN, explosion.quantity());
+        assertEquals(QuantitySemantics.NONE, explosion.quantity());
         assertEquals(ActorStatus.UNKNOWN, explosion.actor());
-        assertEquals(LoaderStatus.PLANNED, explosion.fabric().status());
-        assertEquals(LoaderStatus.PLANNED, explosion.neoForge().status());
+        assertEquals(EventTaxonomy.SourceReliability.DIRECT_STATE_DELTA, explosion.sourceReliability());
+        assertEquals(EventTaxonomy.EndpointSemantics.WORLD_LOCATION, explosion.endpoints());
+        assertEquals(EventTaxonomy.PrivacyClass.SENSITIVE_LOCATION, explosion.privacy());
+        assertEquals(LoaderStatus.IMPLEMENTED, explosion.fabric().status());
+        assertEquals(LoaderStatus.IMPLEMENTED, explosion.neoForge().status());
+        EventTaxonomy.Definition piston = EventTaxonomy.find("PISTON_BLOCK_MOVE", Surface.AUDIT_EVENT)
+                .orElseThrow();
+        assertEquals(55, piston.ownerIssue());
+        assertEquals(EvidenceClass.OBSERVED, piston.evidenceClass());
+        assertEquals(QuantitySemantics.NONE, piston.quantity());
+        assertEquals(EventTaxonomy.SourceReliability.DIRECT_STATE_DELTA, piston.sourceReliability());
+        assertEquals(LoaderStatus.IMPLEMENTED, piston.fabric().status());
+        assertEquals(LoaderStatus.IMPLEMENTED, piston.neoForge().status());
+        EventTaxonomy.Definition pistonAttempt = EventTaxonomy.find("PISTON_BLOCK_ATTEMPT", Surface.AUDIT_EVENT)
+                .orElseThrow();
+        assertEquals(EvidenceClass.OBSERVED, pistonAttempt.evidenceClass());
+        assertEquals(EventTaxonomy.SourceReliability.GAME_CALLBACK_ATTEMPT, pistonAttempt.sourceReliability());
+        assertEquals(QuantitySemantics.NONE, pistonAttempt.quantity());
+        assertEquals(LoaderStatus.IMPLEMENTED, pistonAttempt.fabric().status());
+        assertEquals(LoaderStatus.IMPLEMENTED, pistonAttempt.neoForge().status());
+        for (String id : java.util.List.of("FLUID_BLOCK_CHANGE", "FIRE_BLOCK_CHANGE",
+                "ENDERMAN_BLOCK_MOVE", "FALLING_BLOCK_CHANGE")) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(id, Surface.AUDIT_EVENT).orElseThrow();
+            assertEquals(55, definition.ownerIssue());
+            assertEquals(EvidenceClass.OBSERVED, definition.evidenceClass());
+            assertEquals(QuantitySemantics.NONE, definition.quantity());
+            assertEquals(EventTaxonomy.SourceReliability.DIRECT_STATE_DELTA, definition.sourceReliability());
+            assertEquals(EventTaxonomy.PrivacyClass.SENSITIVE_LOCATION, definition.privacy());
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.fabric().status());
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.neoForge().status());
+        }
+        assertTrue(EventTaxonomy.definitions().stream()
+                .filter(definition -> definition.surface() == Surface.AUDIT_EVENT
+                        && definition.ownerIssue() != 55
+                        && definition.fabric().status() == LoaderStatus.PLANNED)
+                .allMatch(definition -> definition.evidenceClass() == EvidenceClass.UNRESOLVED
+                        && definition.quantity() == QuantitySemantics.NONE));
 
         assertTrue(EventTaxonomy.find("TRANSFORMATION_INPUTS_NOT_OBSERVED", Surface.AUDIT_EVENT).isEmpty());
         EventTaxonomy.Definition trade = EventTaxonomy.find("TRADE", Surface.TRANSFORMATION).orElseThrow();

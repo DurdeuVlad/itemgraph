@@ -167,10 +167,11 @@ The project follows a simple pre-1.0 development changelog model.
   types and unified lookup aliases now use the shared registry. Definitions
   specify evidence class, capture reliability, endpoint and quantity semantics,
   actor status, privacy class, loader support, evidence-ID contract, aliases,
-  and owning issue. #55–#57 event families and stable unresolved reason codes
-  are listed as planned until loader adapters and fixtures prove support. This
-  is a taxonomy version only; the ItemGraph mod remains 0.3.2 and no distributable
-  JAR is built.
+  and owning issue. Issue #55 now has paired Fabric and NeoForge capture for
+  explosions, pistons, flowing fluids, fire, Enderman block movement, and
+  falling blocks. Issues #56–#57 remain planned until loader adapters and
+  fixtures prove support. The taxonomy version is 2.1.0; ItemGraph remains
+  version 0.3.2 and no distributable JAR is built.
 - **Creative transformation evidence boundary:** taxonomy `2.0.0` retains
   `CREATIVE_ITEM_TRANSFORM` for classification but marks it unsupported on both
   loaders with `CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED`. Creative slot packets
@@ -178,6 +179,17 @@ The project follows a simple pre-1.0 development changelog model.
   the ID retains `UNRESOLVED` evidence with `UNKNOWN` quantity and no longer
   appears in lookup suggestions. Mod version remains 0.3.2; no distributable
   JAR is built.
+
+- **Issue #55 world and environmental causes:** both loaders record confirmed
+  explosion, piston, fluid, fire, Enderman block-movement, and falling-block
+  state changes into ItemGraph-owned storage. Bounded snapshots preserve
+  confirmed deltas and emit classified unresolved evidence when coverage is
+  partial or callbacks fail. Blocked piston results are recorded as attempts,
+  separately from direct state deltas. Events do not invent player actors or
+  item quantities. The consolidated isolated NeoForge and Fabric run passed
+  all seven required GameTests per loader with GriefLogger absent. Full #55
+  replay/conservation, privacy, and incident-export acceptance remains open.
+  Mod version remains 0.3.2; no distributable JAR is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus ten allowlisted audit
   events, including `PLACE_BLOCK`, `INTERACT_BLOCK_ATTEMPT`, and `KILL_ENTITY`,

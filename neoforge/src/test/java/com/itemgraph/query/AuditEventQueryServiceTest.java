@@ -104,6 +104,20 @@ class AuditEventQueryServiceTest {
     }
 
     @Test
+    void formatterPreservesUnresolvedWorldEvidenceAndDoesNotInventAPlayer() {
+        AuditEventDetail event = new AuditEventDetail(
+                7L, "WORLD_EFFECT_UNRESOLVED", 1_000L, null, null,
+                "minecraft:overworld", 1, 64, 2, "minecraft:stone",
+                "cause=minecraft:creeper outcome=unconfirmed");
+
+        String formatted = String.join("\n", QueryFormatter.formatAuditEvents(List.of(event), "all"));
+
+        assertTrue(formatted.contains("[UNRESOLVED] audit#7 WORLD_EFFECT_UNRESOLVED"));
+        assertTrue(formatted.contains("actor=(unknown actor)"));
+        assertFalse(formatted.contains("actor=(unknown player)"));
+    }
+
+    @Test
     void resultLimitIsCapped() throws Exception {
         try (PreparedStatement insert = conn.prepareStatement(
                 "INSERT INTO ig_audit_events (event_type, timestamp_ms) VALUES ('CHAT_MESSAGE', ?)")) {

@@ -73,6 +73,7 @@ event coverage or full GriefLogger parity.
 | Block actions | `PLACE_BLOCK`, `BREAK_BLOCK`, `INTERACT_BLOCK`, `INTERACT_BLOCK_ATTEMPT` | `PLACE_BLOCK` uses NeoForge's cancellable `EntityPlaceEvent`; `BREAK_BLOCK` uses NeoForge's cancellable `BreakEvent`, documented as a player attempt. The shared taxonomy conservatively labels both as attempts across loaders. [NeoForge 1.21.1 `EntityPlaceEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.EntityPlaceEvent.html), [NeoForge 1.21.1 `BreakEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.BreakEvent.html). Both are player-attributed at a sensitive world location. |
 | Entity interaction | `INTERACT_ENTITY`, `INTERACT_ENTITY_COMPLETED`, `INTERACT_ENTITY_DENIED`, `INTERACT_ENTITY_UNRESOLVED` | Attempt, method/callback result, or explicit unresolved boundary; no quantity claim. |
 | Entity/projectile | `KILL_ENTITY`, `THROW_ITEM`, `SHOOT_ITEM`, `PROJECTILE_SPAWN_ACCEPTED` | Captured player/entity event boundary; projectile attempt and accepted spawn remain distinct. |
+| World/environment | `EXPLOSION_BLOCK_CHANGE`, `PISTON_BLOCK_MOVE`, `PISTON_BLOCK_ATTEMPT`, `FLUID_BLOCK_CHANGE`, `FIRE_BLOCK_CHANGE`, `ENDERMAN_BLOCK_MOVE`, `FALLING_BLOCK_CHANGE`, `WORLD_EFFECT_UNRESOLVED` | Confirmed explosion, piston, fluid, fire, Enderman, and falling-block changes use bounded before/after block-state deltas. `PISTON_BLOCK_ATTEMPT` records a trigger result with no observed state delta and uses `GAME_CALLBACK_ATTEMPT` reliability. Incomplete candidate coverage and queue rejection use unresolved rows. All use `quantity=NONE`. |
 
 The item-flow and transformation action IDs are cataloged on their own storage
 surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,
@@ -88,7 +89,7 @@ surface for each ID.
 `CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED`. Creative slot packets prove separate
 before/after quantity deltas; they do not prove a transformation between the
 two fingerprints. The ID is therefore excluded from query suggestions. This
-support correction increments the taxonomy major version while preserving the
+support correction was introduced in taxonomy `2.0.0` while preserving the
 stable identifier.
 Unified lookup continues to show the legacy row and its source/result
 fingerprints, but omits its free-form legacy details so an old numeric string
@@ -97,15 +98,22 @@ IDs with an implemented native writer on both loaders; shared queries have no
 loader provenance. Unknown, malformed, and unsupported IDs remain queryable
 evidence without becoming observed movement hops.
 
-## Planned child issue families
+## Event family roadmap
 
-These definitions are deliberately `PLANNED` on Fabric and NeoForge until a
-loader adapter, success/cancel/partial/unsupported fixtures, and the child
-issue's acceptance checks establish otherwise.
+Issue #55 world-cause definitions are implemented on Fabric and NeoForge; see
+[`WORLD_EVENT_CAPTURE.md`](WORLD_EVENT_CAPTURE.md) for capture limits and
+remaining acceptance evidence. Issues #56 and #57 remain `PLANNED` until their
+loader adapters, success/cancel/partial/unsupported fixtures, and acceptance
+checks establish support.
+
+Planned definitions are classified `UNRESOLVED` with
+`UNRESOLVED_CAUSE` reliability. Audit-event definitions always use
+`quantity=NONE`; a planned event cannot be rendered as an observed transfer or
+contribute item quantity before an authoritative writer exists.
 
 | Issue | IDs | Acceptance focus |
 | --- | --- | --- |
-| [#55](https://github.com/DurdeuVlad/itemgraph/issues/55) | `EXPLOSION_BLOCK_CHANGE`, `FLUID_BLOCK_CHANGE`, `FIRE_BLOCK_CHANGE`, `PISTON_BLOCK_MOVE`, `ENDERMAN_BLOCK_MOVE`, `FALLING_BLOCK_CHANGE`, `DISPENSER_EFFECT`, `DROPPER_EFFECT` | Authoritative world cause, before/after state, endpoint, cancellation/partial outcome, stable unresolved reason. |
+| [#55](https://github.com/DurdeuVlad/itemgraph/issues/55) | World cause families above are implemented on both loaders; see [`WORLD_EVENT_CAPTURE.md`](WORLD_EVENT_CAPTURE.md) for capture limits and remaining acceptance evidence. | Authoritative world cause, before/after state, endpoint, cancellation/partial outcome, stable unresolved reason. |
 | [#56](https://github.com/DurdeuVlad/itemgraph/issues/56) | `ENTITY_SPAWN`, `ENTITY_DESPAWN`, `ENTITY_KILL`, `PROJECTILE_LAUNCH`, `PROJECTILE_IMPACT`, `ITEM_ENTITY_SPAWN`, `ITEM_ENTITY_DESPAWN` | Separate attempt/result/lifecycle; use UUID only when supplied by the event; do not treat it as item identity. |
 | [#57](https://github.com/DurdeuVlad/itemgraph/issues/57) | `TRADE`, `ENCHANTING`, `BREWING`, `SMITHING`, `GRINDSTONE`, `LOOT_GENERATION` | Explicit input/output or unknown inputs; failed/cancelled/partial operations remain distinct. |
 
