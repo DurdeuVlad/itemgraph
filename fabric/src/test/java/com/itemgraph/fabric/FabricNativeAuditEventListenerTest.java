@@ -10,6 +10,7 @@ import com.mojang.authlib.GameProfile;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerLevel;
@@ -167,7 +168,7 @@ class FabricNativeAuditEventListenerTest {
                     opens.incrementAndGet();
                     return 1;
                 },
-                player, level, pos);
+                player, level, pos, Direction.UP);
 
         assertEquals(InteractionResult.SUCCESS, result);
         assertEquals(1, opens.get());
@@ -241,12 +242,12 @@ class FabricNativeAuditEventListenerTest {
 
         assertNull(FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, l, pos) -> { opens.incrementAndGet(); return 1; },
-                player, unsupportedLevel, BlockPos.ZERO));
+                player, unsupportedLevel, BlockPos.ZERO, Direction.UP));
 
         inspections.setEnabled(playerUuid, true);
         assertNull(FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, l, pos) -> { opens.incrementAndGet(); return 0; },
-                player, serverLevelWithContainer(), BlockPos.ZERO));
+                player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
         assertEquals(1, opens.get());
     }
 
@@ -269,7 +270,7 @@ class FabricNativeAuditEventListenerTest {
                     opens.incrementAndGet();
                     return 1;
                 },
-                player, level, BlockPos.ZERO);
+                player, level, BlockPos.ZERO, Direction.UP);
 
         assertEquals(InteractionResult.SUCCESS, result);
         assertEquals(1, opens.get());
@@ -289,11 +290,69 @@ class FabricNativeAuditEventListenerTest {
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             result = FabricNativeAuditEventListener.handleBlockUse(
-                    inspections, (p, l, target) -> 1, player, level, InteractionHand.MAIN_HAND, pos);
+                    inspections, (p, l, target) -> 1, player, level, InteractionHand.MAIN_HAND, pos, Direction.UP);
         }
 
         assertEquals(InteractionResult.SUCCESS, result);
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void ordinaryBlockClickInspectsTheAdjacentFaceHistory() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos clicked = BlockPos.ZERO;
+        BlockPos target = clicked.relative(Direction.EAST);
+        when(level.getBlockState(clicked)).thenReturn(Blocks.STONE.defaultBlockState());
+
+        InteractionResult result = FabricNativeAuditEventListener.handleBlockUse(
+                inspections, (p, l, pos) -> { assertEquals(target, pos); return 1; },
+                player, level, InteractionHand.MAIN_HAND, clicked, Direction.EAST);
+
+        assertEquals(InteractionResult.SUCCESS, result);
+    }
+
+    @Test
+    void offHandBlockUseDoesNotInspectOrRecordGameplayEvidence() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        InternalObservationService service = mock(InternalObservationService.class);
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleBlockUse(
+                    inspections, (p, l, pos) -> { opens.incrementAndGet(); return 1; },
+                    player, level, InteractionHand.OFF_HAND, BlockPos.ZERO, Direction.UP);
+        }
+
+        assertEquals(InteractionResult.PASS, result);
+        assertEquals(0, opens.get());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void rejectedOrdinaryBlockFallbackPreservesGameplay() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos clicked = BlockPos.ZERO;
+        when(level.getBlockState(clicked)).thenReturn(Blocks.STONE.defaultBlockState());
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.handleBlockUse(
+                inspections, (p, l, pos) -> { assertEquals(clicked.relative(Direction.WEST), pos);
+                    opens.incrementAndGet(); return 0; },
+                player, level, InteractionHand.MAIN_HAND, clicked, Direction.WEST);
+
+        assertEquals(InteractionResult.PASS, result);
+        assertEquals(1, opens.get());
     }
 
     @Test
@@ -308,7 +367,7 @@ class FabricNativeAuditEventListenerTest {
         InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
                 inspections,
                 (openingPlayer, openingLevel, clickedPos) -> 0,
-                player, level, BlockPos.ZERO);
+                player, level, BlockPos.ZERO, Direction.UP);
 
         assertNull(result);
     }
@@ -350,7 +409,7 @@ class FabricNativeAuditEventListenerTest {
         ServerPlayer player = playerWithPermission(playerUuid, false);
 
         assertNull(FabricNativeAuditEventListener.tryOpenInspection(
-                inspections, (p, l, pos) -> 1, player, serverLevelWithContainer(), BlockPos.ZERO));
+                inspections, (p, l, pos) -> 1, player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
         assertFalse(inspections.isEnabled(playerUuid));
     }
 
