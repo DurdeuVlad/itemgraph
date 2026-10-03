@@ -547,10 +547,23 @@ identity.
 
 The internal persistence worker limits observation, transformation, and audit writes,
 including its shutdown drain, to `ingestion.max_batch_size`. A loader shutdown closes queue
-admission before draining accepted ItemGraph records on the persistence worker. It waits for
-the GriefLogger importer executor to terminate before closing the database. The lifecycle
-callback waits for completion but never performs JDBC writes itself. A rejected post-stop
-submission increments the evidence-loss counter. A pre-transaction failure or confirmed rollback increments the evidence-loss counter.
+admission before draining accepted ItemGraph records on the persistence worker. The ingestion
+worker has a 5-second graceful wait plus a 5-second interrupt wait. The internal persistence
+worker uses the same bound; if it is still inside JDBC, the lifecycle callback hands its
+queued and in-flight immutable events to an ItemGraph daemon writer, then waits at most 5 seconds
+for the recovery-file write. `ingest_event_uuid` makes the next startup's database replay
+idempotent. The recovery file is retained until all its records are confirmed durable in ItemGraph
+storage. Malformed or unsupported recovery files are preserved and prevent capture from starting.
+If shutdown finds already-accepted pre-start records while the primary recovery file cannot be
+read, it writes those records to the adjacent `itemgraph-pending-evidence.json.overflow` file and
+leaves the primary file intact. Startup merges both files after the primary file is readable; both
+are removed only after all recovered records commit.
+If the recovery writer fails or exceeds its deadline, the log and evidence-loss counter report the
+outstanding record count; a late write may finish only if the process remains alive and the
+filesystem returns. JDBC connection close runs on a daemon closer with a 1-second wait, so the
+server callback does not wait forever on a driver that ignores interruption. The lifecycle callback
+never performs evidence JDBC writes or recovery-file I/O itself. A rejected post-stop submission increments the evidence-loss counter.
+A pre-transaction failure or confirmed rollback increments the evidence-loss counter.
 If commit or rollback leaves the durable result uncertain, ItemGraph increments the
 separate persistence-outcome-unknown counter. Failed live transformation batches return to the same bounded queue with exponential
 backoff; the status queue count includes in-flight transformations. A requeue overflow also

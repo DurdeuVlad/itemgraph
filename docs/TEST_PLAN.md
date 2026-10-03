@@ -14,6 +14,48 @@ Testing should focus on correctness, explainability, quantity conservation, temp
 
 Never use production as the primary test environment.
 
+## Stalled JDBC shutdown and pending-evidence recovery
+
+- `InternalObservationServiceTest.stalledJdbcShutdownReturnsAndRecoversTheAcceptedEvent`
+  blocks an audit insert while ignoring interruption, verifies shutdown returns
+  within the 10-second worker wait plus the 5-second recovery-writer wait and margin, verifies the in-flight event is
+  present in ItemGraph's recovery file, then reopens SQLite and proves the event
+  appears exactly once and the recovery file is removed only after commit.
+- `InternalObservationServiceTest.replayAfterCommittedBatchLostAcknowledgementDoesNotDuplicateEvidence`
+  commits an observation to SQLite, throws after `Connection.commit()` to simulate
+  a lost acknowledgement, replays the immutable record, and verifies one durable
+  row for observations, transformations, and audit events.
+- `InternalObservationServiceTest.failedRecoveryLoadClosesAdmissionAndPreservesOriginalFile`
+  starts with a malformed primary recovery file and an already-accepted event,
+  verifies later submissions are rejected and counted, then verifies recovery
+  saves the accepted event to the adjacent `.overflow` file without changing the
+  malformed original. After the primary file is repaired, restart replays the
+  overflow event once and removes that file only after commit.
+- `InternalObservationServiceTest.startupRecoveryIoRunsOffCallerAndPersistsSavedEventsBeforeNewEvents`
+  holds the recovery-file lock while `start()` returns, then submits a new event
+  and verifies the saved event persists first.
+- `InternalObservationServiceTest.producerRacingCorruptRecoveryIsEitherDurablyPreservedOrRejected`
+  holds the queue lock to force a producer that passed its first gate check to
+  race failed recovery; the event must either be durably written to overflow or
+  rejected and counted.
+- `InternalObservationServiceTest.observationBatchIsRejectedAtomicallyWhenRecoveredQueueExceedsProducerLimit`
+  restores a queue at the recovery capacity and verifies a later observation
+  batch is wholly rejected and fully counted, with no partial enqueue.
+- `InternalObservationServiceTest.failedTransformationBatchIsSpooledAndReplayedAfterDatabaseReturns`
+  covers a definite failure before transaction start and confirms transformation
+  recovery uses the same path.
+- `PendingEvidenceSpoolTest` round-trips observations, transformations, audit
+  events, canonical components, raw byte payloads, and supersession positions;
+  it also verifies malformed files are preserved and the shutdown caller returns
+  within its deadline when the recovery-file worker simulates an interrupt-ignoring
+  filesystem stall.
+- `DatabaseManagerTest.jdbcCloseThatIgnoresInterruptCannotHoldServerShutdown`
+  holds `Connection.close()` past its bound and verifies database state is marked
+  closed while the daemon cleanup worker finishes later.
+- This test injects the stall locally; it does not claim that every JDBC vendor
+  has identical interruption or close behavior. The recovery file is ItemGraph
+  owned and does not read or modify a GriefLogger database.
+
 ## Local NeoForge operations check (2026-09-30)
 
 - Runtime: Minecraft 1.21.1, NeoForge 21.1.248, ItemGraph 0.3.2, Java 21;

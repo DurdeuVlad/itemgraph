@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +38,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -66,6 +68,7 @@ class InternalObservationServiceTest {
     void setUp() {
         service = InternalObservationService.getInstance();
         service.configureOperations(250, 1, 100, 30_000, true);
+        service.setEvidenceSpoolPathForTests(tempDir.resolve("pending-evidence.json"));
         service.clear();
         IngestionService.getInstance().getNodeManager().clearCaches();
     }
@@ -74,6 +77,7 @@ class InternalObservationServiceTest {
     void tearDown() {
         service.stop();
         service.clear();
+        service.setEvidenceSpoolPathForTests(null);
         IngestionService.getInstance().getNodeManager().clearCaches();
         DatabaseManager.getInstance().close();
     }
@@ -144,7 +148,8 @@ class InternalObservationServiceTest {
                 10, 64, -20, "minecraft:armor_stand",
                 "outcome=denied callback=fabric_use_entity callback_result=fail "
                         + "reason=FABRIC_USE_ENTITY_CALLBACK_SHORT_CIRCUITED held_item=minecraft:diamond "
-                        + "held_count=1 held_fingerprint=fp-diamond", null)));
+                        + "held_count=1 held_fingerprint=fp-diamond", null)),
+                "capture=" + service.isCaptureEnabled() + " queue=" + service.getQueueSize());
         service.stop();
 
         DatabaseManager.getInstance().close();
@@ -370,7 +375,9 @@ class InternalObservationServiceTest {
     }
 
     @Test
-    void uninitializedDatabaseDoesNotClaimAuditEventsWerePersisted() {
+    void uninitializedDatabaseSpoolsAcceptedAuditEventForRestartRecovery() throws Exception {
+        Path databasePath = tempDir.resolve("audit-recovery/itemgraph.db");
+        DatabaseManager.getInstance().initialize(databasePath);
         DatabaseManager.getInstance().close();
         assertTrue(service.submitAuditEvent(new InternalAuditEvent(
                 1234L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
@@ -380,10 +387,320 @@ class InternalObservationServiceTest {
 
         assertEquals(0, service.getTotalAuditEvents());
         assertEquals(0, service.getTotalPersisted());
-        assertEquals(1, service.getTotalDropped(), "a failure before transaction start is definite loss");
+        assertEquals(0, service.getTotalDropped(), "the recovery file preserves an accepted event after shutdown database failure");
         assertEquals(0, service.getTotalPersistenceOutcomeUnknown(),
                 "no commit was attempted because the database was not initialized");
         assertEquals(0, service.getQueueSize());
+
+        Path spoolPath = tempDir.resolve("pending-evidence.json");
+        assertTrue(java.nio.file.Files.exists(spoolPath));
+        DatabaseManager.getInstance().initialize(databasePath);
+        service.start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getTotalPersisted() == 0 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(1, service.getTotalPersisted());
+        service.stop();
+        assertFalse(java.nio.file.Files.exists(spoolPath));
+        try (Statement statement = DatabaseManager.getInstance().getConnection().createStatement();
+             ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM ig_audit_events WHERE detail = 'hello'")) {
+            assertTrue(result.next());
+            assertEquals(1, result.getInt(1));
+        }
+    }
+
+    @Test
+    void failedRecoveryLoadClosesAdmissionAndPreservesOriginalFile() throws Exception {
+        initializeTopologyDatabase();
+        Path spoolPath = tempDir.resolve("pending-evidence.json");
+        Path overflowPath = PendingEvidenceSpool.overflowPath(spoolPath);
+        service.start();
+        service.stop(); // Records this exact recovery path before the failed restart.
+        service.clear(); // Simulate already accepted pre-start work across lifecycle reset.
+        byte[] corruptSpool = "{unsupported-recovery-data".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        java.nio.file.Files.write(spoolPath, corruptSpool);
+        assertTrue(service.submitAuditEvent(new InternalAuditEvent(
+                2345L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
+                1, 2, 3, null, "accepted-before-recovery-check", null)));
+
+        service.start();
+
+        java.lang.reflect.Field admissionField = InternalObservationService.class
+                .getDeclaredField("acceptingSubmissions");
+        admissionField.setAccessible(true);
+        long recoveryDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (admissionField.getBoolean(service) && System.nanoTime() < recoveryDeadline) {
+            Thread.sleep(10);
+        }
+        assertFalse(admissionField.getBoolean(service), "malformed recovery must close intake after asynchronous validation");
+        assertFalse(service.submitAuditEvent(new InternalAuditEvent(
+                3456L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
+                1, 2, 3, null, "must-not-be-accepted-while-recovery-is-blocked", null)));
+        assertEquals(1, service.getTotalDropped(), "a failed recovery load must leave admission closed and count rejected evidence");
+        assertArrayEquals(corruptSpool, java.nio.file.Files.readAllBytes(spoolPath),
+                "the unsupported recovery file must remain intact for operator recovery");
+        service.stop();
+        assertTrue(java.nio.file.Files.exists(overflowPath),
+                "already accepted pre-start evidence must be preserved separately if the primary recovery file cannot be read");
+        assertEquals(1, PendingEvidenceSpool.read(overflowPath).size());
+        assertArrayEquals(corruptSpool, java.nio.file.Files.readAllBytes(spoolPath),
+                "overflow preservation must not replace or delete the original recovery file");
+
+        java.nio.file.Files.delete(spoolPath); // Simulate operator repair after preserving the original bytes above.
+        service.start();
+        long replayDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getTotalPersisted() == 0 && System.nanoTime() < replayDeadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(1, service.getTotalPersisted());
+        service.stop();
+        assertFalse(java.nio.file.Files.exists(overflowPath), "the overflow file is removed after its evidence commits");
+        try (Statement statement = DatabaseManager.getInstance().getConnection().createStatement();
+             ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM ig_audit_events WHERE detail = 'accepted-before-recovery-check'")) {
+            assertTrue(result.next());
+            assertEquals(1, result.getInt(1));
+        }
+    }
+
+    @Test
+    void startupRecoveryIoRunsOffCallerAndPersistsSavedEventsBeforeNewEvents() throws Exception {
+        initializeTopologyDatabase();
+        Path spoolPath = tempDir.resolve("pending-evidence.json");
+        InternalAuditEvent recovered = new InternalAuditEvent(
+                1000L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
+                1, 2, 3, null, "recovered-before-new", null);
+        InternalAuditEvent current = new InternalAuditEvent(
+                2000L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
+                1, 2, 3, null, "new-after-recovery", null);
+        PendingEvidenceSpool.write(spoolPath, new PendingEvidenceSpool.Snapshot(
+                List.of(), List.of(), List.of(recovered)));
+        java.lang.reflect.Field lockField = InternalObservationService.class
+                .getDeclaredField("evidenceSpoolLock");
+        lockField.setAccessible(true);
+        Object spoolLock = lockField.get(service);
+
+        synchronized (spoolLock) {
+            long startedAt = System.nanoTime();
+            service.start();
+            assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt) < 2_000,
+                    "start must return without waiting for recovery-file parsing");
+            assertTrue(service.submitAuditEvent(current),
+                    "new evidence must remain bounded and accepted while the recovery worker loads the saved events");
+        }
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getTotalPersisted() < 2 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(2, service.getTotalPersisted());
+        service.stop();
+        try (Statement statement = DatabaseManager.getInstance().getConnection().createStatement();
+             ResultSet result = statement.executeQuery(
+                     "SELECT detail FROM ig_audit_events WHERE detail IN ('recovered-before-new', 'new-after-recovery') ORDER BY id")) {
+            assertTrue(result.next());
+            assertEquals("recovered-before-new", result.getString(1));
+            assertTrue(result.next());
+            assertEquals("new-after-recovery", result.getString(1));
+            assertFalse(result.next());
+        }
+    }
+
+    @Test
+    void producerRacingCorruptRecoveryIsEitherDurablyPreservedOrRejected() throws Exception {
+        initializeTopologyDatabase();
+        Path spoolPath = tempDir.resolve("pending-evidence.json");
+        Path overflowPath = PendingEvidenceSpool.overflowPath(spoolPath);
+        java.nio.file.Files.writeString(spoolPath, "{unsupported-recovery-data");
+        java.lang.reflect.Field queueLockField = InternalObservationService.class
+                .getDeclaredField("queueMutationLock");
+        java.lang.reflect.Field workerField = InternalObservationService.class
+                .getDeclaredField("workerThread");
+        queueLockField.setAccessible(true);
+        workerField.setAccessible(true);
+        Object queueLock = queueLockField.get(service);
+        CountDownLatch producerStarted = new CountDownLatch(1);
+        CountDownLatch producerFinished = new CountDownLatch(1);
+        AtomicBoolean accepted = new AtomicBoolean();
+        InternalAuditEvent racingEvent = new InternalAuditEvent(
+                3000L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
+                1, 2, 3, null, "race-with-corrupt-recovery", null);
+        Thread producer = new Thread(() -> {
+            producerStarted.countDown();
+            accepted.set(service.submitAuditEvent(racingEvent));
+            producerFinished.countDown();
+        }, "ItemGraph-Recovery-Race-Producer");
+
+        synchronized (queueLock) {
+            service.start();
+            long recoveryBlockedDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            Thread recoveryWorker;
+            do {
+                recoveryWorker = (Thread) workerField.get(service);
+                if (recoveryWorker != null && recoveryWorker.getState() == Thread.State.BLOCKED) break;
+                Thread.sleep(1);
+            } while (System.nanoTime() < recoveryBlockedDeadline);
+            assertNotNull(recoveryWorker);
+            assertEquals(Thread.State.BLOCKED, recoveryWorker.getState(),
+                    "recovery worker must be waiting to close admission under the same queue lock");
+            producer.start();
+            assertTrue(producerStarted.await(2, TimeUnit.SECONDS));
+            long producerBlockedDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (producer.getState() != Thread.State.BLOCKED
+                    && System.nanoTime() < producerBlockedDeadline) {
+                Thread.sleep(1);
+            }
+            assertEquals(Thread.State.BLOCKED, producer.getState(),
+                    "producer must have passed its initial admission check and be waiting to enqueue");
+        }
+
+        assertTrue(producerFinished.await(5, TimeUnit.SECONDS));
+        long failureDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.isCaptureEnabled() && System.nanoTime() < failureDeadline) {
+            java.lang.reflect.Field admissionField = InternalObservationService.class
+                    .getDeclaredField("acceptingSubmissions");
+            admissionField.setAccessible(true);
+            if (!admissionField.getBoolean(service)) break;
+            Thread.sleep(10);
+        }
+        if (accepted.get()) {
+            long overflowDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!java.nio.file.Files.exists(overflowPath) && System.nanoTime() < overflowDeadline) {
+                Thread.sleep(10);
+            }
+            assertTrue(java.nio.file.Files.exists(overflowPath),
+                    "any event reported accepted during the race must be present in overflow recovery");
+            PendingEvidenceSpool.Snapshot overflow = PendingEvidenceSpool.read(overflowPath);
+            assertEquals(1, overflow.auditEvents().size());
+            assertEquals("race-with-corrupt-recovery", overflow.auditEvents().getFirst().detail());
+        } else {
+            assertTrue(service.getTotalDropped() > 0,
+                    "a producer blocked behind the failed recovery gate must be counted as rejected");
+        }
+        service.stop();
+    }
+
+    @Test
+    void observationBatchIsRejectedAtomicallyWhenRecoveredQueueExceedsProducerLimit() throws Exception {
+        initializeTopologyDatabase();
+        Path spoolPath = tempDir.resolve("pending-evidence.json");
+        java.lang.reflect.Field capacityField = InternalObservationService.class
+                .getDeclaredField("RECOVERY_QUEUE_CAPACITY");
+        capacityField.setAccessible(true);
+        int recoveryCapacity = capacityField.getInt(null);
+        List<InternalObservation> recovered = new java.util.ArrayList<>(recoveryCapacity);
+        for (int i = 0; i < recoveryCapacity; i++) {
+            recovered.add(createDummyObservation(20_000 + i));
+        }
+        PendingEvidenceSpool.write(spoolPath, new PendingEvidenceSpool.Snapshot(
+                recovered, List.of(), List.of()));
+        Method restore = InternalObservationService.class.getDeclaredMethod(
+                "restorePendingEvidence", Path.class);
+        restore.setAccessible(true);
+        restore.invoke(service, spoolPath);
+        assertEquals(recoveryCapacity, service.getQueueSize());
+
+        assertFalse(service.submitAll(List.of(
+                createDummyObservation(50_001), createDummyObservation(50_002))));
+        assertEquals(recoveryCapacity, service.getQueueSize(),
+                "capacity rejection must not partially enqueue an observation batch");
+        assertEquals(2, service.getTotalDropped(),
+                "every event in a rejected batch must be counted explicitly");
+
+        service.clear();
+        java.nio.file.Files.deleteIfExists(spoolPath);
+        java.nio.file.Files.deleteIfExists(PendingEvidenceSpool.overflowPath(spoolPath));
+    }
+
+    @Test
+    void stalledJdbcShutdownReturnsAndRecoversTheAcceptedEvent() throws Exception {
+        Path databasePath = tempDir.resolve("jdbc-stall/itemgraph.db");
+        DatabaseManager database = DatabaseManager.getInstance();
+        database.initialize(databasePath);
+        Connection original = database.getConnection();
+        CountDownLatch executeStarted = new CountDownLatch(1);
+        CountDownLatch releaseExecute = new CountDownLatch(1);
+        AtomicBoolean stallOnce = new AtomicBoolean(true);
+        Connection stalledConnection = (Connection) Proxy.newProxyInstance(
+                Connection.class.getClassLoader(), new Class<?>[]{Connection.class}, (proxy, method, args) -> {
+                    Object result = invokeJdbc(original, method, args);
+                    if (method.getName().equals("prepareStatement") && result instanceof PreparedStatement prepared) {
+                        return Proxy.newProxyInstance(PreparedStatement.class.getClassLoader(),
+                                new Class<?>[]{PreparedStatement.class}, (statementProxy, statementMethod, statementArgs) -> {
+                                    if (statementMethod.getName().equals("executeUpdate") && stallOnce.compareAndSet(true, false)) {
+                                        executeStarted.countDown();
+                                        awaitUninterruptibly(releaseExecute);
+                                        throw new SQLException("simulated interrupted JDBC request after shutdown timeout");
+                                    }
+                                    return invokeJdbc(prepared, statementMethod, statementArgs);
+                                });
+                    }
+                    return result;
+                });
+        java.lang.reflect.Field connectionField = DatabaseManager.class.getDeclaredField("connection");
+        connectionField.setAccessible(true);
+        connectionField.set(database, stalledConnection);
+
+        assertTrue(service.submitAuditEvent(new InternalAuditEvent(
+                5678L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
+                1, 2, 3, null, "stalled-write", null)));
+        service.start();
+        service.onServerTick();
+        assertTrue(executeStarted.await(2, TimeUnit.SECONDS), "the test must hold the worker inside JDBC");
+
+        long began = System.nanoTime();
+        service.stop();
+        long shutdownMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began);
+        Path spoolPath = tempDir.resolve("pending-evidence.json");
+        assertTrue(shutdownMs < 12_000, "a stalled JDBC call must not block server shutdown indefinitely");
+        assertTrue(java.nio.file.Files.exists(spoolPath), "all accepted in-flight evidence must be in the recovery file before shutdown returns");
+        assertEquals(0, service.getTotalDropped());
+
+        database.close();
+        releaseExecute.countDown();
+        java.lang.reflect.Field workerField = InternalObservationService.class.getDeclaredField("workerThread");
+        workerField.setAccessible(true);
+        Thread worker = (Thread) workerField.get(service);
+        long workerDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (worker.isAlive() && System.nanoTime() < workerDeadline) {
+            Thread.sleep(10);
+        }
+        assertFalse(worker.isAlive(), "the interrupted JDBC worker should exit after its driver call returns");
+
+        database.initialize(databasePath);
+        service.start();
+        long persistDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getTotalPersisted() == 0 && System.nanoTime() < persistDeadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(1, service.getTotalPersisted(), "the spooled event must be replayed on restart");
+        service.stop();
+        assertFalse(java.nio.file.Files.exists(spoolPath), "durable replay must remove the recovery file");
+        try (Statement statement = database.getConnection().createStatement();
+             ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM ig_audit_events WHERE detail = 'stalled-write'")) {
+            assertTrue(result.next());
+            assertEquals(1, result.getInt(1));
+        }
+    }
+
+    private static Object invokeJdbc(Object target, java.lang.reflect.Method method, Object[] args) throws Throwable {
+        try {
+            return method.invoke(target, args);
+        } catch (InvocationTargetException invocationFailure) {
+            throw invocationFailure.getCause();
+        }
+    }
+
+    private static void awaitUninterruptibly(CountDownLatch latch) {
+        boolean interrupted = false;
+        while (latch.getCount() != 0) {
+            try {
+                latch.await();
+            } catch (InterruptedException ignored) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
     }
 
     @Test
@@ -715,7 +1032,10 @@ class InternalObservationServiceTest {
     }
 
     @Test
-    void failedTransformationBatchIsRetainedAndShutdownCountsDefiniteLoss() throws Exception {
+    void failedTransformationBatchIsSpooledAndReplayedAfterDatabaseReturns() throws Exception {
+        Path databasePath = tempDir.resolve("recovery/itemgraph.db");
+        DatabaseManager.getInstance().initialize(databasePath);
+        DatabaseManager.getInstance().close();
         service.configureOperations(10, 1, 2, 30_000, true);
         service.start();
         for (int i = 0; i < 5; i++) {
@@ -732,16 +1052,33 @@ class InternalObservationServiceTest {
 
         assertEquals(0, service.getQueueSize());
         assertEquals(0, service.getTotalPersisted());
-        assertEquals(5, service.getTotalDropped(),
-                "an unavailable database means none of the transformations could have committed");
+        assertEquals(0, service.getTotalDropped(),
+                "accepted records must be retained in the ItemGraph recovery file rather than counted as dropped");
         assertEquals(0, service.getTotalPersistenceOutcomeUnknown(),
                 "no transaction was started for the unavailable database");
+        Path spoolPath = tempDir.resolve("pending-evidence.json");
+        assertTrue(java.nio.file.Files.exists(spoolPath), "shutdown must save the failed batch for restart recovery");
         java.lang.reflect.Field pendingField = InternalObservationService.class
                 .getDeclaredField("pendingTransformations");
         pendingField.setAccessible(true);
         java.util.concurrent.atomic.AtomicInteger pending =
                 (java.util.concurrent.atomic.AtomicInteger) pendingField.get(service);
         assertEquals(0, pending.get(), "shutdown must release each failed transformation exactly once");
+
+        DatabaseManager.getInstance().initialize(databasePath);
+        service.start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getTotalPersisted() < 5 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(5, service.getTotalPersisted(), "every spooled transformation must be replayed into ItemGraph storage");
+        service.stop();
+        assertFalse(java.nio.file.Files.exists(spoolPath), "the recovery file is removed only after durable replay succeeds");
+        try (Statement statement = DatabaseManager.getInstance().getConnection().createStatement();
+             ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM ig_item_transformations")) {
+            assertTrue(result.next());
+            assertEquals(5, result.getInt(1));
+        }
     }
 
     @Test
@@ -880,6 +1217,8 @@ class InternalObservationServiceTest {
     @Test
     void replayAfterCommittedBatchLostAcknowledgementDoesNotDuplicateEvidence() throws Exception {
         initializeTopologyDatabase();
+        Path databasePath = tempDir.resolve("itemgraph.db");
+        service.start();
         InternalObservation observation = createDummyObservation(9100);
         InternalTransformation transformation = createDummyTransformation(9100);
         InternalAuditEvent auditEvent = new InternalAuditEvent(
@@ -915,14 +1254,29 @@ class InternalObservationServiceTest {
                 "an exception after commit was attempted must be classified as unknown");
         assertTrue(loseAcknowledgement[0] == false, "the simulated exception must follow a successful commit");
 
-        // Replaying the same immutable queue record must be a no-op, despite the
-        // missing producer ID that made this vulnerable before schema V18.
-        persist(observation);
-        persistTransformation(transformation);
-        persistAudit(auditEvent);
-        persist(observation);
-        persistTransformation(transformation);
-        persistAudit(auditEvent);
+        // Preserve the uncertain batch, stop, and replay it through startup's
+        // normal recovery path. Its UUID must suppress the row already committed.
+        Path spoolPath = tempDir.resolve("pending-evidence.json");
+        Method writeSpool = InternalObservationService.class.getDeclaredMethod(
+                "writePendingEvidenceSpool", PendingEvidenceSpool.Snapshot.class, Path.class);
+        writeSpool.setAccessible(true);
+        PendingEvidenceSpool.Snapshot recovery = new PendingEvidenceSpool.Snapshot(
+                List.of(observation), List.of(transformation), List.of(auditEvent));
+        writeSpool.invoke(service, recovery, spoolPath);
+        assertTrue(java.nio.file.Files.exists(spoolPath));
+        service.stop();
+        DatabaseManager.getInstance().close();
+        DatabaseManager.getInstance().initialize(databasePath);
+        conn = DatabaseManager.getInstance().getConnection();
+        service.start();
+
+        long replayDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getTotalPersisted() < 3 && System.nanoTime() < replayDeadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(3, service.getTotalPersisted(), "recovery restart must process every spooled evidence kind");
+        service.stop();
+        assertFalse(java.nio.file.Files.exists(spoolPath), "the recovery file is removed after all replayed records commit");
 
         try (Statement statement = conn.createStatement()) {
             try (ResultSet result = statement.executeQuery(

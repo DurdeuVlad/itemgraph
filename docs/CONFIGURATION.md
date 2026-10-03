@@ -71,15 +71,43 @@ maximum idle wait used for worker housekeeping and database heartbeat deadlines.
 A failed transformation write is retried through its bounded queue with backoff.
 If the queue fills while re-queuing, or a producer submits after shutdown closes
 admission, the dropped count is incremented and the server log reports evidence
-loss. During server shutdown, ItemGraph waits for active worker and importer writes
-to finish before it flushes the queues and closes the database. There is no hard
-deadline for this wait: a stalled JDBC operation can delay shutdown. For the
-healthy local SQLite saturation profile, five isolated NeoForge runs drained a
+loss. Shutdown waits up to 5 seconds for each database worker, interrupts it,
+then waits up to 5 more seconds. If the internal evidence worker remains blocked,
+ItemGraph snapshots its queued and in-flight observations, transformations, and
+audit events into `itemgraph-pending-evidence.json` beside the SQLite database
+(or under `./itemgraph/` for a network database). Snapshot serialization and
+file I/O run on a daemon writer; the lifecycle callback waits at most 5 seconds
+for it. The writer uses a temporary file, forces it to disk, and atomically
+replaces the recovery file where the filesystem supports it. JDBC connection
+close also has a 1-second deadline. If the recovery-file write misses its
+deadline or fails, ItemGraph logs a critical error and counts the outstanding
+records as at risk; the daemon may finish a late write only if the process stays
+alive and the filesystem returns. The callback does not wait indefinitely on
+JDBC, file I/O, or connection close.
+
+On the next start, ItemGraph replays the recovery file on its evidence worker,
+not on the loader lifecycle callback. New evidence remains bounded in the
+normal queues while recovery runs; recovered records are placed ahead of those
+new records before persistence. A malformed or unsupported file is preserved,
+then intake closes and any records accepted during validation are saved in the
+adjacent `.overflow` file. Intake stays closed until the primary recovery file
+is repaired.
+`ingest_event_uuid` keeps replay idempotent when a commit succeeded but the JDBC
+acknowledgement was lost. The file remains until every recovered record has a
+confirmed database commit, then ItemGraph removes it. Recovery files are limited to 256 MiB; a larger
+existing file is preserved and capture remains disabled. If recovery encounters
+already-accepted events while that primary file cannot be read, ItemGraph
+preserves them in the adjacent `itemgraph-pending-evidence.json.overflow` file
+without replacing the primary file. Both files replay after the primary recovery
+file is repaired; ItemGraph removes them only after every record commits. If a
+shutdown snapshot cannot be written within the size limit or because storage
+fails, ItemGraph logs a critical error and reports the outstanding count as at risk.
+
+For the healthy local SQLite saturation profile, five isolated NeoForge runs drained a
 full 10,000-event audit queue in 626–666 ms. CI enforces a 1,000 ms regression
 budget for that exact workload (`max_batch_size=100`, one explicit over-capacity
 rejection, all accepted rows durable). This is a deterministic fixture budget,
-not a production latency claim or a hard timeout; the worker still waits for
-durability if a JDBC operation stalls. The measured profile and limits are in
+not a production latency claim or a shutdown timeout. The measured profile and limits are in
 the [performance test plan](TEST_PLAN.md#measured-local-performance-profile).
 Failures before transaction start and failures followed by confirmed rollback count as
 definite loss. If commit and rollback both leave the durable result uncertain, ItemGraph

@@ -113,6 +113,11 @@ public class IngestionService {
             if (running.get()) {
                 return;
             }
+            if (executor != null && !executor.isTerminated()) {
+                LOGGER.error("Cannot restart ItemGraph ingestion: the previous worker is still using the database after its bounded shutdown wait");
+                return;
+            }
+            executor = null;
 
             // The ItemGraph database can be reopened for a new server lifecycle while this
             // singleton remains alive (for example, an integrated-server restart). Node IDs
@@ -148,7 +153,6 @@ public class IngestionService {
         synchronized (lifecycleLock) {
             running.set(false);
             ScheduledExecutorService stopping = executor;
-            executor = null;
             if (stopping == null) {
                 manualIngestionQueued.set(false);
                 historicalImportQueued.set(false);
@@ -156,42 +160,18 @@ public class IngestionService {
                 return;
             }
             LOGGER.info("Stopping ItemGraph ingestion service...");
-            stopping.shutdown();
-            boolean interrupted = false;
-            try {
-                if (!stopping.awaitTermination(5, TimeUnit.SECONDS)) {
-                    LOGGER.warn("ItemGraph ingestion is still active after 5 seconds; interrupting and waiting before database shutdown");
-                    stopping.shutdownNow();
-                }
-                // Do not return while a JDBC operation or queued correlation pass can
-                // still use DatabaseManager. Some drivers ignore interruption during I/O.
-                while (!stopping.isTerminated()) {
-                    try {
-                        stopping.awaitTermination(1, TimeUnit.SECONDS);
-                    } catch (InterruptedException e) {
-                        interrupted = true;
-                        stopping.shutdownNow();
-                    }
-                }
-            } catch (InterruptedException e) {
-                interrupted = true;
-                stopping.shutdownNow();
-                while (!stopping.isTerminated()) {
-                    try {
-                        stopping.awaitTermination(1, TimeUnit.SECONDS);
-                    } catch (InterruptedException ignored) {
-                        interrupted = true;
-                    }
-                }
-            } finally {
-                if (interrupted) {
-                    Thread.currentThread().interrupt();
-                }
-            }
+            boolean terminated = WorkerShutdown.stop(stopping,
+                    WorkerShutdown.GRACEFUL_WAIT_MS, WorkerShutdown.INTERRUPTED_WAIT_MS);
             manualIngestionQueued.set(false);
             historicalImportQueued.set(false);
-            nodeManager.clearCaches();
-            LOGGER.info("ItemGraph ingestion service stopped.");
+            if (terminated) {
+                executor = null;
+                nodeManager.clearCaches();
+                LOGGER.info("ItemGraph ingestion service stopped.");
+            } else {
+                LOGGER.error("ItemGraph ingestion worker did not terminate within {} ms; its database work may be incomplete. The worker remains tracked, and ItemGraph will not start a second ingestion worker until it exits.",
+                        WorkerShutdown.GRACEFUL_WAIT_MS + WorkerShutdown.INTERRUPTED_WAIT_MS);
+            }
         }
     }
 

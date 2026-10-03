@@ -19,7 +19,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -40,6 +42,7 @@ public class InternalObservationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(InternalObservationService.class);
     private static final InternalObservationService INSTANCE = new InternalObservationService();
     private static final int QUEUE_CAPACITY = 10_000;
+    private static final int RECOVERY_QUEUE_CAPACITY = QUEUE_CAPACITY * 2 + 1_000;
     private static final int DEFAULT_MAX_BATCH_SIZE = 100;
     private static final long AUDIT_RETRY_INITIAL_BACKOFF_MS = 25L;
     private static final long AUDIT_RETRY_MAX_BACKOFF_MS = 5_000L;
@@ -353,10 +356,10 @@ public class InternalObservationService {
         return ingestEventUuid == null ? UUID.randomUUID().toString() : UUID.fromString(ingestEventUuid).toString();
     }
 
-    private final BlockingQueue<InternalObservation> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+    private final BlockingQueue<InternalObservation> queue = new LinkedBlockingQueue<>(RECOVERY_QUEUE_CAPACITY);
     private final Object observationQueueLock = new Object();
-    private final BlockingQueue<InternalTransformation> transformationQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
-    private final BlockingQueue<InternalAuditEvent> auditEventQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+    private final BlockingQueue<InternalTransformation> transformationQueue = new LinkedBlockingQueue<>(RECOVERY_QUEUE_CAPACITY);
+    private final BlockingQueue<InternalAuditEvent> auditEventQueue = new LinkedBlockingQueue<>(RECOVERY_QUEUE_CAPACITY);
     // Serializes queue mutations with depth sampling so a fast drain cannot hide a
     // just-accepted backlog from the queue peak metric.
     private final Object queueMutationLock = new Object();
@@ -366,9 +369,20 @@ public class InternalObservationService {
     private final java.util.concurrent.atomic.AtomicInteger serverTicksSinceFlush =
             new java.util.concurrent.atomic.AtomicInteger();
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicBoolean shutdownSpoolComplete = new AtomicBoolean(false);
     private final Object submissionLifecycleLock = new Object();
+    private final Object evidenceSpoolLock = new Object();
+    private final Map<String, Object> recoveryEvents = new LinkedHashMap<>();
+    private volatile PendingEvidenceSpool.Snapshot inFlightSnapshot =
+            new PendingEvidenceSpool.Snapshot(List.of(), List.of(), List.of());
+    private volatile java.nio.file.Path evidenceSpoolPath;
+    private volatile java.nio.file.Path evidenceSpoolPathOverride;
+    private volatile WorkerShutdown.SpoolWriteHandle pendingSpoolWriter;
+    private volatile boolean recoveryLoadFailed;
+    private final java.util.concurrent.atomic.AtomicBoolean restartRetryRequested = new java.util.concurrent.atomic.AtomicBoolean();
+    private final java.util.concurrent.atomic.AtomicBoolean restartRetryScheduled = new java.util.concurrent.atomic.AtomicBoolean();
     // Pre-start submissions are retained for lifecycle callbacks; stop closes admission.
-    private boolean acceptingSubmissions = true;
+    private volatile boolean acceptingSubmissions;
     private final java.util.concurrent.atomic.AtomicLong totalEnqueued = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalPersisted = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalDropped = new java.util.concurrent.atomic.AtomicLong(0);
@@ -389,7 +403,7 @@ public class InternalObservationService {
     private volatile int maxBatchSize = DEFAULT_MAX_BATCH_SIZE;
     private volatile int databaseHeartbeatIntervalMs = 30_000;
     private volatile boolean captureEnabled = true;
-    private Thread workerThread;
+    private volatile Thread workerThread;
 
     private InternalObservationService() {}
 
@@ -461,15 +475,109 @@ public class InternalObservationService {
             if (running.get()) {
                 return;
             }
-            acceptingSubmissions = true;
-            OperationalMetrics.getInstance().reset();
+            if (hasActiveShutdownWorker()) {
+                acceptingSubmissions = false;
+                restartRetryRequested.set(true);
+                scheduleStartRetry();
+                LOGGER.error("Cannot start ItemGraph evidence capture until the previous database/recovery workers finish; a daemon retry will restore evidence and start capture automatically when they exit");
+                return;
+            }
+            restartRetryRequested.set(false);
+            startAfterShutdownWorkersLocked();
+        }
+    }
+
+    private boolean hasActiveShutdownWorker() {
+        return (workerThread != null && workerThread.isAlive())
+                || (pendingSpoolWriter != null && !pendingSpoolWriter.isComplete());
+    }
+
+    private void startAfterShutdownWorkersLocked() {
+        acceptingSubmissions = true;
+        pendingSpoolWriter = null;
+        recoveryLoadFailed = true;
+        java.nio.file.Path recoveryPath = currentEvidenceSpoolPath();
+        // Keep the exact recovery target available to stop() even if startup
+        // recovery is still blocked in filesystem I/O when shutdown begins.
+        evidenceSpoolPath = recoveryPath;
+        shutdownSpoolComplete.set(false);
+        OperationalMetrics.getInstance().reset();
+        if (java.nio.file.Files.exists(recoveryPath)
+                || java.nio.file.Files.exists(PendingEvidenceSpool.overflowPath(recoveryPath))) {
+            startWorker(recoveryPath);
+        } else {
+            // Normal starts have no recovery I/O to perform. Avoid creating a
+            // startup race between the loader lifecycle and its worker.
+            recoveryLoadFailed = false;
             startWorker();
         }
     }
 
+    private void scheduleStartRetry() {
+        if (!restartRetryScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        Thread retry = new Thread(() -> {
+            try {
+                while (restartRetryRequested.get() && hasActiveShutdownWorker()) {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException interrupted) {
+                        restartRetryRequested.set(false);
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                synchronized (submissionLifecycleLock) {
+                    if (restartRetryRequested.get() && !running.get() && !hasActiveShutdownWorker()) {
+                        restartRetryRequested.set(false);
+                        startAfterShutdownWorkersLocked();
+                    }
+                }
+            } finally {
+                restartRetryScheduled.set(false);
+                if (restartRetryRequested.get() && !hasActiveShutdownWorker()) {
+                    scheduleStartRetry();
+                }
+            }
+        }, "ItemGraph-Recovery-Restart");
+        retry.setDaemon(true);
+        retry.start();
+    }
+
     private void startWorker() {
+        startWorker(null);
+    }
+
+    private void startWorker(java.nio.file.Path recoveryPath) {
         running.set(true);
-        workerThread = new Thread(this::drainQueueSafely, "ItemGraph-Internal-Worker");
+        workerThread = new Thread(() -> {
+            if (recoveryPath != null) {
+                try {
+                    restorePendingEvidence(recoveryPath);
+                    recoveryLoadFailed = false;
+                } catch (java.io.IOException recoveryFailure) {
+                    recoveryLoadFailed = true;
+                    running.set(false);
+                    LOGGER.error("Cannot flush ItemGraph evidence because pending recovery could not be loaded; original recovery file is preserved", recoveryFailure);
+                    try {
+                        PendingEvidenceSpool.Snapshot queued = closeAdmissionAndSnapshotPendingEvidence();
+                        if (queued.size() > 0) {
+                            int preserved = writeOverflowEvidenceSpool(recoveryPath, queued);
+                            shutdownSpoolComplete.set(true);
+                            clearQueuesAfterSpoolHandoff();
+                            LOGGER.error("ItemGraph preserved {} accepted queued records in the separate overflow recovery file {} because primary recovery failed", preserved, PendingEvidenceSpool.overflowPath(recoveryPath));
+                        }
+                    } catch (java.io.IOException overflowFailure) {
+                        int atRisk = snapshotPendingEvidence().size();
+                        totalDropped.addAndGet(atRisk);
+                        LOGGER.error("CRITICAL: ItemGraph could not preserve {} accepted queued records because primary recovery failed and overflow recovery writing failed; the original primary file remains untouched", atRisk, overflowFailure);
+                    }
+                    return;
+                }
+            }
+            drainQueueSafely();
+        }, "ItemGraph-Internal-Worker");
         workerThread.setDaemon(true);
         workerThread.start();
         LOGGER.info("ItemGraph internal observation service started.");
@@ -477,33 +585,67 @@ public class InternalObservationService {
 
     public void stop() {
         synchronized (submissionLifecycleLock) {
+            restartRetryRequested.set(false);
             // Close admission atomically with every producer enqueue before deciding
             // whether a worker is needed for the final drain. JDBC remains worker-owned.
             acceptingSubmissions = false;
             if ((workerThread == null || !workerThread.isAlive()) && hasQueuedWork()) {
-                workerThread = null;
-                startWorker();
+                java.nio.file.Path currentSpoolPath = currentEvidenceSpoolPath();
+                if (!currentSpoolPath.equals(evidenceSpoolPath) || recoveryLoadFailed) {
+                    workerThread = null;
+                    startWorker(currentSpoolPath);
+                }
+                queueFlushDue.set(true);
+                signalQueuedWork();
             }
             running.set(false);
             if (workerThread != null) {
                 queueFlushDue.set(true);
                 signalQueuedWork();
-                boolean interrupted = false;
-                while (workerThread.isAlive()) {
-                    try {
-                        workerThread.join();
-                    } catch (InterruptedException ignored) {
-                        interrupted = true;
+                Thread stopping = workerThread;
+                boolean terminated = WorkerShutdown.stop(stopping,
+                        WorkerShutdown.GRACEFUL_WAIT_MS, WorkerShutdown.INTERRUPTED_WAIT_MS);
+                if (!terminated) {
+                    PendingEvidenceSpool.Snapshot shutdownSnapshot = snapshotPendingEvidence();
+                    java.nio.file.Path shutdownSpoolPath = evidenceSpoolPath;
+                    java.util.concurrent.atomic.AtomicBoolean lossCounted = new java.util.concurrent.atomic.AtomicBoolean();
+                    WorkerShutdown.SpoolWriteHandle spoolWriter = WorkerShutdown.startSpoolWriter(() -> {
+                        try {
+                            int spooled = writePendingEvidenceSpool(shutdownSnapshot, shutdownSpoolPath);
+                            if (shutdownSpoolComplete.get()) clearQueuesAfterSpoolHandoff();
+                            return spooled;
+                        } catch (Exception spoolFailure) {
+                            if (lossCounted.compareAndSet(false, true)) totalDropped.addAndGet(shutdownSnapshot.size());
+                            LOGGER.error("CRITICAL: ItemGraph recovery-file writer failed at its captured target {}", shutdownSpoolPath, spoolFailure);
+                            throw spoolFailure;
+                        }
+                    });
+                    pendingSpoolWriter = spoolWriter;
+                    WorkerShutdown.SpoolWriteResult spoolResult = spoolWriter.await(WorkerShutdown.EVIDENCE_SPOOL_WAIT_MS);
+                    if (!spoolResult.completed() || spoolResult.failure() != null) {
+                        int outstanding = shutdownSnapshot.size();
+                        if (lossCounted.compareAndSet(false, true)) totalDropped.addAndGet(outstanding);
+                        shutdownSpoolComplete.set(true);
+                        clearQueuesAfterSpoolHandoff();
+                        LOGGER.error("CRITICAL: ItemGraph evidence worker did not terminate within {} ms and the recovery-file write did not finish within {} ms; {} accepted records remain at risk. Recovery file target: {}. A late daemon write may still complete if the filesystem returns.",
+                                WorkerShutdown.GRACEFUL_WAIT_MS + WorkerShutdown.INTERRUPTED_WAIT_MS,
+                                WorkerShutdown.EVIDENCE_SPOOL_WAIT_MS, outstanding, evidenceSpoolPath,
+                                spoolResult.failure());
+                    } else {
+                        shutdownSpoolComplete.set(true);
+                        clearQueuesAfterSpoolHandoff();
+                        LOGGER.error("ItemGraph evidence worker did not terminate within {} ms; {} outstanding records were saved for idempotent recovery at {}. The worker remains tracked and capture will stay disabled until it exits.",
+                                WorkerShutdown.GRACEFUL_WAIT_MS + WorkerShutdown.INTERRUPTED_WAIT_MS,
+                                spoolResult.written(), evidenceSpoolPath);
                     }
+                    return;
                 }
                 workerThread = null;
+                inFlightSnapshot = new PendingEvidenceSpool.Snapshot(List.of(), List.of(), List.of());
                 queuedWorkSignals.drainPermits();
                 queuedWorkSignalPending.set(false);
                 queueFlushDue.set(false);
                 serverTicksSinceFlush.set(0);
-                if (interrupted) {
-                    Thread.currentThread().interrupt();
-                }
                 return;
             }
             queuedWorkSignals.drainPermits();
@@ -511,6 +653,158 @@ public class InternalObservationService {
             queueFlushDue.set(false);
             serverTicksSinceFlush.set(0);
         }
+    }
+
+    private void restorePendingEvidence() throws java.io.IOException {
+        restorePendingEvidence(currentEvidenceSpoolPath());
+    }
+
+    private void restorePendingEvidence(java.nio.file.Path path) throws java.io.IOException {
+        synchronized (evidenceSpoolLock) {
+            PendingEvidenceSpool.Snapshot snapshot = PendingEvidenceSpool.merge(
+                    PendingEvidenceSpool.read(path),
+                    PendingEvidenceSpool.read(PendingEvidenceSpool.overflowPath(path)));
+            if (snapshot.size() == 0) {
+                if (!path.equals(evidenceSpoolPath)) recoveryEvents.clear();
+                evidenceSpoolPath = path;
+                return;
+            }
+            synchronized (queueMutationLock) {
+                if (snapshot.observations().size() + queue.size() > RECOVERY_QUEUE_CAPACITY
+                        || snapshot.transformations().size() + transformationQueue.size() > RECOVERY_QUEUE_CAPACITY
+                        || snapshot.auditEvents().size() + auditEventQueue.size() > RECOVERY_QUEUE_CAPACITY) {
+                    throw new java.io.IOException("pending evidence exceeds the configured recovery queue capacity; original file was preserved");
+                }
+                if (!path.equals(evidenceSpoolPath)) recoveryEvents.clear();
+                evidenceSpoolPath = path;
+                // Events accepted while recovery I/O ran are newer than every
+                // record in the saved snapshot. Put recovered records first so
+                // worker persistence preserves temporal order within each ledger.
+                List<InternalObservation> newObservations = new ArrayList<>(queue);
+                List<InternalTransformation> newTransformations = new ArrayList<>(transformationQueue);
+                List<InternalAuditEvent> newAuditEvents = new ArrayList<>(auditEventQueue);
+                queue.clear();
+                transformationQueue.clear();
+                auditEventQueue.clear();
+                snapshot.observations().forEach(event -> {
+                    queue.add(event);
+                    recoveryEvents.put("observation:" + event.ingestEventUuid(), event);
+                });
+                snapshot.transformations().forEach(event -> {
+                    transformationQueue.add(event);
+                    recoveryEvents.put("transformation:" + event.ingestEventUuid(), event);
+                });
+                snapshot.auditEvents().forEach(event -> {
+                    auditEventQueue.add(event);
+                    recoveryEvents.put("audit:" + event.ingestEventUuid(), event);
+                });
+                queue.addAll(newObservations);
+                transformationQueue.addAll(newTransformations);
+                auditEventQueue.addAll(newAuditEvents);
+            }
+            LOGGER.warn("Restored {} pending ItemGraph evidence records from {}", snapshot.size(), path);
+            queueFlushDue.set(true);
+            signalQueuedWork();
+        }
+    }
+
+    private int writeOverflowEvidenceSpool(java.nio.file.Path primaryPath,
+                                           PendingEvidenceSpool.Snapshot snapshot) throws java.io.IOException {
+        synchronized (evidenceSpoolLock) {
+            java.nio.file.Path overflowPath = PendingEvidenceSpool.overflowPath(primaryPath);
+            PendingEvidenceSpool.Snapshot complete = PendingEvidenceSpool.merge(
+                    PendingEvidenceSpool.read(overflowPath), snapshot);
+            PendingEvidenceSpool.write(overflowPath, complete);
+            return complete.size();
+        }
+    }
+
+    void setEvidenceSpoolPathForTests(java.nio.file.Path path) {
+        evidenceSpoolPathOverride = path;
+    }
+
+    private java.nio.file.Path currentEvidenceSpoolPath() {
+        java.nio.file.Path override = evidenceSpoolPathOverride;
+        return override != null ? override : PendingEvidenceSpool.pathFor(DatabaseManager.getInstance().getSettings());
+    }
+
+    private PendingEvidenceSpool.Snapshot snapshotPendingEvidence() {
+        synchronized (queueMutationLock) {
+            return snapshotPendingEvidenceLocked();
+        }
+    }
+
+    private PendingEvidenceSpool.Snapshot closeAdmissionAndSnapshotPendingEvidence() {
+        synchronized (queueMutationLock) {
+            acceptingSubmissions = false;
+            return snapshotPendingEvidenceLocked();
+        }
+    }
+
+    private PendingEvidenceSpool.Snapshot snapshotPendingEvidenceLocked() {
+        List<InternalObservation> observations = new ArrayList<>(queue);
+        List<InternalTransformation> transformations = new ArrayList<>(transformationQueue);
+        List<InternalAuditEvent> auditEvents = new ArrayList<>(auditEventQueue);
+        observations.addAll(inFlightSnapshot.observations());
+        transformations.addAll(inFlightSnapshot.transformations());
+        auditEvents.addAll(inFlightSnapshot.auditEvents());
+        return new PendingEvidenceSpool.Snapshot(observations, transformations, auditEvents);
+    }
+
+    private int writePendingEvidenceSpool() throws java.io.IOException {
+        return writePendingEvidenceSpool(snapshotPendingEvidence(), evidenceSpoolPath);
+    }
+
+    private int writePendingEvidenceSpool(PendingEvidenceSpool.Snapshot snapshot,
+                                          java.nio.file.Path targetPath) throws java.io.IOException {
+        synchronized (evidenceSpoolLock) {
+            for (InternalObservation event : snapshot.observations()) recoveryEvents.put("observation:" + event.ingestEventUuid(), event);
+            for (InternalTransformation event : snapshot.transformations()) recoveryEvents.put("transformation:" + event.ingestEventUuid(), event);
+            for (InternalAuditEvent event : snapshot.auditEvents()) recoveryEvents.put("audit:" + event.ingestEventUuid(), event);
+            PendingEvidenceSpool.Snapshot complete = recoverySnapshot();
+            PendingEvidenceSpool.write(targetPath, complete);
+            return complete.size();
+        }
+    }
+
+    private void clearQueuesAfterSpoolHandoff() {
+        synchronized (queueMutationLock) {
+            queue.clear();
+            transformationQueue.clear();
+            auditEventQueue.clear();
+            pendingTransformations.set(0);
+            inFlightSnapshot = new PendingEvidenceSpool.Snapshot(List.of(), List.of(), List.of());
+            OperationalMetrics.getInstance().recordQueueDepth(0);
+        }
+        queueFlushDue.set(false);
+        queuedWorkSignals.drainPermits();
+        queuedWorkSignalPending.set(false);
+    }
+
+    private void acknowledgeRecovered(List<String> eventIds) {
+        synchronized (evidenceSpoolLock) {
+            eventIds.forEach(recoveryEvents::remove);
+            if (recoveryEvents.isEmpty() && evidenceSpoolPath != null) {
+                try {
+                    PendingEvidenceSpool.delete(evidenceSpoolPath);
+                    PendingEvidenceSpool.delete(PendingEvidenceSpool.overflowPath(evidenceSpoolPath));
+                } catch (java.io.IOException cleanupFailure) {
+                    LOGGER.warn("All recovered ItemGraph evidence is durable, but a recovery file could not be removed; it will be replayed idempotently on next startup", cleanupFailure);
+                }
+            }
+        }
+    }
+
+    private PendingEvidenceSpool.Snapshot recoverySnapshot() {
+        List<InternalObservation> observations = new ArrayList<>();
+        List<InternalTransformation> transformations = new ArrayList<>();
+        List<InternalAuditEvent> auditEvents = new ArrayList<>();
+        for (Object event : recoveryEvents.values()) {
+            if (event instanceof InternalObservation observation) observations.add(observation);
+            else if (event instanceof InternalTransformation transformation) transformations.add(transformation);
+            else if (event instanceof InternalAuditEvent auditEvent) auditEvents.add(auditEvent);
+        }
+        return new PendingEvidenceSpool.Snapshot(observations, transformations, auditEvents);
     }
 
     private boolean hasQueuedWork() {
@@ -557,16 +851,20 @@ public class InternalObservationService {
                 return true;
             }
             synchronized (observationQueueLock) {
-                if (queue.remainingCapacity() < observations.size()) {
-                    long dropped = totalDropped.addAndGet(observations.size());
-                    OperationalMetrics.getInstance().recordQueueRejection(observations.size());
-                    if (dropped == observations.size() || dropped % 1000 < observations.size()) {
-                        LOGGER.warn("Internal observation queue is full — rejected {} observation batch ({} dropped total; evidence loss)",
-                                observations.size(), dropped);
-                    }
-                    return false;
-                }
                 synchronized (queueMutationLock) {
+                    if (!acceptingSubmissions) {
+                        recordPostStopRejection(observations.size());
+                        return false;
+                    }
+                    if (queue.size() + observations.size() > QUEUE_CAPACITY) {
+                        long dropped = totalDropped.addAndGet(observations.size());
+                        OperationalMetrics.getInstance().recordQueueRejection(observations.size());
+                        if (dropped == observations.size() || dropped % 1000 < observations.size()) {
+                            LOGGER.warn("Internal observation queue is full — rejected {} observation batch ({} dropped total; evidence loss)",
+                                    observations.size(), dropped);
+                        }
+                        return false;
+                    }
                     for (InternalObservation observation : observations) {
                         // Capacity cannot shrink while producers are locked out; the worker
                         // only frees slots, so this batch cannot be partially accepted.
@@ -609,8 +907,12 @@ public class InternalObservationService {
             }
             boolean ok;
             synchronized (queueMutationLock) {
+                if (!acceptingSubmissions) {
+                    recordPostStopRejection(1);
+                    return false;
+                }
                 pendingTransformations.incrementAndGet();
-                ok = transformationQueue.offer(trans);
+                ok = transformationQueue.size() < QUEUE_CAPACITY && transformationQueue.offer(trans);
                 if (ok) {
                     totalEnqueued.incrementAndGet();
                     OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
@@ -657,7 +959,11 @@ public class InternalObservationService {
             }
             boolean ok;
             synchronized (queueMutationLock) {
-                ok = auditEventQueue.offer(event);
+                if (!acceptingSubmissions) {
+                    recordPostStopRejection(1);
+                    return false;
+                }
+                ok = auditEventQueue.size() < QUEUE_CAPACITY && auditEventQueue.offer(event);
                 if (ok) {
                     totalEnqueued.incrementAndGet();
                     OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
@@ -710,10 +1016,16 @@ public class InternalObservationService {
     public synchronized void clear() {
         synchronized (submissionLifecycleLock) {
             acceptingSubmissions = true;
+            recoveryLoadFailed = false;
+            shutdownSpoolComplete.set(false);
             synchronized (queueMutationLock) {
                 queue.clear();
                 transformationQueue.clear();
                 auditEventQueue.clear();
+                inFlightSnapshot = new PendingEvidenceSpool.Snapshot(List.of(), List.of(), List.of());
+            }
+            synchronized (evidenceSpoolLock) {
+                recoveryEvents.clear();
             }
             pendingTransformations.set(0);
             totalEnqueued.set(0);
@@ -739,7 +1051,7 @@ public class InternalObservationService {
         long nextDatabaseHeartbeatNanos = System.nanoTime()
                 + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(databaseHeartbeatIntervalMs);
 
-        while (running.get() || hasQueuedWork()) {
+        while ((running.get() || hasQueuedWork()) && !shutdownSpoolComplete.get()) {
             try {
                 long nanosUntilHeartbeat = nextDatabaseHeartbeatNanos - System.nanoTime();
                 long pollWaitMs = running.get()
@@ -762,6 +1074,7 @@ public class InternalObservationService {
                             queue.drainTo(obsBatch, maxBatchSize);
                             transformationQueue.drainTo(transBatch, maxBatchSize);
                             auditEventQueue.drainTo(auditBatch, maxBatchSize);
+                            inFlightSnapshot = new PendingEvidenceSpool.Snapshot(obsBatch, transBatch, auditBatch);
                         }
 
                         if (!obsBatch.isEmpty()) {
@@ -769,18 +1082,20 @@ public class InternalObservationService {
                                 persistMeasured(obsBatch.size(), () -> persistBatch(obsBatch));
                                 resetObservationRetryState();
                                 totalPersisted.addAndGet(obsBatch.size());
+                                acknowledgeRecovered(observationIds(obsBatch));
                             } catch (Exception failure) {
                                 if (running.get()) {
                                     requeueObservationBatch(obsBatch, failure);
                                 } else {
-                                    if (hasUnknownCommitOutcome(failure)) {
-                                        reportObservationBatchOutcomeUnknown(obsBatch, failure);
-                                    } else {
-                                        reportObservationBatchLoss(obsBatch, failure);
-                                    }
+                                    boolean spooled = preserveFailedShutdownBatch("observations", failure);
+                                    reportShutdownPersistenceFailure("observations", obsBatch.size(), failure, spooled);
+                                    handoffShutdownRecords(spooled, failure);
                                 }
+                            } finally {
+                                completeInFlightObservations();
                             }
                             obsBatch.clear();
+                            if (shutdownSpoolComplete.get()) return;
                         }
 
                         if (!transBatch.isEmpty()) {
@@ -790,20 +1105,21 @@ public class InternalObservationService {
                                 totalTransformations.addAndGet(transBatch.size());
                                 totalPersisted.addAndGet(transBatch.size());
                                 pendingTransformations.addAndGet(-transBatch.size());
+                                acknowledgeRecovered(transformationIds(transBatch));
                             } catch (Exception failure) {
                                 if (running.get()) {
                                     requeueTransformationBatch(transBatch, failure);
                                 } else {
                                     pendingTransformations.addAndGet(-transBatch.size());
-                                    if (hasUnknownCommitOutcome(failure)) {
-                                        reportTransformationBatchOutcomeUnknown(transBatch, failure);
-                                    } else {
-                                        reportTransformationBatchLoss(transBatch, failure);
-                                    }
+                                    boolean spooled = preserveFailedShutdownBatch("transformations", failure);
+                                    reportShutdownPersistenceFailure("transformations", transBatch.size(), failure, spooled);
+                                    handoffShutdownRecords(spooled, failure);
                                 }
                             } finally {
+                                completeInFlightTransformations();
                                 transBatch.clear();
                             }
+                            if (shutdownSpoolComplete.get()) return;
                         }
 
                         if (!auditBatch.isEmpty()) {
@@ -812,17 +1128,22 @@ public class InternalObservationService {
                                 resetAuditRetryState();
                                 totalAuditEvents.addAndGet(auditBatch.size());
                                 totalPersisted.addAndGet(auditBatch.size());
+                                acknowledgeRecovered(auditEventIds(auditBatch));
                             } catch (Exception e) {
                                 if (running.get()) {
                                     requeueAuditBatch(auditBatch, e);
                                 } else {
-                                    if (hasUnknownCommitOutcome(e)) {
-                                        reportAuditBatchOutcomeUnknown(auditBatch, e);
-                                    } else {
-                                        reportAuditBatchLoss(auditBatch, e);
-                                    }
+                                    boolean spooled = preserveFailedShutdownBatch("audit events", e);
+                                    reportShutdownPersistenceFailure("audit events", auditBatch.size(), e, spooled);
+                                    handoffShutdownRecords(spooled, e);
                                 }
                             }
+                            completeInFlightAuditEvents();
+                            if (shutdownSpoolComplete.get()) return;
+                        }
+
+                        synchronized (queueMutationLock) {
+                            inFlightSnapshot = new PendingEvidenceSpool.Snapshot(List.of(), List.of(), List.of());
                         }
 
                         // A pass is intentionally bounded per queue. Keep the worker running
@@ -849,6 +1170,74 @@ public class InternalObservationService {
             } catch (Exception e) {
                 LOGGER.error("Error persisting internal observations/transformations batch", e);
             }
+        }
+    }
+
+    private static List<String> observationIds(List<InternalObservation> events) {
+        return events.stream().map(event -> "observation:" + event.ingestEventUuid()).toList();
+    }
+
+    private static List<String> transformationIds(List<InternalTransformation> events) {
+        return events.stream().map(event -> "transformation:" + event.ingestEventUuid()).toList();
+    }
+
+    private static List<String> auditEventIds(List<InternalAuditEvent> events) {
+        return events.stream().map(event -> "audit:" + event.ingestEventUuid()).toList();
+    }
+
+    private boolean preserveFailedShutdownBatch(String batchType, Exception failure) {
+        try {
+            int preserved = writePendingEvidenceSpool();
+            if (preserved == 0) {
+                LOGGER.error("ItemGraph could not confirm shutdown persistence for {} but no pending records were available to spool", batchType, failure);
+            }
+            return preserved > 0;
+        } catch (java.io.IOException spoolFailure) {
+            LOGGER.error("CRITICAL: ItemGraph failed to write its shutdown recovery file for {} after a database error", batchType, spoolFailure);
+            return false;
+        }
+    }
+
+    private void reportShutdownPersistenceFailure(String batchType, int count, Exception failure, boolean spooled) {
+        if (hasUnknownCommitOutcome(failure)) {
+            long unknown = totalPersistenceOutcomeUnknown.addAndGet(count);
+            LOGGER.error("Shutdown could not confirm persistence for {} {} ({} records with unknown commit outcome); recovery file saved={}",
+                    count, batchType, unknown, spooled, failure);
+        } else {
+            LOGGER.error("Could not persist {} {} during shutdown; recovery file saved={}",
+                    count, batchType, spooled, failure);
+        }
+    }
+
+    private void handoffShutdownRecords(boolean spooled, Exception failure) {
+        if (!spooled) {
+            int outstanding = snapshotPendingEvidence().size();
+            totalDropped.addAndGet(outstanding);
+            LOGGER.error("{} accepted evidence records could not be persisted or spooled during shutdown",
+                    outstanding, failure);
+        }
+        shutdownSpoolComplete.set(true);
+        clearQueuesAfterSpoolHandoff();
+    }
+
+    private void completeInFlightObservations() {
+        synchronized (queueMutationLock) {
+            inFlightSnapshot = new PendingEvidenceSpool.Snapshot(List.of(),
+                    inFlightSnapshot.transformations(), inFlightSnapshot.auditEvents());
+        }
+    }
+
+    private void completeInFlightTransformations() {
+        synchronized (queueMutationLock) {
+            inFlightSnapshot = new PendingEvidenceSpool.Snapshot(inFlightSnapshot.observations(),
+                    List.of(), inFlightSnapshot.auditEvents());
+        }
+    }
+
+    private void completeInFlightAuditEvents() {
+        synchronized (queueMutationLock) {
+            inFlightSnapshot = new PendingEvidenceSpool.Snapshot(inFlightSnapshot.observations(),
+                    inFlightSnapshot.transformations(), List.of());
         }
     }
 
