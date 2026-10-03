@@ -31,13 +31,19 @@ public class GriefLoggerAdapter {
             "materials", Set.of("id", "name"));
 
     private final Path databasePath;
+    private final boolean integrationEnabled;
 
     public GriefLoggerAdapter() {
-        this(resolveConfiguredPath());
+        this(resolveConfiguredPath(), false);
     }
 
     public GriefLoggerAdapter(Path databasePath) {
+        this(databasePath, true);
+    }
+
+    public GriefLoggerAdapter(Path databasePath, boolean integrationEnabled) {
         this.databasePath = Objects.requireNonNull(databasePath, "databasePath must not be null");
+        this.integrationEnabled = integrationEnabled;
     }
 
     private static Path resolveConfiguredPath() {
@@ -48,8 +54,12 @@ public class GriefLoggerAdapter {
         return databasePath;
     }
 
+    public boolean isIntegrationEnabled() {
+        return integrationEnabled;
+    }
+
     public boolean isDatabaseAvailable() {
-        return Files.exists(databasePath) && Files.isReadable(databasePath);
+        return integrationEnabled && Files.exists(databasePath) && Files.isReadable(databasePath);
     }
 
     /**
@@ -100,6 +110,9 @@ public class GriefLoggerAdapter {
      * busy timeout, and PRAGMA query_only = true.
      */
     public Connection openReadOnlyConnection() throws SQLException {
+        if (!integrationEnabled) {
+            throw new SQLException("GriefLogger source integration is disabled");
+        }
         if (!isDatabaseAvailable()) {
             throw new SQLException("GriefLogger database file not found or not readable: " + databasePath.toAbsolutePath());
         }

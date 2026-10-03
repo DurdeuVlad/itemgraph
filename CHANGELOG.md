@@ -8,6 +8,13 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #127 native-only default:** NeoForge and Fabric no longer inspect a
+  `database.db` file for GriefLogger data during normal operation. Read-only
+  source sync and historical import require the explicit
+  `grieflogger_integration_enabled=true` setting. Native capture, storage,
+  correlation, and queries remain independent. Mod version remains 0.3.2; no
+  distributable jar is built.
+
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus seven allowlisted audit
   events, including namespaced entity/block `subject_id`, and a count-only

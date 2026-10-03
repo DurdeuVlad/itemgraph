@@ -394,12 +394,14 @@ checksummed historical database when an operator explicitly configures it.
 2. Run ItemGraph native-only with the GriefLogger JAR absent for a complete
    24-hour staging window. Verify the acceptance gates above and record the
    ItemGraph schema version and row-count report.
-3. Keep the immutable GriefLogger copy for 30 days after native-only cutover.
-   Store its checksum beside the backup and keep the original database read-only.
-4. After the 30-day retention window, keep the checksummed GriefLogger copy
-   under the operator's archive policy and remove only the GriefLogger JAR/config
-   after an operator approves the checksum and acceptance report. Leave
-   `grieflogger_database_path` unset for native-only operation.
+3. Keep ItemGraph raw evidence indefinitely. Store the GriefLogger source-copy
+   checksum beside that immutable backup; its archive and retention are governed
+   by the operator's policy, with no ItemGraph purge.
+4. Remove only the GriefLogger JAR/config after an operator approves the
+   checksum and acceptance report. The optional migration bridge is disabled by
+   default; set `general.grieflogger_integration_enabled=true` (NeoForge) or
+   `grieflogger_integration_enabled=true` (Fabric) only when migration sync or
+   historical import is required. This setting does not disable native capture.
 5. Rollback is bounded: restore the GriefLogger JAR and its immutable database
    copy, leave ItemGraph's database untouched, and re-run the staging checks
    before any production decision. The recorded rollback evidence is the source
