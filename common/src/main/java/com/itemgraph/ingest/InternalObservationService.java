@@ -987,6 +987,22 @@ public class InternalObservationService {
         return queue.size() + transformationQueue.size() + auditEventQueue.size();
     }
 
+    public int getObservationQueueSize() {
+        return queue.size();
+    }
+
+    public int getTransformationQueueSize() {
+        return transformationQueue.size();
+    }
+
+    public int getAuditEventQueueSize() {
+        return auditEventQueue.size();
+    }
+
+    public int getQueueCapacity() {
+        return QUEUE_CAPACITY;
+    }
+
     public long getTotalEnqueued() {
         return totalEnqueued.get();
     }

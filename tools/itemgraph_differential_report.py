@@ -22,7 +22,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "docs" / "GRIEFLOGGER_COMPATIBILITY.json"
 FIXTURE_PATH = ROOT / "docs" / "grieflogger-fixtures" / "1.2.10-1.21.1.json"
-REPORT_SCHEMA_VERSION = 5
+REPORT_SCHEMA_VERSION = 6
 LOADERS = {"fabric", "neoforge"}
 SYSTEMS = {"grieflogger", "itemgraph"}
 RUNTIME_MODES = {"grieflogger_present", "native_only"}
@@ -74,7 +74,7 @@ COMPARABLE_EVENT_FIELDS = tuple(field for field in EVENT_FIELDS if field not in 
 ITEMGRAPH_INVARIANT_FIELDS = {
     "healthy", "total_observations", "total_edges", "total_allocations", "total_transformations",
     "over_allocated_observations", "invalid_edge_allocations", "invalid_edge_temporal", "non_positive_quantities", "orphaned_allocations",
-    "invalid_edge_nodes", "status_mismatches",
+    "invalid_edge_nodes", "status_mismatches", "queue_health",
 }
 ITEMGRAPH_VIOLATION_FIELDS = {
     "over_allocated_observations", "invalid_edge_allocations", "invalid_edge_temporal", "non_positive_quantities", "orphaned_allocations",
@@ -343,9 +343,25 @@ def _validate_itemgraph_invariants(invariants: Any) -> None:
         raise ReportError("ItemGraph invariants do not match the whole-graph audit schema")
     if type(invariants["healthy"]) is not bool:
         raise ReportError("ItemGraph invariants.healthy must be a boolean")
-    for field in ITEMGRAPH_INVARIANT_FIELDS - {"healthy"}:
+    for field in ITEMGRAPH_INVARIANT_FIELDS - {"healthy", "queue_health"}:
         if not _is_integer(invariants[field]) or invariants[field] < 0:
             raise ReportError(f"ItemGraph invariants.{field} must be a non-negative integer")
+    queue_health = invariants["queue_health"]
+    queue_fields = {"observation_waiting_depth", "transformation_waiting_depth", "audit_waiting_depth",
+                    "queue_capacity_each", "dropped_since_service_start"}
+    if not isinstance(queue_health, dict) or set(queue_health) != queue_fields:
+        raise ReportError("ItemGraph queue_health does not match the replay queue schema")
+    for field in queue_fields:
+        if not _is_integer(queue_health[field]) or queue_health[field] < 0:
+            raise ReportError(f"ItemGraph queue_health.{field} must be a non-negative integer")
+    capacity = queue_health["queue_capacity_each"]
+    if capacity != 10_000:
+        raise ReportError("ItemGraph queue_health.queue_capacity_each must match the configured capacity")
+    for field in ("observation_waiting_depth", "transformation_waiting_depth", "audit_waiting_depth"):
+        if queue_health[field] > capacity:
+            raise ReportError(f"ItemGraph queue_health.{field} exceeds its configured capacity")
+    if queue_health["dropped_since_service_start"]:
+        raise ReportError("ItemGraph GameTest server must not lose accepted events to queue rejection")
     violations = sum(invariants[field] for field in ITEMGRAPH_VIOLATION_FIELDS)
     if invariants["healthy"] != (violations == 0):
         raise ReportError("ItemGraph invariants.healthy disagrees with the whole-graph violation counts")

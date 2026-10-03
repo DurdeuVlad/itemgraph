@@ -160,8 +160,22 @@ read-only SQLite fixture checks these transfers, including item registry IDs,
 quantities, canonical fingerprints, player/container/ground endpoints, the container's
 position and dimension, session interval evidence, distinct event IDs, and the
 exact spawned `ItemEntity` UUID across the drop/pickup pair. Ground endpoints
-must remain in the same dimension and within one block, allowing for the server
-tick between drop confirmation and pickup. A second unfiltered query requires
+must remain in the same dimension and within one block. The native replay
+records pickup Y=2 on NeoForge and Y=1 on Fabric. This is consistent with the
+loader-specific evidence hooks: NeoForge's patched two-argument
+`Player.drop(ItemStack, boolean)` calls `CommonHooks.onPlayerTossEvent`, while
+Fabric's accepted-entity capture uses the three-argument
+`ServerPlayer.drop(ItemStack, boolean, boolean)` path. Calling NeoForge's
+three-argument overload bypasses its toss-event hook and omits `DROP_ITEM`, so
+matching overload arity makes the fixture invalid. NeoForge floors pickup
+coordinates in its pickup listener; Fabric captures the entity position at
+`playerTouch` return. Those different capture rules do not by themselves prove
+the cause of the one-block report delta: `NodeManager` floors ground endpoints
+for both loaders, and the normalized report has no sub-block coordinates. The
+exact fixture-level cause remains unverified. The shared fixture preserves the
+exact entity UUID, item fingerprint, and quantity and retains a one-block
+continuity bound; that tolerance does not establish exact coordinate parity.
+A second unfiltered query requires
 the replay player to have exactly these four new ItemGraph-sourced quantity
 rows; an unexpected fifth observation fails the fixture. CoreProtect's
 documented inventory lookup also normalizes a transfer into player inventory
@@ -210,6 +224,14 @@ source lookup merge excludes chat and command rows even though those tables are
 stored; and the source default `maxPageSize` is 10. ItemGraph records the chosen
 operator-safe behavior and the source behavior as a versioned fixture instead of
 claiming that the two are identical.
+
+The explicit conflict cases and their ItemGraph decisions are machine-readable in
+[`source-contradictions.json`](grieflogger-fixtures/source-contradictions.json).
+CI requires every case to name both claims, the chosen behavior, its owner issue,
+and typed source/test anchors; the CI test pins each issue owner and decision
+string and verifies Java method declarations for method anchors. The fixture covers required
+radius, stored chat/command rows omitted from GriefLogger's in-game lookup, and
+Ender action enum values with no writer in the exact 1.21.1 release.
 
 ### Command semantics (#24)
 
@@ -477,10 +499,11 @@ checksummed historical database when an operator explicitly configures it.
 ### Differential report comparator foundation
 
 `tools/itemgraph_differential_report.py` defines normalized report schema
-version 5 for #31. The shared
-`ItemGraphReplayReportFixture` writes raw schema version 3 with six durable
-movement rows and seven allowlisted audit rows checked by the NeoForge and
-Fabric GameTests. CI normalizes and
+version 6 for #31. The shared
+`ItemGraphReplayReportFixture` writes raw schema version 5 with six durable
+movement/projectile rows and ten allowlisted audit rows, including block place,
+block interaction attempt, and entity kill, checked by the NeoForge and Fabric
+GameTests. CI normalizes and
 validates each loader report, then uploads the redacted JSON as a workflow
 artifact. The normalizer labels the output `system=itemgraph` and
 `runtime_mode=native_only`; this native-only export does not claim a
@@ -517,7 +540,20 @@ invariant violation count to be zero and checks that `healthy` agrees with
 those counts. The comparison result retains the validated audit summary. This
 summary exports counts only and omits database row IDs and violation details.
 It covers the complete database attached to the isolated GameTest run, not just
-the 13 events in the replay report.
+the 16 events in the replay report. Those are six item movement/projectile
+observations and ten quantity-free block/entity audit rows. The block-action
+subset is `BREAK_BLOCK`, `PLACE_BLOCK`, `INTERACT_BLOCK_ATTEMPT`, and
+`KILL_ENTITY`, with namespaced subject IDs retained on every row.
+
+The replay report also records each queue's waiting-entry depth at export, the
+fixed capacity of each queue (10,000), and the cumulative server-wide rejected
+event counter since the ingestion service was initialized. A nonzero counter
+fails the report, including drops from concurrent GameTests. Fabric exports after its
+worker flushes; the depth values are end-state checks, not peak measurements.
+The separate 8,000-event operational load GameTest remains the peak-backlog and
+throughput measurement. In-flight batches are not included in waiting-entry
+depths; accepted replay events are independently required to exist in the
+durable report rows.
 
 Each event has a unique scenario-local `event_key`, a unique integer `sequence`,
 and explicit normalized action, evidence class, quantity, item registry ID,
@@ -576,6 +612,16 @@ class mismatch, or wrong native source table never inherits an action-level exce
 requires exact per-event quantities and rejects any whole-database allocation
 or integrity violation reported by `AuditService`.
 
+The historical import path applies the same rule to unknown or missing source
+actions. `ig_grieflogger_rows` keeps the original action ID, payload, and opaque
+component bytes for provenance. The normalized `ig_grieflogger_lookup` projection
+labels the row `UNRESOLVED`, sets quantity to zero, leaves `subject_id` null, and
+retains the raw-byte SHA-256; it does not interpret the row's `amount` or `type`
+columns as item-flow claims. Action IDs are validated against each source table's
+mapping; oversized integer IDs and non-integral malformed values remain raw
+payload evidence with an explicit unresolved reason rather than being narrowed
+into the portable 32-bit action index column.
+
 The GameTest export contains 13 checked durable rows: six quantity observations
 for chest deposit and withdrawal, ground drop and pickup, and projectile throw
 and shoot; one successful source-water pickup audit row; three entity
@@ -590,32 +636,55 @@ structure origin; actors use fixed replay aliases. Events sort by persisted
 timestamp, source table, and source row ID; row IDs are not exported. This gives
 deterministic ordering when events share a millisecond across source tables. CI
 requires the fixed scenario ID, seed,
-13 event records with pinned per-action counts, unique event keys, and contiguous
+16 event records with pinned per-action and subject counts, unique event keys, and contiguous
 sequence, tests malformed inputs, and pins each report to its loader and source
-profile. The raw report schema is v3 and normalized report schema is v5. It does not start
-GriefLogger or compare its live database rows. Remaining #31 work is exact-release
-feature-category coverage and issue-linked dispositions for every extension or
-gap. This report does not establish live GriefLogger runtime equivalence or
-coverage for untested features. Staging soak, rollback rehearsal, and compatible
-artifact retirement are separate M10 operator/release gates. The whole-database
+profile. The raw report schema is v5 and normalized report schema is v6. It does
+not start GriefLogger or compare its live database rows. Remaining #31 work is
+exact-release feature-category coverage and issue-linked dispositions for every
+extension or gap. This report does not establish live GriefLogger runtime
+equivalence or coverage for untested features. Staging soak, rollback rehearsal,
+and compatible-artifact retirement are separate M10 operator/release gates. The
+whole-database
 quantity and integrity audit is included in each native report and enforced as
 a zero-violation gate; it does not replace feature-category coverage.
 
 CI also uploads `itemgraph-<loader>-coverage.json`, generated by
 `tools/itemgraph_feature_coverage.py` from the profile-pinned normalized report.
-This schema-v1 sidecar lists every registry action, its source enum/ID when it
-has one, exact-release writer disposition, ItemGraph compatibility status and
-extensions, compatible source table, and count in the selected replay. The
-independent `coverage_status` reports `observed-in-replay` or
-`not-observed-in-replay` from that count. The separate `release_writer_status`
-reports whether the exact 1.2.10-1.21.1 artifact has a writer or verifies
-`unsupported-no-writer`. An ItemGraph extension can therefore be observed in
-this replay even when GriefLogger has no corresponding writer.
-`not-observed-in-replay` means only that the current selected scenario did not
-exercise that action. It does not mean the ItemGraph implementation is absent,
-and it does not satisfy #31's outstanding coverage criterion. The report is pinned to the same
-compatibility profile and exact-release fixture hashes, and contains no event
-IDs, player identity, raw payload, world position, or database row ID.
+Schema v2 lists every registry action and all eleven exact-release database
+table families. Action rows contain their source enum/ID when present,
+exact-release writer disposition, ItemGraph compatibility status and
+extensions, compatible source table, and replay count. Table-family rows
+separate six event tables from five reference-data tables and report only
+counts of matching normalized replay events, observed ItemGraph source tables,
+and a precise coverage basis. These are event signals, not GriefLogger source
+row counts or distinct reference values, and do not establish table equivalence.
+`users`, `levels`, `materials`, and `entities` are represented as values on
+ItemGraph evidence rows rather than parallel GriefLogger tables; the `users`
+row is explicitly limited to an actor-reference observation because report
+redaction prevents checking UUID/name equivalence. Material references count
+item IDs or block-material subjects, and entity references count only
+`KILL_ENTITY` subjects. The
+`usernames` disposition explicitly states that native rows keep observed name
+snapshots but ItemGraph has no dedicated native username-history table; this
+replay does not claim that behavior is covered. Its historical name suggestions
+currently come from online players and the optional imported GriefLogger
+reference rows. This is a standalone-query parity gap tracked by #31.
+CoreProtect's API v13 handles the same problem by resolving current names,
+historical names, or UUIDs to a UUID-backed username history and returning both
+the recorded name and UUID ([CoreProtect API v13](https://docs.coreprotect.net/api/version/v13/)).
+This is a researched design reference, not an ItemGraph dependency or source-code
+reuse.
+
+The independent action `coverage_status` reports `observed-in-replay` or
+`not-observed-in-replay`; `release_writer_status` separately reports whether
+the exact 1.2.10-1.21.1 artifact has a writer or verifies
+`unsupported-no-writer`. An ItemGraph extension can be observed in this replay
+even when GriefLogger has no corresponding writer. `not-observed-in-replay`
+means only that the current selected scenario did not exercise the action or
+category. It does not mean the ItemGraph implementation is absent, and it does
+not satisfy #31's outstanding coverage criterion. The report is pinned to the
+same compatibility profile and exact-release fixture hashes, and contains no
+event IDs, player identity, raw payload, world position, or database row ID.
 
 ## Verification notes
 

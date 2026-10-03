@@ -88,6 +88,13 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
                 "orphaned_allocations": 0,
                 "invalid_edge_nodes": 0,
                 "status_mismatches": 0,
+                "queue_health": {
+                    "observation_waiting_depth": 0,
+                    "transformation_waiting_depth": 0,
+                    "audit_waiting_depth": 0,
+                    "queue_capacity_each": 10_000,
+                    "dropped_since_service_start": 0,
+                },
             },
         }
 
@@ -121,6 +128,47 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
         self.assertTrue(ender["itemgraph_extension"])
         self.assertEqual("not-observed-in-replay", place["coverage_status"])
         self.assertEqual(31, place["owner_issue"])
+
+    def test_classifies_all_release_table_families_without_claiming_absent_rows(self) -> None:
+        output = coverage_module.build_coverage(self.report)
+        fixture = differential.read_json(differential.FIXTURE_PATH)
+        families = {row["table"]: row for row in output["table_families"]}
+        self.assertEqual(set(fixture["database"]["tables"]), set(families))
+        self.assertEqual(11, output["summary"]["release_table_count"])
+        self.assertEqual(6, output["summary"]["release_table_families_not_observed_in_replay"])
+        self.assertEqual("observed-in-replay", families["containers"]["coverage_status"])
+        self.assertEqual("observed-in-replay", families["blocks"]["coverage_status"])
+        self.assertEqual("not-observed-in-replay", families["sessions"]["coverage_status"])
+        self.assertEqual("reference-data", families["usernames"]["table_kind"])
+        self.assertIn("no separate native username-history table",
+                      families["usernames"]["itemgraph_native_representation"])
+        self.assertEqual("actor-reference-only", families["users"]["coverage_status"])
+        self.assertEqual("not-observed-in-replay", families["entities"]["coverage_status"])
+        self.assertEqual(2, output["summary"]["release_reference_tables_represented_in_replay"])
+        self.assertEqual(1, output["summary"]["release_reference_tables_actor_reference_only"])
+        self.assertTrue(all(row["owner_issue"] == 31 for row in families.values()))
+
+    def test_reference_signals_require_action_specific_entity_and_block_subjects(self) -> None:
+        entity_interaction = self.report["events"][1]
+        self.assertFalse(coverage_module.reference_field_observed(entity_interaction, "entities"))
+        self.assertFalse(coverage_module.reference_field_observed(entity_interaction, "materials"))
+
+        block_event = copy.deepcopy(self.report["events"][0])
+        block_event.update({
+            "action": "PLACE_BLOCK",
+            "item_id": None,
+            "subject_id": "minecraft:stone",
+        })
+        self.assertTrue(coverage_module.reference_field_observed(block_event, "materials"))
+        block_event.update({"action": "KILL_ENTITY", "subject_id": "minecraft:zombie"})
+        self.assertTrue(coverage_module.reference_field_observed(block_event, "entities"))
+
+    def test_table_family_report_redacts_event_identity_and_values(self) -> None:
+        output = coverage_module.build_coverage(self.report)
+        serialized = json.dumps(output)
+        for forbidden in ("replay-add-item-0", "actor:replay-0", "minecraft:overworld", "minecraft:dirt",
+                          "minecraft:cow"):
+            self.assertNotIn(forbidden, serialized)
 
     def test_separate_chat_and_command_tables_are_classified_without_action_ids(self) -> None:
         output = coverage_module.build_coverage(self.report)

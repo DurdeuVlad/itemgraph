@@ -4,6 +4,7 @@ import com.itemgraph.audit.AuditReport;
 import com.itemgraph.audit.AuditService;
 import com.itemgraph.db.DatabaseDialect;
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 
@@ -24,7 +25,7 @@ import java.util.stream.Collectors;
 
 /** Exports the durable movement and allowlisted audit rows from the shared loader replay fixture. */
 public final class ItemGraphReplayReportFixture {
-    private static final String SCENARIO_ID = "item-movement-projectile-entity-audit-replay";
+    private static final String SCENARIO_ID = "item-movement-projectile-block-entity-audit-replay";
     private static final Set<String> EXPECTED_OBSERVATION_ACTIONS = Set.of(
             "ADD_ITEM", "REMOVE_ITEM", "DROP_ITEM", "PICKUP_ITEM", "THROW_ITEM", "SHOOT_ITEM");
     private static final Map<String, ExpectedEvent> EXPECTED_OBSERVATION_EVENTS = Map.of(
@@ -36,9 +37,27 @@ public final class ItemGraphReplayReportFixture {
             "SHOOT_ITEM", new ExpectedEvent("minecraft:arrow", 1));
     private static final Map<String, Integer> EXPECTED_AUDIT_ACTION_COUNTS = Map.of(
             "BREAK_BLOCK", 1,
+            "PLACE_BLOCK", 1,
+            "INTERACT_BLOCK_ATTEMPT", 1,
+            "KILL_ENTITY", 1,
             "INTERACT_ENTITY", 3,
             "INTERACT_ENTITY_COMPLETED", 2,
             "INTERACT_ENTITY_UNRESOLVED", 1);
+    private static final Map<String, Integer> EXPECTED_AUDIT_SUBJECT_COUNTS = Map.of(
+            "minecraft:water", 1,
+            "minecraft:diamond_block", 1,
+            "minecraft:chest", 1,
+            "minecraft:cow", 2,
+            "minecraft:armor_stand", 5);
+    private static final Map<ExpectedActionSubject, Integer> EXPECTED_AUDIT_ACTION_SUBJECT_COUNTS = Map.of(
+            new ExpectedActionSubject("BREAK_BLOCK", "minecraft:water"), 1,
+            new ExpectedActionSubject("PLACE_BLOCK", "minecraft:diamond_block"), 1,
+            new ExpectedActionSubject("INTERACT_BLOCK_ATTEMPT", "minecraft:chest"), 1,
+            new ExpectedActionSubject("KILL_ENTITY", "minecraft:cow"), 1,
+            new ExpectedActionSubject("INTERACT_ENTITY", "minecraft:cow"), 1,
+            new ExpectedActionSubject("INTERACT_ENTITY", "minecraft:armor_stand"), 2,
+            new ExpectedActionSubject("INTERACT_ENTITY_COMPLETED", "minecraft:armor_stand"), 2,
+            new ExpectedActionSubject("INTERACT_ENTITY_UNRESOLVED", "minecraft:armor_stand"), 1);
 
     private ItemGraphReplayReportFixture() { }
 
@@ -49,7 +68,8 @@ public final class ItemGraphReplayReportFixture {
      */
     public static void writeIfRequested(GameTestHelper helper, String loader, long priorObservationId,
                                         long priorAuditId, Map<String, String> actorAliases,
-                                        BlockPos successfulWaterPickupPos) {
+                                        BlockPos successfulWaterPickupPos,
+                                        Map<String, BlockPos> expectedAuditPositions) {
         String configuredDirectory = System.getenv("ITEMGRAPH_DIFFERENTIAL_REPORT_DIR");
         if (configuredDirectory == null || configuredDirectory.isBlank()) {
             return;
@@ -69,6 +89,15 @@ public final class ItemGraphReplayReportFixture {
                 ReplayEvent::action, Collectors.summingInt(ignored -> 1)));
         helper.assertValueEqual(EXPECTED_AUDIT_ACTION_COUNTS, actualAuditActionCounts,
                 "native report must include every expected durable audit event exactly once");
+        Map<String, Integer> actualAuditSubjectCounts = auditEvents.stream().collect(Collectors.groupingBy(
+                ReplayEvent::subjectId, Collectors.summingInt(ignored -> 1)));
+        helper.assertValueEqual(EXPECTED_AUDIT_SUBJECT_COUNTS, actualAuditSubjectCounts,
+                "native report must retain each expected namespaced block or entity subject exactly");
+        Map<ExpectedActionSubject, Integer> actualActionSubjectCounts = auditEvents.stream().collect(
+                Collectors.groupingBy(event -> new ExpectedActionSubject(event.action(), event.subjectId()),
+                        Collectors.summingInt(ignored -> 1)));
+        helper.assertValueEqual(EXPECTED_AUDIT_ACTION_SUBJECT_COUNTS, actualActionSubjectCounts,
+                "native report must retain every audit action with its expected namespaced subject");
         List<ReplayEvent> events = new ArrayList<>(observationEvents.size() + auditEvents.size());
         events.addAll(observationEvents);
         events.addAll(auditEvents);
@@ -78,11 +107,22 @@ public final class ItemGraphReplayReportFixture {
         AuditReport audit = readWholeGraphAudit();
         helper.assertValueEqual(true, audit.healthy(),
                 "native report requires a healthy whole-database quantity and integrity audit");
+        InternalObservationService ingestion = InternalObservationService.getInstance();
+        long droppedSinceServiceStart = ingestion.getTotalDropped();
 
         BlockPos origin = helper.absolutePos(BlockPos.ZERO);
+        for (ReplayEvent event : auditEvents) {
+            BlockPos expectedPosition = expectedAuditPositions.get(event.action());
+            if (expectedPosition != null) {
+                helper.assertValueEqual(new BlockPos(expectedPosition.getX() - origin.getX(),
+                                expectedPosition.getY() - origin.getY(), expectedPosition.getZ() - origin.getZ()),
+                        new BlockPos(event.x() - origin.getX(), event.y() - origin.getY(), event.z() - origin.getZ()),
+                        "native audit event position differs from its expected replay target: " + event.action());
+            }
+        }
         // Keep persisted row order when events from one source share a millisecond timestamp.
         StringBuilder json = new StringBuilder(2048);
-        json.append("{\n  \"raw_schema_version\": 3,\n  \"loader\": ").append(quote(loader))
+        json.append("{\n  \"raw_schema_version\": 5,\n  \"loader\": ").append(quote(loader))
                 .append(",\n  \"scenario_id\": ").append(quote(SCENARIO_ID))
                 .append(",\n  \"seed\": 0,\n  \"events\": [\n");
         Map<String, Integer> actionOccurrences = new HashMap<>();
@@ -123,7 +163,8 @@ public final class ItemGraphReplayReportFixture {
                     .append(event.unresolvedReason() == null ? "null" : quote(event.unresolvedReason()))
                     .append("}");
         }
-        json.append("\n  ],\n  \"invariants\": ").append(auditJson(audit)).append("\n}\n");
+        json.append("\n  ],\n  \"invariants\": ").append(auditJson(audit, ingestion, droppedSinceServiceStart))
+                .append("\n}\n");
         writeAtomically(Path.of(configuredDirectory).resolve("itemgraph-" + loader + ".raw.json"), json.toString());
     }
 
@@ -145,7 +186,8 @@ public final class ItemGraphReplayReportFixture {
         }
     }
 
-    private static String auditJson(AuditReport report) {
+    private static String auditJson(AuditReport report, InternalObservationService ingestion,
+                                    long droppedSinceServiceStart) {
         return "{\"healthy\":" + report.healthy()
                 + ",\"total_observations\":" + report.totalObservations()
                 + ",\"total_edges\":" + report.totalEdges()
@@ -157,7 +199,12 @@ public final class ItemGraphReplayReportFixture {
                 + ",\"non_positive_quantities\":" + report.nonPositiveQuantities()
                 + ",\"orphaned_allocations\":" + report.orphanedAllocations()
                 + ",\"invalid_edge_nodes\":" + report.invalidEdgeNodes()
-                + ",\"status_mismatches\":" + report.statusMismatches() + "}";
+                + ",\"status_mismatches\":" + report.statusMismatches()
+                + ",\"queue_health\":{\"observation_waiting_depth\":" + ingestion.getObservationQueueSize()
+                + ",\"transformation_waiting_depth\":" + ingestion.getTransformationQueueSize()
+                + ",\"audit_waiting_depth\":" + ingestion.getAuditEventQueueSize()
+                + ",\"queue_capacity_each\":" + ingestion.getQueueCapacity()
+                + ",\"dropped_since_service_start\":" + droppedSinceServiceStart + "}}";
     }
 
     private static List<ReplayEvent> readObservationEvents(long priorObservationId,
@@ -227,7 +274,8 @@ public final class ItemGraphReplayReportFixture {
                 FROM ig_audit_events
                 WHERE id > ? AND source_type = 'ITEMGRAPH_INTERNAL'
                   AND player_uuid IN (%s)
-                  AND event_type IN ('BREAK_BLOCK', 'INTERACT_ENTITY', 'INTERACT_ENTITY_COMPLETED',
+                  AND event_type IN ('BREAK_BLOCK', 'PLACE_BLOCK', 'INTERACT_BLOCK_ATTEMPT', 'KILL_ENTITY',
+                                     'INTERACT_ENTITY', 'INTERACT_ENTITY_COMPLETED',
                                      'INTERACT_ENTITY_UNRESOLVED')
                   -- Exclude the direct-call guard probe with a synthetic lava-bucket result.
                   AND (event_type <> 'BREAK_BLOCK' OR
@@ -315,6 +363,8 @@ public final class ItemGraphReplayReportFixture {
     }
 
     private record ExpectedEvent(String itemId, int amount) { }
+
+    private record ExpectedActionSubject(String action, String subjectId) { }
 
     private record ReplayEvent(long rowId, long occurredAtMs, String action, String evidenceClass, Integer amount,
                                String itemId, String subjectId, String dimension, int x, int y, int z,
