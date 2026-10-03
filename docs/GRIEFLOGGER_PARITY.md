@@ -235,10 +235,18 @@ the 15 examples now checks both Brigadier command parsing and the normalized
 radius, and the fixed-clock time window. The command-tree parse also asserts
 that the `lookupFilters` argument retains the published expression through
 both roots. Both loaders cover aliases, filter
-bounds, suggestions, permission checks, inspect forms, invalid pages, and
-asynchronous no-result handling. Lookup pages keep
-per-player state, expire after 30 minutes, cap offset at 10,000 rows, and emit
-Previous/Next commands tied to the same session.
+bounds, suggestions, permission checks, inspect forms, and invalid pages.
+`QueryFormatterTest.emptyUnifiedLookupExplainsThatNoEvidenceMatchedTheFilters`
+asserts the empty unified-evidence message, and
+`FabricItemGraphPageDispatchTest.filteredLookupWithNoEvidenceReturnsItsDocumentedEmptyMessageOnFabric`
+executes a real filtered lookup against an empty ItemGraph database and asserts
+its server-thread output. `QueryDispatcherNoResultTest` separately asserts
+generic asynchronous failure delivery. `FabricItemGraphPageDispatchTest` verifies that generated
+Previous/Next controls carry the lookup session UUID, an exact 20-row dataset
+with limit 10 does not emit an empty page 3, and a capped offset cannot advance;
+existing dispatch tests separately verify that another player cannot use a
+copied token. Lookup pages keep per-player state, expire after 30 minutes, and
+cap offsets at 10,000 rows.
 Fabric and NeoForge dispatcher tests execute both inspector roots and verify
 the toggle, explicit `on`/`off`, `status`, and permission denial. Both assert
 the same seven exact chat receipts for the published toggle plus ItemGraph's
