@@ -83,7 +83,7 @@ Instead of assigning artificial, invasive UUIDs to every Minecraft item, ItemGra
 1. **No Synthetic Per-Item UUIDs**: Works with vanilla and modded items without altering item NBT or bloating world save files.
 2. **Strict Quantity Conservation**: The engine never manufactures quantity ($\sum \text{allocated} \le \text{evidenced capacity}$). Stack splits (1-to-many) and merges (many-to-1) are tracked through an explicit allocation ledger.
 3. **Explicit Provenance**: Chat and logs strictly distinguish `[OBSERVED]` raw evidence from `[INFERRED conf=...]` transfers.
-4. **Owned Evidence**: ItemGraph captures and stores its own raw observations and derived graph data. An optional read-only GriefLogger importer is available only for historical migration; normal operation does not require its jar or database.
+4. **Owned Evidence**: ItemGraph captures and stores its own raw observations and derived graph data. An optional read-only GriefLogger transition bridge can sync supported rows and run an explicit history import; native capture and queries do not require its jar or database.
 5. **Zero Server Lag**: Graph traversals, heavy historical scans, and invariant audits execute exclusively on asynchronous worker threads.
 
 ---
@@ -162,5 +162,5 @@ Displays live operational health, background ingestion checkpoints, correlation 
 - **Java**: Java 21+
 - **Environment**: **Server-Side Only**. Players do not need ItemGraph installed on their clients to join.
 - **Required**: NeoForge 1.21.1 and Java 21+.
-- **Standalone operation**: ItemGraph captures native evidence and stores it in its own database. GriefLogger is not required. Its database can be imported read-only during migration; temporary compatible artifacts are for servers that run both mods while the SQLite class conflict coexistence bridge remains supported.
+- **Standalone operation**: ItemGraph captures native evidence and stores it in its own database. GriefLogger is not required. Its database can be read during migration through an optional read-only transition bridge; temporary compatible artifacts are for servers that run both mods while the SQLite class conflict coexistence bridge remains supported.
 ```

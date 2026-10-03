@@ -6,7 +6,7 @@ ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **
 
 Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time, while retaining a native audit ledger for non-item events. It does **not** assign a permanent UUID to every item. ItemGraph captures its own native raw evidence and builds an explainable temporal item-flow graph.
 
-**ItemGraph runs without GriefLogger.** The NeoForge and Fabric builds own their event capture, database, graph reconstruction, and queries. The optional read-only GriefLogger importer exists only to bring historical records across during migration. Native replacement coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
+**ItemGraph runs without GriefLogger.** The NeoForge and Fabric builds own their event capture, database, graph reconstruction, and queries. During migration, an optional read-only GriefLogger bridge can ingest supported item/container rows and run a separate explicit historical import. Neither path is required for native operation. Native replacement coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
 
 ItemGraph records vanilla hopper, dispenser, and dropper movement on both loaders.
 Other mods can opt into exact transfer evidence through the Fabric Transfer API or
@@ -31,10 +31,13 @@ remain open. They let servers run both mods during migration despite their
 bundled SQLite class conflict. Once the parity acceptance gates and native-only
 cutover evidence in [the cutover plan](docs/GRIEFLOGGER_PARITY.md) are complete,
 the standard ItemGraph jar becomes the only supported artifact. The optional
-read-only historical importer is separate from runtime event capture; operators
-keep their original GriefLogger database under their own archive policy.
+read-only source bridge is separate from native event capture; it can ingest
+supported source rows while configured, and the explicit historical import can
+copy additional legacy tables. Operators keep their original GriefLogger
+database under their own archive policy.
 
-To import historical data, configure `grieflogger_database_path` in
+To enable the optional read-only migration bridge and historical import,
+configure `grieflogger_database_path` in
 `config/itemgraph.properties` on Fabric or the corresponding NeoForge config.
 Both configs default this path to `database.db`; if that file is absent, the
 legacy importer is inactive and ItemGraph runs natively. Point it at a known
@@ -137,10 +140,12 @@ GriefLogger / Minecraft / Mod hooks
 
 ItemGraph owns native observations, its evidence ledger, and derived data.
 During migration, a configured GriefLogger database can be read as a legacy
-source; imported rows retain provenance, confirmed cross-source copies contribute
-one quantity capacity, and uncertain matches remain ambiguous. Container GUI
-observations are session net deltas with explicit time bounds, not click history,
-and generic `IItemHandler` rows keep caller/cause identity UNKNOWN.
+source: supported item/container rows are polled continuously, and the separate
+historical import is explicit. Imported rows retain provenance, confirmed
+cross-source copies contribute one quantity capacity, and uncertain matches
+remain ambiguous. Container GUI observations are session net deltas with
+explicit time bounds, not click history, and generic `IItemHandler` rows keep
+caller/cause identity UNKNOWN.
 
 ## MVP goals
 

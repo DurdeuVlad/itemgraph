@@ -44,8 +44,9 @@ multigraph. Its normal runtime needs neither GriefLogger nor its database:
   must remain permission-scoped.
 - ItemGraph: owns native observations, raw evidence, derived graph state, and
   explanations.
-- GriefLogger: optional legacy source for read-only historical import during
-  migration; never a runtime requirement for ItemGraph capture or queries.
+- GriefLogger: optional read-only transition source for supported-row sync and
+  explicit historical import; never a runtime requirement for native ItemGraph
+  capture or queries.
 - Contributor: proposes code, tests, documentation, or integrations through a
   pull request.
 - Maintainer: reviews changes, controls releases, and protects credentials.

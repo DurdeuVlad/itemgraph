@@ -15,7 +15,7 @@ neoforge adapter┘
 ```
 
 - `core/` contains Java-only domain records (`CanonicalItem`, `CorrelationResult`, and `NodeType`) and loader-neutral ports. It must not import Minecraft, Brigadier, Fabric, NeoForge, SQLite, or JDBC packages. `verifyCoreArchitecture` enforces that source boundary.
-- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence and migrations are shared runtime components; the GriefLogger reader is an optional read-only historical importer.
+- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence and migrations are shared runtime components; the GriefLogger reader is an optional read-only transition integration for supported-row sync and explicit historical import.
 - `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite and MariaDB Connector/J as nested Fabric jars; its compatible jar replaces the metadata, requires GriefLogger, and strips only the nested SQLite jar.
 - `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite and MariaDB Connector/J; its compatible jar requires GriefLogger, keeps MariaDB Connector/J, and omits the Jar-in-Jar SQLite module.
 
@@ -831,8 +831,9 @@ The `/ig audit` command runs this engine on the query worker and outputs a compr
 ### GriefLogger
 
 ItemGraph is designed to run as a standalone replacement. A configured GriefLogger
-database is an optional read-only historical import source during migration; it is
-not used for native capture, ItemGraph-owned storage, or normal queries.
+database is an optional read-only transition source for supported-row sync and
+explicit history import; it is not used for native capture, ItemGraph-owned
+storage, or normal queries.
 
 ItemGraph must not:
 

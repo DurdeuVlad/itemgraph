@@ -5,20 +5,23 @@
 ItemGraph is the standalone product and intended complete replacement for
 GriefLogger. Native capture, storage, reconstruction, and queries require neither
 the GriefLogger jar nor its database. This document describes the optional,
-read-only historical importer and temporary coexistence artifact only.
+read-only transition bridge, explicit historical import, and temporary
+coexistence artifact.
 
 ## Supported modes
 
 | GriefLogger installation | ItemGraph behavior |
 |---|---|
 | Absent | ItemGraph runs its native capture, own database, graph reconstruction, and queries. Exact coverage limits are tracked in the parity matrix. |
-| Present, configured source file absent | Same native-only behavior. Both loader configs default the source path to `database.db`; a missing file disables historical import. |
-| Present, importer configured | ItemGraph can read legacy SQLite evidence through read-only connections for historical migration and comparison. ItemGraph owns the imported copy and never writes to the source database. |
+| Present, configured source file absent | Same native-only behavior. Both loader configs default the source path to `database.db`; a missing file disables the read-only transition integration. |
+| Present, source file configured | ItemGraph can poll supported `items` and `containers` rows and run a separate explicit 11-table historical import through read-only connections. ItemGraph owns the imported copy and never writes to the source database. |
 
-The importer is a migration facility, not a runtime dependency or source of
-ongoing ItemGraph capture. Imported rows retain their source labels and
-provenance. The config path cannot be blank; when another `database.db` exists,
-set the path to a known missing file to disable import explicitly.
+The reader is a migration facility, not a runtime dependency or source of
+ItemGraph's native capture. When configured, its supported row poll runs
+alongside native capture; the separate historical import is explicit. Imported
+rows retain their source labels and provenance. The config path cannot be blank;
+when another `database.db` exists, set the path to a known missing file to
+disable the bridge explicitly.
 
 ## Artifact selection and SQLite module compatibility
 
@@ -76,9 +79,9 @@ compatibility check before widening this artifact's declared version range.
 ## Integration principle
 
 ```text
-ItemGraph            = native event capture, owned evidence, reconstruction, and queries
-GriefLogger importer = optional read-only historical migration path
-Compatible artifact  = temporary coexistence bridge for SQLite class conflicts
+ItemGraph               = native event capture, owned evidence, reconstruction, and queries
+GriefLogger transition  = optional read-only supported-row sync plus explicit history import
+Compatible artifact    = temporary coexistence bridge for SQLite class conflicts
 ```
 
 GriefLogger must always be treated as read-only. Ingestion skips gracefully with no log spam when the database is absent.
