@@ -79,7 +79,7 @@ public final class EntityInteractionGameTests implements FabricGameTest {
         FabricNativeAuditEventListener.onBlockItemPlaced(
                 new BlockPlaceContext(new UseOnContext(player, InteractionHand.MAIN_HAND, placementHit)),
                 (BlockItem) Items.DIAMOND_BLOCK, InteractionResult.SUCCESS,
-                Map.of(placedBlock, Blocks.AIR.defaultBlockState()));
+                Map.of(placedBlock, Blocks.AIR.defaultBlockState()), null);
 
         BlockPos killedCowPos = helper.absolutePos(new BlockPos(16, 1, 2));
         Cow killedCow = new Cow(EntityType.COW, helper.getLevel());

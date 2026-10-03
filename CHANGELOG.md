@@ -51,12 +51,12 @@ The project follows a simple pre-1.0 development changelog model.
   Java-method or documentation anchors. Mod
   version remains 0.3.2; no jar is built.
 - **Issue #31 release-contract coverage inventory:** CI now emits a redacted
-  sidecar beside each native-only NeoForge and Fabric replay. It lists every
-  compatibility-registry action, exact-release writer disposition, ItemGraph
-  implementation classification, and the number of matching events in that
-  replay. `coverage_status` records whether an action was observed in this
-  replay; `release_writer_status` independently records whether GriefLogger's
-  exact release has a writer. This makes remaining coverage gaps explicit
+  sidecar beside each native-only NeoForge and Fabric replay. Schema v2 lists
+  every compatibility-registry action and all eleven exact-release database
+  table families, with replay counts separate from exact-release writer
+  dispositions. It identifies the absence of a dedicated native
+  username-history table as an uncovered standalone query category. The
+  report distinguishes unobserved categories from unsupported release writers
   without claiming full runtime parity. Tests and CI do not package
   distributable mod jars; version remains 0.3.2.
 - **Issue #127 native-only default:** NeoForge and Fabric no longer inspect a

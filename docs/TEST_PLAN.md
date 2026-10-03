@@ -444,13 +444,17 @@ fixtures verify that profile-linked native extensions remain visible with an
 issue URL and stable reason while passing the difference gate; unlinked field
 mismatches, including quantity changes, remain failures.
 
-For each loader, `tools/itemgraph_feature_coverage.py` also emits a separate
-redacted sidecar for every compatibility-registry action. It records the
-exact-release writer disposition, ItemGraph implementation classification,
-profile source table, and count found in the selected replay. The sidecar
-explicitly separates a feature absent from this replay from an action that the
-verified release has no writer for; the current 13-event scenario still leaves
-additional covered-feature testing open under #31.
+For each loader, `tools/itemgraph_feature_coverage.py` emits a redacted sidecar
+for every compatibility-registry action and all eleven exact-release database
+table families. It records exact-release writer dispositions and replay counts
+separately from table-family dispositions. Reference tables are represented by
+native evidence fields; the report explicitly marks `usernames` as lacking a
+dedicated native username-history table and does not claim that category as
+covered. `not-observed-in-replay` means the current selected scenario did not
+exercise an action/category; it does not establish missing implementation or
+satisfy #31's remaining coverage criterion. Table-family counts are event
+signals, not GriefLogger source row counts, distinct reference values, or proof
+of schema equivalence.
 - explanation available
 
 ## Coffer/modded inventory test
