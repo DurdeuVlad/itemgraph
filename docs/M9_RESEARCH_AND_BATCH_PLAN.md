@@ -16,12 +16,16 @@ database. GriefLogger's published features and audited source are behavior
 references only; all implementations, event types, storage, and query behavior
 are ItemGraph-owned. Do not copy or patch GriefLogger code.
 
-During migration, the optional importer may read a GriefLogger database without
-modifying it so operators can retain and compare historical evidence. That path
-is not required for ItemGraph capture or queries and is not the product's
-long-term source of events. Compatible jars remain temporary coexistence builds
-until every tracked parity acceptance gate and the native-only cutover evidence
-are complete.
+During migration, the optional read-only transition integration can poll
+supported GriefLogger `items` and `containers` rows; a separate explicit
+historical import can preserve rows from the documented source tables. Neither
+path is required for native ItemGraph capture, storage, graph reconstruction,
+or native queries. Queries over historical GriefLogger data require an explicit
+import or sync first. Installing GriefLogger does not activate the bridge; an
+operator must enable it in ItemGraph configuration. Neither bridge path is the
+product's long-term source of events. Compatible jars remain temporary
+coexistence builds until every tracked parity acceptance gate and the
+native-only cutover evidence are complete.
 
 ItemGraph's replacement standard preserves the observed/inferred/ambiguous/
 unresolved distinction, traceable evidence IDs, deterministic explanations,
