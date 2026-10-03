@@ -126,9 +126,13 @@ public final class FabricNativeAuditEventListener {
     static InteractionResult handleBlockUse(InspectionService inspections,
                                             BlockHistoryOpener blockHistoryOpener,
                                             ServerPlayer player, ServerLevel level,
-                                            net.minecraft.world.InteractionHand hand, BlockPos pos) {
+                                            net.minecraft.world.InteractionHand hand, BlockPos pos,
+                                            Direction face) {
+        if (hand != net.minecraft.world.InteractionHand.MAIN_HAND) {
+            return InteractionResult.PASS;
+        }
         InteractionResult inspectionResult = tryOpenInspection(
-                inspections, blockHistoryOpener, player, level, pos);
+                inspections, blockHistoryOpener, player, level, pos, face);
         if (inspectionResult != null) {
             return inspectionResult;
         }
@@ -175,7 +179,7 @@ public final class FabricNativeAuditEventListener {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
                 return handleBlockUse(InspectionService.getInstance(),
                         FabricNativeAuditEventListener::openBlockHistory,
-                        serverPlayer, serverLevel, hand, hit.getBlockPos());
+                        serverPlayer, serverLevel, hand, hit.getBlockPos(), hit.getDirection());
             }
             return InteractionResult.PASS;
         });
@@ -237,7 +241,8 @@ public final class FabricNativeAuditEventListener {
                                                 BlockHistoryOpener blockHistoryOpener,
                                                 ServerPlayer player,
                                                 ServerLevel level,
-                                                BlockPos pos) {
+                                                BlockPos pos,
+                                                Direction face) {
         if (inspections == null || blockHistoryOpener == null || player == null || level == null || pos == null
                 || !inspections.isEnabled(player.getUUID())) {
             return null;
@@ -246,10 +251,8 @@ public final class FabricNativeAuditEventListener {
             inspections.clear(player.getUUID());
             return null;
         }
-        if (!BlockInspectionTargets.isInspectableRightClickTarget(level, pos)) {
-            return null;
-        }
-        return blockHistoryOpener.open(player, level, pos) == 0 ? null : InteractionResult.SUCCESS;
+        BlockPos target = BlockInspectionTargets.resolveRightClickTarget(level, pos, face);
+        return blockHistoryOpener.open(player, level, target) == 0 ? null : InteractionResult.SUCCESS;
     }
 
     /** Left-click inspection applies to every block; consume breaking only after the query is accepted. */

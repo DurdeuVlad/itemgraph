@@ -240,8 +240,8 @@ Previous/Next commands tied to the same session.
 Fabric and NeoForge dispatcher tests execute both inspector roots and verify
 the toggle, explicit `on`/`off`, `status`, and permission denial. Both assert
 the same seven exact chat receipts for the published toggle plus ItemGraph's
-explicit forms. These checks do not
-replace the required vanilla-client command replay. Both loader command suites
+explicit forms. The maintainer requested skipping the visible-client replay;
+client socket transport and rendered command output remain unverified. Both loader command suites
 also encode and decode the full tree through Minecraft 1.21.1's
 `ClientboundCommandsPacket` codec, then verify `/itemgraph` and `/ig` survive
 and `/gl` and `/grieflogger` remain absent. This exercises vanilla packet
@@ -254,7 +254,8 @@ timestamp fields, and unchanged JDBC value and Java type snapshots for every
 `ig_observations` cell. Their shared fixture reads ItemGraph's database only. These embedded
 mock-player tests establish handler-to-ledger behavior; they do not establish
 client socket transport, rendered command output, or GriefLogger differential
-parity. The required connected vanilla-client replay remains open under #24.
+parity. The connected vanilla-client replay is intentionally skipped under the
+maintainer's instruction and is not claimed as completed evidence.
 `pageSessionTokensAreIsolatedByPlayerAndExplicitlyClearable` and
 `lookupPageSessionCannotBeResolvedByAnotherPlayerAndCanBeCleared` verify a
 copied token cannot expose one player's page to another level-2 player and that
@@ -273,6 +274,21 @@ The Fabric callback registration and NeoForge event-bus registration remain
 source-inspected; these tests do not simulate socket disconnect transport. The
 output continues to label evidence source/type and retain evidence IDs; ItemGraph-only
 output remains an explicit extension.
+
+The checksum-verified GriefLogger 1.2.10-1.21.1 NeoForge and Fabric release
+artifacts were statically inspected for right-click target selection. Both
+ignore off-hand inspection clicks; doors and containers inspect their clicked
+structure, while other right-click targets fall back to the block on the
+clicked face. The published inspect documentation describes clicked-block
+history, so ItemGraph deliberately keeps clicked-position behavior for its
+built-in functional blocks; this is a documented-contract extension to the
+release implementation. ItemGraph also keeps clicked-position support for
+modded `Container` block entities. Unlike GriefLogger,
+ItemGraph consumes a click only after its bounded asynchronous history request
+is accepted, so queue rejection leaves the normal game interaction available.
+`InspectionListenerTest` and `FabricNativeAuditEventListenerTest` cover these
+branches locally. The maintainer skipped visible-client clicks, so client-side
+rendering and real packet transport remain unverified.
 
 Fabric `FabricItemGraphPageDispatchTest` also executes `/ig page` and
 `/itemgraph page` without an active session and checks the exact failure text,

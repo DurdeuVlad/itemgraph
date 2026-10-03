@@ -209,6 +209,57 @@ class InspectionListenerTest {
     }
 
     @Test
+    void offHandInspectionClickDoesNotOpenHistoryOrCancelInteraction() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = serverLevelWithContainer(CONTAINER_POS);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, InteractionHand.OFF_HAND, CONTAINER_POS);
+        AtomicInteger opens = new AtomicInteger();
+
+        listener(service, (p, l, pos) -> { opens.incrementAndGet(); return 1; }).onRightClickBlock(event);
+
+        assertFalse(event.isCanceled());
+        assertEquals(0, opens.get());
+    }
+
+    @Test
+    void ordinaryBlockClickInspectsAdjacentFaceTarget() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockState(CONTAINER_POS)).thenReturn(Blocks.STONE.defaultBlockState());
+        BlockPos target = CONTAINER_POS.relative(Direction.EAST);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS, Direction.EAST);
+
+        listener(service, (p, l, pos) -> { assertEquals(target, pos); return 1; }).onRightClickBlock(event);
+
+        assertTrue(event.isCanceled());
+    }
+
+    @Test
+    void rejectedOrdinaryBlockFallbackPreservesGameplay() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockState(CONTAINER_POS)).thenReturn(Blocks.STONE.defaultBlockState());
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS, Direction.EAST);
+        AtomicInteger opens = new AtomicInteger();
+
+        listener(service, (p, l, target) -> { opens.incrementAndGet(); return 0; }).onRightClickBlock(event);
+
+        assertFalse(event.isCanceled());
+        assertEquals(1, opens.get());
+    }
+
+    @Test
     void activeLeftClickOpensExactBlockHistoryAndCancelsBreaking() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
@@ -327,8 +378,18 @@ class InspectionListenerTest {
     }
 
     private PlayerInteractEvent.RightClickBlock rightClick(ServerPlayer player, BlockPos pos) {
+        return rightClick(player, InteractionHand.MAIN_HAND, pos);
+    }
+
+    private PlayerInteractEvent.RightClickBlock rightClick(ServerPlayer player, InteractionHand hand, BlockPos pos) {
         return new PlayerInteractEvent.RightClickBlock(
-                player, InteractionHand.MAIN_HAND, pos, mock(BlockHitResult.class));
+                player, hand, pos, mock(BlockHitResult.class));
+    }
+
+    private PlayerInteractEvent.RightClickBlock rightClick(ServerPlayer player, BlockPos pos, Direction face) {
+        BlockHitResult hit = mock(BlockHitResult.class);
+        when(hit.getDirection()).thenReturn(face);
+        return new PlayerInteractEvent.RightClickBlock(player, InteractionHand.MAIN_HAND, pos, hit);
     }
 
     private PlayerInteractEvent.LeftClickBlock leftClick(ServerPlayer player, BlockPos pos) {
