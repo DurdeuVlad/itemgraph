@@ -418,10 +418,18 @@ counts, queue accounting, and existing server-thread submission ceilings.
 rejection accounting, and the complete artifact set. CI uploads the validated
 `itemgraph-performance-reports` artifact for 14 days.
 
-The nine-report set covers NeoForge SQLite burst (8,000 events), Fabric SQLite
+The fifteen-report set covers NeoForge SQLite burst (8,000 events), Fabric SQLite
 flush (32 events), NeoForge and Fabric each against disposable MySQL and MariaDB
 (512 synthetic events, 20 concurrent raw-JDBC ledger lookups, and 20 registered
 `/ig lookup radius.20` command queries per backend),
+plus one-second live tick-hook idle samples for NeoForge and Fabric against
+SQLite, and worker-only idle samples against MySQL and MariaDB. All idle reports
+compare durable `ig_observations`, `ig_audit_events`, and
+`ig_item_transformations` row counts before and after the sample, assert zero
+accepted, persisted, rejected, queued, queried, correlated, or heartbeat work,
+and record heap snapshots at the sample boundary.
+Network-backend samples do not represent live server ticks. These are CI
+baselines, not production memory budgets.
 NeoForge shutdown saturation (10,000 accepted audit events, one explicitly
 rejected over-capacity submission, worker-owned bounded drain, and exact durable
 row verification), and a cross-loader SQLite correlation workload (500 accepted
@@ -436,9 +444,9 @@ delivery with mocked Minecraft server/player objects. It returns matching
 synthetic audit rows and reports redacted completion, failure, overlap, total,
 maximum, and p95 dispatch-to-callback latency. This measures the application
 lookup path on disposable CI databases; it does not measure live-client delivery,
-real server tick impact, or third-party adapter behavior. An idle baseline,
-adapter-specific load, and staging-derived latency/memory budgets remain open;
-CI timings are measurements, not production budgets.
+real server tick impact, or third-party adapter behavior. Adapter-specific load
+and staging-derived latency/memory budgets remain open; CI timings are measurements,
+not production budgets.
 
 The performance reports snapshot process-wide metrics. Each queue GameTest now
 stops and drains the prior worker, clears its counters, and restarts it before

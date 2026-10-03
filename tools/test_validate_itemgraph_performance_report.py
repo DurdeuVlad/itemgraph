@@ -15,10 +15,27 @@ from validate_itemgraph_performance_report import ReportError, validate_director
 
 def report(loader: str, scenario: str, accepted: int) -> dict:
     backend_matrix = scenario in {"backend_mariadb_matrix", "backend_mysql_matrix", "backend_fabric_mariadb_matrix", "backend_fabric_mysql_matrix"}
+    idle_baseline = scenario in {"idle_sqlite_baseline", "idle_worker_mariadb_baseline", "idle_worker_mysql_baseline"}
     shutdown_saturation = scenario == "shutdown_saturation"
     correlation_burst = scenario == "correlation_burst"
     attempted = accepted + 1 if shutdown_saturation else accepted
-    if correlation_burst:
+    if idle_baseline:
+        workload = {
+            "idle_window_ms": 1_000,
+            "accepted_events": 0,
+            "persisted_counter_delta": 0,
+            "dropped_counter_delta": 0,
+            "durable_rows_delta": 0,
+            "queue_remaining": 0,
+            "database_heartbeat_delta": 0,
+            "enqueue_samples": 0,
+            "persistence_samples": 0,
+            "query_samples": 0,
+            "correlation_samples": 0,
+            "heap_used_before_bytes": 1_000,
+            "heap_used_after_bytes": 1_000,
+        }
+    elif correlation_burst:
         workload = {
             "accepted_events": accepted,
             "persisted_counter_delta": accepted,
@@ -77,16 +94,19 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
         "loader": loader,
         "scenario": scenario,
         "minecraft_version": "1.21.1",
-        "backend": "mysql_mariadb" if backend_matrix else "sqlite",
+        "backend": "mysql_mariadb" if backend_matrix or scenario in {
+            "idle_worker_mariadb_baseline", "idle_worker_mysql_baseline",
+        } else "sqlite",
         "grieflogger_runtime_state": (
             "unavailable" if loader == "neoforge" and scenario in {
                 "backend_mariadb_matrix", "backend_mysql_matrix", "shutdown_saturation",
+                "idle_worker_mariadb_baseline", "idle_worker_mysql_baseline",
             } else "absent"
         ),
         "workload": workload,
         "queue": {
             "depth": 0,
-            "peak_depth": accepted,
+            "peak_depth": 0 if idle_baseline else accepted,
             "capacity_per_type": 10_000,
             "flush_every_ticks": 20,
             "max_batch_size": 100 if shutdown_saturation else 1_000,
@@ -94,7 +114,7 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
         },
         "latency": {
             name: {
-                "count": attempted if name == "enqueue" else (
+                "count": 0 if idle_baseline else attempted if name == "enqueue" else (
                     5 if correlation_burst and name == "correlation" else (
                         1 if name == "persistence_commit" else 40 if backend_matrix and name == "query" else 0)),
                 "failed": 1 if shutdown_saturation and name == "enqueue" else 0,
@@ -106,9 +126,9 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             for name in ("enqueue", "persistence_commit", "query", "correlation")
         },
         "persistence": {
-            "persisted_items": accepted,
+            "persisted_items": 0 if idle_baseline else accepted,
             "failed_batches": 0,
-            "largest_batch": min(accepted, 100 if shutdown_saturation else 1_000),
+            "largest_batch": 0 if idle_baseline else min(accepted, 100 if shutdown_saturation else 1_000),
         },
         "components": {"decode_failure_cache_insertions": 0, "negative_cache_hits": 0},
         "memory": {"heap_used_bytes": 1, "heap_max_bytes": -1},
@@ -179,6 +199,39 @@ class PerformanceReportValidationTest(unittest.TestCase):
             validate_report(report("neoforge", "shutdown_saturation", 10_000))["grieflogger_runtime_state"],
         )
 
+    def test_accepts_empty_idle_baselines_for_both_loader_database_pairs(self) -> None:
+        for loader in ("neoforge", "fabric"):
+            for scenario in ("idle_sqlite_baseline", "idle_worker_mariadb_baseline", "idle_worker_mysql_baseline"):
+                with self.subTest(loader=loader, scenario=scenario):
+                    candidate = report(loader, scenario, 0)
+                    self.assertEqual(scenario, validate_report(candidate)["scenario"])
+
+    def test_rejects_idle_baseline_that_records_database_or_queue_work(self) -> None:
+        candidate = report("neoforge", "idle_worker_mariadb_baseline", 0)
+        candidate["workload"]["persistence_samples"] = 1
+        with self.assertRaisesRegex(ReportError, "unexpected work"):
+            validate_report(candidate)
+
+    def test_rejects_idle_baseline_without_full_observation_window(self) -> None:
+        candidate = report("fabric", "idle_worker_mysql_baseline", 0)
+        candidate["workload"]["idle_window_ms"] = 999
+        with self.assertRaises(ReportError):
+            validate_report(candidate)
+
+    def test_rejects_idle_baseline_with_queue_peak(self) -> None:
+        candidate = report("fabric", "idle_worker_mysql_baseline", 0)
+        candidate["queue"]["peak_depth"] = 1
+        with self.assertRaisesRegex(ReportError, "bounded empty-queue"):
+            validate_report(candidate)
+
+    def test_rejects_idle_heap_samples_above_reported_heap_maximum(self) -> None:
+        candidate = report("fabric", "idle_sqlite_baseline", 0)
+        candidate["workload"]["heap_used_after_bytes"] = 2_000
+        candidate["memory"]["heap_used_bytes"] = 1_000
+        candidate["memory"]["heap_max_bytes"] = 1_500
+        with self.assertRaisesRegex(ReportError, "idle heap sample"):
+            validate_report(candidate)
+
     def test_rejects_enqueue_samples_from_another_scenario(self) -> None:
         candidate = report("neoforge", "queue_burst", 8_000)
         candidate["latency"]["enqueue"]["count"] += 25
@@ -198,7 +251,7 @@ class PerformanceReportValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(ReportError, "explicit rejection count"):
             validate_report(candidate)
 
-    def test_directory_requires_complete_nine_report_artifact_set(self) -> None:
+    def test_directory_requires_complete_fifteen_report_artifact_set(self) -> None:
         scenarios = [
             ("itemgraph-neoforge-queue_burst.json", report("neoforge", "queue_burst", 8_000)),
             ("itemgraph-fabric-queue_flush_durability.json", report("fabric", "queue_flush_durability", 32)),
@@ -209,12 +262,18 @@ class PerformanceReportValidationTest(unittest.TestCase):
             ("itemgraph-neoforge-shutdown_saturation.json", report("neoforge", "shutdown_saturation", 10_000)),
             ("itemgraph-neoforge-correlation_burst.json", report("neoforge", "correlation_burst", 500)),
             ("itemgraph-fabric-correlation_burst.json", report("fabric", "correlation_burst", 500)),
+            ("itemgraph-neoforge-idle_worker_mariadb_baseline.json", report("neoforge", "idle_worker_mariadb_baseline", 0)),
+            ("itemgraph-neoforge-idle_worker_mysql_baseline.json", report("neoforge", "idle_worker_mysql_baseline", 0)),
+            ("itemgraph-fabric-idle_worker_mariadb_baseline.json", report("fabric", "idle_worker_mariadb_baseline", 0)),
+            ("itemgraph-fabric-idle_worker_mysql_baseline.json", report("fabric", "idle_worker_mysql_baseline", 0)),
+            ("itemgraph-neoforge-idle_sqlite_baseline.json", report("neoforge", "idle_sqlite_baseline", 0)),
+            ("itemgraph-fabric-idle_sqlite_baseline.json", report("fabric", "idle_sqlite_baseline", 0)),
         ]
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             for filename, contents in scenarios:
                 (directory / filename).write_text(json.dumps(contents), encoding="utf-8")
-            self.assertEqual(9, len(validate_directory(directory)))
+            self.assertEqual(15, len(validate_directory(directory)))
             (directory / "itemgraph-fabric-correlation_burst.json").write_text(
                 json.dumps(scenarios[0][1]), encoding="utf-8"
             )

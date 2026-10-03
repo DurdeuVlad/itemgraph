@@ -92,17 +92,17 @@ class FabricNetworkBackendPerformanceIntegrationTest {
     @Test
     void mariadbQueueAndConcurrentLookupProbe() throws Exception {
         runBackendProbe("ITEMGRAPH_TEST_MARIADB_URL", "ITEMGRAPH_TEST_MARIADB_USER",
-                "ITEMGRAPH_TEST_MARIADB_PASSWORD", "mariadb", "disable");
+                "ITEMGRAPH_TEST_MARIADB_PASSWORD", "mariadb", "disable", "fabric");
     }
 
     @Test
     void mysqlQueueAndConcurrentLookupProbe() throws Exception {
         runBackendProbe("ITEMGRAPH_TEST_MYSQL_URL", "ITEMGRAPH_TEST_MYSQL_USER",
-                "ITEMGRAPH_TEST_MYSQL_PASSWORD", "mysql", "trust");
+                "ITEMGRAPH_TEST_MYSQL_PASSWORD", "mysql", "trust", "fabric");
     }
 
     private static void runBackendProbe(String urlKey, String userKey, String passwordKey,
-                                       String flavor, String sslMode) throws Exception {
+                                       String flavor, String sslMode, String loader) throws Exception {
         assumeTrue("true".equalsIgnoreCase(System.getenv("GITHUB_ACTIONS"))
                         && System.getenv("ITEMGRAPH_PERFORMANCE_REPORT_DIR") != null
                         && !System.getenv("ITEMGRAPH_PERFORMANCE_REPORT_DIR").isBlank(),
@@ -140,6 +140,7 @@ class FabricNetworkBackendPerformanceIntegrationTest {
                     "CI service must report the expected " + flavor + " database engine");
             service.configureOperations(10, 1, 100, 30_000, true);
             service.start();
+            captureIdleBaseline(service, loader, flavor);
             long runStarted = System.nanoTime();
 
             CountDownLatch readersReady = new CountDownLatch(LOOKUP_THREADS);
@@ -438,6 +439,79 @@ class FabricNetworkBackendPerformanceIntegrationTest {
             }
         } catch (SQLException failure) {
             throw new IllegalStateException("Could not count the isolated ItemGraph backend probe", failure);
+        }
+    }
+
+    private static void captureIdleBaseline(InternalObservationService service, String loader,
+                                            String flavor) throws InterruptedException {
+        OperationalMetrics metrics = OperationalMetrics.getInstance();
+        long durableRowsBefore = countDurableEvidenceRows(DatabaseManager.getInstance());
+        var before = metrics.snapshot();
+        long enqueuedBefore = service.getTotalEnqueued();
+        long persistedBefore = service.getTotalPersisted();
+        long droppedBefore = service.getTotalDropped();
+        long heartbeatsBefore = service.getTotalDatabaseHeartbeats();
+        int queueBefore = service.getQueueSize();
+        long startedNanos = System.nanoTime();
+        Thread.sleep(1_000L);
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+        var after = metrics.snapshot();
+        long enqueuedDelta = service.getTotalEnqueued() - enqueuedBefore;
+        long persistedDelta = service.getTotalPersisted() - persistedBefore;
+        long droppedDelta = service.getTotalDropped() - droppedBefore;
+        long heartbeatDelta = service.getTotalDatabaseHeartbeats() - heartbeatsBefore;
+        int queueRemaining = service.getQueueSize();
+        long durableRowsAfter = countDurableEvidenceRows(DatabaseManager.getInstance());
+        long durableRowsDelta = durableRowsAfter - durableRowsBefore;
+
+        assertTrue(elapsedMs >= 1_000L, "idle baseline must observe at least one second");
+        assertEquals(0, queueBefore, "idle baseline must begin with empty queues");
+        assertEquals(0, queueRemaining, "idle baseline must end with empty queues");
+        assertEquals(0L, enqueuedDelta, "idle baseline must enqueue no evidence");
+        assertEquals(0L, persistedDelta, "idle baseline must persist no evidence");
+        assertEquals(0L, droppedDelta, "idle baseline must reject no evidence");
+        assertEquals(0L, durableRowsDelta, "idle baseline must not change durable evidence rows");
+        assertEquals(0L, heartbeatDelta, "one-second idle baseline must not run a database heartbeat");
+        assertEquals(0L, after.enqueue().count() - before.enqueue().count(),
+                "idle baseline must not record enqueue work");
+        assertEquals(0L, after.persistenceCommit().count() - before.persistenceCommit().count(),
+                "idle baseline must not run persistence batches");
+        assertEquals(0L, after.query().count() - before.query().count(),
+                "idle baseline must not run ItemGraph lookups");
+        assertEquals(0L, after.correlation().count() - before.correlation().count(),
+                "idle baseline must not run correlation work");
+        assertEquals(0L, after.persistenceFailures() - before.persistenceFailures(),
+                "idle baseline must not fail persistence");
+
+        FabricPerformanceReportFixture.writeIfRequested(loader, "idle_worker_" + flavor + "_baseline", Map.ofEntries(
+                Map.entry("idle_window_ms", elapsedMs),
+                Map.entry("accepted_events", enqueuedDelta),
+                Map.entry("persisted_counter_delta", persistedDelta),
+                Map.entry("dropped_counter_delta", droppedDelta),
+                Map.entry("durable_rows_delta", durableRowsDelta),
+                Map.entry("queue_remaining", (long) queueRemaining),
+                Map.entry("database_heartbeat_delta", heartbeatDelta),
+                Map.entry("enqueue_samples", after.enqueue().count() - before.enqueue().count()),
+                Map.entry("persistence_samples", after.persistenceCommit().count()
+                        - before.persistenceCommit().count()),
+                Map.entry("query_samples", after.query().count() - before.query().count()),
+                Map.entry("correlation_samples", after.correlation().count() - before.correlation().count()),
+                Map.entry("heap_used_before_bytes", before.heapUsedBytes()),
+                Map.entry("heap_used_after_bytes", after.heapUsedBytes())), "absent");
+    }
+
+    private static long countDurableEvidenceRows(DatabaseManager database) {
+        try (var connection = database.openReadOnlyConnection();
+             var statement = connection.createStatement();
+             var rows = statement.executeQuery("SELECT (SELECT COUNT(*) FROM ig_observations) + "
+                     + "(SELECT COUNT(*) FROM ig_audit_events) + "
+                     + "(SELECT COUNT(*) FROM ig_item_transformations)")) {
+            if (!rows.next()) {
+                throw new SQLException("database did not return the durable evidence row count");
+            }
+            return rows.getLong(1);
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not count ItemGraph's durable evidence ledger", failure);
         }
     }
 

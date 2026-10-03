@@ -10,6 +10,7 @@ The project follows a simple pre-1.0 development changelog model.
 
 - **Issue #32 shutdown durability:** submission admission closes atomically with the final queue drain; submissions after stop are rejected and counted. Loader shutdown waits for the GriefLogger importer executor to terminate before database close. Shutdown write failures with uncertain commit status are reported as unknown outcomes instead of definite drops. Regression tests cover submit/stop races and importer worker termination.
 - **Issue #32 performance evidence:** correlation failures returned as result values now increment the failure counter. The MySQL and MariaDB CI probes now execute 20 registered `/ig lookup` commands alongside 20 raw-JDBC readers and 512 submitted events on both loaders, recording callback completion and p95/max latency. CI also enforces a 1,000 ms drain regression budget for the healthy NeoForge SQLite 10,000-event saturation fixture, based on five repeated local measurements; stalled JDBC work can still extend shutdown while accepted evidence drains.
+- **Issue #32 idle baseline:** CI adds one-second live tick-hook no-input samples for both loaders against SQLite and worker-only samples against MySQL and MariaDB. The validator requires zero queue, persistence, lookup, correlation, rejection, and heartbeat work; reports compare durable observation, audit, and transformation row counts and capture heap at the sample boundary. Network-backend samples do not represent live server ticks or production budgets.
 
 ### Added
 
@@ -28,9 +29,9 @@ The project follows a simple pre-1.0 development changelog model.
   count queries across four readers against 512 synthetic events; the shutdown
   probe persists all 10,000 accepted events in bounded worker batches and counts
   one rejected over-capacity event explicitly. Reports contain aggregate values
-  without event or player identifiers. Real adapter workloads, moderator
-  command lookup, idle baseline, and staging-derived production budgets remain
-  open under #32. Mod version remains 0.3.2; no distributable jar is built.
+  without event or player identifiers. The real adapter workloads and
+  staging-derived production budgets remain open under #32. Mod version remains
+  0.3.2; no distributable jar is built.
 - **Issue #32 report provenance:** performance report fixtures record
   `grieflogger_runtime_state` as `absent`, `present`, or `unavailable` instead
   of treating an uninitialized NeoForge JUnit mod list as proof of absence.

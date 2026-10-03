@@ -3,6 +3,7 @@ package com.itemgraph.gametest;
 import com.itemgraph.ItemGraph;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.gametest.CorrelationPerformanceFixture;
+import com.itemgraph.gametest.IdlePerformanceFixture;
 import com.itemgraph.gametest.PerformanceReportFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.gametest.framework.GameTest;
@@ -28,6 +29,14 @@ public final class OperationalLoadGameTests {
     private static final long SERVER_TICK_BUDGET_NANOS = 50_000_000L;
 
     private OperationalLoadGameTests() { }
+
+    @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zzzzzz_itemgraph_idle_baseline",
+            timeoutTicks = 300_000)
+    public static void idleSqliteWorkerProducesNoEvidenceWork(GameTestHelper helper) {
+        boolean griefLoggerInstalled = ModList.get().isLoaded("grieflogger");
+        helper.assertFalse(griefLoggerInstalled, "The isolated idle probe must run without GriefLogger installed");
+        IdlePerformanceFixture.run(helper, "neoforge", griefLoggerInstalled ? "present" : "absent");
+    }
 
     @GameTest(templateNamespace = "itemgraph", template = "empty", batch = "zzzzz_itemgraph_correlation_burst",
             timeoutTicks = 300_000)

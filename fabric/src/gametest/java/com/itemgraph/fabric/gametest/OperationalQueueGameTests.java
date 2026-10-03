@@ -2,6 +2,7 @@ package com.itemgraph.fabric.gametest;
 
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.gametest.CorrelationPerformanceFixture;
+import com.itemgraph.gametest.IdlePerformanceFixture;
 import com.itemgraph.gametest.PerformanceReportFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
@@ -27,6 +28,14 @@ public final class OperationalQueueGameTests implements FabricGameTest {
 
     static {
         ServerTickEvents.END_SERVER_TICK.register(server -> END_TICK_CALLBACKS.incrementAndGet());
+    }
+
+    @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zzzzzz_itemgraph_idle_baseline",
+            timeoutTicks = 300_000)
+    public void idleSqliteWorkerProducesNoEvidenceWork(GameTestHelper helper) {
+        boolean griefLoggerInstalled = FabricLoader.getInstance().isModLoaded("grieflogger");
+        helper.assertFalse(griefLoggerInstalled, "The isolated idle probe must run without GriefLogger installed");
+        IdlePerformanceFixture.run(helper, "fabric", griefLoggerInstalled ? "present" : "absent");
     }
 
     @GameTest(template = "fabric-gametest-api-v1:empty", batch = "zzzz_itemgraph_correlation_burst",

@@ -19,7 +19,7 @@ LOADERS = {"fabric", "neoforge"}
 BACKENDS = {"sqlite", "mysql_mariadb", "unknown"}
 WORKLOAD_FIELDS = {
     "accepted_events", "batch_count", "batch_size", "persisted_counter_delta",
-    "dropped_counter_delta", "durable_rows", "queue_remaining",
+    "dropped_counter_delta", "durable_rows", "durable_rows_delta", "queue_remaining",
     "max_server_thread_batch_ns", "end_tick_callbacks", "flush_every_ticks",
     "enqueue_total_ns", "concurrent_lookups", "overlapping_lookups",
     "registered_lookup_commands", "registered_lookup_callbacks_completed",
@@ -28,6 +28,8 @@ WORKLOAD_FIELDS = {
     "registered_lookup_dispatch_callback_p95_ns",
     "automation_events", "modded_inventory_events", "elapsed_ms", "attempted_events",
     "correlation_pairs", "correlation_passes", "correlation_edges",
+    "idle_window_ms", "database_heartbeat_delta", "enqueue_samples", "persistence_samples",
+    "query_samples", "correlation_samples", "heap_used_before_bytes", "heap_used_after_bytes",
 }
 QUEUE_FIELDS = {
     "depth", "peak_depth", "capacity_per_type", "flush_every_ticks",
@@ -64,6 +66,7 @@ def validate_report(report: Any) -> dict[str, Any]:
         "queue_burst", "queue_flush_durability",
         "backend_mariadb_matrix", "backend_mysql_matrix", "backend_fabric_mariadb_matrix",
         "backend_fabric_mysql_matrix", "shutdown_saturation", "correlation_burst",
+        "idle_sqlite_baseline", "idle_worker_mariadb_baseline", "idle_worker_mysql_baseline",
     }:
         raise ReportError("scenario is not a supported queue benchmark")
     if value["minecraft_version"] != "1.21.1":
@@ -77,6 +80,7 @@ def validate_report(report: Any) -> dict[str, Any]:
         raise ReportError("isolated performance reports must not run with GriefLogger installed")
     no_loader_runtime = value["loader"] == "neoforge" and value["scenario"] in {
         "backend_mariadb_matrix", "backend_mysql_matrix", "shutdown_saturation",
+        "idle_worker_mariadb_baseline", "idle_worker_mysql_baseline",
     }
     expected_grief_logger_state = "unavailable" if no_loader_runtime else "absent"
     if grief_logger_state != expected_grief_logger_state:
@@ -90,6 +94,9 @@ def validate_report(report: Any) -> dict[str, Any]:
         raise ReportError("workload contains unsupported or potentially identifying fields")
     for key, item in workload.items():
         _integer(item, f"workload.{key}")
+    if value["scenario"] in {"idle_sqlite_baseline", "idle_worker_mariadb_baseline", "idle_worker_mysql_baseline"}:
+        return _validate_idle_report(value)
+
     accepted = _integer(workload.get("accepted_events"), "workload.accepted_events", 1)
     if "attempted_events" in workload and value["scenario"] != "shutdown_saturation":
         raise ReportError("attempted_events is only valid for the pinned shutdown_saturation probe")
@@ -259,6 +266,62 @@ def validate_report(report: Any) -> dict[str, Any]:
     return value
 
 
+def _validate_idle_report(value: dict[str, Any]) -> dict[str, Any]:
+    expected_backend = "sqlite" if value["scenario"] == "idle_sqlite_baseline" else "mysql_mariadb"
+    if value["backend"] != expected_backend:
+        raise ReportError("idle report must identify its pinned database backend")
+    workload = _object(value["workload"], "idle workload", {
+        "idle_window_ms", "accepted_events", "persisted_counter_delta", "dropped_counter_delta",
+        "durable_rows_delta", "queue_remaining", "database_heartbeat_delta", "enqueue_samples",
+        "persistence_samples", "query_samples", "correlation_samples", "heap_used_before_bytes",
+        "heap_used_after_bytes",
+    })
+    for key, item in workload.items():
+        _integer(item, f"workload.{key}")
+    if _integer(workload["idle_window_ms"], "workload.idle_window_ms", 1_000) > 30_000:
+        raise ReportError("idle baseline must cover between 1,000 and 30,000 ms")
+    for key in set(workload) - {"idle_window_ms", "heap_used_before_bytes", "heap_used_after_bytes"}:
+        if workload[key] != 0:
+            raise ReportError(f"idle baseline recorded unexpected work in {key}")
+
+    queue = _object(value["queue"], "queue", QUEUE_FIELDS)
+    for key, item in queue.items():
+        _integer(item, f"queue.{key}")
+    if (queue["depth"] != 0 or queue["peak_depth"] != 0 or queue["rejected_items"] != 0
+            or queue["capacity_per_type"] != 10_000
+            or not 1 <= queue["flush_every_ticks"] <= 100
+            or not 1 <= queue["max_batch_size"] <= 1_000):
+        raise ReportError("idle baseline must retain the bounded empty-queue configuration")
+
+    latency = _object(value["latency"], "latency", LATENCY_METRICS)
+    for name, raw_metric in latency.items():
+        metric = _object(raw_metric, f"latency.{name}", LATENCY_FIELDS)
+        if (metric["count"] != 0 or metric["failed"] != 0 or metric["average_us"] != 0
+                or metric["max_ns"] != 0 or metric["p95_upper_bound_ns"] != 0
+                or metric["p95_over_10s"] is not False):
+            raise ReportError(f"idle baseline recorded {name} work")
+
+    persistence = _object(value["persistence"], "persistence", {
+        "persisted_items", "failed_batches", "largest_batch",
+    })
+    if any(_integer(item, f"persistence.{key}") != 0 for key, item in persistence.items()):
+        raise ReportError("idle baseline must not persist or fail a batch")
+    components = _object(value["components"], "components", {
+        "decode_failure_cache_insertions", "negative_cache_hits",
+    })
+    if any(_integer(item, f"components.{key}") != 0 for key, item in components.items()):
+        raise ReportError("idle baseline must not decode component payloads")
+    memory = _object(value["memory"], "memory", {"heap_used_bytes", "heap_max_bytes"})
+    heap_used = _integer(memory["heap_used_bytes"], "memory.heap_used_bytes")
+    heap_max = _integer(memory["heap_max_bytes"], "memory.heap_max_bytes", minimum=-1)
+    if heap_max != -1 and heap_used > heap_max:
+        raise ReportError("heap usage exceeds the reported JVM heap maximum")
+    if heap_max != -1 and any(workload[key] > heap_max for key in (
+            "heap_used_before_bytes", "heap_used_after_bytes")):
+        raise ReportError("idle heap sample exceeds the reported JVM heap maximum")
+    return value
+
+
 def validate_directory(directory: Path) -> list[dict[str, Any]]:
     expected = {
         "itemgraph-neoforge-queue_burst.json": ("neoforge", "queue_burst"),
@@ -270,6 +333,12 @@ def validate_directory(directory: Path) -> list[dict[str, Any]]:
         "itemgraph-neoforge-shutdown_saturation.json": ("neoforge", "shutdown_saturation"),
         "itemgraph-neoforge-correlation_burst.json": ("neoforge", "correlation_burst"),
         "itemgraph-fabric-correlation_burst.json": ("fabric", "correlation_burst"),
+        "itemgraph-neoforge-idle_worker_mariadb_baseline.json": ("neoforge", "idle_worker_mariadb_baseline"),
+        "itemgraph-neoforge-idle_worker_mysql_baseline.json": ("neoforge", "idle_worker_mysql_baseline"),
+        "itemgraph-fabric-idle_worker_mariadb_baseline.json": ("fabric", "idle_worker_mariadb_baseline"),
+        "itemgraph-fabric-idle_worker_mysql_baseline.json": ("fabric", "idle_worker_mysql_baseline"),
+        "itemgraph-neoforge-idle_sqlite_baseline.json": ("neoforge", "idle_sqlite_baseline"),
+        "itemgraph-fabric-idle_sqlite_baseline.json": ("fabric", "idle_sqlite_baseline"),
     }
     actual = {path.name for path in directory.glob("*.json")}
     if actual != set(expected):
