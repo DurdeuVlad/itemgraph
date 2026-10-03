@@ -1,5 +1,7 @@
 package com.itemgraph.query;
 
+import com.itemgraph.audit.EventTaxonomy;
+
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -88,13 +90,16 @@ public final class QueryFormatter {
             return lines;
         }
         for (AuditEventDetail event : events) {
-            String actor = event.playerName() == null ? "(unknown player)" : event.playerName();
+            String actor = event.playerName() == null ? "(unknown actor)" : event.playerName();
             String subject = event.subjectId() == null ? "" : " subject=" + event.subjectId();
             String detail = event.detail() == null ? "" : " detail=" + escapeDetail(event.detail());
             String supersession = event.supersedingEventId() == null ? ""
                     : " superseded_by=audit#" + event.supersedingEventId()
                     + " reason=" + event.supersessionReason();
-            lines.add(PREFIX + "[OBSERVED] audit#" + event.id() + " " + event.eventType()
+            String evidenceClass = EventTaxonomy.find(event.eventType(), EventTaxonomy.Surface.AUDIT_EVENT)
+                    .map(definition -> definition.evidenceClass().name())
+                    .orElse(EventTaxonomy.UNCLASSIFIED_EVIDENCE);
+            lines.add(PREFIX + "[" + evidenceClass + "] audit#" + event.id() + " " + event.eventType()
                     + " actor=" + actor + " at " + event.levelName()
                     + " [" + formatCoordinate(event.x()) + ", "
                     + formatCoordinate(event.y()) + ", " + formatCoordinate(event.z()) + "]"
@@ -113,7 +118,7 @@ public final class QueryFormatter {
             return lines;
         }
         for (UnifiedEvidenceDetail row : evidence) {
-            String actor = row.playerName() == null ? "(unknown player)" : row.playerName();
+            String actor = row.playerName() == null ? "(unknown actor)" : row.playerName();
             String location = row.levelName() == null ? "(unknown dimension)" : row.levelName();
             if (row.x() != null && row.y() != null && row.z() != null) {
                 location += " [" + formatCoordinate(row.x()) + ", "
