@@ -81,6 +81,9 @@ jobs:
       - name: Test native GameTest report normalization
         run: python3 tools/test_normalize_itemgraph_gametest_report.py
 
+      - name: Test cross-loader world-event replay report validation
+        run: python3 tools/test_compare_itemgraph_world_event_reports.py
+
       - name: Validate exact GriefLogger 1.21.1 release fixture
         env:
           GRIEFLOGGER_RELEASE_FIXTURE_CHECK_REMOTE: '1'
@@ -89,6 +92,7 @@ jobs:
       - name: Test all loaders without packaging distributable mod jars
         env:
           ITEMGRAPH_DIFFERENTIAL_REPORT_DIR: ${{ runner.temp }}/itemgraph-differential-reports/raw
+          ITEMGRAPH_WORLD_EVENT_REPORT_DIR: ${{ runner.temp }}/itemgraph-world-event-reports/raw
           ITEMGRAPH_TEST_MARIADB_URL: jdbc:mariadb://127.0.0.1:3306/itemgraph
           ITEMGRAPH_TEST_MARIADB_USER: itemgraph
           ITEMGRAPH_TEST_MARIADB_PASSWORD: itemgraph
@@ -97,6 +101,7 @@ jobs:
           ITEMGRAPH_TEST_MYSQL_PASSWORD: itemgraph
         run: |
           mkdir -p "$ITEMGRAPH_DIFFERENTIAL_REPORT_DIR"
+          mkdir -p "$ITEMGRAPH_WORLD_EVENT_REPORT_DIR"
           ./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest
 
       - name: Normalize and validate native-only replay reports
@@ -114,6 +119,20 @@ jobs:
               --expected-system itemgraph \
               --expected-loader "$loader"
           done
+
+      - name: Compare redacted world-event replay and conservation reports
+        run: |
+          python3 tools/compare_itemgraph_world_event_reports.py \
+            --input-dir "${{ runner.temp }}/itemgraph-world-event-reports/raw" \
+            --output-dir "${{ runner.temp }}/itemgraph-world-event-reports/normalized"
+
+      - name: Upload redacted world-event replay reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: itemgraph-world-event-replay-reports
+          path: ${{ runner.temp }}/itemgraph-world-event-reports/normalized/*.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload redacted replay reports
         uses: actions/upload-artifact@v4

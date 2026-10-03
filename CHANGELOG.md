@@ -56,9 +56,13 @@ The project follows a simple pre-1.0 development changelog model.
   confirmed deltas and emit classified unresolved evidence when coverage is
   partial or callbacks fail. Blocked piston results are recorded as attempts,
   separately from direct state deltas. Events do not invent player actors or
-  item quantities. The consolidated isolated NeoForge and Fabric run passed
-  all required GameTests with GriefLogger absent (NeoForge: 7; Fabric: 8). Full #55
-  replay/conservation, privacy, and incident-export acceptance remains open.
+  item quantities. CI now emits redacted cross-loader reports for explosion,
+  piston, and environmental replays; it requires exact explosion/piston
+  sequences, deterministic environmental multisets, matching fire/Enderman
+  evidence contracts, and zero whole-graph conservation or integrity
+  violations. Report audits run off-thread on a consistent read snapshot, and
+  only allowlisted cause aliases enter artifacts. Full #55 replay/conservation,
+  privacy, and incident-export acceptance remains open.
   Mod version remains 0.3.2; no distributable JAR is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus seven allowlisted audit

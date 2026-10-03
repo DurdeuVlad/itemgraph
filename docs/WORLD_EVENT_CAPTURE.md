@@ -162,6 +162,35 @@ families use `quantity=NONE`, sensitive-location privacy, and explicit cause
 metadata. A state delta is observed evidence; no delta is not promoted to a
 successful move. Dispenser and dropper inventory changes remain issue #34.
 
+## Cross-loader replay and conservation report
+
+`WorldEventReplayReportFixture` writes one synthetic, redacted report for each
+of explosion, piston, and environmental GameTest batches on both loaders. It
+reads only durable `ig_audit_events` rows after a per-batch watermark and runs
+`AuditService.audit` after each batch on a worker thread, using one read-only
+transaction snapshot; the GameTest polls for completion on its normal tick
+sequence. Report generation is skipped when
+`ITEMGRAPH_WORLD_EVENT_REPORT_DIR` is unset. The report contains taxonomy fields,
+template-relative coordinates, block states, reason codes, and allowlisted cause
+aliases; it omits raw evidence JSON, method-signature cause strings,
+event/entity/player UUIDs, names, and server coordinates. Unknown cause strings
+fail report generation instead of being copied into the artifact. The
+fixture requires each event type to be selectable through
+`AuditEventQueryService.EVENT_TYPES`, every location to retain
+`SENSITIVE_LOCATION`, every world event to keep `quantity_semantics=NONE`, and
+the whole ItemGraph audit to report zero conservation and integrity violations.
+
+CI compares explosion and piston event sequences exactly across loaders. The
+environment GameTest fixes the report's upper event-ID watermark before
+cleanup, so cleanup writes cannot enter the fixture report. Fluid, falling-block,
+and unresolved rows compare as full multisets including state and position;
+fire and Enderman rows compare their shared taxonomy/outcome contract because
+their selection consumes loader/world random state. Exact duplicate rows fail
+validation in either loader's report. Each loader's GameTest separately checks
+the durable before/after positions and states. These reports establish capture and
+conservation behavior, not the incident-export and permission-path acceptance
+owned by #37.
+
 Comparison notes: CoreProtect's documented lookup groups world block changes
 with player/container history, while GriefLogger's compatibility surface is
 limited to its pinned action writers. Those systems establish useful query
