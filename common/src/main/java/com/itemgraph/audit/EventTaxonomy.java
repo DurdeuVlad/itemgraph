@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "2.0.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -129,6 +129,8 @@ public final class EventTaxonomy {
     private static final LoaderSupport IMPLEMENTED = new LoaderSupport(LoaderStatus.IMPLEMENTED, null);
     private static final LoaderSupport HISTORICAL_ONLY = new LoaderSupport(LoaderStatus.HISTORICAL_ONLY,
             "NO_NATIVE_WRITER_HISTORICAL_QUERY_ONLY");
+    private static final LoaderSupport CREATIVE_TRANSFORM_UNSUPPORTED = new LoaderSupport(
+            LoaderStatus.UNSUPPORTED, "CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED");
     private static final List<ReasonCode> UNRESOLVED_REASON_CODES = List.of(
             new ReasonCode("WORLD_EVENT_API_UNAVAILABLE", 55,
                     "The loader exposes no authoritative callback for this world event."),
@@ -143,7 +145,9 @@ public final class EventTaxonomy {
             new ReasonCode("TRANSFORMATION_INPUTS_NOT_OBSERVED", 57,
                     "The operation output is known but one or more input stacks were not observed."),
             new ReasonCode("TRANSFORMATION_CANCELLED", 57,
-                    "The transformation operation was cancelled before a successful result.")
+                    "The transformation operation was cancelled before a successful result."),
+            new ReasonCode("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", 33,
+                    "Creative slot changes do not establish an item transformation cause.")
     );
     private static final List<Definition> DEFINITIONS = createDefinitions();
     private static final Map<String, Definition> BY_ID = indexById(DEFINITIONS);
@@ -173,6 +177,23 @@ public final class EventTaxonomy {
 
     public static List<String> unifiedLookupActions() {
         return UNIFIED_LOOKUP_ACTIONS;
+    }
+
+    /** Transformation IDs implemented on both loaders; shared queries have no loader provenance. */
+    public static List<String> traceableTransformationTypes() {
+        return DEFINITIONS.stream()
+                .filter(definition -> definition.surface() == Surface.TRANSFORMATION)
+                .filter(definition -> definition.fabric().status() == LoaderStatus.IMPLEMENTED
+                        && definition.neoForge().status() == LoaderStatus.IMPLEMENTED)
+                .map(Definition::id)
+                .toList();
+    }
+
+    public static boolean isTraceableTransformation(String id) {
+        return find(id, Surface.TRANSFORMATION)
+                .map(definition -> definition.fabric().status() == LoaderStatus.IMPLEMENTED
+                        && definition.neoForge().status() == LoaderStatus.IMPLEMENTED)
+                .orElse(false);
     }
 
     public static Optional<Definition> find(String id) {
@@ -307,9 +328,15 @@ public final class EventTaxonomy {
         action(entries, "ADMIN_ITEM_TRANSFORM", Surface.TRANSFORMATION,
                 QuantitySemantics.INPUT_OUTPUT, 33, "admin_inventory",
                 ActorStatus.UNKNOWN, PrivacyClass.STAFF_ACTIVITY);
-        action(entries, "CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION,
-                QuantitySemantics.INPUT_OUTPUT, 33, "creative_inventory",
-                ActorStatus.PLAYER, PrivacyClass.STAFF_ACTIVITY);
+        // Keep the stable ID classifiable for forward compatibility, but do
+        // not advertise it as supported: creative slot packets expose a
+        // before/after delta, not evidence that one item was transformed into
+        // another. Any such row must remain unresolved with unknown quantity.
+        add(entries, "CREATIVE_ITEM_TRANSFORM", "creative_inventory", Surface.TRANSFORMATION,
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE,
+                EndpointSemantics.UNKNOWN, QuantitySemantics.UNKNOWN,
+                ActorStatus.PLAYER, PrivacyClass.STAFF_ACTIVITY,
+                CREATIVE_TRANSFORM_UNSUPPORTED, CREATIVE_TRANSFORM_UNSUPPORTED, 33);
 
         // Planned child-issue entries are intentionally not exposed as supported
         // lookup actions until loader adapters and reproducible fixtures exist.

@@ -19,13 +19,13 @@ an unknown taxonomy classification, not the `UNRESOLVED` evidence class.
 
 ## Versioning
 
-The taxonomy version is `1.0.0` (`EventTaxonomy.VERSION`) and is independent of
+The taxonomy version is `2.0.0` (`EventTaxonomy.VERSION`) and is independent of
 the ItemGraph mod version and GriefLogger registry version.
 
 - Increment the major taxonomy version when an existing ID is removed, renamed,
-  or changes evidence, quantity, reliability, endpoint, actor, or privacy
-  meaning.
-- Increment the minor version when adding IDs or loader support without
+  changes evidence, quantity, reliability, endpoint, actor, or privacy meaning,
+  or changes from queryable to non-queryable on a loader.
+- Increment the minor version when adding IDs or adding loader support without
   changing existing meanings.
 - Increment the patch version for wording or documentation corrections that do
   not change the contract.
@@ -82,6 +82,20 @@ surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,
 Quantity rows use signed deltas; transformations use explicit input/output
 semantics. The code-level definitions identify issue ownership and the exact
 surface for each ID.
+
+`CREATIVE_ITEM_TRANSFORM` remains classifiable for forward compatibility but is
+`UNSUPPORTED` on both loaders with reason
+`CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED`. Creative slot packets prove separate
+before/after quantity deltas; they do not prove a transformation between the
+two fingerprints. The ID is therefore excluded from query suggestions. This
+support correction increments the taxonomy major version while preserving the
+stable identifier.
+Unified lookup continues to show the legacy row and its source/result
+fingerprints, but omits its free-form legacy details so an old numeric string
+cannot be mistaken for a proven quantity. Item traces include only transformation
+IDs with an implemented native writer on both loaders; shared queries have no
+loader provenance. Unknown, malformed, and unsupported IDs remain queryable
+evidence without becoming observed movement hops.
 
 ## Planned child issue families
 

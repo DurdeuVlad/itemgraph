@@ -8,6 +8,7 @@ import com.itemgraph.audit.EventTaxonomy.Surface;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,11 +50,14 @@ class EventTaxonomyTest {
                     definition.neoForge().reasonCode() == null, definition.id() + " NeoForge support");
         }
         assertTrue(EventTaxonomy.VERSION.matches("\\d+\\.\\d+\\.\\d+"));
+        assertEquals("2.0.0", EventTaxonomy.VERSION,
+                "removing the unsupported creative transformation from selectable actions is a taxonomy major change");
 
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
             assertTrue(reasons.add(reason.id()), "duplicate reason code: " + reason.id());
-            assertTrue(reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57, reason.id());
+            assertTrue(reason.ownerIssue() == 33 || (reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57),
+                    reason.id());
         }
     }
 
@@ -163,6 +167,37 @@ class EventTaxonomyTest {
             assertEquals(QuantitySemantics.SIGNED_DELTA, event.quantity());
         }
         assertTrue(EventTaxonomy.find("ADMIN_ITEM_TRANSFORM", Surface.TRANSFORMATION).isPresent());
-        assertTrue(EventTaxonomy.find("CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION).isPresent());
+        EventTaxonomy.Definition creativeTransform = EventTaxonomy
+                .find("CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION).orElseThrow();
+        assertEquals(LoaderStatus.UNSUPPORTED, creativeTransform.fabric().status());
+        assertEquals("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", creativeTransform.fabric().reasonCode());
+        assertEquals(LoaderStatus.UNSUPPORTED, creativeTransform.neoForge().status());
+        assertEquals("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", creativeTransform.neoForge().reasonCode());
+        assertEquals(EvidenceClass.UNRESOLVED, creativeTransform.evidenceClass());
+        assertEquals(EventTaxonomy.SourceReliability.UNRESOLVED_CAUSE,
+                creativeTransform.sourceReliability());
+        assertEquals(EventTaxonomy.EndpointSemantics.UNKNOWN, creativeTransform.endpoints());
+        assertEquals(QuantitySemantics.UNKNOWN, creativeTransform.quantity());
+        assertTrue(EventTaxonomy.traceableTransformationTypes().contains("CRAFT"));
+        assertFalse(EventTaxonomy.traceableTransformationTypes().contains("CREATIVE_ITEM_TRANSFORM"));
+        assertTrue(EventTaxonomy.isTraceableTransformation("ADMIN_ITEM_TRANSFORM"));
+        assertFalse(EventTaxonomy.isTraceableTransformation("FUTURE_TRANSFORM"));
+        assertTrue(EventTaxonomy.unresolvedReasonCodes().stream()
+                .anyMatch(reason -> reason.id().equals("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED")));
+        assertFalse(creativeTransform.queryableOn(EventTaxonomy.Loader.FABRIC));
+        assertFalse(creativeTransform.queryableOn(EventTaxonomy.Loader.NEOFORGE));
+        assertFalse(EventTaxonomy.unifiedLookupActions().contains("CREATIVE_ITEM_TRANSFORM"));
+        EventTaxonomy.definitions().stream()
+                .filter(definition -> definition.surface() == Surface.TRANSFORMATION)
+                .forEach(definition -> assertEquals(definition.fabric(), definition.neoForge(),
+                        "shared transformation queries need matching loader classifications: "
+                                + definition.id()));
+        List<String> implementedOnBothLoaders = EventTaxonomy.definitions().stream()
+                .filter(definition -> definition.surface() == Surface.TRANSFORMATION)
+                .filter(definition -> definition.fabric().status() == EventTaxonomy.LoaderStatus.IMPLEMENTED
+                        && definition.neoForge().status() == EventTaxonomy.LoaderStatus.IMPLEMENTED)
+                .map(EventTaxonomy.Definition::id)
+                .toList();
+        assertEquals(implementedOnBothLoaders, EventTaxonomy.traceableTransformationTypes());
     }
 }

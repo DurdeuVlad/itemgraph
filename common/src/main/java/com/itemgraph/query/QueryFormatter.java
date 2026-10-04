@@ -119,7 +119,8 @@ public final class QueryFormatter {
                 location += " [" + formatCoordinate(row.x()) + ", "
                         + formatCoordinate(row.y()) + ", " + formatCoordinate(row.z()) + "]";
             }
-            String quantity = row.quantity() == 0 ? "" : " quantity=" + row.quantity();
+            String quantity = row.quantity() == null ? " quantity=UNKNOWN"
+                    : row.quantity() == 0 ? "" : " quantity=" + row.quantity();
             String subject = row.subjectId() == null ? "" : " subject=" + row.subjectId();
             String detail = row.detail() == null ? "" : " detail=" + escapeDetail(row.detail());
             lines.add(PREFIX + "[" + row.evidenceClass() + "] " + row.source() + " "

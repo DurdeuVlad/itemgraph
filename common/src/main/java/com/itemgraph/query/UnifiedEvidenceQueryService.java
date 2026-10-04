@@ -431,16 +431,31 @@ public final class UnifiedEvidenceQueryService {
                 while (rs.next()) {
                     String sourceItem = rs.getString("source_item");
                     String resultItem = rs.getString("result_item");
-                    String detail = valueOr(rs.getString("details"), "")
-                            + " source=" + valueOr(sourceItem, "(missing)")
+                    String action = rs.getString("transformation_type");
+                    EventTaxonomy.Definition definition = EventTaxonomy
+                            .find(action, EventTaxonomy.Surface.TRANSFORMATION).orElse(null);
+                    boolean unresolved = !EventTaxonomy.isTraceableTransformation(action);
+                    String detail = "source=" + valueOr(sourceItem, "(missing)")
                             + " result=" + valueOr(resultItem, "(missing)");
+                    if (unresolved) {
+                        String reason = definition == null ? "UNCLASSIFIED_TRANSFORMATION_TYPE"
+                                : firstNonBlank(definition.fabric().reasonCode(),
+                                firstNonBlank(definition.neoForge().reasonCode(),
+                                        "TRANSFORMATION_CAUSE_UNSUPPORTED"));
+                        detail += " legacy_details=OMITTED evidence=UNRESOLVED reason=" + reason
+                                + " quantity=UNKNOWN";
+                    } else {
+                        detail = valueOr(rs.getString("details"), "") + " " + detail;
+                    }
                     rows.add(new UnifiedEvidenceDetail(
                             "TRANSFORMATION", "transformation#" + rs.getLong("id"),
                             rs.getLong("timestamp_ms"), rs.getString("level_id"),
                             nullableDouble(rs, "x"), nullableDouble(rs, "y"), nullableDouble(rs, "z"),
                             firstNonBlank(rs.getString("player_name"), rs.getString("player_uuid")),
-                            rs.getString("transformation_type"), rs.getInt("quantity"),
-                            sourceItem + " -> " + resultItem, detail, "OBSERVED"));
+                            action, unresolved ? null : Integer.valueOf(rs.getInt("quantity")),
+                            sourceItem + " -> " + resultItem,
+                            detail, unresolved ? EventTaxonomy.EvidenceClass.UNRESOLVED.name()
+                                    : definition.evidenceClass().name()));
                 }
             }
         }
