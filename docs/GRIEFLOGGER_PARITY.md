@@ -885,3 +885,31 @@ repository validators and automated tests. Do not treat this live replay alone
 as satisfying the remaining issue #24 verification gate.
 
 No release artifact was built and no version was changed for this verification.
+
+## Live inspector interactions — 2026-10-04
+
+MC Pilot 0.15.0 controlled the connected NeoForge 1.21.1 client
+`ItemGraphQA` (MC Pilot client mod 0.9.1; no ItemGraph client mod) against the
+isolated NeoForge 21.1.248 development server from this PR head. The server
+loaded ItemGraph, Minecraft, and NeoForge only; GriefLogger was absent. This
+validates the standalone server path and real client interaction packets, but
+the MC Pilot instrumentation means this is not an unmodified vanilla client.
+
+With `/ig inspect on` enabled for the permission-level-2 operator, the client
+interacted with the following blocks. The inspector returned its unified
+evidence output in chat and did not open a mutable container GUI:
+
+| Interaction | Server/client evidence | Result |
+| --- | --- | --- |
+| Populated single chest `(4,64,0)`, clicked twice | Both clicks returned the exact query header for `[4,64,0]`; the second result included `OBSERVATION observation#1 ADMIN_ITEM_CREATE`, quantity 10, subject `minecraft:diamond`. | Repeated inspection works and preserves the matching evidence. |
+| Furnace `(2,64,0)` | Query header targeted `[2,64,0]`; no matching evidence. | Exact functional-block target; normal furnace GUI stayed closed. |
+| Door lower/upper blocks `(10,64,0)` and `(10,65,0)` | Queries targeted the clicked positions; no matching evidence. | Either door half can be inspected without opening the door. |
+| Real double chest `(6,64,0)` and `(6,64,1)` | MC Pilot placed the two halves in-world. `block get` reported `type=RIGHT` at the first coordinate and `type=LEFT` at the second, both facing west. Clicking either half returned the unified evidence query; results included evidence at both chest positions. | Confirmed merged-double-chest inspection, not two adjacent single chests. |
+| Stone `(0,64,0)`, left-click while inspection remained enabled | The client rendered the exact inspect query and no-match response. MC Pilot's immediate break result said `minecraft:air`, but its subsequent synchronized `block get` reported `minecraft:stone`. A loopback RCON conditional on the server also emitted `MCT_INSPECT_TEST_STONE_PRESENT`. A read-only SQLite query over the interaction window found only the expected `COMMAND_ATTEMPT` rows for enabling inspection, teleporting, and checking status; there was no block-break audit row for the click. | The server retained the stone and inspection suppressed the gameplay break. The immediate MC Pilot break result was a client-side optimistic state and is not treated as authoritative. |
+
+All database inspection used SQLite read-only mode with `PRAGMA query_only=ON`.
+This confirms NeoForge inspector interactions against the standalone runtime and
+adds live evidence for the block, container, and gameplay-suppression cases.
+It does not replace an unmodified vanilla-client run or a live replay of the
+pinned GriefLogger 1.2.10 release fixtures; issue #24 retains those explicit
+limitations until its verification contract is revised or the checks are run.
