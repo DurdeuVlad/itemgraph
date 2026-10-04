@@ -716,11 +716,13 @@ the exact 1.2.10-1.21.1 artifact has a writer or verifies
 even when GriefLogger has no corresponding writer. `not-observed-in-replay`
 means only that the current selected scenario did not exercise the action or
 category; it does not mean the ItemGraph implementation is absent. In the
-2026-10-04 replay, six unobserved actions are ItemGraph extensions: denied
+2026-10-05 replay, eight actions are unobserved: six are ItemGraph extensions—denied
 entity interaction (#75), `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR`
 (transformation coverage, #57), and `HOPPER_INSERT` and `HOPPER_EXTRACT`
-(automation extensions, #34). `ADD_ITEM_ENDER` and `REMOVE_ITEM_ENDER` are
-verified no-writer actions in exact release 1.2.10-1.21.1 (#76). Each row has
+(automation extensions, #34); two, `ADD_ITEM_ENDER` and `REMOVE_ITEM_ENDER`, are
+verified no-writer actions in exact release 1.2.10-1.21.1 (#76). Separately,
+`INTERACT_ENTITY` has no exact-release action ID or writer; it is a 26.2
+pinned-source-only action and ItemGraph extension tracked by #75. Each row has
 an owner issue in the compatibility registry; no missing extension is treated
 as demonstrated runtime behavior. The report is pinned to the
 same compatibility profile and exact-release fixture hashes, and contains no

@@ -530,6 +530,31 @@ references are evidence outside this replay and do not close these issues. The
 validator rejects missing, duplicated, malformed, misclassified, or extra
 requirement fields (including privacy data) and verifies the pinned profile and
 fixture hashes. Open acceptance stays unresolved pending issue-specific proof.
+
+### M8 milestone batch, 2026-10-05
+
+- Ran `:neoforge:test :neoforge:runGameTestServer :fabric:test
+  :fabric:runGameTest` on Minecraft 1.21.1 with Java 21 and ItemGraph 0.3.2;
+  no GriefLogger JAR or database was loaded. NeoForge unit tests: 546 total,
+  zero failures/errors, six skipped; all seven required GameTests passed.
+  Fabric unit tests: 86 total, zero failures/errors, two skipped. The Fabric
+  GameTest manifest was updated to register #140's `ContainerBreakGameTests`;
+  the rerun then passed all eight required tests.
+- The coverage, differential-report, and container-break-report Python suites
+  passed 53, 11, and 11 tests respectively. The NeoForge and Fabric normalized
+  native-only reports each contain 25 events, classify all 28 registry actions
+  and 11 release table families, and report zero unobserved table families.
+  Each sidecar has 20 observed actions and eight unobserved actions. The
+  separate container-break reports passed redaction and conservation validation
+  for both loaders.
+- Three registry actions have no writer in the exact release profile:
+  `INTERACT_ENTITY` has no 1.2.10 release action ID/writer and is kept as a
+  pinned-source-only extension; `ADD_ITEM_ENDER` and `REMOVE_ITEM_ENDER` have
+  exact enum IDs but no writer. These are distinct from the eight actions not
+  exercised by the selected replay. Requirements #136, #137, #138, #140, and
+  five durability categories remain explicitly unresolved in the reports until
+  their acceptance and PR checks pass. No connected-client, production, or
+  distributable-jar test was part of this batch.
 - explanation available
 
 ## Coffer/modded inventory test

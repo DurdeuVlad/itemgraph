@@ -8,6 +8,7 @@
     "fabric-gametest": [
       "com.itemgraph.fabric.gametest.EntityInteractionGameTests",
       "com.itemgraph.fabric.gametest.CommandPacketGameTests",
+    "com.itemgraph.fabric.gametest.ContainerBreakGameTests",
       "com.itemgraph.fabric.gametest.OperationalQueueGameTests",
       "com.itemgraph.fabric.gametest.AdminMutationGameTests"
     ]
