@@ -1,5 +1,7 @@
 package com.itemgraph.command;
 
+import com.itemgraph.i18n.ItemGraphLanguage;
+
 import com.itemgraph.query.AuditEventQueryService;
 
 import java.util.ArrayList;
@@ -9,12 +11,13 @@ import java.util.Locale;
 import java.util.Map;
 
 /** Maintained help text for the live /itemgraph command tree. */
-final class CommandHelp {
+public final class CommandHelp {
 
-    private static final String PERMISSION_LINE = "[ItemGraph] Permission: level 2.";
+    private static final String PERMISSION_LINE = "[ItemGraph] Unset named permissions use vanilla permission level 2; see /ig help permissions.";
 
     static final List<String> TOPIC_NAMES = List.of(
-            "help", "commands", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain",
+            "help", "commands", "permissions", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain",
+            "goto",
             "lookup", "lookup near", "lookup page", "lookup player", "lookup filters", "lookup provenance",
             "page",
             "trace", "trace item", "trace player", "trace container",
@@ -26,7 +29,7 @@ final class CommandHelp {
 
     static List<String> overviewLines() {
         return List.of(
-                "[ItemGraph] Start with your question. Permission level 2 is required; history queries are read-only.",
+                "[ItemGraph] Start with your question. Unset permissions require level 2; delegate lookup with /ig help permissions.",
                 "[ItemGraph] Where did an item go? /ig trace item <query> prints its time-ordered flow in chat; /ig gui item <query> opens the menu.",
                 "[ItemGraph] Help: /ig help trace item or /ig help gui item. A flow trace lists item events and links; the menu lets you select a flow entry.",
                 "[ItemGraph] What did a player/container record? /ig trace player <name> prints a timeline; /ig gui container <dimension> <x> <y> <z> opens a menu.",
@@ -38,6 +41,18 @@ final class CommandHelp {
                 "[ItemGraph] Help: /ig help event or /ig help explain. /ig status shows service health; /ig audit checks integrity. Details: /ig help status or /ig help audit.",
                 "[ItemGraph] /ig help commands lists paths. OBSERVED=recorded; INFERRED=proposed link; AMBIGUOUS/UNRESOLVED=uncertain. Stored evidence may miss world events and does not identify permanent items.",
                 "[ItemGraph] Guide: https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md");
+    }
+
+    /** Registers every static help sentence so catalog keys can be validated before database startup. */
+    public static void initializeMessages() {
+        ItemGraphLanguage.sourceText("[ItemGraph] ");
+        overviewLines().forEach(ItemGraphLanguage::sourceText);
+        List.of("Evidence", "Item", "Canonical metadata fingerprint", "Event", "UTC time", "Origin",
+                "Destination", "Previous", "Next").forEach(ItemGraphLanguage::sourceText);
+        for (String topic : TOPIC_NAMES) {
+            List<String> lines = topicLines(topic);
+            if (lines != null) lines.forEach(ItemGraphLanguage::sourceText);
+        }
     }
 
     static List<String> topicLines(String topic) {
@@ -75,13 +90,22 @@ final class CommandHelp {
                 "[ItemGraph] AUDIT — /ig lookup <eventType> [limit] [sinceMinutes]; /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes].",
                 "[ItemGraph] AUDIT FILTERS — /ig lookup player <playerName> <eventType> [limit] [sinceMinutes]; /ig lookup page <page> <eventType> [limit] [sinceMinutes].",
                 "[ItemGraph] FILTER/PROVENANCE — /ig lookup <filters...>; /ig lookup filters <filters...>; /ig lookup provenance <sourceSha256> <table> <sourceKey> [limit].",
-                "[ItemGraph] MORE — /ig page <page> [session]; /ig inspect [on|off|status]; /ig event <observationId>; /ig explain <edgeId>.",
+                "[ItemGraph] MORE — /ig page <page> [session]; /ig inspect [on|off|status]; /ig event <observationId>; /ig explain <edgeId>; /ig goto <token>.",
                 "[ItemGraph] HEALTH/INGEST — /ig status; /ig audit; /ig ingest now. Optional read-only GriefLogger import: /ig ingest history (requires configured source DB).",
-                "[ItemGraph] HELP TOPICS — help, commands, status, audit, ingest [now|history], event, explain, page, inspect.",
+                "[ItemGraph] HELP TOPICS — help, commands, permissions, status, audit, ingest [now|history], event, explain, page, inspect, goto.",
                 "[ItemGraph] HELP TOPICS — lookup [near|page|player|filters|provenance], trace [item|player|container], gui [item|player|container].",
                 "[ItemGraph] Configuration, the preview API, imports, and all workflows: see the Admin Quick Start in the ItemGraph project documentation.",
                 "[ItemGraph] Example: /ig trace item diamond",
                 "[ItemGraph] /itemgraph is the full command root; /ig is its alias. Configuration and the preview API are documented features, not commands."));
+        topics.put("permissions", List.of(
+                "[ItemGraph] Grant a lookup-only moderator both itemgraph.command and itemgraph.command.lookup.",
+                "[ItemGraph] Add itemgraph.command.page for /ig page and lookup-page buttons; it is an independent node.",
+                "[ItemGraph] Nodes do not inherit from dotted parents. Explicit deny overrides operator level; an unset node falls back to vanilla level 2.",
+                "[ItemGraph] Other nodes: itemgraph.command.inspect, itemgraph.trace, itemgraph.event, itemgraph.explain, itemgraph.audit, itemgraph.gui, itemgraph.ingest, itemgraph.import.",
+                "[ItemGraph] Protected evidence can appear in event, explain, trace, and GUI results; those surfaces require their node plus itemgraph.audit.",
+                "[ItemGraph] NeoForge uses its PermissionAPI handler. Fabric bundles fabric-permissions-api 0.3.1; a compatible provider mod is needed to configure grants.",
+                "[ItemGraph] Full command-to-node matrix: docs/SECURITY_AND_PERMISSIONS.md",
+                "[ItemGraph] Example: grant itemgraph.command and itemgraph.command.lookup to a level-1 moderator."));
         topics.put("status", List.of(
                 "[ItemGraph] Syntax: /ig status",
                 "[ItemGraph] Shows ItemGraph version, GriefLogger mode, database/schema state, checkpoints, queue totals, and last ingest/correlation results; database reads are asynchronous.",
@@ -141,20 +165,30 @@ final class CommandHelp {
                 "[ItemGraph] Queues the eleven-table GriefLogger historical importer on the bounded background worker.",
                 "[ItemGraph] The source database is opened read-only; ItemGraph stores source/schema fingerprints, checkpoints, opaque bytes, and unresolved reasons.",
                 "[ItemGraph] Example: /ig ingest history"));
+        topics.put("goto", List.of(
+                "[ItemGraph] /ig goto <token> is the private action behind a displayed [Go to ...] link; do not type a token manually.",
+                "[ItemGraph] Tokens are bound to the requesting player, expire after two minutes, work once, and recheck the originating query permission.",
+                "[ItemGraph] Example: click a displayed [Go to ...] result link."));
         topics.put("event", List.of(
                 "[ItemGraph] Syntax: /ig event <observationId>",
+                "[ItemGraph] Requires itemgraph.event and itemgraph.audit because raw item evidence may contain administrative or creative-inventory records.",
                 "[ItemGraph] observationId: positive long. Shows one raw OBSERVED row with source, endpoints, item, amount, timing, and correlation metadata.",
+                "[ItemGraph] Hover a result line for bounded item fingerprint, evidence class, event kind, UTC time, and endpoint details; click [Go to ...] to move only yourself to a recorded location. The link is one-use and expires after two minutes.",
                 "[ItemGraph] The query is read-only and asynchronous. Example: /ig event 633"));
         topics.put("explain", List.of(
                 "[ItemGraph] Syntax: /ig explain <edgeId>",
+                "[ItemGraph] Requires itemgraph.explain and itemgraph.audit because an inferred edge can cite protected observations.",
                 "[ItemGraph] edgeId: positive long. Shows one inferred edge, deterministic confidence, explanation, and every supporting observation ID.",
+                "[ItemGraph] The edge summary hover shows bounded item fingerprint, confidence class, UTC time, and endpoints; cited observation lines are not mislabeled as inferred. Location links recheck permissions when clicked.",
                 "[ItemGraph] Inferred edges are explanations, not direct evidence. The query is read-only and asynchronous. Example: /ig explain 8"));
         topics.put("trace", List.of(
                 "[ItemGraph] Syntax: /ig trace item <query> [limit] [sinceMinutes]",
                 "[ItemGraph] Syntax: /ig trace player <playerName> [limit] [sinceMinutes]",
                 "[ItemGraph] Syntax: /ig trace container <x> <y> <z> [limit] [sinceMinutes]",
                 "[ItemGraph] limit: default 20, maximum 100. sinceMinutes: positive minutes; omitted means all recorded history.",
+                "[ItemGraph] Requires itemgraph.trace and itemgraph.audit; protected-only candidates and inferred edges are hidden by denying the whole query before lookup.",
                 "[ItemGraph] Trace queries are read-only and asynchronous. Output distinguishes OBSERVED rows from inferred edges and preserves ambiguous/UNKNOWN endpoints.",
+                "[ItemGraph] Hover a result row for canonical fingerprint hash, event kind, exact UTC time, and endpoints. Click [Go to ...] to move only yourself; the one-use link rechecks the exact trace permission.",
                 "[ItemGraph] Examples: /ig trace item stone | /ig trace player PlayerA 50 60 | /ig trace container -39 112 -8 20 120"));
         topics.put("trace item", List.of(
                 "[ItemGraph] Syntax: /ig trace item <query> [limit] [sinceMinutes]",
@@ -176,7 +210,9 @@ final class CommandHelp {
                 "[ItemGraph] Syntax: /ig gui player <playerName> [sinceMinutes]",
                 "[ItemGraph] Syntax: /ig gui container <dimension> <x> <y> <z> [sinceMinutes]",
                 "[ItemGraph] Player-only read-only vanilla six-row browser; no custom item, screen, packet, or inventory movement. Timeline lookups are asynchronous.",
-                "[ItemGraph] sinceMinutes: positive minutes; omitted means all history. Candidate lists cap at 10; timelines cap at 45 entries per page.",
+                "[ItemGraph] Requires itemgraph.gui and itemgraph.audit because a timeline can include protected evidence; the menu rechecks both on every click.",
+                "[ItemGraph] sinceMinutes: positive minutes; omitted means all history. Pages show up to nine rows (also capped by query.max_page_size) with matching numbered chat labels; candidate lists cap at 10 and use a separate page.",
+                "[ItemGraph] Rows label observed, inferred, ambiguous, transformation, or unresolved states; missing item identities use an explicit fallback.",
                 "[ItemGraph] Examples: /ig gui item stone | /ig gui player PlayerA | /ig gui container minecraft:overworld -39 112 -8"));
         topics.put("gui item", List.of(
                 "[ItemGraph] Syntax: /ig gui item <query> [sinceMinutes]",
@@ -193,6 +229,7 @@ final class CommandHelp {
         List<String> inspect = List.of(
                 "[ItemGraph] Syntax: /ig inspect [on|off|status]",
                 "[ItemGraph] The command and each supported click enforce the same permission check. /ig inspect toggles; /ig inspect on enables; /ig inspect off disables; /ig inspect status reports without changing.",
+                "[ItemGraph] Toggle, status, and click recognition require itemgraph.command.inspect. Block history reads eventType=all and also requires itemgraph.audit; the container flow browser separately requires itemgraph.gui and itemgraph.audit.",
                 "[ItemGraph] While enabled, left-click inspects that block; right-click a Container opens its flow browser; a right-click on a non-container opens paginated block history (ordinary blocks target the block on the clicked face).",
                 "[ItemGraph] The click is consumed only after the read-only request is accepted, so held items are not used and inspection is not transfer evidence. State clears on logout and server stop.",
                 "[ItemGraph] Example: /ig inspect on");

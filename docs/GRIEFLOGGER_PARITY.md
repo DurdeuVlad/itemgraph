@@ -1,5 +1,17 @@
 # GriefLogger replacement parity
 
+## Locale research and ItemGraph contract
+
+The checked-in GriefLogger 1.2.10-1.21.1 release fixture contains no locale
+inventory, so its exact-release locale set is **unknown**. Separately, the
+pinned GriefLogger 26.2 source config permits `en_us` (default), `nl_nl`, and
+`zh_tw`; `zh_cn` is packaged in that source but is not selectable in its config.
+That newer source inventory is research only and is not evidence about the exact
+1.2.10 release. Its `LanguageManager` falls back per key to `en_us`, and also
+downloads/caches Mojang language resources. ItemGraph supports only its own
+offline `en_us`, `nl_nl`, and `zh_tw` catalogs, uses English per-key fallback,
+and performs no language HTTP requests or GriefLogger code/resource reuse.
+
 This document defines the compatibility contract and acceptance boundary for
 replacing GriefLogger as the native server audit source. Compatibility is
 behavioral and evidence-preserving; ItemGraph keeps its own command names and
@@ -241,7 +253,15 @@ The published [lookup command](https://daqem.com/projects/grieflogger/wiki/inspe
 and [inspect reference](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/inspect-command)
 are the operator-facing command contract. ItemGraph registers `/itemgraph` as
 the full root and redirects `/ig` to the same node; it does not register `/gl`
-or `/grieflogger`. Both roots use permission level 2. The direct lookup form
+or `/grieflogger`. The root uses `itemgraph.command`; `/ig lookup`, `/ig page`,
+`/ig inspect`, `/ig trace`, `/ig event`, `/ig explain`, `/ig audit`, `/ig gui`,
+and `/ig ingest` use their exact namespaced permission nodes. Both roots preserve
+vanilla permission level 2 for unset nodes, and an explicit provider denial wins
+over operator status. Dotted nodes do not inherit from parents. NeoForge registers
+native boolean `PermissionNode` values; Fabric embeds `fabric-permissions-api`
+0.3.1 so its permission API is available without an external API-mod dependency.
+The provider matrix and each async/menu recheck are documented in
+[`SECURITY_AND_PERMISSIONS.md`](SECURITY_AND_PERMISSIONS.md). The direct lookup form
 accepts the six documented `name.value` filters and one-letter aliases, quoted
 comma-separated values, at most five filters, required radius, cubic distance,
 and AND semantics. The explicit `/ig lookup filters` spelling is an ItemGraph
@@ -947,3 +967,16 @@ claimed as an unmodified vanilla client; neither server loaded the GriefLogger
 runtime or opened its database. CI validates the exact GriefLogger
 1.2.10-1.21.1 release fixture and the selected 26.2 source decisions without
 loading a GriefLogger jar into the live servers.
+
+## M8 structured chat and flow-browser scanability
+
+ItemGraph query lines retain their stable `QueryFormatter` text. Player chat adds bounded
+hover data from typed evidence records (evidence class, item identity, canonical fingerprint
+hash, event kind, UTC timestamp, and endpoints), and a location link is bound to the issuing
+player plus the exact originating permission nodes. Each nine-entry vanilla flow-browser
+page has one numbered chat row per menu slot; candidate selection uses its own bounded page
+so all ten resolver candidates remain reachable. Observed, inferred, source-group ambiguous,
+recorded transformation, and unresolved page states have distinct text. This presentation
+adds no dependency on the GriefLogger runtime and does not copy its code. Focused loader tests
+are the validation boundary for this change; the M8 milestone-wide suites remain batched.
+Display strings are English server text in this batch; offline locale resources belong to #136.

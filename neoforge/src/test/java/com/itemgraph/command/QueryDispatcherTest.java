@@ -6,12 +6,17 @@ import com.itemgraph.db.DatabaseManager;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.players.PlayerList;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.Entity;
 import net.neoforged.fml.loading.LoadingModList;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -23,6 +28,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -32,6 +39,145 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class QueryDispatcherTest {
+
+    @Test
+    void structuredChatHoverAddsBoundedSafeFieldsWithoutChangingVisibleFormatterText() {
+        String visible = "[OBSERVED] CHEST minecraft:overworld 1,64,2 -> PLAYER Admin : 1x at 2026-10-05T12:00:00Z";
+        QueryDispatcher.ChatHoverDetail detail = new QueryDispatcher.ChatHoverDetail(
+                "OBSERVED", "minecraft:diamond named stack", "sha256:abc123", "DROP_ITEM",
+                "2026-10-05T12:00:00Z", "CHEST minecraft:overworld 1,64,2", "PLAYER Admin");
+
+        Component component = QueryDispatcher.chatLine(visible, detail);
+        HoverEvent hover = component.getStyle().getHoverEvent();
+        String hoverText = hover.getValue(HoverEvent.Action.SHOW_TEXT).getString();
+
+        assertEquals(visible, component.getString(), "QueryFormatter's visible text remains unchanged");
+        assertTrue(hoverText.contains("Canonical metadata fingerprint: sha256:abc123"));
+        assertTrue(hoverText.contains("UTC time: 2026-10-05T12:00:00Z"));
+        assertTrue(hoverText.contains("Origin: CHEST minecraft:overworld 1,64,2"));
+        assertFalse(hoverText.toLowerCase().contains("nbt"));
+        assertFalse(hoverText.contains("raw component payload"));
+
+        QueryDispatcher.ChatHoverDetail oversized = new QueryDispatcher.ChatHoverDetail(
+                "OBSERVED", "x".repeat(400), "hash", "DROP_ITEM", "2026-10-05T12:00:00Z", "x", "y");
+        assertTrue(QueryDispatcher.chatLine(visible, oversized).getStyle().getHoverEvent()
+                .getValue(HoverEvent.Action.SHOW_TEXT).getString().contains("..."));
+    }
+
+    @Test
+    void resultLocationTokenIsPlayerScopedOneUseAndRechecksOriginPermission() {
+        UUID ownerId = UUID.randomUUID();
+        UUID otherId = UUID.randomUUID();
+        List<String> originPermissions = List.of(ItemGraphPermissions.TRACE);
+        QueryDispatcher.LocationAction target = new QueryDispatcher.LocationAction(
+                "minecraft:overworld", 12.0, 65.0, -8.0);
+        UUID crossPlayerToken = QueryDispatcher.issueLocationGrant(ownerId, originPermissions, target,
+                System.currentTimeMillis());
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer otherPlayer = mock(ServerPlayer.class);
+        CommandSourceStack otherSource = mock(CommandSourceStack.class);
+        when(otherPlayer.getUUID()).thenReturn(otherId);
+        when(otherSource.getEntity()).thenReturn(otherPlayer);
+        when(otherSource.getServer()).thenReturn(server);
+        assertFalse(QueryDispatcher.consumeLocationGrant(otherSource, crossPlayerToken),
+                "a different player cannot use the token");
+
+        ServerPlayer owner = mock(ServerPlayer.class);
+        CommandSourceStack ownerSource = mock(CommandSourceStack.class);
+        PlayerList players = mock(PlayerList.class);
+        ServerLevel overworld = mock(ServerLevel.class);
+        when(owner.getUUID()).thenReturn(ownerId);
+        when(ownerSource.getEntity()).thenReturn(owner);
+        when(ownerSource.getServer()).thenReturn(server);
+        when(server.getPlayerList()).thenReturn(players);
+        when(players.getPlayer(ownerId)).thenReturn(owner);
+        when(server.getLevel(any(ResourceKey.class))).thenReturn(overworld);
+
+        UUID revokedToken = QueryDispatcher.issueLocationGrant(ownerId, originPermissions, target,
+                System.currentTimeMillis());
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.TRACE));
+        assertFalse(QueryDispatcher.consumeLocationGrant(ownerSource, revokedToken),
+                "the origin permission is checked again at click time");
+        verify(server, never()).getLevel(any(ResourceKey.class));
+
+        ItemGraphPermissions.setChecker((source, node) -> true);
+        UUID singleUseToken = QueryDispatcher.issueLocationGrant(ownerId, originPermissions, target,
+                System.currentTimeMillis());
+        assertTrue(QueryDispatcher.consumeLocationGrant(ownerSource, singleUseToken));
+        assertFalse(QueryDispatcher.consumeLocationGrant(ownerSource, singleUseToken),
+                "successful links are one-use");
+        verify(owner).teleportTo(eq(overworld), eq(12.0), eq(65.0), eq(-8.0), eq(Set.of()), anyFloat(), anyFloat());
+    }
+
+    @Test
+    void pageLocationTokenRetainsPageAndOriginatingAuditPermissions() {
+        UUID ownerId = UUID.randomUUID();
+        ServerPlayer owner = mock(ServerPlayer.class);
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        when(owner.getUUID()).thenReturn(ownerId);
+        when(source.getEntity()).thenReturn(owner);
+        UUID token = QueryDispatcher.issueLocationGrant(ownerId,
+                List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.PAGE, ItemGraphPermissions.AUDIT),
+                new QueryDispatcher.LocationAction("minecraft:overworld", 1, 64, 1), System.currentTimeMillis());
+
+        ItemGraphPermissions.setChecker((checkedSource, node) -> !node.equals(ItemGraphPermissions.PAGE));
+        assertFalse(QueryDispatcher.consumeLocationGrant(source, token),
+                "a continuation location token must be rejected after PAGE is revoked");
+    }
+
+    @Test
+    void dataQueriesRejectAnyMissingPermissionInTheRequiredSurfaceSet() {
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        ItemGraphPermissions.setChecker((checkedSource, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+        AtomicBoolean queryRan = new AtomicBoolean();
+        AtomicBoolean callbackRan = new AtomicBoolean();
+
+        int accepted = QueryDispatcher.dispatchData(source,
+                List.of(ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT), "protected GUI",
+                conn -> {
+                    queryRan.set(true);
+                    return "protected";
+                }, (returnedSource, result) -> callbackRan.set(true), () -> {});
+
+        assertEquals(0, accepted);
+        assertFalse(queryRan.get(), "authorization precedes candidate/query reads");
+        assertFalse(callbackRan.get());
+    }
+
+    @Test
+    void singlePermissionDataQueryRejectsBeforeSubmittingWhenPermissionIsMissing() {
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        ItemGraphPermissions.setChecker((checkedSource, node) -> !node.equals(ItemGraphPermissions.GUI));
+        AtomicBoolean queryRan = new AtomicBoolean();
+        AtomicBoolean callbackRan = new AtomicBoolean();
+        AtomicBoolean failureRan = new AtomicBoolean();
+
+        int accepted = QueryDispatcher.dispatchData(source, ItemGraphPermissions.GUI, "protected GUI",
+                conn -> {
+                    queryRan.set(true);
+                    return "protected";
+                }, (returnedSource, result) -> callbackRan.set(true), () -> failureRan.set(true));
+
+        assertEquals(0, accepted);
+        assertFalse(queryRan.get(), "permission is checked before the JDBC task is submitted");
+        assertFalse(callbackRan.get());
+        assertTrue(failureRan.get(), "denial clears the caller's loading state");
+    }
+
+    @Test
+    void locationActionRejectsMissingDimensionAndNonFiniteCoordinates() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new QueryDispatcher.LocationAction(" ", 1.0, 2.0, 3.0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new QueryDispatcher.LocationAction("minecraft:overworld", Double.NaN, 2.0, 3.0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new QueryDispatcher.LocationAction("minecraft:overworld", 1.0, Double.POSITIVE_INFINITY, 3.0));
+    }
+
+    @BeforeEach
+    void allowNamedNodesUnlessTheTestOverridesTheProvider() {
+        ItemGraphPermissions.setChecker((source, node) -> true);
+    }
 
     @Test
     void statusQueryFailuresHideRawJdbcMessagesFromCommandCallers() {
@@ -58,6 +204,7 @@ class QueryDispatcherTest {
     void tearDown() {
         QueryDispatcher.shutdown();
         DatabaseManager.getInstance().close();
+        ItemGraphPermissions.setChecker(null);
     }
 
     @Test
@@ -71,7 +218,7 @@ class QueryDispatcherTest {
 
         CommandSourceStack source = mock(CommandSourceStack.class);
 
-        int result = QueryDispatcher.dispatch(source, "trace", conn -> QueryOutput.found(List.of("test line")));
+        int result = QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "trace", conn -> QueryOutput.found(List.of("test line")));
 
         assertEquals(0, result, "dispatch must return 0 when database is not connected");
 
@@ -102,6 +249,53 @@ class QueryDispatcherTest {
     }
 
     @Test
+    void lookupOnlyGrantCannotRunOrDiscoverSensitiveAuditLookupIncludingBroadCounts() {
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        AtomicBoolean queryRan = new AtomicBoolean();
+        ItemGraphPermissions.setChecker((checkedSource, node) ->
+                node.equals(ItemGraphPermissions.COMMAND) || node.equals(ItemGraphPermissions.LOOKUP));
+
+        int result = QueryDispatcher.dispatch(source, ItemGraphCommands.lookupPermissionsForType("all"),
+                "all lookup", conn -> {
+                    queryRan.set(true); // Includes both result rows and any has-next/count probe.
+                    return QueryOutput.found(List.of("CHAT_MESSAGE private metadata"));
+                });
+
+        assertEquals(0, result);
+        assertFalse(queryRan.get(), "audit denial must happen before result rows or next-page metadata are queried");
+        verify(source).sendFailure(any(Component.class));
+        verify(source, never()).sendSuccess(any(), anyBoolean());
+    }
+
+    @Test
+    void entitylessOffThreadDispatchDropsResultWhenAuditPermissionIsRevokedDuringWait(@TempDir Path tempDir)
+            throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("permission-revoked-rcon.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        Thread serverThread = new Thread("mock-server-thread");
+        AtomicBoolean auditAllowed = new AtomicBoolean(true);
+        when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(null);
+        when(server.getRunningThread()).thenReturn(serverThread);
+        ItemGraphPermissions.setChecker((checkedSource, node) ->
+                node.equals(ItemGraphPermissions.COMMAND)
+                        || node.equals(ItemGraphPermissions.LOOKUP)
+                        || (node.equals(ItemGraphPermissions.AUDIT) && auditAllowed.get()));
+
+        int result = QueryDispatcher.dispatch(source,
+                List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT), "revoked-rcon", conn -> {
+                    auditAllowed.set(false);
+                    return QueryOutput.found(List.of("private audit metadata"),
+                            List.of(new QueryAction("Next", "/ig page 2 token")));
+                });
+
+        assertEquals(0, result);
+        verify(source).sendFailure(any(Component.class));
+        verify(source, never()).sendSuccess(any(), anyBoolean());
+    }
+
+    @Test
     void testDispatchReportsFailureWhenDatabaseClosesAfterPrecheck(@TempDir Path tempDir) throws Exception {
         DatabaseManager db = DatabaseManager.getInstance();
         db.initialize(tempDir.resolve("shutdown-race.db"));
@@ -127,7 +321,7 @@ class QueryDispatcherTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        assertEquals(1, QueryDispatcher.dispatch(source, "blocking-query", conn -> {
+        assertEquals(1, QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "blocking-query", conn -> {
             firstQueryStarted.countDown();
             try {
                 assertTrue(releaseFirstQuery.await(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -141,7 +335,7 @@ class QueryDispatcherTest {
 
         // The second dispatch passes isInitialized(), then waits behind the first query.
         // Closing the database before releasing the worker reproduces the shutdown race.
-        assertEquals(1, QueryDispatcher.dispatch(source, "shutdown-race", conn ->
+        assertEquals(1, QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "shutdown-race", conn ->
                 QueryOutput.found(List.of("must not be returned"))));
         db.close();
         releaseFirstQuery.countDown();
@@ -182,7 +376,7 @@ class QueryDispatcherTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        assertEquals(1, QueryDispatcher.dispatch(source, "server-thread-rcon", conn -> {
+        assertEquals(1, QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "server-thread-rcon", conn -> {
             queryStarted.countDown();
             try {
                 assertTrue(releaseQuery.await(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -225,7 +419,7 @@ class QueryDispatcherTest {
         }).when(server).execute(any(Runnable.class));
 
         Thread caller = new Thread(() -> {
-            resultCode.set(QueryDispatcher.dispatch(source, "off-thread-player", conn -> {
+            resultCode.set(QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "off-thread-player", conn -> {
                 queryStarted.countDown();
                 try {
                     assertTrue(releaseQuery.await(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -264,7 +458,7 @@ class QueryDispatcherTest {
         when(server.isStopped()).thenReturn(false);
 
         Thread caller = new Thread(() -> {
-            QueryDispatcher.dispatch(source, "interrupted-rcon", conn -> {
+            QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "interrupted-rcon", conn -> {
                 queryStarted.countDown();
                 try {
                     assertTrue(releaseQuery.await(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -298,7 +492,7 @@ class QueryDispatcherTest {
         when(source.getServer()).thenReturn(server);
         when(server.getRunningThread()).thenReturn(Thread.currentThread());
         when(server.isStopped()).thenReturn(false);
-        Thread caller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, "rcon-sql-failure",
+        Thread caller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "rcon-sql-failure",
                 conn -> { throw new SQLException("clean SQL failure"); })));
         caller.start();
         caller.join(5_000);
@@ -324,7 +518,7 @@ class QueryDispatcherTest {
         when(server.getRunningThread()).thenReturn(serverThread);
         when(server.isStopped()).thenReturn(false);
 
-        Thread slowCaller = new Thread(() -> slowResult.set(QueryDispatcher.dispatch(source, "slow-rcon", conn -> {
+        Thread slowCaller = new Thread(() -> slowResult.set(QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "slow-rcon", conn -> {
             try (Statement statement = conn.createStatement()) {
                 queryStarted.countDown();
                 try (ResultSet rs = statement.executeQuery("""
@@ -349,7 +543,7 @@ class QueryDispatcherTest {
         assertEquals(0, slowResult.get());
         assertTrue(queryFinished.await(5, java.util.concurrent.TimeUnit.SECONDS));
 
-        Thread quickCaller = new Thread(() -> quickResult.set(QueryDispatcher.dispatch(source, "quick-rcon", conn -> {
+        Thread quickCaller = new Thread(() -> quickResult.set(QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "quick-rcon", conn -> {
             try (Statement statement = conn.createStatement(); ResultSet rs = statement.executeQuery("SELECT 1")) {
                 assertTrue(rs.next());
             }
@@ -379,7 +573,7 @@ class QueryDispatcherTest {
         when(server.getRunningThread()).thenReturn(Thread.currentThread());
         when(server.isStopped()).thenReturn(false);
 
-        Thread caller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, "cancel-before-statement", conn -> {
+        Thread caller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "cancel-before-statement", conn -> {
             queryEntered.countDown();
             boolean released = false;
             while (!released) {
@@ -419,7 +613,7 @@ class QueryDispatcherTest {
         assertEquals(0, resultCode.get());
         assertTrue(cancelledBeforeStatementCompleted, "a cancelled query must not start long SQL after timeout");
 
-        Thread quickCaller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, "after-cancel", conn ->
+        Thread quickCaller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "after-cancel", conn ->
                 QueryOutput.found(List.of("worker available")))));
         quickCaller.start();
         quickCaller.join(5_000);
@@ -442,7 +636,10 @@ class QueryDispatcherTest {
         when(source.getServer()).thenReturn(server);
         when(source.getEntity()).thenReturn(player);
         when(player.hasDisconnected()).thenReturn(false);
-        when(source.hasPermission(2)).thenReturn(true);
+        AtomicBoolean traceAllowed = new AtomicBoolean(true);
+        ItemGraphPermissions.setChecker((checkedSource, node) ->
+                node.equals(ItemGraphPermissions.COMMAND)
+                        || (node.equals(ItemGraphPermissions.TRACE) && traceAllowed.get()));
         when(server.getRunningThread()).thenReturn(serverThread);
         when(server.isStopped()).thenReturn(false);
         doAnswer(invocation -> {
@@ -451,13 +648,12 @@ class QueryDispatcherTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        assertEquals(1, QueryDispatcher.dispatch(source, "permission-revoked", conn ->
+        assertEquals(1, QueryDispatcher.dispatch(source, ItemGraphPermissions.TRACE, "permission-revoked", conn ->
                 QueryOutput.found(List.of("sensitive trace"))));
         assertTrue(callbackQueued.await(5, java.util.concurrent.TimeUnit.SECONDS));
-        when(source.hasPermission(2)).thenReturn(false);
+        traceAllowed.set(false);
         queuedTask.get().run();
 
-        verify(source).hasPermission(2);
         verify(source, never()).sendSuccess(any(), anyBoolean());
         verify(source, never()).sendFailure(any());
     }
@@ -550,7 +746,7 @@ class QueryDispatcherTest {
         when(source.getServer()).thenReturn(server);
 
         // Dispatched from current thread (not fakeServerThread), so it executes synchronously
-        int result = QueryDispatcher.dispatch(source, "test-query", conn -> QueryOutput.found(List.of("Success line 1")));
+        int result = QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "test-query", conn -> QueryOutput.found(List.of("Success line 1")));
 
         assertEquals(1, result);
         verify(source, times(1)).sendSuccess(any(), eq(false));
@@ -568,7 +764,7 @@ class QueryDispatcherTest {
         when(server.getRunningThread()).thenReturn(fakeServerThread);
         when(source.getServer()).thenReturn(server);
 
-        int result = QueryDispatcher.dispatch(source, "test-query-nf", conn -> QueryOutput.notFound("Not found line"));
+        int result = QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "test-query-nf", conn -> QueryOutput.notFound("Not found line"));
 
         assertEquals(0, result);
         ArgumentCaptor<Component> captor = ArgumentCaptor.forClass(Component.class);
@@ -599,7 +795,7 @@ class QueryDispatcherTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        assertEquals(1, QueryDispatcher.dispatchData(source, "flow-page", conn -> {
+        assertEquals(1, QueryDispatcher.dispatchData(source, ItemGraphPermissions.GUI, "flow-page", conn -> {
             queryThread.set(Thread.currentThread());
             assertThrows(SQLException.class, () -> {
                 try (var stmt = conn.createStatement()) {
@@ -643,7 +839,7 @@ class QueryDispatcherTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        assertEquals(1, QueryDispatcher.dispatchData(source, "inline-callback", conn -> {
+        assertEquals(1, QueryDispatcher.dispatchData(source, ItemGraphPermissions.GUI, "inline-callback", conn -> {
             queryStarted.countDown();
             try {
                 assertTrue(releaseQuery.await(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -695,7 +891,7 @@ class QueryDispatcherTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        assertEquals(1, QueryDispatcher.dispatch(source, "inline-text-query", conn -> {
+        assertEquals(1, QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "inline-text-query", conn -> {
             queryStarted.countDown();
             try {
                 assertTrue(releaseQuery.await(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -735,7 +931,7 @@ class QueryDispatcherTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        assertEquals(1, QueryDispatcher.dispatchData(source, "failing-flow-page",
+        assertEquals(1, QueryDispatcher.dispatchData(source, ItemGraphPermissions.GUI, "failing-flow-page",
                 conn -> { throw new SQLException("expected query failure"); },
                 (returnedSource, result) -> fail("failed data query must not invoke success"),
                 () -> {
@@ -766,7 +962,7 @@ class QueryDispatcherTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        assertEquals(1, QueryDispatcher.dispatchData(source, "blocking-query", conn -> {
+        assertEquals(1, QueryDispatcher.dispatchData(source, ItemGraphPermissions.GUI, "blocking-query", conn -> {
             workerStarted.countDown();
             try {
                 assertTrue(releaseWorker.await(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -779,10 +975,10 @@ class QueryDispatcherTest {
         assertTrue(workerStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
 
         for (int i = 0; i < 64; i++) {
-            assertEquals(1, QueryDispatcher.dispatchData(source, "queued-query", conn -> "queued",
+            assertEquals(1, QueryDispatcher.dispatchData(source, ItemGraphPermissions.GUI, "queued-query", conn -> "queued",
                     (returnedSource, result) -> {}));
         }
-        assertEquals(0, QueryDispatcher.dispatchData(source, "overflow-query", conn -> "rejected",
+        assertEquals(0, QueryDispatcher.dispatchData(source, ItemGraphPermissions.GUI, "overflow-query", conn -> "rejected",
                 (returnedSource, result) -> {}));
         ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
         verify(source).sendFailure(failure.capture());

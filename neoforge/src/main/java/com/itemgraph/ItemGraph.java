@@ -39,6 +39,7 @@ public class ItemGraph {
             }
         };
         ItemGraphCommands.setRuntimeInformation(runtimeInformation);
+        NeoForgeItemGraphPermissions.install();
         com.itemgraph.api.ItemGraphApiLifecycle.setRuntimeInformation(runtimeInformation);
 
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
@@ -71,6 +72,8 @@ public class ItemGraph {
     private void onServerStarting(ServerStartingEvent event) {
         ItemCanonicalizer.setRegistryAccess(event.getServer().registryAccess());
         var operationalSettings = ItemGraphConfig.operationalSettings();
+        com.itemgraph.command.CommandHelp.initializeMessages();
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale(ItemGraphConfig.language());
         var databaseSettings = ItemGraphConfig.databaseSettings();
         var griefLoggerIntegrationEnabled = ItemGraphConfig.griefLoggerIntegrationEnabled();
         var griefLoggerDatabasePath = ItemGraphConfig.griefLoggerDatabasePath();

@@ -8,6 +8,7 @@ import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.command.ItemGraphCommands;
+import com.itemgraph.command.ItemGraphPermissions;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.command.FlowBrowserService;
 import com.itemgraph.query.AuditEventQueryService;
@@ -200,7 +201,7 @@ public final class FabricNativeAuditEventListener {
                     || !InspectionService.getInstance().isEnabled(serverPlayer.getUUID())) {
                 return InteractionResult.PASS;
             }
-            if (!serverPlayer.createCommandSourceStack().hasPermission(2)) {
+            if (!ItemGraphPermissions.canUse(serverPlayer.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
                 InspectionService.getInstance().clear(serverPlayer.getUUID());
                 return InteractionResult.PASS;
             }
@@ -276,7 +277,7 @@ public final class FabricNativeAuditEventListener {
                 || !inspections.isEnabled(player.getUUID())) {
             return null;
         }
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
             return null;
         }
@@ -301,7 +302,7 @@ public final class FabricNativeAuditEventListener {
                 || !inspections.isEnabled(player.getUUID())) {
             return null;
         }
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
             return null;
         }

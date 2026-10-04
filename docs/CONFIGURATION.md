@@ -17,6 +17,8 @@ initialization logs also identify the selected backend.
 
 | ItemGraph setting | NeoForge TOML path | Fabric properties key | Type / default | Accepted values | Reload |
 |---|---|---|---|---|---|
+| Server message language | `general.language` | `language` | string / `en_us` | `en_us`, `nl_nl`, `zh_tw` | Restart |
+| Server message language | `general.language` | `language` | string / `en_us` | `en_us`, `nl_nl`, `zh_tw` | Restart |
 | SQLite path | `general.database_path` | `database_path` | string / `itemgraph/itemgraph.db` | Non-empty path; relative paths resolve from the game directory | Restart |
 | Storage backend | `general.database_backend` | `database_backend` | string / `sqlite` | `sqlite`, `mysql`, `mariadb`, `mysql_mariadb` | Restart |
 | Network DB host | `general.database_host` | `database_host` | string / `127.0.0.1` | Required and non-blank for MySQL/MariaDB | Restart |
@@ -43,6 +45,18 @@ initialization logs also identify the selected backend.
 | Network database keepalive | `operations.database_heartbeat_interval_ms` | `database_heartbeat_interval_ms` | integer / `30000` | `[1000,3600000]` milliseconds; best-effort validation of the shared MySQL/MariaDB connection on the ItemGraph worker; SQLite does not send heartbeats | Restart |
 | Native capture | `capture.enabled` | `capture_enabled` | boolean / `true` | `true` or `false`; false suppresses new ItemGraph-native records and does not change the separately configured GriefLogger migration bridge | Restart |
 | Raw evidence retention | `retention.raw_evidence` | `raw_evidence_retention` | string / `indefinite` | `indefinite`; no automatic purge is implemented | Restart |
+
+`general.language` selects server-rendered ItemGraph message resources. The
+NeoForge server config rejects unsupported values while validating its config
+spec; Fabric rejects them while loading `config/itemgraph.properties`. Both
+validate before `DatabaseManager.initialize`, and the diagnostic names
+`general.language`. ItemGraph resolves message text on the server and sends
+literal components, so vanilla clients do not need ItemGraph or language files.
+The bundled locale inventory is `en_us`, `nl_nl`, and `zh_tw`; absent keys use
+the English source string. `zh_cn` is not supported by ItemGraph. It is present
+only in the pinned GriefLogger 26.2 source research, not in ItemGraph's shipped
+locale set. The exact GriefLogger 1.2.10-1.21.1 release fixture has no locale
+inventory, so no exact-release locale compatibility claim is made.
 
 The raw evidence retention value is a safety invariant, not a purge scheduler.
 ItemGraph preserves raw observations and audit events indefinitely. During

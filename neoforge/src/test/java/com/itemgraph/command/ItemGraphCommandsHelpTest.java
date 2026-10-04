@@ -30,6 +30,7 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.flag.FeatureFlags;
 import net.neoforged.fml.loading.LoadingModList;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -47,6 +48,146 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ItemGraphCommandsHelpTest {
+
+    @Test
+    void everyTaskHelpSentenceResolvesThroughExplicitPerKeyEnglishFallback() {
+        CommandHelp.initializeMessages();
+        var english = CommandHelp.overviewLines();
+        for (String topic : CommandHelp.TOPIC_NAMES) {
+            List<String> topicLines = CommandHelp.topicLines(topic);
+            if (topicLines != null) english = java.util.stream.Stream.concat(english.stream(), topicLines.stream()).toList();
+        }
+        assertTrue(com.itemgraph.i18n.ItemGraphLanguage.sourceInventory().containsAll(english));
+
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("nl_nl");
+        List<String> nl = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
+        assertTrue(nl.get(0).startsWith("[ItemGraph] Begin met je vraag."));
+        Set<String> nlFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("nl_nl");
+        assertEquals(121, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertTrue(nlFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
+        for (int i = 0; i < english.size(); i++) {
+            if (nlFallback.contains(english.get(i))) assertEquals(english.get(i), nl.get(i));
+        }
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("zh_tw");
+        List<String> zh = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
+        assertTrue(zh.get(0).startsWith("[ItemGraph] 請從你的問題開始。"));
+        Set<String> zhFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("zh_tw");
+        assertEquals(121, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertTrue(zhFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
+        for (int i = 0; i < english.size(); i++) {
+            if (zhFallback.contains(english.get(i))) assertEquals(english.get(i), zh.get(i));
+        }
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
+    }
+
+    @Test
+    void sensitiveLookupAliasesAndBroadFiltersRetainAuditPermissionAcrossPages() {
+        assertEquals(List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT),
+                ItemGraphCommands.lookupPermissionsForType("chat_message"));
+        assertEquals(List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT),
+                ItemGraphCommands.lookupPermissionsForType("COMMAND_ATTEMPT"));
+        assertEquals(List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT),
+                ItemGraphCommands.lookupPermissionsForType("command_executed"));
+        assertEquals(List.of(ItemGraphPermissions.LOOKUP),
+                ItemGraphCommands.lookupPermissionsForType("PLAYER_JOIN"));
+        assertTrue(ItemGraphCommands.requiresAuditPermission(List.of()));
+        assertTrue(ItemGraphCommands.requiresAuditPermission(List.of("PLAYER_JOIN", "CREATIVE_SLOT_EFFECT")));
+        assertTrue(ItemGraphCommands.requiresAuditPermission(List.of("ADMIN_ITEM_CREATE")));
+        assertFalse(ItemGraphCommands.requiresAuditPermission(List.of("PLAYER_JOIN")));
+
+        ItemGraphCommands.AuditPageSession session = new ItemGraphCommands.AuditPageSession(
+                java.util.UUID.randomUUID(), "COMMAND_ATTEMPT", null,
+                com.itemgraph.query.QueryWindow.unbounded(), 20, null,
+                null, null, null, null, null, null, "command attempt lookup",
+                ItemGraphPermissions.LOOKUP, true, System.currentTimeMillis());
+        assertEquals(List.of(ItemGraphPermissions.PAGE, ItemGraphPermissions.LOOKUP,
+                        ItemGraphPermissions.AUDIT), ItemGraphCommands.pagePermissionsFor(session));
+    }
+
+    @Test
+    void lookupOnlyGrantCannotReachSensitiveEventAliasesOrSavedPages() throws Exception {
+        ItemGraphPermissions.setChecker((source, node) -> Set.of(ItemGraphPermissions.COMMAND,
+                ItemGraphPermissions.LOOKUP, ItemGraphPermissions.PAGE).contains(node));
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        for (String command : List.of(
+                "ig lookup CHAT_MESSAGE",
+                "ig lookup chat_message",
+                "itemgraph lookup player Alex COMMAND_ATTEMPT",
+                "ig lookup near minecraft:overworld 0 64 0 5 COMMAND_EXECUTED",
+                "ig lookup filters action.chat_message radius.5",
+                "ig lookup action.command_attempt radius.5")) {
+            CommandSourceStack source = source();
+            assertEquals(0, dispatcher.execute(command, source), command);
+            ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+            verify(source).sendFailure(failure.capture());
+            assertTrue(failure.getValue().getString().contains("permission")
+                            || failure.getValue().getString().contains("itemgraph.audit"),
+                    command + " failure text: " + failure.getValue().getString());
+            verify(source, never()).sendSuccess(any(), anyBoolean());
+        }
+
+        UUID ownerId = UUID.randomUUID();
+        ServerPlayer owner = mock(ServerPlayer.class);
+        when(owner.getUUID()).thenReturn(ownerId);
+        CommandSourceStack pageSource = sourceForPlayer(owner);
+        ItemGraphCommands.AuditPageSession session = new ItemGraphCommands.AuditPageSession(
+                UUID.randomUUID(), "COMMAND_ATTEMPT", null, QueryWindow.unbounded(), 20, null,
+                null, null, null, null, null, null, "command lookup",
+                ItemGraphPermissions.LOOKUP, true, System.currentTimeMillis());
+        ItemGraphCommands.rememberPageSession(pageSource, session);
+
+        assertEquals(0, dispatcher.execute("ig page 2 " + session.sessionId(), pageSource));
+        ArgumentCaptor<Component> pageFailure = ArgumentCaptor.forClass(Component.class);
+        verify(pageSource).sendFailure(pageFailure.capture());
+        assertTrue(pageFailure.getValue().getString().contains("permission"),
+                pageFailure.getValue().getString());
+        verify(pageSource, never()).sendSuccess(any(), anyBoolean());
+    }
+
+    @Test
+    void protectedEvidenceSurfacesFailClosedWithoutAuditBeforeQueryDispatch() throws Exception {
+        ItemGraphPermissions.setChecker((source, node) -> Set.of(ItemGraphPermissions.COMMAND,
+                ItemGraphPermissions.EVENT, ItemGraphPermissions.EXPLAIN, ItemGraphPermissions.TRACE,
+                ItemGraphPermissions.GUI).contains(node));
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        for (String command : List.of("ig event 1", "ig explain 1", "ig trace item diamond", "ig gui item diamond")) {
+            assertThrows(CommandSyntaxException.class, () -> dispatcher.execute(command, source), command);
+            verify(source, never()).sendSuccess(any(), anyBoolean());
+        }
+    }
+
+    @Test
+    void pageLocationGrantsRetainPageOriginAndAuditNodes() {
+        ItemGraphCommands.AuditPageSession session = new ItemGraphCommands.AuditPageSession(
+                UUID.randomUUID(), "ADMIN_ITEM_CREATE", null, QueryWindow.unbounded(), 10, null,
+                null, null, null, null, null, null, "admin item history",
+                ItemGraphPermissions.LOOKUP, true, System.currentTimeMillis());
+        assertEquals(List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.PAGE, ItemGraphPermissions.AUDIT),
+                ItemGraphCommands.locationPermissionNodes(session, ItemGraphPermissions.PAGE));
+        assertEquals(List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT),
+                ItemGraphCommands.locationPermissionNodes(session, ItemGraphPermissions.LOOKUP));
+    }
+
+    @Test
+    void explainSummaryHoverDoesNotLabelCitedObservedEvidenceAsInferred() {
+        var edge = new com.itemgraph.query.EdgeExplanation(1,
+                new com.itemgraph.query.NodeRef(1, "PLAYER", "Alex", null, null, null, null),
+                new com.itemgraph.query.NodeRef(2, "CONTAINER", null, "minecraft:overworld", 1d, 2d, 3d),
+                new com.itemgraph.query.FingerprintRef(1, "minecraft:diamond", null, "safe-hash"),
+                1, 1000, 2000, 0.9, "supporting observations", 2000, List.of(), false);
+
+        Map<Integer, QueryDispatcher.ChatHoverDetail> hovers = ItemGraphCommands.explainSummaryHover(edge);
+
+        assertEquals(Set.of(0), hovers.keySet(), "raw observation/evidence lines have no inherited inferred hover");
+        assertTrue(hovers.get(0).evidenceClass().startsWith("INFERRED"));
+        assertFalse(hovers.values().stream().anyMatch(hover -> hover.evidenceClass().equals("OBSERVED")));
+    }
+
+    @AfterEach
+    void resetPermissionChecker() {
+        ItemGraphPermissions.setChecker(null);
+    }
 
     @BeforeAll
     static void initMinecraftRegistries() {
@@ -87,6 +228,7 @@ class ItemGraphCommandsHelpTest {
         assertTrue(overview.contains("/ig help inspect"));
         assertTrue(overview.contains("/ig help status"));
         assertTrue(overview.contains("/ig help audit"));
+        assertTrue(overview.contains("delegate lookup with /ig help permissions"));
         assertTrue(overview.contains("BREAK_BLOCK 20 1440"));
         assertTrue(overview.contains("https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md"));
         assertTrue(overview.contains("OBSERVED") || overview.contains("Inference is not observation"));
@@ -101,6 +243,54 @@ class ItemGraphCommandsHelpTest {
         assertEquals(1, dispatcher.execute("ig", source));
         assertTrue(successes.stream().anyMatch(line -> line.contains("Where did an item go?")));
         assertTrue(successes.stream().anyMatch(line -> line.contains("/ig help commands")));
+    }
+
+    @Test
+    void namedPermissionsAllowLookupOnlyAndExplicitDenialsOverrideOperatorFallback() {
+        CommandSourceStack levelOne = source();
+        when(levelOne.hasPermission(2)).thenReturn(false);
+        Map<String, Boolean> decisions = Map.ofEntries(
+                Map.entry(ItemGraphPermissions.COMMAND, true),
+                Map.entry(ItemGraphPermissions.LOOKUP, true),
+                Map.entry(ItemGraphPermissions.INSPECT, false),
+                Map.entry(ItemGraphPermissions.PAGE, false),
+                Map.entry(ItemGraphPermissions.TRACE, false),
+                Map.entry(ItemGraphPermissions.EVENT, false),
+                Map.entry(ItemGraphPermissions.EXPLAIN, false),
+                Map.entry(ItemGraphPermissions.AUDIT, false),
+                Map.entry(ItemGraphPermissions.GUI, false),
+                Map.entry(ItemGraphPermissions.INGEST, false),
+                Map.entry(ItemGraphPermissions.IMPORT, false));
+        ItemGraphPermissions.setChecker((source, node) -> decisions.getOrDefault(node, source.hasPermission(2)));
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+
+        assertFalse(dispatcher.parse("itemgraph lookup BREAK_BLOCK", levelOne).getReader().canRead(),
+                "explicit root + lookup grants permit a level-1 lookup user");
+        for (String denied : List.of("itemgraph inspect on", "itemgraph page 1", "itemgraph trace item stone",
+                "itemgraph event 1", "itemgraph explain 1", "itemgraph audit", "itemgraph gui item stone",
+                "itemgraph ingest now", "itemgraph ingest history")) {
+            assertTrue(dispatcher.parse(denied, levelOne).getReader().canRead(),
+                    "an explicit denial must hide the command despite the lookup grant: " + denied);
+        }
+
+        CommandSourceStack operator = source();
+        when(operator.hasPermission(2)).thenReturn(true);
+        assertTrue(ItemGraphPermissions.check(operator, "itemgraph.unset"),
+                "an unset node must use the level-2 fallback");
+        assertFalse(ItemGraphPermissions.check(operator, ItemGraphPermissions.INSPECT),
+                "an explicit false must override the level-2 fallback");
+    }
+
+    @Test
+    void absentProviderUsesVanillaLevelTwoForNamedNodes() {
+        CommandSourceStack levelOne = source();
+        when(levelOne.hasPermission(2)).thenReturn(false);
+        ItemGraphPermissions.setChecker(null);
+        assertFalse(ItemGraphPermissions.canUse(levelOne, ItemGraphPermissions.LOOKUP));
+
+        CommandSourceStack operator = source();
+        when(operator.hasPermission(2)).thenReturn(true);
+        assertTrue(ItemGraphPermissions.canUse(operator, ItemGraphPermissions.LOOKUP));
     }
 
     @Test
@@ -140,14 +330,14 @@ class ItemGraphCommandsHelpTest {
                 "ItemGraph exposes its two named roots without GriefLogger command aliases");
         CommandNode<CommandSourceStack> root = dispatcher.getRoot().getChild("itemgraph");
         assertNotNull(root);
-        assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect"),
+        assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect", "goto"),
                 root.getChildren().stream().map(CommandNode::getName).collect(Collectors.toSet()));
         assertEquals(Set.of("now", "history"), childNames(root, "ingest"));
         assertEquals(Set.of("item", "player", "container"), childNames(root, "trace"));
         assertEquals(Set.of("item", "player", "container"), childNames(root, "gui"));
         assertEquals(Set.of("on", "off", "status"), childNames(root, "inspect"));
 
-        for (String topLevel : Set.of("help", "commands", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect")) {
+        for (String topLevel : Set.of("help", "commands", "permissions", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect", "goto")) {
             assertNotNull(CommandHelp.topicLines(topLevel), "missing help topic for /ig " + topLevel);
         }
         for (String path : List.of("ingest now", "ingest history", "lookup near", "lookup page", "lookup player",
@@ -245,7 +435,7 @@ class ItemGraphCommandsHelpTest {
         assertEquals(1, dispatcher.execute("itemgraph help trace item", source));
         String itemHelp = String.join("\n", successes);
         assertTrue(itemHelp.contains("Syntax: /ig trace item <query> [limit] [sinceMinutes]"));
-        assertTrue(itemHelp.contains("Permission: level 2"));
+        assertTrue(itemHelp.contains("Unset named permissions use vanilla permission level 2"));
         assertTrue(itemHelp.contains("asynchronous"));
         assertTrue(itemHelp.contains("default 20"));
         assertTrue(itemHelp.contains("Example:"));
@@ -259,7 +449,7 @@ class ItemGraphCommandsHelpTest {
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help inspect", source));
         String inspectHelp = String.join("\n", successes);
-        assertTrue(inspectHelp.contains("Permission: level 2"));
+        assertTrue(inspectHelp.contains("Unset named permissions use vanilla permission level 2"));
         assertTrue(inspectHelp.contains("held items are not used"));
         assertTrue(inspectHelp.contains("Example: /ig inspect on"));
 
@@ -281,7 +471,7 @@ class ItemGraphCommandsHelpTest {
             assertEquals(1, dispatcher.execute("itemgraph help " + topic, source), topic);
             assertFalse(successes.isEmpty(), topic);
             String lines = String.join("\n", successes);
-            assertTrue(lines.contains("Permission: level 2"), topic);
+            assertTrue(lines.contains("Unset named permissions use vanilla permission level 2"), topic);
             assertTrue(lines.contains("Example"), topic);
         }
         verify(source, never()).sendFailure(any());

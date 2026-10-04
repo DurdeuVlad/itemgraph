@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import com.itemgraph.query.EventQueryService;
+import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.query.ExplainQueryService;
 import com.itemgraph.query.FingerprintRef;
 import com.itemgraph.query.NodeRef;
@@ -35,9 +36,9 @@ import java.util.Map;
 /** Shared read-only flow-browser entry points used by both loader adapters. */
 public final class FlowBrowserService {
 
-    private static int pageSize() {
-        return QueryLimits.clampGuiPageSize(QueryLimits.MAX_GUI_PAGE_SIZE);
-    }
+    private static final int ROWS_PER_PAGE = 9;
+
+    static int pageSize() { return QueryLimits.clampGuiPageSize(ROWS_PER_PAGE); }
     private static final int PREVIOUS_SLOT = 45;
     private static final int PAGE_LABEL_SLOT = 49;
     private static final int BACK_OR_CLOSE_SLOT = 52;
@@ -95,6 +96,7 @@ public final class FlowBrowserService {
         final QueryWindow window;
         TracePage page;
         int pageIndex;
+        int candidatePageIndex;
         volatile boolean loading;
 
         BrowserSession(Target target, QueryWindow window) {
@@ -130,15 +132,16 @@ public final class FlowBrowserService {
     }
 
     private static int open(CommandSourceStack source, Target target, Long sinceMinutes) {
-        if (!(source.getEntity() instanceof ServerPlayer) || !source.hasPermission(2)) {
-            source.sendFailure(Component.literal("[ItemGraph] The flow browser requires a permission-level-2 player."));
+        if (!(source.getEntity() instanceof ServerPlayer)
+                || !ItemGraphPermissions.canUseAll(source, ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT)) {
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("flow.browser.permission_denied", "[ItemGraph] The flow browser requires GUI and audit permissions.")));
             return 0;
         }
         QueryWindow window = sinceMinutes == null
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
         BrowserSession session = new BrowserSession(target, window);
-        source.sendSuccess(() -> Component.literal("[ItemGraph] Loading read-only flow browser..."), false);
+        source.sendSuccess(() -> Component.literal(ItemGraphLanguage.text("flow.browser.loading", "[ItemGraph] Loading read-only flow browser...")), false);
         return loadPage(source, session, null, TracePage.Direction.FORWARD, 0);
     }
 
@@ -149,17 +152,18 @@ public final class FlowBrowserService {
         }
         AbstractContainerMenu expectedMenu = requester.containerMenu;
         session.loading = true;
-        int accepted = QueryDispatcher.dispatchData(source, "gui flow",
+        int accepted = QueryDispatcher.dispatchData(source, List.of(ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT), "gui flow",
                 conn -> session.target.load(conn, session.window, cursor, direction),
                 (returnedSource, page) -> {
                     session.loading = false;
                     if (!(returnedSource.getEntity() instanceof ServerPlayer player)
-                            || !returnedSource.hasPermission(2) || player.containerMenu != expectedMenu) {
+                            || !ItemGraphPermissions.canUseAll(returnedSource, ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT)
+                            || player.containerMenu != expectedMenu) {
                         return;
                     }
                     if (isStaleEmptyContinuation(cursor, page)) {
                         returnedSource.sendFailure(Component.literal(
-                                "[ItemGraph] The timeline changed while browsing; reopen the flow to refresh."));
+                                ItemGraphLanguage.text("browser.timeline_stale", "[ItemGraph] The timeline changed while browsing; reopen the flow to refresh.")));
                         return;
                     }
                     session.pageIndex = pageIndex;
@@ -183,59 +187,161 @@ public final class FlowBrowserService {
         Map<Integer, FlowBrowserMenu.Action> actions = new HashMap<>();
 
         if (page.resolution() == TracePage.Resolution.NOT_FOUND) {
-            items.set(22, display(Items.BARRIER, "No matching target", List.of(page.targetDescription())));
+            items.set(22, display(Items.BARRIER, t("browser.no_target", "No matching target"), List.of(page.targetDescription())));
         } else if (page.resolution() == TracePage.Resolution.AMBIGUOUS) {
             if (!page.candidates().isEmpty()) {
-                int count = Math.min(FlowBrowserMenu.DISPLAY_SLOT_COUNT, page.candidates().size());
+                int start = session.candidatePageIndex * page.pageSize();
+                int count = Math.min(page.pageSize(), page.candidates().size() - start);
                 for (int i = 0; i < count; i++) {
-                    FingerprintRef candidate = page.candidates().get(i);
+                    int candidateIndex = start + i;
+                    FingerprintRef candidate = page.candidates().get(candidateIndex);
                     items.set(i, fingerprintItem(candidate));
-                    actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.FINGERPRINT_CANDIDATE, i));
+                    actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.FINGERPRINT_CANDIDATE, candidateIndex));
                 }
             } else {
-                int count = Math.min(FlowBrowserMenu.DISPLAY_SLOT_COUNT, page.nodeCandidates().size());
+                int start = session.candidatePageIndex * page.pageSize();
+                int count = Math.min(page.pageSize(), page.nodeCandidates().size() - start);
                 for (int i = 0; i < count; i++) {
-                    NodeRef candidate = page.nodeCandidates().get(i);
+                    int candidateIndex = start + i;
+                    NodeRef candidate = page.nodeCandidates().get(candidateIndex);
                     items.set(i, nodeCandidateItem(candidate));
-                    actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.NODE_CANDIDATE, i));
+                    actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.NODE_CANDIDATE, candidateIndex));
                 }
             }
         } else if (page.hops().isEmpty()) {
-            items.set(22, display(Items.PAPER, "No recorded movement", List.of(
-                    page.targetDescription(), "No observed or inferred movement was recorded in this time window.")));
+            items.set(22, display(Items.PAPER, t("browser.no_movement_title", "No recorded movement"), List.of(
+                    page.targetDescription(), t("browser.no_movement_lore", "No observed or inferred movement was recorded in this time window."))));
         } else {
-            for (int i = 0; i < page.hops().size(); i++) {
+            for (int i = 0; i < Math.min(page.pageSize(), page.hops().size()); i++) {
                 items.set(i, hopItem(page.hops().get(i)));
                 actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.ENTRY, i));
             }
         }
 
-        boolean hasPrevious = page.hasPrevious() && !session.loading;
+        boolean candidateList = page.resolution() == TracePage.Resolution.AMBIGUOUS;
+        int candidateCount = page.candidates().isEmpty() ? page.nodeCandidates().size() : page.candidates().size();
+        boolean hasPrevious = (candidateList ? session.candidatePageIndex > 0 : page.hasPrevious()) && !session.loading;
         control(items, actions, PREVIOUS_SLOT,
                 hasPrevious ? Items.ARROW : Items.GRAY_STAINED_GLASS_PANE,
                 hasPrevious ? "Previous page" : "Previous page unavailable",
                 hasPrevious ? new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.PREVIOUS_PAGE, 0) : null);
         List<String> pageLore = new ArrayList<>(List.of(page.targetDescription(),
-                "Window: " + page.window().describe()));
+                t("browser.window", "Window: {0}", page.window().describe())));
         pageLore.add(page.resolution() == TracePage.Resolution.AMBIGUOUS
-                ? "Candidate list capped at 10 matches."
-                : "Up to " + pageSize() + " timeline entries per page.");
+                ? t("browser.candidate_cap", "Candidate list capped at 10 matches.")
+                : t("browser.timeline_page_size", "Up to {0} timeline entries per page.", pageSize()));
+        int shownPage = candidateList ? session.candidatePageIndex + 1 : session.pageIndex + 1;
+        String pageTitle = candidateList
+                ? t("browser.candidate_title", "Candidates {0}{1}", shownPage,
+                        session.loading ? t("browser.loading_suffix", " (loading)") : "")
+                : t("browser.page_title", "Page {0}{1}", shownPage,
+                        session.loading ? t("browser.loading_suffix", " (loading)") : "");
         items.set(PAGE_LABEL_SLOT, display(Items.PAPER,
-                "Page " + (session.pageIndex + 1) + (session.loading ? " (loading)" : ""), pageLore));
+                pageTitle, pageLore));
         control(items, actions, BACK_OR_CLOSE_SLOT, Items.BARRIER, "Close flow browser",
                 new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.CLOSE, 0));
         control(items, actions, NEXT_SLOT,
-                page.hasNext() && !session.loading ? Items.ARROW : Items.GRAY_STAINED_GLASS_PANE,
-                page.hasNext() && !session.loading ? "Next page" : "Next page unavailable",
-                page.hasNext() && !session.loading
+                (candidateList ? (session.candidatePageIndex + 1) * page.pageSize() < candidateCount : page.hasNext())
+                        && !session.loading ? Items.ARROW : Items.GRAY_STAINED_GLASS_PANE,
+                (candidateList ? (session.candidatePageIndex + 1) * page.pageSize() < candidateCount : page.hasNext())
+                        && !session.loading ? "Next page" : "Next page unavailable",
+                (candidateList ? (session.candidatePageIndex + 1) * page.pageSize() < candidateCount : page.hasNext())
+                        && !session.loading
                         ? new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.NEXT_PAGE, 0) : null);
 
+        sendPageCompanion(player, page, candidateList ? session.candidatePageIndex : session.pageIndex);
         openMenu(player, menuTitle(page), items, actions,
                 (clickingPlayer, action) -> handlePageAction(clickingPlayer, session, action));
     }
 
+    /**
+     * A vanilla chest menu renders item names only on hover. Send the current page rows
+     * as numbered chat lines so each slot has a persistent, readable label at normal
+     * scale. The row number is also the one-based menu slot number.
+     */
+    static List<String> pageCompanionLines(TracePage page, int pageIndex) {
+        return pageCompanionLines(page, pageIndex, 0);
+    }
+
+    static List<String> pageCompanionLines(TracePage page, int pageIndex, int candidatePageIndex) {
+        List<String> lines = new ArrayList<>();
+        String pagePrefix = t("browser.page_prefix", "[ItemGraph] Flow browser {0} {1} — ",
+                page.resolution() == TracePage.Resolution.AMBIGUOUS
+                        ? t("browser.candidate_page", "candidate page") : t("browser.page", "page"), pageIndex + 1);
+        if (page.resolution() == TracePage.Resolution.AMBIGUOUS) {
+            if (!page.candidates().isEmpty()) {
+                int start = candidatePageIndex * page.pageSize();
+                for (int i = start; i < Math.min(start + page.pageSize(), page.candidates().size()); i++) {
+                    FingerprintRef candidate = page.candidates().get(i);
+                    lines.add((i == start ? pagePrefix : "[ItemGraph] ") + t("browser.ambiguous_candidate",
+                            "{0}. AMBIGUOUS candidate — {1}", i - start + 1, safeIdentity(candidate)));
+                }
+            } else {
+                int start = candidatePageIndex * page.pageSize();
+                for (int i = start; i < Math.min(start + page.pageSize(), page.nodeCandidates().size()); i++) {
+                    NodeRef candidate = page.nodeCandidates().get(i);
+                    lines.add((i == start ? pagePrefix : "[ItemGraph] ") + t("browser.ambiguous_node_candidate",
+                            "{0}. AMBIGUOUS node candidate — {1}", i - start + 1, candidate.describeShort()));
+                }
+            }
+            if (lines.isEmpty()) lines.add(pagePrefix + t("browser.ambiguous_empty", "AMBIGUOUS — no candidate details were recorded."));
+        } else if (page.resolution() == TracePage.Resolution.NOT_FOUND) {
+            lines.add(pagePrefix + t("browser.not_found", "UNRESOLVED — no matching item, player, or container was recorded."));
+        } else if (page.hops().isEmpty()) {
+            lines.add(pagePrefix + t("browser.empty", "UNRESOLVED — no observed or inferred movement was recorded in this window."));
+        } else {
+            for (int i = 0; i < Math.min(page.pageSize(), page.hops().size()); i++) {
+                TraceHop hop = page.hops().get(i);
+                String evidence = companionEvidenceClass(hop);
+                String eventKind = hop.source() == TraceHop.Source.TRANSFORMATION
+                        ? safeSummary(hop.detail(), 48) : isAmbiguousSourceGroup(hop)
+                            ? "ambiguous source group; no independent quantity capacity"
+                            : safeSummary(hop.detail(), 48);
+                String interval = hop.endMs() > hop.timestampMs()
+                        ? QueryFormatter.formatTime(hop.timestampMs()) + " to " + QueryFormatter.formatTime(hop.endMs())
+                        : QueryFormatter.formatTime(hop.timestampMs());
+                lines.add((i == 0 ? pagePrefix : "[ItemGraph] ") + t("browser.row",
+                        "{0}. {1} — {2} — {3} — {4}", i + 1, evidence, safeIdentity(hop.item()), eventKind, interval));
+            }
+        }
+        return List.copyOf(lines);
+    }
+
+    static String companionEvidenceClass(TraceHop hop) {
+        if (hop.source() == TraceHop.Source.TRANSFORMATION) return "OBSERVED / TRANSFORMATION";
+        if (hop.kind() == TraceHop.Kind.INFERRED) {
+            return "INFERRED conf=" + QueryFormatter.formatConfidence(hop.confidence());
+        }
+        return isAmbiguousSourceGroup(hop) ? "OBSERVED / AMBIGUOUS SOURCE GROUP" : "OBSERVED";
+    }
+
+    private static boolean isAmbiguousSourceGroup(TraceHop hop) {
+        return hop.kind() == TraceHop.Kind.OBSERVED && hop.detail() != null
+                && hop.detail().contains("[source group ambiguous #");
+    }
+
+    private static void sendPageCompanion(ServerPlayer player, TracePage page, int pageIndex) {
+        int candidatePageIndex = page.resolution() == TracePage.Resolution.AMBIGUOUS ? pageIndex : 0;
+        for (String line : pageCompanionLines(page, pageIndex, candidatePageIndex)) {
+            player.sendSystemMessage(Component.literal(line));
+        }
+    }
+
+    private static String safeIdentity(FingerprintRef fingerprint) {
+        if (fingerprint == null || !fingerprint.resolved()) return t("browser.identity_unavailable", "item identity unavailable");
+        String identity = (fingerprint.customName() == null || fingerprint.customName().isBlank())
+                ? fingerprint.itemId() : fingerprint.customName() + " (" + fingerprint.itemId() + ")";
+        return safeSummary(identity, 72);
+    }
+
+    private static String safeSummary(String value, int maxLength) {
+        if (value == null || value.isBlank()) return t("browser.event_kind_unavailable", "event kind unavailable");
+        String singleLine = value.replaceAll("[\\r\\n\\p{Cntrl}]", " ").trim();
+        return singleLine.length() <= maxLength ? singleLine : singleLine.substring(0, maxLength - 3) + "...";
+    }
+
     private static void handlePageAction(ServerPlayer player, BrowserSession session, FlowBrowserMenu.Action action) {
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUseAll(player.createCommandSourceStack(), ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT)) {
             player.closeContainer();
             return;
         }
@@ -251,6 +357,7 @@ public final class FlowBrowserService {
                         && action.index() < session.page.candidates().size()) {
                     session.target = session.target.forFingerprint(session.page.candidates().get(action.index()).id());
                     session.pageIndex = 0;
+                    session.candidatePageIndex = 0;
                     loadPage(player.createCommandSourceStack(), session, null,
                             TracePage.Direction.FORWARD, 0);
                 }
@@ -260,18 +367,31 @@ public final class FlowBrowserService {
                         && action.index() < session.page.nodeCandidates().size()) {
                     session.target = session.target.forNode(session.page.nodeCandidates().get(action.index()).id());
                     session.pageIndex = 0;
+                    session.candidatePageIndex = 0;
                     loadPage(player.createCommandSourceStack(), session, null,
                             TracePage.Direction.FORWARD, 0);
                 }
             }
             case PREVIOUS_PAGE -> {
-                if (session.page != null && session.page.hasPrevious() && !session.loading) {
+                if (session.page != null && session.page.resolution() == TracePage.Resolution.AMBIGUOUS
+                        && session.candidatePageIndex > 0 && !session.loading) {
+                    session.candidatePageIndex--;
+                    showPage(player, session);
+                } else if (session.page != null && session.page.hasPrevious() && !session.loading) {
                     loadPage(player.createCommandSourceStack(), session, session.page.previousCursor(),
                             TracePage.Direction.BACKWARD, session.pageIndex - 1);
                 }
             }
             case NEXT_PAGE -> {
-                if (session.page != null && session.page.hasNext() && !session.loading) {
+                if (session.page != null && session.page.resolution() == TracePage.Resolution.AMBIGUOUS
+                        && !session.loading) {
+                    int candidates = session.page.candidates().isEmpty()
+                            ? session.page.nodeCandidates().size() : session.page.candidates().size();
+                    if ((session.candidatePageIndex + 1) * session.page.pageSize() < candidates) {
+                        session.candidatePageIndex++;
+                        showPage(player, session);
+                    }
+                } else if (session.page != null && session.page.hasNext() && !session.loading) {
                     loadPage(player.createCommandSourceStack(), session, session.page.nextCursor(),
                             TracePage.Direction.FORWARD, session.pageIndex + 1);
                 }
@@ -287,11 +407,12 @@ public final class FlowBrowserService {
         }
         browser.loading = true;
         AbstractContainerMenu expectedMenu = player.containerMenu;
-        int accepted = QueryDispatcher.dispatchData(player.createCommandSourceStack(), "gui detail",
+        int accepted = QueryDispatcher.dispatchData(player.createCommandSourceStack(), List.of(ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT), "gui detail",
                 conn -> detailLines(conn, hop),
                 (source, lines) -> {
                     browser.loading = false;
-                    if (source.getEntity() instanceof ServerPlayer viewer && source.hasPermission(2)
+                    if (source.getEntity() instanceof ServerPlayer viewer
+                            && ItemGraphPermissions.canUseAll(source, ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT)
                             && viewer.containerMenu == expectedMenu) {
                         DetailSession detail = new DetailSession(browser, detailTitle(hop), lines, 0);
                         showDetails(viewer, detail);
@@ -313,18 +434,18 @@ public final class FlowBrowserService {
                     .orElseGet(() -> List.of(QueryFormatter.explainNotFound(hop.refId())));
             case TRANSFORMATION -> List.of(
                     "[OBSERVED] TRANSFORMATION #" + hop.refId(),
-                    "time: " + QueryFormatter.formatTime(hop.timestampMs()),
-                    "quantity: " + hop.amount() + "x",
-                    "item: " + (hop.item() == null ? "(no related fingerprint)" : hop.item().describeFull()),
-                    "stored details: " + hop.detail());
+                    t("browser.detail.time", "time: {0}", QueryFormatter.formatTime(hop.timestampMs())),
+                    t("browser.detail.quantity", "quantity: {0}x", hop.amount()),
+                    t("browser.detail.item", "item: {0}", hop.item() == null ? "(no related fingerprint)" : hop.item().describeFull()),
+                    t("browser.detail.stored_details", "stored details: {0}", hop.detail()));
         };
     }
 
     private static String detailTitle(TraceHop hop) {
         return switch (hop.source()) {
-            case OBSERVATION -> "Observation #" + hop.refId();
-            case TRANSFORMATION -> "Transformation #" + hop.refId();
-            case INFERRED_EDGE -> "Inference edge #" + hop.refId();
+            case OBSERVATION -> t("browser.detail.observation", "Observation #{0}", hop.refId());
+            case TRANSFORMATION -> t("browser.detail.transformation", "Transformation #{0}", hop.refId());
+            case INFERRED_EDGE -> t("browser.detail.inference_edge", "Inference edge #{0}", hop.refId());
         };
     }
 
@@ -341,15 +462,17 @@ public final class FlowBrowserService {
         boolean hasNext = end < detail.lines().size();
         control(items, actions, PREVIOUS_SLOT,
                 hasPrevious ? Items.ARROW : Items.GRAY_STAINED_GLASS_PANE,
-                hasPrevious ? "Previous detail page" : "Previous detail page unavailable",
+                hasPrevious ? t("browser.detail.previous", "Previous detail page")
+                        : t("browser.detail.previous_unavailable", "Previous detail page unavailable"),
                 hasPrevious ? new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.DETAIL_PREVIOUS, 0) : null);
         items.set(PAGE_LABEL_SLOT, display(Items.PAPER,
-                "Details " + (detail.pageIndex() + 1), List.of(detail.title())));
-        control(items, actions, BACK_OR_CLOSE_SLOT, Items.BARRIER, "Back to flow timeline",
+                t("browser.detail.title", "Details {0}", detail.pageIndex() + 1), List.of(detail.title())));
+        control(items, actions, BACK_OR_CLOSE_SLOT, Items.BARRIER, t("browser.detail.back", "Back to flow timeline"),
                 new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.DETAIL_BACK, 0));
         control(items, actions, NEXT_SLOT,
                 hasNext ? Items.ARROW : Items.GRAY_STAINED_GLASS_PANE,
-                hasNext ? "Next detail page" : "Next detail page unavailable",
+                hasNext ? t("browser.detail.next", "Next detail page")
+                        : t("browser.detail.next_unavailable", "Next detail page unavailable"),
                 hasNext ? new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.DETAIL_NEXT, 0) : null);
         openMenu(player, detail.title(), items, actions,
                 (clickingPlayer, action) -> handleDetailAction(clickingPlayer, detail, action));
@@ -357,7 +480,7 @@ public final class FlowBrowserService {
 
     private static void handleDetailAction(ServerPlayer player, DetailSession detail,
                                            FlowBrowserMenu.Action action) {
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUseAll(player.createCommandSourceStack(), ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT)) {
             player.closeContainer();
             return;
         }
@@ -390,7 +513,7 @@ public final class FlowBrowserService {
 
     private static void control(List<ItemStack> items, Map<Integer, FlowBrowserMenu.Action> actions,
                                 int slot, Item item, String label, FlowBrowserMenu.Action action) {
-        items.set(slot, display(item, label, List.of("Flow browser control")));
+        items.set(slot, display(item, localizeControl(label), List.of(t("browser.control_lore", "Flow browser control"))));
         if (action != null) {
             actions.put(slot, action);
         }
@@ -406,44 +529,44 @@ public final class FlowBrowserService {
                 ? provenance + " TRANSFORMATION #" + hop.refId() + " " + hop.amount() + "x"
                 : provenance + " " + hop.amount() + "x " + itemDescription;
         List<String> lore = new ArrayList<>();
-        lore.add("Amount: " + hop.amount() + "x");
+        lore.add(t("browser.amount", "Amount: {0}x", hop.amount()));
         if (hop.endMs() > hop.timestampMs()) {
-            lore.add("Time window: " + QueryFormatter.formatTime(hop.timestampMs())
-                    + " -> " + QueryFormatter.formatTime(hop.endMs()));
+            lore.add(t("browser.time_window", "Time window: {0} -> {1}", QueryFormatter.formatTime(hop.timestampMs()),
+                    QueryFormatter.formatTime(hop.endMs())));
         } else {
-            lore.add("Time: " + QueryFormatter.formatTime(hop.timestampMs()));
+            lore.add(t("browser.time", "Time: {0}", QueryFormatter.formatTime(hop.timestampMs())));
         }
-        lore.add("From: " + (hop.origin() == null ? "(none recorded)" : hop.origin().describeShort()));
-        lore.add("To: " + (hop.destination() == null ? "(none recorded)" : hop.destination().describeShort()));
+        lore.add(t("browser.from", "From: {0}", hop.origin() == null ? "(none recorded)" : hop.origin().describeShort()));
+        lore.add(t("browser.to", "To: {0}", hop.destination() == null ? "(none recorded)" : hop.destination().describeShort()));
         lore.add(switch (hop.source()) {
-            case OBSERVATION -> "Evidence: observation #" + hop.refId();
-            case TRANSFORMATION -> "Evidence: transformation #" + hop.refId();
-            case INFERRED_EDGE -> "Inference edge #" + hop.refId();
+            case OBSERVATION -> t("browser.evidence_observation", "Evidence: observation #{0}", hop.refId());
+            case TRANSFORMATION -> t("browser.evidence_transformation", "Evidence: transformation #{0}", hop.refId());
+            case INFERRED_EDGE -> t("browser.inference_edge", "Inference edge #{0}", hop.refId());
         });
         if (transformation && hop.item() != null) {
-            lore.add("Related fingerprint: " + hop.item().describeFull());
+            lore.add(t("browser.related_fingerprint", "Related fingerprint: {0}", hop.item().describeFull()));
         }
-        lore.add("Details: " + hop.detail());
+        lore.add(t("browser.details", "Details: {0}", hop.detail()));
         ItemStack icon = transformation ? new ItemStack(Items.PAPER) : icon(hop.item());
         return display(icon, title, lore);
     }
 
     private static ItemStack fingerprintItem(FingerprintRef fingerprint) {
         List<String> lore = new ArrayList<>();
-        lore.add("Fingerprint #" + fingerprint.id());
+        lore.add(t("browser.fingerprint_id", "Fingerprint #{0}", fingerprint.id()));
         if (fingerprint.fingerprintHash() != null) {
-            lore.add("Hash: " + fingerprint.fingerprintHash());
+            lore.add(t("browser.hash", "Hash: {0}", fingerprint.fingerprintHash()));
         }
-        lore.add("Select to open this item's flow.");
-        return display(icon(fingerprint), "Select " + fingerprint.describe(), lore);
+        lore.add(t("browser.select_fingerprint", "Select to open this item's flow."));
+        return display(icon(fingerprint), t("browser.select_item", "Select {0}", fingerprint.describe()), lore);
     }
 
     private static ItemStack nodeCandidateItem(NodeRef node) {
         Item icon = "PLAYER".equals(node.nodeType()) ? Items.PLAYER_HEAD : Items.CHEST;
-        return display(icon, "Select " + node.describe(), List.of(
-                "Node ID: " + node.id(),
-                "Type: " + node.nodeType(),
-                "Dimension: " + node.levelId()));
+        return display(icon, t("browser.select_node", "Select {0}", node.describe()), List.of(
+                t("browser.node_id", "Node ID: {0}", node.id()),
+                t("browser.node_type", "Type: {0}", node.nodeType()),
+                t("browser.dimension", "Dimension: {0}", node.levelId())));
     }
 
     private static ItemStack icon(FingerprintRef fingerprint) {
@@ -463,6 +586,7 @@ public final class FlowBrowserService {
     }
 
     private static ItemStack display(ItemStack stack, String name, List<String> lore) {
+        // Names and lore may contain raw item/node values; translate only their authored template segments.
         stack.set(DataComponents.CUSTOM_NAME, Component.literal(name));
         if (!lore.isEmpty()) {
             stack.set(DataComponents.LORE, new ItemLore(
@@ -473,14 +597,13 @@ public final class FlowBrowserService {
 
     static String menuTitle(TracePage page) {
         if (page.fingerprint() != null && page.fingerprint().resolved()) {
-            return "ItemGraph: item #" + page.fingerprint().id();
+            return t("browser.title_item", "ItemGraph: item #{0}", page.fingerprint().id());
         }
         if (page.targetNode() != null && page.targetNode().resolved()) {
-            return "ItemGraph: "
-                    + page.targetNode().nodeType().toLowerCase(Locale.ROOT)
-                    + " #" + page.targetNode().id();
+            return t("browser.title_node", "ItemGraph: {0} #{1}",
+                    page.targetNode().nodeType().toLowerCase(Locale.ROOT), page.targetNode().id());
         }
-        return shortText("ItemGraph: " + page.targetDescription(), 40);
+        return shortText(t("browser.title_target", "ItemGraph: {0}", page.targetDescription()), 40);
     }
 
     private static String shortText(String line) {
@@ -491,10 +614,25 @@ public final class FlowBrowserService {
         return line.length() <= maxLength ? line : line.substring(0, maxLength - 3) + "...";
     }
 
+    private static String t(String key, String english, Object... arguments) {
+        return ItemGraphLanguage.text(key, english, arguments);
+    }
+
+    private static String localizeControl(String label) {
+        return switch (label) {
+            case "Previous page" -> t("browser.previous", "Previous page");
+            case "Previous page unavailable" -> t("browser.previous_unavailable", "Previous page unavailable");
+            case "Next page" -> t("browser.next", "Next page");
+            case "Next page unavailable" -> t("browser.next_unavailable", "Next page unavailable");
+            case "Close flow browser" -> t("browser.close", "Close flow browser");
+            default -> label;
+        };
+    }
+
     private static void openMenu(ServerPlayer player, String title, List<ItemStack> items,
                                  Map<Integer, FlowBrowserMenu.Action> actions,
                                  java.util.function.BiConsumer<ServerPlayer, FlowBrowserMenu.Action> handler) {
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUseAll(player.createCommandSourceStack(), ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT)) {
             player.closeContainer();
             return;
         }
@@ -503,7 +641,7 @@ public final class FlowBrowserService {
                         containerId, inventory, items, actions, handler),
                 Component.literal(title))).isPresent();
         if (!opened) {
-            player.sendSystemMessage(Component.literal("[ItemGraph] Could not open the flow browser."));
+            player.sendSystemMessage(Component.literal(ItemGraphLanguage.text("flow.browser.open_failed", "[ItemGraph] Could not open the flow browser.")));
         }
     }
 }

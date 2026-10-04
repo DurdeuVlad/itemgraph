@@ -5,6 +5,7 @@ import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.command.ItemGraphCommands;
+import com.itemgraph.command.ItemGraphPermissions;
 import com.itemgraph.ingest.InternalObservationService;
 import com.mojang.authlib.GameProfile;
 import net.minecraft.SharedConstants;
@@ -60,6 +61,7 @@ class FabricNativeAuditEventListenerTest {
     @AfterEach
     void clearInspectionState() {
         inspections.clear();
+        ItemGraphPermissions.setChecker(null);
     }
 
     @Test
@@ -553,6 +555,22 @@ class FabricNativeAuditEventListenerTest {
         assertNull(FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, l, pos) -> 1, player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
         assertFalse(inspections.isEnabled(playerUuid));
+    }
+
+    @Test
+    void explicitInspectNodeDenialDisablesModeAndDoesNotOpenHistory() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        AtomicInteger opens = new AtomicInteger();
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.INSPECT));
+
+        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, level, pos) -> { opens.incrementAndGet(); return 1; },
+                player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
+
+        assertFalse(inspections.isEnabled(playerUuid));
+        assertEquals(0, opens.get(), "the named inspect denial must override vanilla operator status");
     }
 
     private ServerPlayer playerWithPermission(UUID uuid, boolean permitted) {

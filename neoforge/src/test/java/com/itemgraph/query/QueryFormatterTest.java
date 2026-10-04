@@ -10,6 +10,28 @@ import static org.junit.jupiter.api.Assertions.*;
 class QueryFormatterTest {
 
     @Test
+    void localizedObservationKeepsForensicValuesAndChangesOnlyAuthoredLabels() {
+        NodeRef origin = new NodeRef(1, "PLAYER", "Alice", "minecraft:overworld", null, null, null);
+        FingerprintRef fp = new FingerprintRef(1, "minecraft:diamond_sword", "Excalibur", "hash123");
+        ObservationDetail obs = new ObservationDetail(
+                42L, "GRIEFLOGGER", 999L, 1_000_000L, origin, null, fp,
+                "DROP_ITEM", 4, null, null, null);
+
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("nl_nl");
+        List<String> nl = QueryFormatter.formatEvent(obs);
+        assertTrue(nl.stream().anyMatch(line -> line.contains("tijd:") && line.contains("1970-01-01 00:16:40 UTC")));
+        assertTrue(nl.stream().anyMatch(line -> line.contains("DROP_ITEM") && line.contains("4x")));
+        assertTrue(nl.stream().anyMatch(line -> line.contains("minecraft:diamond_sword") && line.contains("Excalibur")));
+
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("zh_tw");
+        List<String> zh = QueryFormatter.formatEvent(obs);
+        assertTrue(zh.stream().anyMatch(line -> line.contains("時間：") && line.contains("1970-01-01 00:16:40 UTC")));
+        assertTrue(zh.stream().anyMatch(line -> line.contains("DROP_ITEM") && line.contains("4x")));
+        assertTrue(zh.stream().anyMatch(line -> line.contains("minecraft:diamond_sword") && line.contains("Excalibur")));
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
+    }
+
+    @Test
     void testFormatTime() {
         assertEquals("1970-01-01 00:00:00 UTC", QueryFormatter.formatTime(0L));
         assertEquals("2023-11-14 22:13:20 UTC", QueryFormatter.formatTime(1_700_000_000_000L));

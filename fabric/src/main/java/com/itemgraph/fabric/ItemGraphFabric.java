@@ -3,6 +3,7 @@ package com.itemgraph.fabric;
 import com.itemgraph.api.ItemGraphApiLifecycle;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.ItemGraphCommands;
+import com.itemgraph.command.ItemGraphPermissions;
 import com.itemgraph.core.port.RuntimeInformationPort;
 import com.itemgraph.correlation.CorrelationEngine;
 import com.itemgraph.db.DatabaseManager;
@@ -10,6 +11,7 @@ import com.itemgraph.ingest.GriefLoggerAdapter;
 import com.itemgraph.ingest.IngestionService;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.api.ModInitializer;
+import me.lucko.fabric.api.permissions.v0.Permissions;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -41,6 +43,7 @@ public final class ItemGraphFabric implements ModInitializer {
             }
         };
         ItemGraphCommands.setRuntimeInformation(runtimeInformation);
+        ItemGraphPermissions.setChecker((source, node) -> Permissions.check(source, node, 2));
         ItemGraphApiLifecycle.setRuntimeInformation(runtimeInformation);
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
@@ -56,6 +59,8 @@ public final class ItemGraphFabric implements ModInitializer {
     private void onServerStarting(MinecraftServer server) {
         try {
             config = FabricItemGraphConfig.load(FABRIC.getGameDir(), FABRIC.getConfigDir());
+            com.itemgraph.command.CommandHelp.initializeMessages();
+            com.itemgraph.i18n.ItemGraphLanguage.setLocale(config.language());
         } catch (IOException e) {
             throw new IllegalStateException("Could not load config/itemgraph.properties", e);
         }

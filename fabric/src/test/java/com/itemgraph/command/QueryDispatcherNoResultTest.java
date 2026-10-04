@@ -64,7 +64,7 @@ class QueryDispatcherNoResultTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        int result = QueryDispatcher.dispatch(source, "lookup", connection ->
+        int result = QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "lookup", connection ->
                 QueryDispatcher.QueryOutput.notFound("[ItemGraph] No recorded history found."));
 
         assertEquals(1, result, "the command reports asynchronous query acceptance");

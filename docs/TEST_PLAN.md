@@ -1,5 +1,15 @@
 # Test Plan
 
+## Locale startup and message checks
+
+Focused unit checks validate supported locale normalization, reject `zh_cn` and
+unknown values with a `general.language` diagnostic, verify server-owned Dutch
+messages, exercise per-key English fallback, and check that formatted item/evidence
+identifiers, timestamps, quantities, and evidence-class values remain exact
+across locale selection. NeoForge and Fabric startup paths apply the selected
+locale before database initialization. An isolated no-network live server test
+and a full audit of every user-visible message surface remain batch-end checks.
+
 ## Objective
 
 ItemGraph must be reliable enough for moderation disputes.
@@ -749,6 +759,9 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue/stop admission race, 2,000-record worker persistence, shutdown flush, confirmed-loss and unknown-commit accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
 | `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
+| `ItemGraphCommandsHelpTest`, `FabricItemGraphCommandsParityTest` | provider-absent level-2 fallback on each loader; root plus lookup grants for a level-1 user; explicit denials for inspect, page, trace, event, explain, audit, GUI, ingest, and import; help topic exposes exact lookup delegation nodes |
+| `QueryDispatcherTest` | named trace permission is revoked after query submission and before server-thread delivery; level-1 lookup without audit permission cannot run a broad/protected query or reveal rows/has-next metadata; entity-less off-thread delivery drops results and actions when audit permission is revoked during the wait |
+| `FlowBrowserMenuTest`, `InspectionListenerTest`, `FabricNativeAuditEventListenerTest` | explicit GUI denial blocks menu navigation and closes the menu; explicit inspect denial clears inspection mode and prevents lookup on both loaders |
 | `ItemGraphConfigTest` | default values, config paths and metadata, strict NeoForge type/range rejection, and NightConfig default correction without clamping invalid supplied values (8 tests) |
 | `ItemGraphOperationalSettingsTest`, `ItemGraphConfigTest`, `FabricItemGraphConfigTest`, `QueryLimitsTest`, `TraceQueryServiceTest.configuredPageCapConstrainsSqlBackedTracePages` | fail-closed operational bounds and policies, both-loader defaults/custom values, Fabric config re-read creates the next startup snapshot, NeoForge worker guard against live setting changes and application after worker stop, atomic rejection without changing the query cap, capture controls, query cap on command and SQL-backed GUI pages, queue idle poll/batch/flush-tick/heartbeat settings, and retention invariants |
 | `FabricItemGraphPageDispatchTest` | executed `/ig page` and `/itemgraph page` failures for missing, malformed, and expired explicit sessions; expired-session owner-map cleanup; cross-player token denial without invalidating the owner's session; and permission-level-2 enforcement on both roots |
@@ -769,7 +782,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ContainerInteractionTrackerTest`, `ContainerSessionListenerTest` | open/close net deltas, timestamp intervals, multi-viewer ambiguity, capability-credit subtraction, and zero-net limitation (14 + 1 tests) |
 | `V9InternalObservationDedupTest`, `V10InternalDedupEntityUuidTest` | partial-index, UUID, destination-sensitive dedup, NULL-UUID preservation, and V11 idempotence (5 + 6 tests) |
 | `ItemEntityEventListenerPartialPickupTest` | pending-pickup resolution: emit on reduced count, drop on removal/expiry, keep while unchanged |
-| `FlowBrowserMenuTest` | vanilla six-row menu type, compact resolved-menu titles, textual provenance/confidence/evidence labels, every click category rejected or handled as navigation/detail only, and permission recheck (3 tests) |
+| `FlowBrowserMenuTest` | vanilla six-row menu type, compact resolved-menu titles, textual provenance/confidence/evidence labels, numbered nine-row chat companion with UTC timestamps and safe identity fallbacks, every click category rejected or handled as navigation/detail only, and permission recheck |
 | `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container and `/ig inspect` command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
 | `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest`, `FabricNativeAuditEventListenerTest` | per-player inspect state, deterministic command forms, permission denial, block-history fallback, exact Container-to-flow-browser routing on both loaders, browser-queue rejection fallback, NeoForge logout and Fabric disconnect handlers, and canceled-click isolation from session tracking |
 | `ItemGraphCommandsHelpTest` | bare-root overview, every help topic, invalid-topic diagnostics, permission denial, registered-path/help synchronization, literal/player/item/dimension suggestions, published filter examples under both roots, aliases and bounds, value completion, page-session expiry, and vanilla `ClientboundCommandsPacket` command-tree encode/decode (expanded in #24) |
@@ -1432,4 +1445,21 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
   off-thread inline-executor case deterministic. The focused test passed, and the complete
   NeoForge/Fabric unit and GameTest batch passed again after this test-only correction. No
   production code changed for this CI fix; a new CI run on the corrected commit is pending.
+
+## M8 issues #138 and #146: structured chat and scannable flow rows
+
+- `QueryDispatcherTest.structuredChatHoverAddsBoundedSafeFieldsWithoutChangingVisibleFormatterText`
+  and `FabricItemGraphPageDispatchTest.fabricChatBoundaryPreservesVisibleQueryLineAndUsesStructuredSafeHoverFields`
+  cover unchanged visible `QueryFormatter` output, typed hover fields, UTC time, canonical fingerprint hash,
+  field bounds, and omission of NBT/component payloads on both loaders.
+- `QueryDispatcherTest.resultLocationTokenIsPlayerScopedOneUseAndRechecksOriginPermission`
+  covers cross-player replay rejection, permission revocation at click time, and one-use teleport action.
+  `locationActionRejectsMissingDimensionAndNonFiniteCoordinates` covers invalid dimension and non-finite
+  target rejection, while click handling rejects dimensions not loaded by the server.
+- `FlowBrowserMenuTest.pageCompanionLabelsObservedInferredAndUnresolvedRowsWithoutExposingRawMetadata`
+  and `pageCompanionKeepsAmbiguousTransformationAndUnresolvedStatesDistinct` cover observed, inferred,
+  ambiguous source-group, recorded transformation type, missing fingerprint, unresolved target/empty page,
+  UTC labels, and preservation of resolver candidate ten on its own nine-row page.
+- Required post-batch checks are focused NeoForge and Fabric unit tests plus both-loader main/test compilation.
+  Full loader suites, GameTests, and client screenshot replay remain deferred to the M8 milestone-end batch.
 

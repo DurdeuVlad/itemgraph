@@ -63,7 +63,7 @@ public class InspectionListener {
         if (level.isClientSide() || !inspections.isEnabled(player.getUUID())) {
             return;
         }
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
             return;
         }
@@ -95,7 +95,7 @@ public class InspectionListener {
         if (level.isClientSide() || !inspections.isEnabled(player.getUUID())) {
             return;
         }
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
             return;
         }
