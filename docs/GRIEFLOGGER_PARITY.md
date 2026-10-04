@@ -845,8 +845,10 @@ The connecting client was a NeoForge 1.21.1 client instrumented with MC Pilot
 0.15.0 (MCT client mod 0.9.1); it had no ItemGraph client mod. This exercises
 the actual client-to-server command path and rendered chat, but is not an
 unmodified vanilla client.
-This connected replay used NeoForge only; Fabric has automated command
-coverage, but no live Fabric server/client replay was performed.
+This initial connected replay covered NeoForge. The supplemental Fabric MCT
+replay below exercises the published examples through both command roots and
+adds live paging, permission, and inspector checks on a standalone Fabric
+server.
 
 | Replay | `/ig` | `/itemgraph` | Observed result |
 | --- | --- | --- | --- |
@@ -872,17 +874,17 @@ cannot pair every no-match result to its originating root. Automated Fabric and
 NeoForge tests separately assert that all 15 examples parse completely under
 both roots.
 The independent automated Fabric and NeoForge command suites remain the source
-for syntax, suggestion, permission, and loader-specific regression assertions;
-this replay adds connected-client evidence for rendered behavior. It does not
-claim physical clicking of page controls or inspector world targets.
+for syntax, suggestion, and loader-specific regression assertions; the live
+replays add connected-client evidence for rendered behavior. The Fabric MCT
+supplement below includes physical clicks on paging and inspector targets.
 
-This replay is not the unmodified vanilla-client run required by issue #24, and
-it did not separately replay the pinned GriefLogger 26.2 source fixtures in the
-live client. Issues [#43](https://github.com/DurdeuVlad/itemgraph/issues/43)
-and [#54](https://github.com/DurdeuVlad/itemgraph/issues/54) are closed; their
-compatibility-profile and exact-release fixture evidence remains covered by the
-repository validators and automated tests. Do not treat this live replay alone
-as satisfying the remaining issue #24 verification gate.
+The clients are MC Pilot-instrumented, not unmodified vanilla clients. The live
+servers did not load a GriefLogger jar or open its database. Closed issues
+[#43](https://github.com/DurdeuVlad/itemgraph/issues/43) and
+[#54](https://github.com/DurdeuVlad/itemgraph/issues/54) establish the selected
+26.2 source decisions and exact 1.2.10-1.21.1 release target; CI validates both
+without installing GriefLogger in the live environment. The Fabric live replay
+and inspector evidence follow below.
 
 No release artifact was built and no version was changed for this verification.
 
@@ -910,6 +912,32 @@ evidence output in chat and did not open a mutable container GUI:
 All database inspection used SQLite read-only mode with `PRAGMA query_only=ON`.
 This confirms NeoForge inspector interactions against the standalone runtime and
 adds live evidence for the block, container, and gameplay-suppression cases.
-It does not replace an unmodified vanilla-client run or a live replay of the
-pinned GriefLogger 1.2.10 release fixtures; issue #24 retains those explicit
-limitations until its verification contract is revised or the checks are run.
+
+## Fabric MCT client replay — 2026-10-04
+
+The companion Fabric run used the same ItemGraph PR head in an isolated
+Minecraft 1.21.1 server with Fabric Loader 0.16.9 and Fabric API. The loaded
+mod list included ItemGraph, Minecraft, Fabric Loader/API, and Mixin support;
+GriefLogger was absent. The server initialized ItemGraph schema 21. MC Pilot
+0.15.0 controlled the connected Fabric client
+`itemgraph-qa-fabric-1.21.1` (MCT client mod 0.9.1, no ItemGraph client mod).
+
+| Replay | Evidence | Result |
+| --- | --- | --- |
+| 15 published filter examples under `/ig` and 15 under `/itemgraph` | MC Pilot recorded 30 query headers. Read-only SQLite found exactly 15 durable `COMMAND_ATTEMPT` rows for each root. | Both live Fabric command roots processed every published example. |
+| Positive, empty, and paged queries | `/ig lookup radius.50` rendered `[Next]`. The visible screenshot showed the underlined link and `run_command` action. A physical MCT click on `[Next]` returned page 2 controls; a physical click on `[Previous]` returned page 1 controls. | Paging worked through rendered chat controls, not only command dispatch. |
+| Invalid page `ig page 0` | The server returned localized Brigadier `argument.integer.low` (`[1,0]`) and highlighted the invalid argument. | Page zero is rejected at the command boundary. |
+| Non-operator `ig lookup radius.50` and `itemgraph help` | A separate connected `ItemGraphVisitor` client received native unknown-command responses for both roots. | The Fabric command tree hides ItemGraph commands from non-operators. |
+| Double-chest inspection | MCT placed the two halves in-game. `block get` reported `RIGHT` at `(120,65,291)` and `LEFT` at `(120,65,292)`, both facing west. Clicking each half returned its exact coordinate and evidence across both halves; `gui info` returned `open=false`. | Both halves inspect the merged container while its mutable GUI stays closed. |
+| Stone break attempt at `(121,64,291)` with inspection on | The client rendered the exact inspect query and no-match response. The immediate MCT break result said air, but the server-side conditional emitted `FABRIC_INSPECT_TEST_STONE_PRESENT`. Read-only SQLite found no audit row at the block and no observation in the click window. | The server retained the block and the click created no block-break or item-flow evidence. |
+| Disconnect and database close | Read-only SQLite found one `PLAYER_JOIN` and one `PLAYER_QUIT` for each QA player; `PRAGMA integrity_check` returned `ok`. Server logs confirm ingestion stopped and the ItemGraph database connection closed. | Disconnect evidence persisted and the database shut down cleanly. |
+
+The MCT client used Fabric Loader 0.16.14; the development server used Fabric
+Loader 0.16.9. Database reads used SQLite read-only mode with
+`PRAGMA query_only=ON`. Both MCT clients were stopped, the operator was removed,
+and temporary loopback RCON was disabled with an empty password. The paired
+Fabric and NeoForge client runs use MC Pilot instrumentation, so neither is
+claimed as an unmodified vanilla client; neither server loaded the GriefLogger
+runtime or opened its database. CI validates the exact GriefLogger
+1.2.10-1.21.1 release fixture and the selected 26.2 source decisions without
+loading a GriefLogger jar into the live servers.
