@@ -335,15 +335,15 @@ vanilla client transport or rendered clickable chat controls.
 | Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Implemented and tested; the 2026-09-29 Fabric replay persisted `ADD_ITEM` and `REMOVE_ITEM` rows |
 | Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge paths and Fabric normal, vanilla player-death, and custom death-event item additions are implemented; the Fabric replay persisted accepted `DROP_ITEM` and `PICKUP_ITEM` rows |
 | Hopper/mechanical automation (ItemGraph supplemental) | NeoForge capability wrappers; Fabric `HopperBlockEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | GriefLogger's published feature surface has no hopper or mechanical-automation event; ItemGraph records successful vanilla hopper net deltas with unknown endpoints, while modded automation adapters remain an optional extension |
-| Crafting and smelting; anvil lineage extension | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | GriefLogger records crafting and furnace output under `CRAFT_ITEM`; both loaders preserve that source meaning and add ItemGraph `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR` lineage rows at server result-take boundaries; the Fabric replay persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows |
-| Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted `PLAYER_JOIN` and `PLAYER_QUIT` rows |
-| Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted `CHAT_MESSAGE` rows and returned them through `/ig lookup` |
-| Player commands | `NativeAuditEventListener`, Fabric `CommandsMixin` | `ig_audit_events` | `/ig lookup` | Both loaders record `COMMAND_ATTEMPT` at the pre-execution dispatch boundary, matching GriefLogger's documented behavior of recording attempts regardless of permission or command success; `COMMAND_EXECUTED` remains reserved for legacy rows and is never fabricated |
+| Crafting and smelting; anvil lineage extension | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | GriefLogger records crafting and furnace output under `CRAFT_ITEM`; both loaders preserve that source meaning and add ItemGraph `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR` lineage rows at server result-take boundaries. The profile-pinned local replay now persists one `CRAFT` transformation on each loader; smelting and anvil extensions remain issue-linked and are not claimed as observed by that replay. |
+| Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | The profile-pinned ItemGraph-only replay persists three redacted `PLAYER_JOIN` signals and one `PLAYER_QUIT` row per loader. Join signals are not asserted to equal a count of distinct username-history rows. |
+| Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | The profile-pinned ItemGraph-only replay persists one `CHAT_MESSAGE` row on each loader. The machine-readable report omits chat text. |
+| Player commands | `NativeAuditEventListener`, Fabric `CommandsMixin` | `ig_audit_events` | `/ig lookup` | Both loaders record `COMMAND_ATTEMPT` at the pre-execution dispatch boundary, matching GriefLogger's documented behavior of recording attempts regardless of permission or command success; `COMMAND_EXECUTED` remains reserved for legacy rows and is never fabricated. The profile-pinned replay dispatches a vanilla command through the server packet handler and persists one command row on each loader; report output omits command text. |
 | Block place/break | `NativeAuditEventListener`, Fabric break callback, Fabric `BlockItemMixin` | `ig_audit_events` | `/ig lookup` | NeoForge place/break and Fabric place/break capture/query implemented; the Fabric replay persisted `PLACE_BLOCK` and `BREAK_BLOCK` rows |
 | Block interaction | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Both loaders record main-hand attempts against the exact 28-class 1.21.1 GriefLogger target set as `INTERACT_BLOCK_ATTEMPT`; modded `Container` inspection remains separate, and pre-use callbacks do not claim that block use completed. The Fabric replay persisted interaction attempts. |
 | Player-killed entities | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | Capture/query implemented; the Fabric replay persisted a `KILL_ENTITY` row for a player-killed zombie |
 | Entity interaction and Ender inventory actions | NeoForge `NativeAuditEventListener` and `ArmorStandInteractionMixin`, Fabric aggregate `UseEntityCallback` audit decorator and `ArmorStandInteractionMixin`; shared `EnderChestInteractionTracker` bound by both menu adapters | `ig_audit_events` for attempt, denied, handled-result, and unresolved-result evidence; `ig_observations` for ItemGraph Ender session deltas | `/ig lookup INTERACT_ENTITY`, `/ig lookup INTERACT_ENTITY_COMPLETED`, `/ig lookup INTERACT_ENTITY_DENIED`, `/ig lookup INTERACT_ENTITY_UNRESOLVED`, `/ig lookup filters`, and `/ig trace` | Both loaders retain entity-use attempts, target UUID when available, and held stack registry ID/count/fingerprint without raw component values. NeoForge retains canceled specific/generic callbacks and suppresses only duplicate generic attempts; the armor-stand mixin hooks the `interactAt` override and the entity mixin hooks inherited fallback `interact`, with fallback-method `PASS` explicit as `INTERACT_ENTITY_UNRESOLVED` (without claiming the full entity-use pipeline ended). These are method results, not proof of equipment movement. No non-armor-stand target class has a method-result hook. Those records retain the entity registry ID in `subject_id`, declare `target_support=callback_only`, and carry `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT`; callback-level denied or unresolved outcomes remain recordable. Armor-stand records declare `target_support=armor_stand_method_result`. Fabric wraps the aggregate `UseEntityCallback` invoker and records one final non-`PASS` result, including short-circuits before or after ItemGraph's listener. Both loaders have local server GameTests that dispatch entity-use packets through the server handler, verify a cow attempt, armor-stand equip/unequip packet attempts and `interact_at` results, then separately invoke inherited `ArmorStand.interact` directly and verify its `PASS` return is retained as unresolved; the direct call is a method-hook check and is not attributed to a packet. Both runs assert duplicate-free persisted counts. The shared `EntityInteractionConformanceFixture` checks the same event-type and detail contracts through read-only `AuditEventQueryService` and `QueryFormatter`, including normalized actor, dimension, position, subject, timestamp presence, and console formatter output. Each test compares the complete `ig_observations` row snapshot before and after, proving the replay neither adds nor mutates quantity-flow evidence. The formatter is called directly; these tests do not execute `/ig lookup` through command dispatch. They use GameTest mock players and direct server-handler calls, so they do not prove real client transport. The exact GriefLogger 1.2.10-1.21.1 binary has no entity interaction writer; the 26.2 source has a success-only armor-stand writer. Entity capture work is closed in #75; the exact-release mapping is `unsupported-no-writer` and is no longer counted as unresolved action coverage under [#27](https://github.com/DurdeuVlad/itemgraph/issues/27). Ender action IDs 9 and 10 exist in the source enum but have no writer in the exact release binaries; the registry marks them `unsupported-no-writer` with reason `NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE` under [#76](https://github.com/DurdeuVlad/itemgraph/issues/76). ItemGraph's signed Ender rows come from its own `ender_inventory_session_net_delta` capture under `ITEMGRAPH_INTERNAL` and are an extension, not mapped GriefLogger actions. |
-| Consume, break, throw, shoot item actions | NeoForge `NativeItemActionEventListener`, NeoForge `ProjectileMixin`, NeoForge `ServerLevelMixin`, `ItemEntityEventListener`; Fabric `LivingEntityMixin`, `ItemStackMixin`, `ProjectileMixin`, `ServerLevelMixin` | `ig_observations` for the GriefLogger-compatible attempt row; `ig_audit_events` for the accepted-spawn extension | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record completed eat/drink consumption at the return boundary, durability breaks at the `ItemStack.hurtAndBreak` shrink boundary, and `THROW_ITEM`/`SHOOT_ITEM` at the exact `Projectile.shootFromRotation` HEAD attempt boundary with the canonical source stack and observed count. Projectile attempt rows carry a durable `source_event_id` derived from their UUID event identity, so worker retries cannot manufacture a second quantity row. Accepted player-owned spawns are retained as `PROJECTILE_SPAWN_ACCEPTED` raw evidence only after `ServerLevel.addFreshEntity` returns true, without a second quantity row or quantity claim in the audit detail. Projectile type and coordinates remain raw evidence; no projectile UUID or landing location is claimed. |
+| Consume, break, throw, shoot item actions | NeoForge `NativeItemActionEventListener`, NeoForge `ProjectileMixin`, NeoForge `ServerLevelMixin`, `ItemEntityEventListener`; Fabric `LivingEntityMixin`, `ItemStackMixin`, `ProjectileMixin`, `ServerLevelMixin` | `ig_observations` for the GriefLogger-compatible attempt row; `ig_audit_events` for the accepted-spawn extension | `/ig trace`, `/ig gui`, and `/ig lookup` | NeoForge and Fabric record completed eat/drink consumption at the return boundary, durability breaks at the `ItemStack.hurtAndBreak` shrink boundary, and `THROW_ITEM`/`SHOOT_ITEM` at the exact `Projectile.shootFromRotation` HEAD attempt boundary with the canonical source stack and observed count. The profile-pinned replay persists one `CONSUME_ITEM` and one `BREAK_ITEM` observation on each loader. Projectile attempt rows carry a durable `source_event_id` derived from their UUID event identity, so worker retries cannot manufacture a second quantity row. Accepted player-owned spawns are retained as `PROJECTILE_SPAWN_ACCEPTED` raw evidence only after `ServerLevel.addFreshEntity` returns true, without a second quantity row or quantity claim in the audit detail. Projectile type and coordinates remain raw evidence; no projectile UUID or landing location is claimed. |
 | Location/action filtered lookup | `AuditLookupFilters`, `UnifiedEvidenceQueryService`, `AuditEventQueryService` | `ig_audit_events`, `ig_observations`, `ig_item_transformations`, `ig_grieflogger_lookup` | `/ig lookup`, `/ig lookup near`, direct `/ig lookup <filter...>`, and `/ig lookup filters` | GriefLogger-style action/user/include/exclude/time/radius filters use one bounded asynchronous merge across native audit, item-flow, transformation, and normalized historical GriefLogger events. The published direct filter spelling now has token-aware suggestions and the ten-row default; the explicit `filters` literal remains an ItemGraph extension. Five-filter cap, required cube radius, AND semantics, global timestamp ordering, source/evidence IDs, and unresolved historical rows are tested; the Fabric replay returned rows from both `/ig lookup CHAT_MESSAGE 10 60` and `/ig lookup filters action.chat_message time.1h radius.50` |
 | Block/container inspector history | NeoForge `InspectionListener`; Fabric `FabricNativeAuditEventListener`; shared `BlockInspectionTargets`, `UnifiedEvidenceQueryService`, and `AuditPageSession` | `ig_audit_events`, `ig_observations`, `ig_item_transformations`, `ig_grieflogger_lookup`, ItemGraph supersession tables | `/ig inspect`, `/ig page`, `/ig trace container` | Implemented in code: one exact-position, globally paginated timeline merges audit, item-flow, transformation, and imported rows; observation matching checks either endpoint. Double chests and doors deduplicate target cells. Schema V19 preserves block/door removal history through explicit supersession links, and normal lookup exposes each retained row and reason. Automated cross-loader tests pass. Issue #26 is closed, but maintainers skipped its visible-client click matrix; server/client click evidence remains unverified and is not claimed for #24 or #31. |
 | Paginated generic audit results | `AuditEventQueryService` offset paging | `ig_audit_events` | `/ig lookup page <page> ...` | Bounded 1-based page offsets and server-generated Previous/Next chat controls implemented |
@@ -404,14 +404,19 @@ that surface; the extension remains labeled by source and evidence class.
 
 The lookup filter parser accepts the published aliases and value forms, and
 completion offers unused filters, pinned GriefLogger action names, ItemGraph
-actions, registered item identifiers, online player names, current names from
-imported GriefLogger `users` rows, and historical names from `usernames` rows.
-GriefLogger's pinned `UserFilter` reads its cached options from the `users` table;
-ItemGraph also offers the retained historical `usernames` values. Name reads run through the
-bounded asynchronous query worker, use ItemGraph's read-only database connection,
-and are cached for 30 seconds; malformed provenance payloads are skipped without
-breaking completion. Completion includes reference rows even when a username has
-no corresponding event row.
+actions, registered item identifiers, online player names, native names observed
+at `PLAYER_JOIN`, current names from imported GriefLogger `users` rows, and
+historical names from imported `usernames` rows. GriefLogger's pinned
+`UserFilter` reads its cached options from the `users` table. Native names are
+indexed in ItemGraph's `ig_player_name_history` table by player UUID and a
+case-normalized name; filters for prior names resolve to every UUID that used
+that name across native audit and item-flow evidence. A reused name is
+therefore ambiguous by design; query by UUID when one account must be isolated.
+Name reads run through the bounded asynchronous
+query worker, use ItemGraph's read-only database connection, and are cached for
+30 seconds; malformed provenance payloads are skipped without breaking
+completion. Completion includes reference rows even when a username has no
+matching event row.
 
 GriefLogger removes interaction rows when a block or door is removed. ItemGraph's
 raw evidence is immutable, so parity work must use an explicit supersession or
@@ -622,11 +627,13 @@ mapping; oversized integer IDs and non-integral malformed values remain raw
 payload evidence with an explicit unresolved reason rather than being narrowed
 into the portable 32-bit action index column.
 
-The GameTest export contains 13 checked durable rows: six quantity observations
-for chest deposit and withdrawal, ground drop and pickup, and projectile throw
-and shoot; one successful source-water pickup audit row; three entity
-interaction attempts; two handled armor-stand results; and one unresolved
-inherited-method result. Audit rows
+The current profile-pinned replay exports 25 checked durable rows per loader:
+the six prior quantity observations for chest deposit and withdrawal, ground
+drop and pickup, and projectile throw and shoot; one successful source-water
+pickup audit row; three entity-interaction attempts; two handled armor-stand
+results; one unresolved inherited-method result; three redacted player-join
+signals; one quit; one chat; one command attempt; one item consumption; one
+durability break; and one craft transformation. Audit rows
 retain only their namespaced `subject_id`, event identity, timestamp, dimension,
 relative position, and replay-local actor. They exclude raw audit detail and
 payloads. The export excludes
@@ -635,14 +642,15 @@ coordinates. Positions are block coordinates relative to the GameTest
 structure origin; actors use fixed replay aliases. Events sort by persisted
 timestamp, source table, and source row ID; row IDs are not exported. This gives
 deterministic ordering when events share a millisecond across source tables. CI
-requires the fixed scenario ID, seed,
-16 event records with pinned per-action and subject counts, unique event keys, and contiguous
-sequence, tests malformed inputs, and pins each report to its loader and source
-profile. The raw report schema is v5 and normalized report schema is v6. It does
-not start GriefLogger or compare its live database rows. Remaining #31 work is
-exact-release feature-category coverage and issue-linked dispositions for every
-extension or gap. This report does not establish live GriefLogger runtime
-equivalence or coverage for untested features. Staging soak, rollback rehearsal,
+requires the fixed scenario ID, seed, 25 event records with pinned per-action
+and subject counts, unique event keys, and contiguous sequence, tests malformed
+inputs, and pins each report to its loader and source profile. The raw report
+schema is v5 and normalized report schema is v6. It does
+not start GriefLogger or compare its live database rows. The matching coverage
+sidecar classifies all 28 registry actions and all eleven release table
+families. The eight unobserved actions and their issue owners are listed below;
+unobserved extensions are not claimed as exercised. This report does not
+establish live GriefLogger runtime equivalence. Staging soak, rollback rehearsal,
 and compatible-artifact retirement are separate M10 operator/release gates. The
 whole-database
 quantity and integrity audit is included in each native report and enforced as
@@ -664,14 +672,14 @@ row is explicitly limited to an actor-reference observation because report
 redaction prevents checking UUID/name equivalence. Material references count
 item IDs or block-material subjects, and entity references count only
 `KILL_ENTITY` subjects. The
-`usernames` disposition explicitly states that native rows keep observed name
-snapshots but ItemGraph has no dedicated native username-history table; this
-replay does not claim that behavior is covered. Its historical name suggestions
-currently come from online players and the optional imported GriefLogger
-reference rows. This is a standalone-query parity gap tracked by #31.
-CoreProtect's API v13 handles the same problem by resolving current names,
-historical names, or UUIDs to a UUID-backed username history and returning both
-the recorded name and UUID ([CoreProtect API v13](https://docs.coreprotect.net/api/version/v13/)).
+`usernames` disposition identifies the native `ig_player_name_history` table,
+which indexes names from immutable `PLAYER_JOIN` evidence by UUID. The redacted
+replay reports only the number of join events as a signal; that number is not
+the count of distinct username-history rows and no name or UUID is exported.
+Names changed while a player remains online are not recorded until a later
+join.
+CoreProtect's API v13 uses the same UUID-backed resolution model and returns
+the recorded name with its UUID ([CoreProtect API v13](https://docs.coreprotect.net/api/version/v13/)).
 This is a researched design reference, not an ItemGraph dependency or source-code
 reuse.
 
@@ -681,8 +689,14 @@ the exact 1.2.10-1.21.1 artifact has a writer or verifies
 `unsupported-no-writer`. An ItemGraph extension can be observed in this replay
 even when GriefLogger has no corresponding writer. `not-observed-in-replay`
 means only that the current selected scenario did not exercise the action or
-category. It does not mean the ItemGraph implementation is absent, and it does
-not satisfy #31's outstanding coverage criterion. The report is pinned to the
+category; it does not mean the ItemGraph implementation is absent. In the
+2026-10-04 replay, six unobserved actions are ItemGraph extensions: denied
+entity interaction (#75), `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR`
+(transformation coverage, #57), and `HOPPER_INSERT` and `HOPPER_EXTRACT`
+(automation extensions, #34). `ADD_ITEM_ENDER` and `REMOVE_ITEM_ENDER` are
+verified no-writer actions in exact release 1.2.10-1.21.1 (#76). Each row has
+an owner issue in the compatibility registry; no missing extension is treated
+as demonstrated runtime behavior. The report is pinned to the
 same compatibility profile and exact-release fixture hashes, and contains no
 event IDs, player identity, raw payload, world position, or database row ID.
 

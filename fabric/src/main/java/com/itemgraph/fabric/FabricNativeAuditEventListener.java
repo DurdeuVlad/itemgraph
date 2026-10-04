@@ -212,7 +212,7 @@ public final class FabricNativeAuditEventListener {
         });
     }
 
-    static void onDisconnect(ServerPlayer player) {
+    public static void onDisconnect(ServerPlayer player) {
         if (player == null) {
             return;
         }
@@ -1070,8 +1070,14 @@ public final class FabricNativeAuditEventListener {
     }
 
     private static void onChat(PlayerChatMessage message, ServerPlayer player, ChatType.Bound boundType) {
-        submit("CHAT_MESSAGE", player, player.level(), player.blockPosition(), null,
-                bounded(message.signedContent()));
+        recordChatMessage(player, message.signedContent());
+    }
+
+    /** Records an accepted server chat payload through the same path used by Fabric's native callback. */
+    public static void recordChatMessage(ServerPlayer player, String message) {
+        if (player != null && !player.level().isClientSide()) {
+            submit("CHAT_MESSAGE", player, player.level(), player.blockPosition(), null, bounded(message));
+        }
     }
 
     private static void submit(String eventType, ServerPlayer player, Level level, BlockPos pos,

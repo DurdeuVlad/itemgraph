@@ -23,26 +23,34 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Exports the durable movement and allowlisted audit rows from the shared loader replay fixture. */
+/** Exports redacted movement, transformation, and allowlisted audit rows from the shared loader replay fixture. */
 public final class ItemGraphReplayReportFixture {
     private static final String SCENARIO_ID = "item-movement-projectile-block-entity-audit-replay";
     private static final Set<String> EXPECTED_OBSERVATION_ACTIONS = Set.of(
-            "ADD_ITEM", "REMOVE_ITEM", "DROP_ITEM", "PICKUP_ITEM", "THROW_ITEM", "SHOOT_ITEM");
+            "ADD_ITEM", "REMOVE_ITEM", "DROP_ITEM", "PICKUP_ITEM", "THROW_ITEM", "SHOOT_ITEM",
+            "CONSUME_ITEM", "BREAK_ITEM");
     private static final Map<String, ExpectedEvent> EXPECTED_OBSERVATION_EVENTS = Map.of(
             "ADD_ITEM", new ExpectedEvent("minecraft:dirt", 2),
             "REMOVE_ITEM", new ExpectedEvent("minecraft:cobblestone", 3),
             "DROP_ITEM", new ExpectedEvent("minecraft:diamond", 4),
             "PICKUP_ITEM", new ExpectedEvent("minecraft:diamond", 4),
             "THROW_ITEM", new ExpectedEvent("minecraft:snowball", 1),
-            "SHOOT_ITEM", new ExpectedEvent("minecraft:arrow", 1));
-    private static final Map<String, Integer> EXPECTED_AUDIT_ACTION_COUNTS = Map.of(
-            "BREAK_BLOCK", 1,
-            "PLACE_BLOCK", 1,
-            "INTERACT_BLOCK_ATTEMPT", 1,
-            "KILL_ENTITY", 1,
-            "INTERACT_ENTITY", 3,
-            "INTERACT_ENTITY_COMPLETED", 2,
-            "INTERACT_ENTITY_UNRESOLVED", 1);
+            "SHOOT_ITEM", new ExpectedEvent("minecraft:arrow", 1),
+            "CONSUME_ITEM", new ExpectedEvent("minecraft:apple", 1),
+            "BREAK_ITEM", new ExpectedEvent("minecraft:wooden_sword", 1));
+    private static final Map<String, Integer> EXPECTED_TRANSFORMATION_ACTION_COUNTS = Map.of("CRAFT", 1);
+    private static final Map<String, Integer> EXPECTED_AUDIT_ACTION_COUNTS = Map.ofEntries(
+            Map.entry("PLAYER_JOIN", 3),
+            Map.entry("PLAYER_QUIT", 1),
+            Map.entry("CHAT_MESSAGE", 1),
+            Map.entry("COMMAND_ATTEMPT", 1),
+            Map.entry("BREAK_BLOCK", 1),
+            Map.entry("PLACE_BLOCK", 1),
+            Map.entry("INTERACT_BLOCK_ATTEMPT", 1),
+            Map.entry("KILL_ENTITY", 1),
+            Map.entry("INTERACT_ENTITY", 3),
+            Map.entry("INTERACT_ENTITY_COMPLETED", 2),
+            Map.entry("INTERACT_ENTITY_UNRESOLVED", 1));
     private static final Map<String, Integer> EXPECTED_AUDIT_SUBJECT_COUNTS = Map.of(
             "minecraft:water", 1,
             "minecraft:diamond_block", 1,
@@ -67,7 +75,8 @@ public final class ItemGraphReplayReportFixture {
      * GameTest assertion has passed.
      */
     public static void writeIfRequested(GameTestHelper helper, String loader, long priorObservationId,
-                                        long priorAuditId, Map<String, String> actorAliases,
+                                        long priorAuditId, long priorTransformationId,
+                                        Map<String, String> actorAliases,
                                         BlockPos successfulWaterPickupPos,
                                         Map<String, BlockPos> expectedAuditPositions) {
         String configuredDirectory = System.getenv("ITEMGRAPH_DIFFERENTIAL_REPORT_DIR");
@@ -81,7 +90,7 @@ public final class ItemGraphReplayReportFixture {
         List<ReplayEvent> observationEvents = readObservationEvents(priorObservationId, actorAliases);
         helper.assertValueEqual(EXPECTED_OBSERVATION_ACTIONS,
                 observationEvents.stream().map(ReplayEvent::action).collect(Collectors.toSet()),
-                "native report must contain the six expected durable replay observations");
+                "native report must contain every expected durable item-flow observation");
         helper.assertValueEqual(EXPECTED_OBSERVATION_EVENTS.size(), observationEvents.size(),
                 "native report must not omit or duplicate a replay observation");
         List<ReplayEvent> auditEvents = readAuditEvents(priorAuditId, actorAliases, successfulWaterPickupPos);
@@ -89,18 +98,27 @@ public final class ItemGraphReplayReportFixture {
                 ReplayEvent::action, Collectors.summingInt(ignored -> 1)));
         helper.assertValueEqual(EXPECTED_AUDIT_ACTION_COUNTS, actualAuditActionCounts,
                 "native report must include every expected durable audit event exactly once");
-        Map<String, Integer> actualAuditSubjectCounts = auditEvents.stream().collect(Collectors.groupingBy(
+        List<ReplayEvent> transformationEvents = readTransformationEvents(priorTransformationId, actorAliases);
+        Map<String, Integer> actualTransformationActionCounts = transformationEvents.stream()
+                .collect(Collectors.groupingBy(ReplayEvent::action, Collectors.summingInt(ignored -> 1)));
+        helper.assertValueEqual(EXPECTED_TRANSFORMATION_ACTION_COUNTS, actualTransformationActionCounts,
+                "native report must include each expected durable transformation exactly once");
+        Map<String, Integer> actualAuditSubjectCounts = auditEvents.stream()
+                .filter(event -> event.subjectId() != null).collect(Collectors.groupingBy(
                 ReplayEvent::subjectId, Collectors.summingInt(ignored -> 1)));
         helper.assertValueEqual(EXPECTED_AUDIT_SUBJECT_COUNTS, actualAuditSubjectCounts,
                 "native report must retain each expected namespaced block or entity subject exactly");
-        Map<ExpectedActionSubject, Integer> actualActionSubjectCounts = auditEvents.stream().collect(
+        Map<ExpectedActionSubject, Integer> actualActionSubjectCounts = auditEvents.stream()
+                .filter(event -> event.subjectId() != null).collect(
                 Collectors.groupingBy(event -> new ExpectedActionSubject(event.action(), event.subjectId()),
                         Collectors.summingInt(ignored -> 1)));
         helper.assertValueEqual(EXPECTED_AUDIT_ACTION_SUBJECT_COUNTS, actualActionSubjectCounts,
                 "native report must retain every audit action with its expected namespaced subject");
-        List<ReplayEvent> events = new ArrayList<>(observationEvents.size() + auditEvents.size());
+        List<ReplayEvent> events = new ArrayList<>(observationEvents.size() + auditEvents.size()
+                + transformationEvents.size());
         events.addAll(observationEvents);
         events.addAll(auditEvents);
+        events.addAll(transformationEvents);
         events.sort(Comparator.comparingLong(ReplayEvent::occurredAtMs)
                 .thenComparing(ReplayEvent::sourceTable)
                 .thenComparingLong(ReplayEvent::rowId));
@@ -168,6 +186,16 @@ public final class ItemGraphReplayReportFixture {
         writeAtomically(Path.of(configuredDirectory).resolve("itemgraph-" + loader + ".raw.json"), json.toString());
     }
 
+    public static long transformationWatermark() {
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.createStatement();
+             var rows = statement.executeQuery("SELECT COALESCE(MAX(id), 0) FROM ig_item_transformations")) {
+            return rows.next() ? rows.getLong(1) : 0L;
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not read the ItemGraph transformation watermark", failure);
+        }
+    }
+
     private static AuditReport readWholeGraphAudit() {
         try (var connection = DatabaseManager.getInstance().openReadOnlyConnection()) {
             // Keep every count on the same read-only database snapshot while the
@@ -222,7 +250,8 @@ public final class ItemGraphReplayReportFixture {
                 JOIN ig_nodes source ON source.id = o.node_id
                 JOIN ig_nodes target ON target.id = o.target_node_id
                 WHERE o.id > ? AND o.source_type = 'ITEMGRAPH_INTERNAL'
-                  AND o.action_type IN ('ADD_ITEM', 'REMOVE_ITEM', 'DROP_ITEM', 'PICKUP_ITEM', 'THROW_ITEM', 'SHOOT_ITEM')
+                  AND o.action_type IN ('ADD_ITEM', 'REMOVE_ITEM', 'DROP_ITEM', 'PICKUP_ITEM', 'THROW_ITEM',
+                                        'SHOOT_ITEM', 'CONSUME_ITEM', 'BREAK_ITEM')
                   AND (source.owner_uuid IN (%s) OR target.owner_uuid IN (%s))
                 ORDER BY o.timestamp_ms, o.id
                 """.formatted(String.join(",", java.util.Collections.nCopies(actorAliases.size(), "?")),
@@ -267,6 +296,49 @@ public final class ItemGraphReplayReportFixture {
         }
     }
 
+    private static List<ReplayEvent> readTransformationEvents(long priorTransformationId,
+                                                              Map<String, String> actorAliases) {
+        String sql = """
+                SELECT transformation.id, transformation.timestamp_ms, transformation.transformation_type,
+                       transformation.quantity, result.item_id, player.owner_uuid, player.level_id,
+                       player.x, player.y, player.z
+                FROM ig_item_transformations transformation
+                JOIN ig_nodes player ON player.id = transformation.player_node_id
+                JOIN ig_item_fingerprints result ON result.id = transformation.result_fingerprint_id
+                WHERE transformation.id > ? AND transformation.transformation_type = 'CRAFT'
+                  AND player.owner_uuid IN (%s)
+                ORDER BY transformation.timestamp_ms, transformation.id
+                """.formatted(String.join(",", java.util.Collections.nCopies(actorAliases.size(), "?")));
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, priorTransformationId);
+            int parameter = 2;
+            for (String uuid : actorAliases.keySet()) statement.setString(parameter++, uuid);
+            try (var rows = statement.executeQuery()) {
+                List<ReplayEvent> result = new ArrayList<>();
+                while (rows.next()) {
+                    String action = rows.getString("transformation_type");
+                    String actorRef = actorAliases.get(rows.getString("owner_uuid"));
+                    String dimension = rows.getString("level_id");
+                    Number xValue = (Number) rows.getObject("x");
+                    Number yValue = (Number) rows.getObject("y");
+                    Number zValue = (Number) rows.getObject("z");
+                    if (actorRef == null || dimension == null || xValue == null || yValue == null || zValue == null) {
+                        throw new IllegalStateException("replay transformation lacks a mapped actor or location: " + action);
+                    }
+                    result.add(new ReplayEvent(rows.getLong("id"), rows.getLong("timestamp_ms"), action,
+                            "observed", rows.getInt("quantity"), rows.getString("item_id"), null, dimension,
+                            (int) Math.floor(xValue.doubleValue()), (int) Math.floor(yValue.doubleValue()),
+                            (int) Math.floor(zValue.doubleValue()), actorRef, "ig_item_transformations", action,
+                            "items", null));
+                }
+                return result;
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not read native replay transformation evidence", failure);
+        }
+    }
+
     private static List<ReplayEvent> readAuditEvents(long priorAuditId, Map<String, String> actorAliases,
                                                     BlockPos successfulWaterPickupPos) {
         String sql = """
@@ -274,7 +346,8 @@ public final class ItemGraphReplayReportFixture {
                 FROM ig_audit_events
                 WHERE id > ? AND source_type = 'ITEMGRAPH_INTERNAL'
                   AND player_uuid IN (%s)
-                  AND event_type IN ('BREAK_BLOCK', 'PLACE_BLOCK', 'INTERACT_BLOCK_ATTEMPT', 'KILL_ENTITY',
+                  AND event_type IN ('PLAYER_JOIN', 'PLAYER_QUIT', 'CHAT_MESSAGE', 'COMMAND_ATTEMPT',
+                                     'BREAK_BLOCK', 'PLACE_BLOCK', 'INTERACT_BLOCK_ATTEMPT', 'KILL_ENTITY',
                                      'INTERACT_ENTITY', 'INTERACT_ENTITY_COMPLETED',
                                      'INTERACT_ENTITY_UNRESOLVED')
                   -- Exclude the direct-call guard probe with a synthetic lava-bucket result.
@@ -308,7 +381,12 @@ public final class ItemGraphReplayReportFixture {
                             "observed", null, null, rows.getString("subject_id"), dimension,
                             (int) Math.floor(xValue.doubleValue()), (int) Math.floor(yValue.doubleValue()),
                             (int) Math.floor(zValue.doubleValue()), actorRef, "ig_audit_events", action,
-                            "blocks", unresolvedReason));
+                            switch (action) {
+                                case "PLAYER_JOIN", "PLAYER_QUIT" -> "sessions";
+                                case "CHAT_MESSAGE" -> "chats";
+                                case "COMMAND_ATTEMPT" -> "commands";
+                                default -> "blocks";
+                            }, unresolvedReason));
                 }
                 return result;
             }

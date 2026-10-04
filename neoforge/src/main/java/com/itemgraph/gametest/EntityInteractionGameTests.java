@@ -2,6 +2,8 @@ package com.itemgraph.gametest;
 
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.listener.NativeAuditEventListener;
+import com.itemgraph.listener.NativeItemActionEventListener;
+import com.itemgraph.listener.TransformationEventListener;
 import com.itemgraph.gametest.EntityInteractionConformanceFixture;
 import com.itemgraph.gametest.BucketPickupConformanceFixture;
 import com.itemgraph.gametest.ItemMovementConformanceFixture;
@@ -12,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.ServerboundChatCommandPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
@@ -26,6 +29,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.Direction;
@@ -48,9 +52,12 @@ public final class EntityInteractionGameTests {
     @GameTest(templateNamespace = "itemgraph", template = "empty",
             batch = "zz_itemgraph_entity_interactions", timeoutTicks = 6_000)
     public static void serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome(GameTestHelper helper) {
+        long replayAuditWatermark = BucketPickupConformanceFixture.auditWatermark();
+        long replayTransformationWatermark = ItemGraphReplayReportFixture.transformationWatermark();
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         ServerPlayer fluidPlayer = helper.makeMockServerPlayerInLevel();
         ServerPlayer movementPlayer = helper.makeMockServerPlayerInLevel();
+        NativeAuditEventListener.recordChatMessage(player, "itemgraph_replay_chat");
         BlockPos targetPos = helper.absolutePos(new BlockPos(2, 1, 2));
         Cow target = new Cow(EntityType.COW, helper.getLevel());
         target.moveTo(targetPos.getX() + 0.5, targetPos.getY(), targetPos.getZ() + 0.5,
@@ -213,6 +220,14 @@ public final class EntityInteractionGameTests {
                 "mock server player did not pick up the accepted diamond stack");
         helper.assertTrue(inventoryCount(movementPlayer, Items.DIAMOND) == 4,
                 "ground pickup must restore all four diamonds to player inventory");
+        NativeItemActionEventListener.recordItemUseFinished(player,
+                new ItemStack(Items.APPLE), ItemStack.EMPTY);
+        NativeItemActionEventListener.recordItemDestroyed(player, new ItemStack(Items.WOODEN_SWORD));
+        SimpleContainer craftMatrix = new SimpleContainer(1);
+        craftMatrix.setItem(0, new ItemStack(Items.PAPER));
+        new TransformationEventListener().recordCrafted(player, craftMatrix, new ItemStack(Items.BOOK));
+        NativeAuditEventListener.recordPlayerQuit(fluidPlayer);
+        player.connection.handleChatCommand(new ServerboundChatCommandPacket("say itemgraph_replay_command"));
 
         String playerUuid = player.getUUID().toString();
         String targetUuid = target.getUUID().toString();
@@ -343,7 +358,7 @@ public final class EntityInteractionGameTests {
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
             ItemGraphReplayReportFixture.writeIfRequested(helper, "neoforge",
                     Math.min(movementWatermark, projectileWatermark.observationId()),
-                    bucketAuditWatermark,
+                    replayAuditWatermark, replayTransformationWatermark,
                     Map.of(movementPlayer.getUUID().toString(), "actor:replay-mover",
                             playerUuid, "actor:replay-interactor",
                             fluidPlayer.getUUID().toString(), "actor:replay-fluid"), waterPos,

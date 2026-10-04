@@ -44,8 +44,8 @@ class V20UnverifiedArmorStandInteractionEvidenceTest {
         long edgeId = insertInferredEdge(playerId, standId, fingerprintId);
         insertAllocation(edgeId, observationId);
 
-        assertEquals(20, MigrationRunner.runMigrations(connection),
-                "an existing v19 database should receive the quarantine migration");
+        assertEquals(MigrationRunner.LATEST_VERSION, MigrationRunner.runMigrations(connection),
+                "an existing v19 database should receive all current migrations");
         V20__UnverifiedArmorStandInteractionEvidence migration =
                 new V20__UnverifiedArmorStandInteractionEvidence();
         migration.apply(connection);
@@ -89,7 +89,8 @@ class V20UnverifiedArmorStandInteractionEvidenceTest {
     private void simulateVersion19Schema() throws Exception {
         try (Statement statement = connection.createStatement()) {
             statement.execute("DROP TABLE ig_observation_dispositions");
-            statement.execute("DELETE FROM ig_schema_migrations WHERE version = 20");
+            statement.execute("DROP TABLE IF EXISTS ig_player_name_history");
+            statement.execute("DELETE FROM ig_schema_migrations WHERE version >= 20");
         }
     }
 

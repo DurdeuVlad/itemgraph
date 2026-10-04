@@ -18,12 +18,19 @@ RAW_EVENT_FIELDS = {
     "privacy_class", "unresolved_reason",
 }
 EXPECTED_ACTION_COUNTS = {
+    "PLAYER_JOIN": 3,
+    "PLAYER_QUIT": 1,
+    "CHAT_MESSAGE": 1,
+    "COMMAND_ATTEMPT": 1,
     "ADD_ITEM": 1,
     "REMOVE_ITEM": 1,
     "DROP_ITEM": 1,
     "PICKUP_ITEM": 1,
     "THROW_ITEM": 1,
     "SHOOT_ITEM": 1,
+    "CONSUME_ITEM": 1,
+    "BREAK_ITEM": 1,
+    "CRAFT": 1,
     "BREAK_BLOCK": 1,
     "PLACE_BLOCK": 1,
     "INTERACT_BLOCK_ATTEMPT": 1,
@@ -84,7 +91,7 @@ def normalize(raw: dict[str, Any], expected_loader: str) -> dict[str, Any]:
         occurrence = action_occurrences.get(event["action"], 0)
         action_occurrences[event["action"]] = occurrence + 1
         actual_action_counts[event["action"]] = actual_action_counts.get(event["action"], 0) + 1
-        if event["source_table"] == "ig_audit_events":
+        if event["source_table"] == "ig_audit_events" and event["subject_id"] is not None:
             pair = (event["action"], event["subject_id"])
             actual_audit_pairs[pair] = actual_audit_pairs.get(pair, 0) + 1
         if event["event_key"] != f"replay-{event['action'].lower()}-{occurrence}":

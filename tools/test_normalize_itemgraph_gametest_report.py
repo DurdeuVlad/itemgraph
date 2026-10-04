@@ -42,8 +42,14 @@ def expected_events() -> list[dict]:
         raw_event("PICKUP_ITEM", sequence=3, quantity=4, item_id="minecraft:diamond", compatibility_table="items"),
         raw_event("THROW_ITEM", sequence=4, quantity=1, item_id="minecraft:snowball", compatibility_table="items"),
         raw_event("SHOOT_ITEM", sequence=5, quantity=1, item_id="minecraft:arrow", compatibility_table="items"),
+        raw_event("CONSUME_ITEM", sequence=6, quantity=1, item_id="minecraft:apple", compatibility_table="items"),
+        raw_event("BREAK_ITEM", sequence=7, quantity=1, item_id="minecraft:wooden_sword", compatibility_table="items"),
+        raw_event("CRAFT", sequence=8, quantity=1, item_id="minecraft:book",
+                  source_table="ig_item_transformations", compatibility_table="items"),
     ]
     audit_actions = [
+        ("PLAYER_JOIN", None), ("PLAYER_JOIN", None), ("PLAYER_JOIN", None),
+        ("PLAYER_QUIT", None),
         ("BREAK_BLOCK", "minecraft:water"),
         ("PLACE_BLOCK", "minecraft:diamond_block"),
         ("INTERACT_BLOCK_ATTEMPT", "minecraft:chest"),
@@ -59,9 +65,21 @@ def expected_events() -> list[dict]:
         occurrence = occurrences.get(action, 0)
         occurrences[action] = occurrence + 1
         events.append(raw_event(action, sequence=len(events), quantity=None, item_id=None,
-                                source_table="ig_audit_events", compatibility_table="blocks",
+                                source_table="ig_audit_events",
+                                compatibility_table={
+                                    "PLAYER_JOIN": "sessions",
+                                    "PLAYER_QUIT": "sessions",
+                                    "CHAT_MESSAGE": "chats",
+                                    "COMMAND_ATTEMPT": "commands",
+                                }.get(action, "blocks"),
                                 subject_id=subject_id, occurrence=occurrence,
                                 position=normalizer.EXPECTED_BLOCK_AUDIT_POSITIONS.get(action)))
+    for action, compatibility_table in (("CHAT_MESSAGE", "chats"), ("COMMAND_ATTEMPT", "commands")):
+        occurrence = occurrences.get(action, 0)
+        occurrences[action] = occurrence + 1
+        events.append(raw_event(action, sequence=len(events), quantity=None, item_id=None,
+                                source_table="ig_audit_events", compatibility_table=compatibility_table,
+                                occurrence=occurrence))
     return events
 
 
@@ -75,10 +93,10 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
             "events": expected_events(),
             "invariants": {
                 "healthy": True,
-                "total_observations": 6,
+                "total_observations": 8,
                 "total_edges": 0,
                 "total_allocations": 0,
-                "total_transformations": 0,
+                "total_transformations": 1,
                 "over_allocated_observations": 0,
                 "invalid_edge_allocations": 0,
                 "invalid_edge_temporal": 0,
@@ -127,7 +145,7 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
     def test_report_contains_only_the_real_bucket_pickup_break_event(self) -> None:
         report = normalizer.normalize(self.raw, "neoforge")
         break_events = [event for event in report["events"] if event["action"] == "BREAK_BLOCK"]
-        self.assertEqual(16, len(report["events"]))
+        self.assertEqual(25, len(report["events"]))
         self.assertEqual(1, len(break_events))
         self.assertEqual("minecraft:water", break_events[0]["subject_id"])
 
@@ -181,7 +199,7 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
         with self.assertRaisesRegex(differential.ReportError, "seed"):
             normalizer.normalize(malformed, "neoforge")
         malformed = copy.deepcopy(self.raw)
-        malformed["events"][0]["action"] = "CHAT_MESSAGE"
+        malformed["events"][0]["action"] = "UNKNOWN_REPLAY_ACTION"
         with self.assertRaisesRegex(differential.ReportError, "not part of the native replay fixture"):
             normalizer.normalize(malformed, "neoforge")
 

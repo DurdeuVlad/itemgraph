@@ -64,6 +64,65 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
             "compatibility_table": "blocks",
             "compatibility_action_id": None,
         })
+        join_events = []
+        for index in range(3):
+            player_join = copy.deepcopy(event)
+            player_join.update({
+                "event_key": f"replay-player_join-{index}",
+                "sequence": index + 2,
+                "action": "PLAYER_JOIN",
+                "quantity": None,
+                "item_id": None,
+                "occurred_at_ms": 1790870400002 + index,
+                "source_table": "ig_audit_events",
+                "source_action_id": "PLAYER_JOIN",
+                "compatibility_table": "sessions",
+                "compatibility_action_id": 0,
+            })
+            join_events.append(player_join)
+        chat_event = copy.deepcopy(event)
+        chat_event.update({
+            "event_key": "replay-chat_message-0",
+            "sequence": 5,
+            "action": "CHAT_MESSAGE",
+            "quantity": None,
+            "item_id": None,
+            "occurred_at_ms": 1790870400005,
+            "source_table": "ig_audit_events",
+            "source_action_id": "CHAT_MESSAGE",
+            "compatibility_table": "chats",
+            "compatibility_action_id": None,
+        })
+        command_event = copy.deepcopy(chat_event)
+        command_event.update({
+            "event_key": "replay-command_attempt-0",
+            "sequence": 6,
+            "action": "COMMAND_ATTEMPT",
+            "occurred_at_ms": 1790870400006,
+            "source_action_id": "COMMAND_ATTEMPT",
+            "compatibility_table": "commands",
+        })
+        craft_event = copy.deepcopy(event)
+        craft_event.update({
+            "event_key": "replay-craft-0",
+            "sequence": 8,
+            "action": "CRAFT",
+            "item_id": "minecraft:book",
+            "occurred_at_ms": 1790870400007,
+            "source_table": "ig_item_transformations",
+            "source_action_id": "CRAFT",
+            "compatibility_table": "items",
+            "compatibility_action_id": 4,
+        })
+        kill_event = copy.deepcopy(entity_event)
+        kill_event.update({
+            "event_key": "replay-kill_entity-0",
+            "sequence": 7,
+            "action": "KILL_ENTITY",
+            "occurred_at_ms": 1790870400007,
+            "source_action_id": "KILL_ENTITY",
+            "compatibility_action_id": 3,
+        })
         self.report = {
             "report_schema_version": differential.REPORT_SCHEMA_VERSION,
             "compatibility_version": registry["compatibility_version"],
@@ -74,13 +133,13 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
             "runtime_mode": "native_only",
             "scenario_id": "coverage.fixture.v1",
             "seed": 0,
-            "events": [event, entity_event],
+            "events": [event, entity_event, *join_events, chat_event, command_event, kill_event, craft_event],
             "invariants": {
                 "healthy": True,
                 "total_observations": 1,
                 "total_edges": 0,
                 "total_allocations": 0,
-                "total_transformations": 0,
+                "total_transformations": 1,
                 "over_allocated_observations": 0,
                 "invalid_edge_allocations": 0,
                 "invalid_edge_temporal": 0,
@@ -107,6 +166,8 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
         self.assertEqual("native_only", output["runtime_mode"])
         add_item = next(row for row in output["actions"] if row["action"] == "ADD_ITEM")
         self.assertEqual("observed-in-replay", add_item["coverage_status"])
+        craft = next(row for row in output["actions"] if row["action"] == "CRAFT")
+        self.assertEqual("observed-in-replay", craft["coverage_status"])
         self.assertEqual(1, add_item["runtime_evidence_count"])
         self.assertTrue(all(row["coverage_status"] in {"observed-in-replay", "not-observed-in-replay"}
                             for row in output["actions"]))
@@ -135,16 +196,22 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
         families = {row["table"]: row for row in output["table_families"]}
         self.assertEqual(set(fixture["database"]["tables"]), set(families))
         self.assertEqual(11, output["summary"]["release_table_count"])
-        self.assertEqual(6, output["summary"]["release_table_families_not_observed_in_replay"])
+        self.assertEqual(0, output["summary"]["release_table_families_not_observed_in_replay"])
         self.assertEqual("observed-in-replay", families["containers"]["coverage_status"])
         self.assertEqual("observed-in-replay", families["blocks"]["coverage_status"])
-        self.assertEqual("not-observed-in-replay", families["sessions"]["coverage_status"])
+        self.assertEqual("observed-in-replay", families["sessions"]["coverage_status"])
+        self.assertEqual("observed-in-replay", families["chats"]["coverage_status"])
+        self.assertEqual("observed-in-replay", families["commands"]["coverage_status"])
         self.assertEqual("reference-data", families["usernames"]["table_kind"])
-        self.assertIn("no separate native username-history table",
+        self.assertIn("ig_player_name_history",
                       families["usernames"]["itemgraph_native_representation"])
+        self.assertEqual("represented-in-replay", families["usernames"]["coverage_status"])
+        self.assertEqual(3, families["usernames"]["runtime_evidence_count"])
+        self.assertIn("not a username-history row count",
+                      families["usernames"]["coverage_basis"])
         self.assertEqual("actor-reference-only", families["users"]["coverage_status"])
-        self.assertEqual("not-observed-in-replay", families["entities"]["coverage_status"])
-        self.assertEqual(2, output["summary"]["release_reference_tables_represented_in_replay"])
+        self.assertEqual("represented-in-replay", families["entities"]["coverage_status"])
+        self.assertEqual(4, output["summary"]["release_reference_tables_represented_in_replay"])
         self.assertEqual(1, output["summary"]["release_reference_tables_actor_reference_only"])
         self.assertTrue(all(row["owner_issue"] == 31 for row in families.values()))
 
@@ -162,6 +229,9 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
         self.assertTrue(coverage_module.reference_field_observed(block_event, "materials"))
         block_event.update({"action": "KILL_ENTITY", "subject_id": "minecraft:zombie"})
         self.assertTrue(coverage_module.reference_field_observed(block_event, "entities"))
+        player_join = copy.deepcopy(self.report["events"][0])
+        player_join.update({"action": "PLAYER_JOIN", "source_table": "ig_audit_events"})
+        self.assertTrue(coverage_module.reference_field_observed(player_join, "usernames"))
 
     def test_table_family_report_redacts_event_identity_and_values(self) -> None:
         output = coverage_module.build_coverage(self.report)

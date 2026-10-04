@@ -16,7 +16,7 @@ COVERAGE_SCHEMA_VERSION = 2
 
 REFERENCE_TABLE_REPRESENTATIONS = {
     "users": "actor_ref is present; replay identity values are redacted, so UUID/name equivalence is not checked",
-    "usernames": "player-name snapshots on native evidence rows; no separate native username-history table",
+    "usernames": "UUID-keyed native name history in ig_player_name_history, derived from PLAYER_JOIN evidence; replay counts join signals without exporting names, UUIDs, or history rows",
     "levels": "dimension resource IDs stored inline on native evidence rows",
     "materials": "item/block resource IDs stored inline on native evidence rows",
     "entities": "entity resource IDs stored inline as native evidence subjects",
@@ -185,7 +185,7 @@ def reference_field_observed(event: dict[str, Any], table: str) -> bool:
     if table == "users":
         return event["actor_ref"] is not None
     if table == "usernames":
-        return False
+        return event["action"] == "PLAYER_JOIN" and event["source_table"] == "ig_audit_events"
     if table == "levels":
         return event["dimension"] is not None
     if table == "materials":
@@ -201,7 +201,7 @@ def reference_field_observed(event: dict[str, Any], table: str) -> bool:
 def reference_coverage_basis(table: str) -> str:
     return {
         "users": "normalized replay events with an actor_ref; the identity value is redacted",
-        "usernames": "no username-history field is exported in the redacted replay report",
+        "usernames": "normalized PLAYER_JOIN events signal UUID/name-history indexing; this event count is not a username-history row count and contains no names or UUIDs",
         "levels": "normalized replay events with a dimension value",
         "materials": "normalized replay events with an item_id or block-material subject_id",
         "entities": "KILL_ENTITY events with an entity subject_id",

@@ -53,8 +53,13 @@ public final class AuditEventQueryService {
             args.add(eventType.toUpperCase(java.util.Locale.ROOT));
         }
         if (playerName != null && !playerName.isBlank() && !"*".equals(playerName)) {
-            sql.append(" AND a.player_name = ?");
-            args.add(playerName);
+            String normalizedUser = playerName.toLowerCase(Locale.ROOT);
+            sql.append(" AND (LOWER(a.player_name) = ? OR LOWER(a.player_uuid) = ? ")
+                    .append("OR LOWER(a.player_uuid) IN (")
+                    .append("SELECT LOWER(player_uuid) FROM ig_player_name_history WHERE normalized_name = ?))");
+            args.add(normalizedUser);
+            args.add(normalizedUser);
+            args.add(normalizedUser);
         }
         if (window != null && window.sinceMs() != null) {
             sql.append(" AND a.timestamp_ms >= ?");
@@ -162,8 +167,13 @@ public final class AuditEventQueryService {
             args.add(eventType.toUpperCase(Locale.ROOT));
         }
         if (playerName != null && !playerName.isBlank() && !"*".equals(playerName)) {
-            sql.append(" AND player_name = ?");
-            args.add(playerName);
+            String normalizedUser = playerName.toLowerCase(Locale.ROOT);
+            sql.append(" AND (LOWER(player_name) = ? OR LOWER(player_uuid) = ? ")
+                    .append("OR LOWER(player_uuid) IN (")
+                    .append("SELECT LOWER(player_uuid) FROM ig_player_name_history WHERE normalized_name = ?))");
+            args.add(normalizedUser);
+            args.add(normalizedUser);
+            args.add(normalizedUser);
         }
         if (window != null && window.sinceMs() != null) {
             sql.append(" AND timestamp_ms >= ?");
@@ -232,8 +242,19 @@ public final class AuditEventQueryService {
             args.addAll(filters.eventTypes());
         }
         if (!filters.playerNames().isEmpty()) {
-            appendPlaceholders(sql, " AND LOWER(player_name) IN (", filters.playerNames().size(), ")");
-            args.addAll(filters.playerNames().stream().map(value -> value.toLowerCase(Locale.ROOT)).toList());
+            List<String> names = filters.playerNames().stream()
+                    .map(value -> value.toLowerCase(Locale.ROOT)).toList();
+            sql.append(" AND (LOWER(player_name) IN (");
+            appendPlaceholders(sql, "", names.size(), "");
+            sql.append(") OR LOWER(player_uuid) IN (");
+            appendPlaceholders(sql, "", names.size(), "");
+            sql.append(") OR LOWER(player_uuid) IN (")
+                    .append("SELECT LOWER(player_uuid) FROM ig_player_name_history WHERE normalized_name IN (");
+            appendPlaceholders(sql, "", names.size(), "");
+            sql.append(")))");
+            args.addAll(names);
+            args.addAll(names);
+            args.addAll(names);
         }
         if (filters.window() != null && filters.window().sinceMs() != null) {
             sql.append(" AND timestamp_ms >= ?");
