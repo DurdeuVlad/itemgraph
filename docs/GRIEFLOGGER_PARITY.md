@@ -845,6 +845,8 @@ The connecting client was a NeoForge 1.21.1 client instrumented with MC Pilot
 0.15.0 (MCT client mod 0.9.1); it had no ItemGraph client mod. This exercises
 the actual client-to-server command path and rendered chat, but is not an
 unmodified vanilla client.
+This connected replay used NeoForge only; Fabric has automated command
+coverage, but no live Fabric server/client replay was performed.
 
 | Replay | `/ig` | `/itemgraph` | Observed result |
 | --- | --- | --- | --- |
