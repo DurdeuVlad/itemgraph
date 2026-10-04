@@ -511,6 +511,23 @@ values, or proof of schema equivalence.
   transport, or complete command acceptance for #24. Independent adversarial
   review and the remaining cross-loader report review are required before #31
   can close.
+For each loader, `tools/itemgraph_feature_coverage.py` also emits a separate
+schema-v2 redacted sidecar for every compatibility-registry action. It records
+the exact-release writer disposition, ItemGraph implementation classification,
+profile source table, and count found in the selected replay. The sidecar
+explicitly separates a feature absent from this replay from an action that the
+verified release has no writer for; the current 13-event scenario still leaves
+additional covered-feature testing open under #31.
+It also emits unresolved rows for open issues #136, #137, #138, and #140, plus
+five durability categories. Exact 1.2.10-1.21.1 fixture facts remain separate
+from pinned 26.2 source-only research: the fixture confirms the REMOVE_ITEM
+BreakContainerEvent writer class for both loaders but not its timing details;
+it does not record locale inventory, named permission nodes, rich history-chat
+payloads, or queue/transaction/recovery semantics. Durable ItemGraph unit-test
+references are evidence outside this replay and do not close these issues. The
+validator rejects missing, duplicated, malformed, misclassified, or extra
+requirement fields (including privacy data) and verifies the pinned profile and
+fixture hashes. Open acceptance stays unresolved pending issue-specific proof.
 - explanation available
 
 ## Coffer/modded inventory test

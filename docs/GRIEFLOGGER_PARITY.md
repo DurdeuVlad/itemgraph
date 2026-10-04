@@ -725,6 +725,37 @@ an owner issue in the compatibility registry; no missing extension is treated
 as demonstrated runtime behavior. The report is pinned to the
 same compatibility profile and exact-release fixture hashes, and contains no
 event IDs, player identity, raw payload, world position, or database row ID.
+This schema-v2 sidecar lists every registry action, its source enum/ID when it
+has one, exact-release writer disposition, ItemGraph compatibility status and
+extensions, compatible source table, and count in the selected replay. The
+independent `coverage_status` reports `observed-in-replay` or
+`not-observed-in-replay` from that count. The separate `release_writer_status`
+reports whether the exact 1.2.10-1.21.1 artifact has a writer or verifies
+`unsupported-no-writer`. An ItemGraph extension can therefore be observed in
+this replay even when GriefLogger has no corresponding writer.
+`not-observed-in-replay` means only that the current selected scenario did not
+exercise that action. It does not mean the ItemGraph implementation is absent,
+and it does not satisfy #31's outstanding coverage criterion. The report is pinned to the same
+compatibility profile and exact-release fixture hashes, and contains no event
+IDs, player identity, raw payload, world position, or database row ID.
+
+Schema v2 also contains explicit redacted rows for open requirements #136
+(server-side localization), #137 (named permission nodes), #138 (history chat
+hover/page/location actions), and #140 (player-broken container contents), plus
+five #31 durability categories: transaction boundaries, queue admission versus
+durable persistence, failure/retry/rejection, shutdown drain/flush, and restart
+recovery. Exact-release claims are limited to the checked-in GriefLogger
+1.2.10-1.21.1 fixture. That fixture confirms the `REMOVE_ITEM` writer class
+`BreakContainerEvent` for both audited loaders, but does not establish break
+timing details; locale inventory, named permission nodes, rich history chat
+payloads, and durability semantics are not recorded there. Details from pinned
+GriefLogger 26.2 source are labeled `source-only-research`, never exact-release
+behavior. ItemGraph's separate unit tests are listed as implementation evidence,
+not as passes in the selected 13-event replay. Every listed open acceptance
+remains `unresolved` until issue-specific evidence and acceptance criteria pass.
+The sidecar validator rejects missing, duplicate, changed, misclassified, or
+extra (including privacy-bearing) requirement-row fields, and checks profile
+and fixture hashes before writing the artifact.
 
 ## Verification notes
 
