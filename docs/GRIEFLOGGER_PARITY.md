@@ -748,7 +748,7 @@ timing details; locale inventory, named permission nodes, rich history chat
 payloads, and durability semantics are not recorded there. Details from pinned
 GriefLogger 26.2 source are labeled `source-only-research`, never exact-release
 behavior. ItemGraph's separate unit tests are listed as implementation evidence,
-not as passes in the selected 13-event replay. Every listed open acceptance
+not as passes in the current 2026-10-05 25-event replay. Every listed open acceptance
 remains `unresolved` until issue-specific evidence and acceptance criteria pass.
 The sidecar validator rejects missing, duplicate, changed, misclassified, or
 extra (including privacy-bearing) requirement-row fields, and checks profile
@@ -1006,5 +1006,7 @@ page has one numbered chat row per menu slot; candidate selection uses its own b
 so all ten resolver candidates remain reachable. Observed, inferred, source-group ambiguous,
 recorded transformation, and unresolved page states have distinct text. This presentation
 adds no dependency on the GriefLogger runtime and does not copy its code. Focused loader tests
-are the validation boundary for this change; the M8 milestone-wide suites remain batched.
-Display strings are English server text in this batch; offline locale resources belong to #136.
+are the validation boundary for this change. The complete NeoForge and Fabric unit/GameTest
+batch passed on 2026-10-05; exact results are recorded in `docs/TEST_PLAN.md` under
+“M8 milestone batch, 2026-10-05”. Locale resolution is implemented under #136 and included in
+that batch. Refreshed normal-scale UI evidence for the new chat companion remains open under #146.

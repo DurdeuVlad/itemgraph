@@ -119,7 +119,12 @@ for stale in (
     if any(stale in document for document in (*inspect_docs, architecture, security)):
         fail(f"stale inspection description remains: {stale}")
 
-if not re.search(r"permission level 2", quick_start, re.I) or not re.search(r"permission-level-2 gate", security, re.I):
-    fail("current permission-level-2 behavior must be stated until named nodes land")
+if (
+    not re.search(r"permission\s+level\s+2", quick_start, re.I)
+    or not re.search(r"permission\s+level\s+2", security, re.I)
+    or "exact node" not in quick_start
+    or not re.search(r"explicit `false` denies", security, re.I)
+):
+    fail("admin permission docs must state exact named-node checks, explicit deny, and the level-2 fallback")
 
 print("admin UX docs: command topics, inspection routes, and current permissions are aligned")

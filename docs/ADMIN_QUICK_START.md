@@ -1,19 +1,5 @@
 # ItemGraph admin quick start
 
-## Choose the server message language
-
-Set NeoForge `general.language` or Fabric `language` in
-`config/itemgraph.properties` to `en_us` (default), `nl_nl`, or `zh_tw`, then
-restart. ItemGraph validates this before opening its database and renders text
-on the server, so vanilla clients do not need the mod or network access. Missing
-keys fall back to English. Core query/detail/audit labels, inspection responses,
-flow-browser rows, controls, help entry text and navigation labels have translated
-entries. The explicit English fallback inventory currently contains 121 authored
-source phrases, including detailed help topics. See
-[`CONFIGURATION.md`](CONFIGURATION.md) for exact evidence limits: the checked-in
-GriefLogger 1.2.10-1.21.1 artifact has no locale inventory, while the three
-ItemGraph locales match only the separately pinned 26.2 source configuration.
-
 This guide is for a server admin investigating an item incident for the first time. It
 uses the current ItemGraph command tree and behavior for Minecraft 1.21.1. ItemGraph is a
 server-side NeoForge or Fabric mod; players do not need a client mod for commands or the
@@ -61,6 +47,7 @@ For server setup and the exact database keys, see [Configuration](CONFIGURATION.
 `/ig` and `/itemgraph` are the same command root. `/ig help` gives task-first starting
 points; `/ig help commands` groups every command path by investigation task. `/ig help
 lookup near`, `/ig help trace item`, and other topic forms give syntax and an example.
+`/ig help goto` explains that `[Go to ...]` is an in-game click action; do not type its token.
 `/ig page <page>` continues the issuing player's saved lookup session. By
 contrast, `/ig lookup page <page> <eventType> [limit] [sinceMinutes]` runs a direct page
 number query for that event type.
@@ -107,9 +94,12 @@ To browse a particular container without guessing its dimension, use:
 The flow browser is a vanilla menu. It has no ItemGraph-specific item, screen, packet, or
 client installation requirement. Each page has at most nine rows. A numbered chat companion
 shows each row's observed/inferred class, safe item identity, event kind, and UTC time when
-available; row numbers match menu slots. Missing identity and unresolved history have
-explicit labels. Hover text and icons provide supplemental detail. Its entries are read-only;
-attempts to move inventory items through the menu are rejected. For a supported container,
+available; row numbers match menu slots. Left-click a numbered timeline slot to open its
+details, then use the labeled Back control to return. On an ambiguous candidate page, select
+a candidate slot to open that candidate's timeline. Missing identity and unresolved history
+have explicit labels. Hover text and icons provide supplemental detail. Its entries are
+read-only; attempts to move inventory items through the menu are rejected. For a supported
+container,
 `/ig inspect on` and a
 right-click open the same kind of container flow browser. For a valid double chest, either
 half opens the canonical anchor used when its contents are recorded. Run `/ig inspect off`
@@ -151,6 +141,20 @@ to its evidence IDs and explanation.
 | Database unavailable or `/ig audit` reports violations | Storage or evidence consistency needs operator attention. | Preserve the database and logs, stop interpreting missing results as proof, and follow the [security and permissions](SECURITY_AND_PERMISSIONS.md) and [configuration](CONFIGURATION.md) guidance. |
 | `/ig inspect` does not consume a click | The read-only query was not accepted. | Check `/ig inspect status`, permission, target and server logs; ordinary block/container interaction continues when inspection cannot open. |
 
+## Optional: choose the server message language
+
+Set NeoForge `general.language` or Fabric `language` in
+`config/itemgraph.properties` to `en_us` (default), `nl_nl`, or `zh_tw`, then
+restart. ItemGraph validates this before opening its database and renders text
+on the server, so vanilla clients do not need the mod or network access. Missing
+keys fall back to English. Core query/detail/audit labels, inspection responses,
+flow-browser rows, controls, help entry text and navigation labels have translated
+entries. The explicit English fallback inventory currently contains 121 authored
+source phrases, including detailed help topics. See
+[`CONFIGURATION.md`](CONFIGURATION.md) for exact evidence limits: the checked-in
+GriefLogger 1.2.10-1.21.1 artifact has no locale inventory, while the three
+ItemGraph locales match only the separately pinned 26.2 source configuration.
+
 ItemGraph's graph and location history are sensitive. Share only the specific evidence
 needed for an incident, and keep database files and exports in operator-controlled storage.
 See [Security and permissions](SECURITY_AND_PERMISSIONS.md).
@@ -162,7 +166,7 @@ listed boundary; `Planned` means there is no user-facing implementation to use y
 
 | Feature | Entry point | Status | Permission / effect |
 | --- | --- | --- | --- |
-| Live command overview and topic help | bare `/ig`, `/ig help`, `/ig help <topic>` | Shipped | `itemgraph.command`; unset uses level 2; read-only. Topic list includes near/page/provenance lookups. |
+| Live command overview and topic help | bare `/ig`, `/ig help`, `/ig help <topic>` | Shipped | `itemgraph.command`; unset uses level 2; read-only. Topic list includes near/page/provenance lookups and `goto` link help. |
 | Fine-grained command permissions | `/ig help permissions`; [security and permissions](SECURITY_AND_PERMISSIONS.md) | Shipped | Exact per-surface nodes, explicit deny, level-2 fallback, and async/menu rechecks. |
 | Health, database, queues, and worker status | `/ig status` | Shipped | `itemgraph.command`; unset falls back to level 2; read-only. |
 | Database invariants and quantity audit | `/ig audit` | Shipped | `itemgraph.command` + `itemgraph.audit`; async, read-only. |
@@ -174,14 +178,14 @@ listed boundary; `Planned` means there is no user-facing implementation to use y
 | Raw item-observation details | `/ig event <observationId>` | Shipped | `itemgraph.command` + `itemgraph.event` + `itemgraph.audit`; read-only. |
 | Inference explanation and evidence links | `/ig explain <edgeId>` | Shipped | `itemgraph.command` + `itemgraph.explain` + `itemgraph.audit`; confidence is deterministic. |
 | Item, player, and container chronology | `/ig trace item|player|container ...` | Shipped | `itemgraph.command` + `itemgraph.trace` + `itemgraph.audit`; async, read-only, capped at 100 hops. |
-| Vanilla menu flow browser | `/ig gui item|player|container ...` | Shipped | `itemgraph.command` + `itemgraph.gui` + `itemgraph.audit`; player-only, read-only, up to nine entries/page (also capped by `query.max_page_size`) with a numbered chat companion. |
+| Vanilla menu flow browser | `/ig gui item|player|container ...` | Implemented; focused tests passed, refreshed row-label screenshot pending | `itemgraph.command` + `itemgraph.gui` + `itemgraph.audit`; player-only, read-only, up to nine entries/page (also capped by `query.max_page_size`) with numbered row labels, selectable details, and page controls. |
 | In-world block history and container flow inspection | `/ig inspect [on|off|status]` | Shipped | `itemgraph.command` + `itemgraph.command.inspect`; protected audit evidence also requires `itemgraph.audit`. |
 | Normal ingest-and-correlate cycle | `/ig ingest now` | Shipped | `itemgraph.command` + `itemgraph.ingest`; queues background work. |
 | Optional historical GriefLogger import | `/ig ingest history` | Partial | `itemgraph.command` + `itemgraph.ingest` + `itemgraph.import`; read-only source import, configured only. |
 | Database, queue, and query bounds | `config/itemgraph*.toml`; [configuration reference](CONFIGURATION.md) | Shipped | Operator configuration; restart may be required. |
 | Third-party mod integration | `com.itemgraph.api` `PREVIEW_1`; [API example](../examples/api-consumer) | Preview | Trusted server-side mod code; source-scoped bounded observations and async queries. |
-| Rich result hover and safe location actions | `/ig event`, `/ig explain`, `/ig trace`, paged lookups | Implemented; M8 verification pending | Hover shows bounded evidence details; `[Go to ...]` is player-only, expires after two minutes, works once, and rechecks query permissions. |
-| Player-broken container contents | Native block-break evidence | Implemented; M8 verification pending | Per-slot removal is recorded; destination stays `UNKNOWN` until an authoritative drop link exists. |
+| Rich result hover and safe location actions | `/ig event`, `/ig explain`, `/ig trace`, paged lookups, `/ig help goto` | Implemented; local tests passed, PR CI pending | Hover shows bounded evidence details; click `[Go to ...]` for a private, one-use action that expires after two minutes and rechecks query permissions. `/ig goto <token>` is only the internal click action; do not type the token manually. |
+| Player-broken container contents | Native block-break evidence | Implemented; local tests passed, PR CI pending | Per-slot removal is recorded; destination stays `UNKNOWN` until an authoritative drop link exists. |
 
 For exact command syntax and defaults, continue to [Query model](QUERY_MODEL.md). For
 parity gaps and work status, see [Feature parity inventory](FEATURE_PARITY_INVENTORY.md).

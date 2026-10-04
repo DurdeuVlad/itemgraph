@@ -1504,8 +1504,13 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
   and `pageCompanionKeepsAmbiguousTransformationAndUnresolvedStatesDistinct` cover observed, inferred,
   ambiguous source-group, recorded transformation type, missing fingerprint, unresolved target/empty page,
   UTC labels, and preservation of resolver candidate ten on its own nine-row page.
-- Required post-batch checks are focused NeoForge and Fabric unit tests plus both-loader main/test compilation.
-  Full loader suites, GameTests, and client screenshot replay remain deferred to the M8 milestone-end batch.
+- The M8 milestone-end loader batch and both loader GameTest suites passed on 2026-10-05; see
+  “M8 milestone batch, 2026-10-05” above. The earlier M11 connected-client replay documented
+  above covers the older menu path, not this new chat companion; this batch did not capture a
+  refreshed normal-scale screenshot of the new row labels. The available
+  `docs/test-evidence/m11-admin-first-ux/` screenshots predate this change and do not prove its
+  visible row labels; #146 remains open for that acceptance evidence. The operator's explicit
+  decision to skip live clicks for #26 remains in effect.
 ## M8 issue #140: contents of player-broken containers
 
 Both loader GameTest suites run `ContainerBreakConformanceFixture` through the
@@ -1552,8 +1557,8 @@ linked unresolved audit row records the stable reason code. An empty snapshot ha
 item-drop relation and records neither field nor unresolved drop-link row.
 Fabric obtains the successful-result boundary from `PlayerBlockBreakEvents.AFTER`;
 NeoForge uses the narrow `ServerPlayerGameMode.destroyBlock` wrapper because its
-`BlockEvent.BreakEvent` runs before mutation. No GriefLogger jar or database is
-loaded by these tests. Query databases read-only and run the repository's full CI
-commands only after the complete issue implementation batch; distributable jar
+`BlockEvent.BreakEvent` runs before mutation. The complete M8 loader and GameTest
+batch passed on 2026-10-05; see the milestone batch above. No GriefLogger jar or
+database was loaded. PR CI remains required for issue acceptance; distributable jar
 tasks remain excluded until an explicit mod-version bump.
 
