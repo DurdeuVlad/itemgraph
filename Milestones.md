@@ -145,11 +145,12 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   GriefLogger 1.2.10-1.21.1 feature profile. Native capture, storage, reconstruction,
   and queries work without the GriefLogger JAR or database; the legacy read-only
   importer is optional and disabled by default. M8 parity is proved through
-  exact-release/source research, ItemGraph-only isolated local NeoForge tests, and
-  cross-loader CI reports. No GriefLogger runtime, staging/production access, live GUI
-  click, or release publication is required or claimed. Remaining acceptance work is
-  #24 and #31. Deployment soak, rollback, and compatible-artifact retirement are
-  separate M10 operator/release gates.
+  exact-release/source research, ItemGraph-only isolated local loader tests, connected
+  MC Pilot client replays, and cross-loader CI reports. No GriefLogger runtime,
+  production access, or release publication is required or claimed. Remaining M8
+  issues are #24, #31, and the named-permission, localization, rich-history, and
+  container-break parity slices #136–#138 and #140. Deployment soak, rollback, and
+  compatible-artifact retirement are separate M10 operator/release gates.
 - Delivered: V13 native audit ledger and bounded `/ig lookup` for NeoForge, shared
   Fabric capture for its supported audit events, asynchronous persistence, action/player/
   time/radius lookup, item-flow and transformation capture, read-only container
@@ -166,7 +167,7 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   Paired loader GameTests additionally dispatch inspector command packets through
   the server handler and verify state transitions, exact durable command-attempt
   rows, player attribution, and no quantity-observation cell changes; these use
-  embedded mock players and do not satisfy the connected vanilla-client replay.
+  embedded mock players and do not prove client transport or rendered output.
   NeoForge and Fabric command dispatcher tests now assert the same seven exact
   inspector receipts and confirm permission denial emits no success receipt.
   Exactly five valid filters parse on both loaders; exact invalid-filter
@@ -175,9 +176,12 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   duplicate filters, include/exclude conflict, and the six-filter rejection.
   NeoForge and Fabric dispatcher tests assert identical inspector receipts, and
   PR #106 adds server packet-handler-to-ledger coverage. The embedded mock-player
-  tests do not prove connected-client transport or rendered output. The published
-  vanilla-client command replay and residual error/output evidence remain open
-  under #24. Issues #27, #30, #75, and #76 are closed; #24 and #31 remain open in M8.
+  tests do not prove connected-client transport or rendered output. The 2026-10-04
+  MC Pilot replays now provide connected, instrumented client command, paging, and
+  inspector evidence on both loaders; they are not unmodified vanilla-client tests.
+  Residual command-contract and release-proof criteria remain open under #24 and #31.
+  Issues #27, #30, #75, and #76 are closed. Issues #136–#138 and #140 own the
+  remaining user-facing and container-break parity gaps.
   Issue #30 was reopened because its queue-cadence evidence was incomplete, then
   closed after PR #108 added both-loader cadence coverage and the
   maintainer-selected local load evidence. PR #93 merged the `m8.8.0` registry and
@@ -289,7 +293,9 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   records administrative causes separately from command-attempt text and emits quantity
   evidence only at confirmed mutation boundaries. NeoForge 1.21.1 `CommandEvent` is
   cancellable and fires before execution, so it cannot prove a successful effect.
-  Visible-client inspector clicks remain unverified per the maintainer decision.
+  The 2026-10-04 MCT replay covers selected connected-client inspector cases; the
+  full issue #26 click matrix remains incomplete per the maintainer's earlier skip
+  decision.
 
 ## M10: Native-only cutover and release hardening
 
