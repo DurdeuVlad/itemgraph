@@ -148,7 +148,7 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   exact-release/source research, ItemGraph-only isolated local loader tests, connected
   MC Pilot client replays, and cross-loader CI reports. No GriefLogger runtime,
   production access, or release publication is required or claimed. Remaining M8
-  issues are #24, #31, and the named-permission, localization, rich-history, and
+  issues are #31 and the named-permission, localization, rich-history, and
   container-break parity slices #136–#138 and #140. Deployment soak, rollback, and
   compatible-artifact retirement are separate M10 operator/release gates.
 - Delivered: V13 native audit ledger and bounded `/ig lookup` for NeoForge, shared
@@ -179,7 +179,8 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   tests do not prove connected-client transport or rendered output. The 2026-10-04
   MC Pilot replays now provide connected, instrumented client command, paging, and
   inspector evidence on both loaders; they are not unmodified vanilla-client tests.
-  Residual command-contract and release-proof criteria remain open under #24 and #31.
+  PR #139 closed #24 after adding connected MC Pilot evidence and the feature inventory.
+  The native-only release-contract and invariant report remains open under #31.
   Issues #27, #30, #75, and #76 are closed. Issues #136–#138 and #140 own the
   remaining user-facing and container-break parity gaps.
   Issue #30 was reopened because its queue-cadence evidence was incomplete, then
