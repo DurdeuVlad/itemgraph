@@ -38,6 +38,26 @@ class QueryFormatterTest {
     }
 
     @Test
+    void unresolvedContainerBreakWithoutPlayerIdentityRendersActorUnavailable() {
+        AuditEventDetail missingActor = new AuditEventDetail(1, "CONTAINER_BREAK_UNRESOLVED", 1_700_000_000_000L,
+                null, null, "minecraft:overworld", 1, 64, 2, "minecraft:chest", "reason=CONTAINER_BREAK_ACTOR_UNAVAILABLE");
+        AuditEventDetail knownActor = new AuditEventDetail(2, "CONTAINER_BREAK_UNRESOLVED", 1_700_000_000_001L,
+                "player-uuid", "Admin", "minecraft:overworld", 1, 64, 2, "minecraft:chest", "reason=CONTAINER_OBSERVATION_QUEUE_REJECTED");
+
+        String formatted = String.join("\n", QueryFormatter.formatAuditEvents(List.of(missingActor, knownActor), "all"));
+
+        assertTrue(formatted.contains("actor=(actor unavailable)"), formatted);
+        assertTrue(formatted.contains("actor=Admin"), formatted);
+        assertFalse(formatted.contains("actor=(unknown player)"), formatted);
+
+        UnifiedEvidenceDetail unified = new UnifiedEvidenceDetail("AUDIT", "audit#1", 1_700_000_000_000L,
+                "minecraft:overworld", 1d, 64d, 2d, null, "CONTAINER_BREAK_UNRESOLVED", 0,
+                "minecraft:chest", "reason=CONTAINER_BREAK_ACTOR_UNAVAILABLE", "UNRESOLVED");
+        String unifiedFormatted = String.join("\n", QueryFormatter.formatUnifiedEvidence(List.of(unified), "all"));
+        assertTrue(unifiedFormatted.contains("actor=(actor unavailable)"), unifiedFormatted);
+    }
+
+    @Test
     void testFormatDuration() {
         assertEquals("0ms", QueryFormatter.formatDuration(0));
         assertEquals("999ms", QueryFormatter.formatDuration(999));

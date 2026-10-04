@@ -89,7 +89,7 @@ public final class QueryFormatter {
             return lines;
         }
         for (AuditEventDetail event : events) {
-            String actor = event.playerName() == null ? t("common.unknown_player", "(unknown player)") : event.playerName();
+            String actor = auditActor(event);
             String subject = event.subjectId() == null ? "" : " subject=" + event.subjectId();
             String detail = event.detail() == null ? "" : " detail=" + escapeDetail(event.detail());
             String supersession = event.supersedingEventId() == null ? ""
@@ -101,6 +101,15 @@ public final class QueryFormatter {
                     subject, detail, supersession));
         }
         return lines;
+    }
+
+    private static String auditActor(AuditEventDetail event) {
+        if (event.playerName() != null) return event.playerName();
+        if (event.playerUuid() != null) return event.playerUuid();
+        if ("CONTAINER_BREAK_UNRESOLVED".equals(event.eventType())) {
+            return "(actor unavailable)";
+        }
+        return "(unknown player)";
     }
 
     /** Formats the cross-table GriefLogger-compatible lookup timeline. */
@@ -115,6 +124,9 @@ public final class QueryFormatter {
         for (UnifiedEvidenceDetail row : evidence) {
             String actor = row.playerName() == null ? t("common.unknown_player", "(unknown player)") : row.playerName();
             String location = row.levelName() == null ? t("common.unknown_dimension", "(unknown dimension)") : row.levelName();
+            if ("CONTAINER_BREAK_UNRESOLVED".equals(row.actionType()) && row.playerName() == null) {
+                actor = "(actor unavailable)";
+            }
             if (row.x() != null && row.y() != null && row.z() != null) {
                 location += " [" + formatCoordinate(row.x()) + ", "
                         + formatCoordinate(row.y()) + ", " + formatCoordinate(row.z()) + "]";

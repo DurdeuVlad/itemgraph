@@ -50,15 +50,21 @@ class EventTaxonomyTest {
                     definition.neoForge().reasonCode() == null, definition.id() + " NeoForge support");
         }
         assertTrue(EventTaxonomy.VERSION.matches("\\d+\\.\\d+\\.\\d+"));
-        assertEquals("2.0.0", EventTaxonomy.VERSION,
-                "removing the unsupported creative transformation from selectable actions is a taxonomy major change");
+        assertEquals("2.1.0", EventTaxonomy.VERSION,
+                "adding the container-break event family is a taxonomy minor change");
 
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
             assertTrue(reasons.add(reason.id()), "duplicate reason code: " + reason.id());
-            assertTrue(reason.ownerIssue() == 33 || (reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57),
+            assertTrue(reason.ownerIssue() == 33 || (reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57)
+                            || reason.ownerIssue() == 140,
                     reason.id());
         }
+        assertTrue(reasons.contains("CONTAINER_BREAK_ACTOR_UNAVAILABLE"));
+        assertTrue(reasons.contains("CONTAINER_BLOCK_ENTITY_UNAVAILABLE"));
+        assertTrue(reasons.contains("CONTAINER_BLOCK_ENTITY_UNSUPPORTED"));
+        assertTrue(reasons.contains("CONTAINER_SLOT_LIMIT_EXCEEDED"));
+        assertTrue(reasons.contains("CONTAINER_SNAPSHOT_FAILED"));
     }
 
     @Test
@@ -132,6 +138,21 @@ class EventTaxonomyTest {
                 .orElseThrow();
         assertEquals(EventTaxonomy.SourceReliability.GAME_CALLBACK_ATTEMPT,
                 breakBlock.sourceReliability());
+        EventTaxonomy.Definition containerBreak = EventTaxonomy
+                .find("CONTAINER_BREAK_COMPLETED", Surface.AUDIT_EVENT).orElseThrow();
+        assertEquals(140, containerBreak.ownerIssue());
+        assertEquals(EventTaxonomy.SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                containerBreak.sourceReliability());
+        assertEquals(ActorStatus.PLAYER, containerBreak.actor());
+        EventTaxonomy.Definition unresolvedContainerBreak = EventTaxonomy
+                .find("CONTAINER_BREAK_UNRESOLVED", Surface.AUDIT_EVENT).orElseThrow();
+        assertEquals(EvidenceClass.UNRESOLVED, unresolvedContainerBreak.evidenceClass());
+        assertEquals(ActorStatus.UNKNOWN, unresolvedContainerBreak.actor(),
+                "an unresolved break family may have no authoritative player actor");
+        assertTrue(EventTaxonomy.unifiedLookupActions().contains("REMOVE_ITEM"));
+        assertTrue(EventTaxonomy.unresolvedReasonCodes().stream()
+                .anyMatch(reason -> reason.id().equals("CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED")
+                        && reason.ownerIssue() == 140));
         EventTaxonomy.Definition placeBlock = EventTaxonomy.find("PLACE_BLOCK", Surface.AUDIT_EVENT)
                 .orElseThrow();
         assertEquals(EventTaxonomy.SourceReliability.GAME_CALLBACK_ATTEMPT,

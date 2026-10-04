@@ -140,6 +140,74 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void containerBreakSummaryAndSlotRowsRollbackAsOneDurableUnit() throws Exception {
+        initializeTopologyDatabase();
+        InternalObservation validSlot = containerBreakSlotObservation(92_001);
+        InternalObservation failedSlot = containerBreakSlotObservation(92_002);
+        try (Statement statement = conn.createStatement()) {
+            statement.execute("CREATE TRIGGER fail_container_slot BEFORE INSERT ON ig_observations "
+                    + "WHEN NEW.ingest_event_uuid = '" + failedSlot.ingestEventUuid() + "' "
+                    + "BEGIN SELECT RAISE(ABORT, 'simulated slot insert failure'); END");
+        }
+        InternalAuditEvent completed = new InternalAuditEvent(
+                92_000L, "CONTAINER_BREAK_COMPLETED", PLAYER_UUID, "Alex", "minecraft:overworld",
+                0, 64, 0, "minecraft:chest", "contents_snapshot=complete", null)
+                .withRelatedObservations(List.of(validSlot, failedSlot));
+
+        assertThrows(Exception.class, () -> persistAudit(completed),
+                "a slot persistence failure must abort the audit summary transaction");
+        try (Statement statement = conn.createStatement();
+             ResultSet rows = statement.executeQuery("SELECT "
+                     + "(SELECT COUNT(*) FROM ig_audit_events WHERE event_type='CONTAINER_BREAK_COMPLETED'), "
+                     + "(SELECT COUNT(*) FROM ig_observations)")) {
+            assertTrue(rows.next());
+            assertEquals(0, rows.getInt(1), "the completion claim must roll back with a failed slot write");
+            assertEquals(0, rows.getInt(2), "earlier slot rows in the group must also roll back");
+        }
+
+        // Occupy the row IDs that the rolled-back inserts had cached. Without
+        // cache invalidation, retry would persist to these unrelated endpoints.
+        try (Statement statement = conn.createStatement()) {
+            statement.execute("DROP TRIGGER fail_container_slot");
+            statement.execute("INSERT INTO ig_nodes (id, node_type, level_id, x, y, z) "
+                    + "VALUES (1, 'CONTAINER', 'minecraft:overworld', 90, 64, 90)");
+            statement.execute("INSERT INTO ig_nodes (id, node_type, level_id, x, y, z) "
+                    + "VALUES (2, 'GROUND', 'minecraft:overworld', 91, 64, 91)");
+        }
+        assertDoesNotThrow(() -> persistAudit(completed),
+                "retry after rollback must resolve fresh node IDs rather than reuse rolled-back IDs");
+        try (Statement statement = conn.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT source.node_type, source.x, source.y, source.z, target.node_type,
+                            (SELECT COUNT(*) FROM ig_audit_events WHERE event_type='CONTAINER_BREAK_COMPLETED'),
+                            (SELECT COUNT(*) FROM ig_observations)
+                     FROM ig_observations o
+                     JOIN ig_nodes source ON source.id = o.node_id
+                     JOIN ig_nodes target ON target.id = o.target_node_id
+                     ORDER BY o.id
+                     """)) {
+            for (int slot = 0; slot < 2; slot++) {
+                assertTrue(rows.next());
+                assertEquals("CONTAINER", rows.getString(1));
+                assertEquals(0.0, rows.getDouble(2));
+                assertEquals(64.0, rows.getDouble(3));
+                assertEquals(0.0, rows.getDouble(4));
+                assertEquals("UNKNOWN", rows.getString(5));
+                assertEquals(1, rows.getInt(6));
+                assertEquals(2, rows.getInt(7));
+            }
+            assertFalse(rows.next());
+        }
+    }
+
+    private InternalObservation containerBreakSlotObservation(int id) {
+        return new InternalObservation(
+                92_000L + id, "REMOVE_ITEM", PLAYER_UUID, "Alex", "minecraft:overworld",
+                0, 64, 0, "minecraft:overworld", 0.0, 64.0, 0.0, "DESTROYED_CONTAINER",
+                "minecraft:diamond", null, DIAMOND, 1, null, null, null, UUID.randomUUID().toString());
+    }
+
+    @Test
     void duplicateJoinEventIdentityCannotCreateUnsupportedNameHistory() throws Exception {
         initializeTopologyDatabase();
         InternalAuditEvent accepted = new InternalAuditEvent(
@@ -400,13 +468,16 @@ class InternalObservationServiceTest {
     }
 
     @Test
-    void uninitializedDatabaseSpoolsAcceptedAuditEventForRestartRecovery() throws Exception {
+    void uninitializedDatabaseSpoolsGroupedContainerEvidenceForRestartRecovery() throws Exception {
         Path databasePath = tempDir.resolve("audit-recovery/itemgraph.db");
         DatabaseManager.getInstance().initialize(databasePath);
         DatabaseManager.getInstance().close();
-        assertTrue(service.submitAuditEvent(new InternalAuditEvent(
-                1234L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
-                10, 64, -20, null, "hello", null)));
+        InternalAuditEvent summary = new InternalAuditEvent(
+                1234L, "CONTAINER_BREAK_COMPLETED", PLAYER_UUID, "Alex", "minecraft:overworld",
+                10, 64, -20, "minecraft:chest", "contents_snapshot=complete", null)
+                .withRelatedObservations(List.of(
+                        containerBreakSlotObservation(93_001), containerBreakSlotObservation(93_002)));
+        assertTrue(service.submitAuditEvent(summary));
 
         service.stop();
 
@@ -425,13 +496,16 @@ class InternalObservationServiceTest {
         while (service.getTotalPersisted() == 0 && System.nanoTime() < deadline) {
             Thread.sleep(10);
         }
-        assertEquals(1, service.getTotalPersisted());
+        assertEquals(3, service.getTotalPersisted(), "recovery counts the summary and both related slots");
         service.stop();
         assertFalse(java.nio.file.Files.exists(spoolPath));
         try (Statement statement = DatabaseManager.getInstance().getConnection().createStatement();
-             ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM ig_audit_events WHERE detail = 'hello'")) {
+             ResultSet result = statement.executeQuery("SELECT "
+                     + "(SELECT COUNT(*) FROM ig_audit_events WHERE event_type='CONTAINER_BREAK_COMPLETED'), "
+                     + "(SELECT COUNT(*) FROM ig_observations)")) {
             assertTrue(result.next());
-            assertEquals(1, result.getInt(1));
+            assertEquals(1, result.getInt(1), "recovered parent summary must be durable");
+            assertEquals(2, result.getInt(2), "both related slot rows must recover with the summary");
         }
     }
 
@@ -1051,6 +1125,26 @@ class InternalObservationServiceTest {
                 neoForgeGriefLoggerRuntimeState());
     }
 
+    @Test
+    void containerBreakEvidenceCannotBePartiallyAdmittedWhenAuditQueueIsFull() {
+        for (int index = 0; index < 10_000; index++) {
+            assertTrue(service.submitAuditEvent(new InternalAuditEvent(
+                    System.currentTimeMillis(), "CONTAINER_BREAK_QUEUE_FILL", null, null,
+                    "minecraft:overworld", index, 64, 0, null, "fill=" + index, null)));
+        }
+        InternalAuditEvent relatedSummary = new InternalAuditEvent(
+                System.currentTimeMillis(), "CONTAINER_BREAK_COMPLETED", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 0, 64, 0, "minecraft:chest", "contents_snapshot=complete", null);
+
+        assertFalse(service.submitEvidenceBatch(List.of(createDummyObservation(91_401)), List.of(relatedSummary)));
+        assertEquals(0, service.getObservationQueueSize(),
+                "a full summary queue must reject all child observations in the related batch");
+        assertEquals(10_000, service.getAuditEventQueueSize());
+        assertEquals(2, service.getTotalDropped(),
+                "both the child observation and parent summary must count as rejected evidence");
+        service.clear();
+    }
+
     private static String neoForgeGriefLoggerRuntimeState() {
         net.neoforged.fml.ModList modList = net.neoforged.fml.ModList.get();
         return modList == null ? "unavailable" : modList.isLoaded("grieflogger") ? "present" : "absent";
@@ -1526,6 +1620,23 @@ class InternalObservationServiceTest {
         ObsRow row = singleObservation();
         assertEquals("CONTAINER", nodeTypeOf(row.nodeId()));
         assertEquals("PLAYER", nodeTypeOf(row.targetNodeId()));
+    }
+
+    @Test
+    void destroyedContainerContentsFlowToUnknownInsteadOfTheBreakingPlayer() throws Exception {
+        initializeTopologyDatabase();
+        persist(new InternalObservation(
+                System.currentTimeMillis(), "REMOVE_ITEM", PLAYER_UUID, "Steve",
+                "minecraft:overworld", 10, 64, -20,
+                "minecraft:overworld", 30.0, 70.0, -40.0,
+                "DESTROYED_CONTAINER", DIAMOND, 6, null));
+
+        ObsRow row = singleObservation();
+        assertEquals("CONTAINER", nodeTypeOf(row.nodeId()));
+        assertEquals("UNKNOWN", nodeTypeOf(row.targetNodeId()),
+                "a container break does not prove that the player or ground received its contents");
+        assertEquals(0, playerNodeCount(),
+                "retaining the actor in raw evidence must not invent a player item destination");
     }
 
     @Test

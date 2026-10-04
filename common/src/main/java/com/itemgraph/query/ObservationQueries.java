@@ -34,6 +34,9 @@ final class ObservationQueries {
                    o.timestamp_end_ms AS o_timestamp_end_ms,
                    CASE
                        WHEN o.source_type = 'ITEMGRAPH_INTERNAL'
+                         AND substr(CAST(o.raw_data AS TEXT), 1, 128) LIKE '%\"capture\":\"player_container_break_contents\"%'
+                           THEN 'player_container_break_contents'
+                       WHEN o.source_type = 'ITEMGRAPH_INTERNAL'
                          AND substr(CAST(o.raw_data AS TEXT), 1, 128) LIKE '%\"capture\":\"container_session_net_delta\"%'
                            THEN 'container_session_net_delta'
                        WHEN o.source_type = 'ITEMGRAPH_INTERNAL'
@@ -43,6 +46,7 @@ final class ObservationQueries {
                    END AS o_capture_type,
                    o.action_type AS o_action_type,
                    o.amount AS o_amount,
+                   o.raw_data AS o_raw_data,
                    o.correlated_at AS o_correlated_at,
                    o.correlation_status AS o_correlation_status,
                    o.item_entity_uuid AS o_item_entity_uuid,
@@ -106,6 +110,8 @@ final class ObservationQueries {
         long rawEndMs = rs.getLong("o_timestamp_end_ms");
         Long timestampEndMs = rs.wasNull() ? null : rawEndMs;
         String captureType = rs.getString("o_capture_type");
+        ContainerBreakEvidenceLinks.ObservationLinks containerBreakLinks =
+                ContainerBreakEvidenceLinks.observation(rs.getBytes("o_raw_data"));
         long rawGroupId = rs.getLong("o_source_group_id");
         Long groupId = rs.wasNull() ? null : rawGroupId;
         ObservationDetail.SourceGroup sourceGroup = null;
@@ -137,7 +143,10 @@ final class ObservationQueries {
                 timestampEndMs,
                 captureType,
                 sourceGroup,
-                rs.getString("o_disposition_reason")
+                rs.getString("o_disposition_reason"),
+                containerBreakLinks == null ? null : containerBreakLinks.eventId(),
+                containerBreakLinks == null ? null : containerBreakLinks.parentEventId(),
+                containerBreakLinks == null ? null : containerBreakLinks.breakEventId()
         );
     }
 

@@ -16,8 +16,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.nio.file.attribute.PosixFilePermission;
@@ -44,7 +46,8 @@ final class PendingEvidenceSpool {
         }
 
         int size() {
-            return observations.size() + transformations.size() + auditEvents.size();
+            return observations.size() + transformations.size() + auditEvents.stream()
+                    .mapToInt(event -> 1 + event.relatedObservations().size()).sum();
         }
     }
 
@@ -98,10 +101,61 @@ final class PendingEvidenceSpool {
         if (version != FORMAT_VERSION) {
             throw new IOException("pending evidence spool has an unsupported format version; original file was preserved");
         }
-        return new Snapshot(
+        Snapshot snapshot = new Snapshot(
                 decode(root, "observations", InternalObservationService.InternalObservation.class),
                 decode(root, "transformations", InternalObservationService.InternalTransformation.class),
                 decode(root, "audit_events", InternalObservationService.InternalAuditEvent.class));
+        return regroupLegacyContainerBreaks(snapshot);
+    }
+
+    /** Upgrade pre-grouping shutdown snapshots so a completion row cannot outlive its slot rows. */
+    private static Snapshot regroupLegacyContainerBreaks(Snapshot snapshot) {
+        Map<String, List<InternalObservationService.InternalObservation>> slotsByParent = new HashMap<>();
+        List<InternalObservationService.InternalObservation> ungrouped = new ArrayList<>();
+        Map<String, Boolean> knownParents = new HashMap<>();
+        for (InternalObservationService.InternalAuditEvent event : snapshot.auditEvents()) {
+            String parentId = containerBreakParentId(event);
+            if (parentId != null && event.relatedObservations().isEmpty()) knownParents.put(parentId, true);
+        }
+        for (InternalObservationService.InternalObservation observation : snapshot.observations()) {
+            String parentId = containerBreakCauseId(observation);
+            if (parentId != null && knownParents.containsKey(parentId)) {
+                slotsByParent.computeIfAbsent(parentId, ignored -> new ArrayList<>()).add(observation);
+            } else {
+                ungrouped.add(observation);
+            }
+        }
+        if (slotsByParent.isEmpty()) return snapshot;
+        List<InternalObservationService.InternalAuditEvent> auditEvents = new ArrayList<>(snapshot.auditEvents().size());
+        for (InternalObservationService.InternalAuditEvent event : snapshot.auditEvents()) {
+            String parentId = containerBreakParentId(event);
+            List<InternalObservationService.InternalObservation> slots = parentId == null
+                    ? null : slotsByParent.get(parentId);
+            auditEvents.add(slots == null ? event : event.withRelatedObservations(slots));
+        }
+        return new Snapshot(ungrouped, snapshot.transformations(), auditEvents);
+    }
+
+    private static String containerBreakParentId(InternalObservationService.InternalAuditEvent event) {
+        if (!"CONTAINER_BREAK_COMPLETED".equals(event.eventType()) || event.rawData() == null) return null;
+        try {
+            JsonObject details = JsonParser.parseString(new String(event.rawData(), StandardCharsets.UTF_8))
+                    .getAsJsonObject();
+            return details.has("event_id") ? details.get("event_id").getAsString() : null;
+        } catch (RuntimeException malformed) {
+            return null;
+        }
+    }
+
+    private static String containerBreakCauseId(InternalObservationService.InternalObservation observation) {
+        if (!"REMOVE_ITEM".equals(observation.actionType()) || observation.rawData() == null) return null;
+        try {
+            JsonObject details = JsonParser.parseString(new String(observation.rawData(), StandardCharsets.UTF_8))
+                    .getAsJsonObject();
+            return details.has("cause_event_id") ? details.get("cause_event_id").getAsString() : null;
+        } catch (RuntimeException malformed) {
+            return null;
+        }
     }
 
     private static <T> List<T> decode(JsonObject root, String field, Class<T> type) throws IOException {

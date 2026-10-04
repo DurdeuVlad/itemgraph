@@ -5,6 +5,7 @@ import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.audit.AdminMutationCapture;
+import com.itemgraph.audit.ContainerBreakCapture;
 import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.neoforge.mixin.BucketItemAccessor;
 import net.minecraft.commands.CommandSourceStack;
@@ -245,12 +246,15 @@ public final class NativeAuditEventListener {
     private static void submit(String eventType, ServerPlayer player, Level level, BlockPos pos,
                                String subjectId, String detail,
                                List<AuditEventQueryService.ExactPosition> supersessionPositions) {
+        String linkedBreakEventId = eventType.equals("BREAK_BLOCK") && level instanceof ServerLevel serverLevel
+                ? ContainerBreakCapture.activeBreakEventId(player, serverLevel, pos) : null;
         InternalObservationService.getInstance().submitAuditEvent(
                 new InternalObservationService.InternalAuditEvent(
                         System.currentTimeMillis(), eventType,
                         player.getUUID().toString(), player.getGameProfile().getName(),
                         level.dimension().location().toString(),
-                        pos.getX(), pos.getY(), pos.getZ(), subjectId, detail, null, supersessionPositions));
+                        pos.getX(), pos.getY(), pos.getZ(), subjectId, detail, null,
+                        null, linkedBreakEventId, supersessionPositions));
     }
 
     private static String blockId(BlockState state) {

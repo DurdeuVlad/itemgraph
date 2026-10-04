@@ -1,11 +1,14 @@
 package com.itemgraph.neoforge.mixin;
 
 import com.itemgraph.audit.AdminMutationCapture;
+import com.itemgraph.audit.ContainerBreakCapture;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerPlayerGameMode;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -22,6 +25,11 @@ abstract class AdminCreativeBlockResultMixin {
 
     @WrapMethod(method = "destroyBlock")
     private boolean itemgraph$recordBreakResult(BlockPos position, Operation<Boolean> original) throws Throwable {
+        var level = player.serverLevel();
+        BlockState stateBefore = level.getBlockState(position);
+        BlockEntity blockEntityBefore = level.getBlockEntity(position);
+        ContainerBreakCapture.Snapshot containerSnapshot = ContainerBreakCapture.begin(
+                player, level, position, stateBefore, blockEntityBefore);
         boolean completed = false;
         boolean broken = false;
         try {
@@ -30,6 +38,9 @@ abstract class AdminCreativeBlockResultMixin {
             return broken;
         } finally {
             AdminMutationCapture.finishCreativeBlockBreakSafely(player, position, completed, broken);
+            boolean blockChanged = !level.getBlockState(position).equals(stateBefore)
+                    || level.getBlockEntity(position) != blockEntityBefore;
+            ContainerBreakCapture.complete(containerSnapshot, completed && broken && blockChanged);
         }
     }
 }

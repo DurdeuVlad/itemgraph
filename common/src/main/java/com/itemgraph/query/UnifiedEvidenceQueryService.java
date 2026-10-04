@@ -241,7 +241,7 @@ public final class UnifiedEvidenceQueryService {
                                                    boolean activeInspectorHistory) throws SQLException {
         StringBuilder sql = new StringBuilder("""
                 SELECT a.id, a.event_type, a.timestamp_ms, a.player_uuid, a.player_name,
-                       a.level_id, a.x, a.y, a.z, a.subject_id, a.detail, a.source_type,
+                       a.level_id, a.x, a.y, a.z, a.subject_id, a.detail, a.source_type, a.raw_data,
                        s.superseding_event_id, s.reason_code
                 FROM ig_audit_events a
                 LEFT JOIN ig_audit_event_supersessions s ON s.superseded_event_id = a.id
@@ -289,6 +289,8 @@ public final class UnifiedEvidenceQueryService {
                                 + " reason=" + rs.getString("reason_code");
                         detail = detail == null || detail.isBlank() ? reason : detail + " " + reason;
                     }
+                    detail = ContainerBreakEvidenceLinks.appendAuditDetail(
+                            rs.getString("event_type"), detail, rs.getBytes("raw_data"));
                     rows.add(new UnifiedEvidenceDetail(
                             valueOr(rs.getString("source_type"), "AUDIT"),
                             "audit#" + rs.getLong("id"),
@@ -329,7 +331,7 @@ public final class UnifiedEvidenceQueryService {
                             WHEN dest.node_type = 'PLAYER' THEN dest.owner_uuid
                             ELSE COALESCE(origin.owner_uuid, dest.owner_uuid) END AS player_uuid,
                        f.item_id, origin.custom_label AS origin_label,
-                       dest.custom_label AS dest_label
+                       dest.custom_label AS dest_label, o.raw_data
                 FROM ig_observations o
                 LEFT JOIN ig_nodes origin ON origin.id = o.node_id
                 LEFT JOIN ig_nodes dest ON dest.id = o.target_node_id
@@ -373,6 +375,7 @@ public final class UnifiedEvidenceQueryService {
                             + (sourceEventId == null ? "" : " sourceEvent#" + sourceEventId)
                             + " origin=" + valueOr(rs.getString("origin_label"), "(unlabeled)")
                             + " destination=" + valueOr(rs.getString("dest_label"), "(unlabeled)");
+                    detail = ContainerBreakEvidenceLinks.appendObservationDetail(detail, rs.getBytes("raw_data"));
                     String rowLevel = rs.getString("level_id");
                     Double rowX = nullableDouble(rs, "x");
                     Double rowY = nullableDouble(rs, "y");

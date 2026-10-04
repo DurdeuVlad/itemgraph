@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "2.0.0";
+    public static final String VERSION = "2.1.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -147,7 +147,23 @@ public final class EventTaxonomy {
             new ReasonCode("TRANSFORMATION_CANCELLED", 57,
                     "The transformation operation was cancelled before a successful result."),
             new ReasonCode("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", 33,
-                    "Creative slot changes do not establish an item transformation cause.")
+                    "Creative slot changes do not establish an item transformation cause."),
+            new ReasonCode("CONTAINER_SNAPSHOT_INCOMPLETE", 140,
+                    "A successful player container break was observed, but its complete pre-break inventory snapshot was unavailable."),
+            new ReasonCode("CONTAINER_BREAK_ACTOR_UNAVAILABLE", 140,
+                    "The loader reported a container-break boundary without an authoritative player actor."),
+            new ReasonCode("CONTAINER_BLOCK_ENTITY_UNAVAILABLE", 140,
+                    "The block state required a block entity, but it was unavailable at the break snapshot boundary."),
+            new ReasonCode("CONTAINER_BLOCK_ENTITY_UNSUPPORTED", 140,
+                    "The broken block entity does not expose inventory through ItemGraph's supported Container contract."),
+            new ReasonCode("CONTAINER_SLOT_LIMIT_EXCEEDED", 140,
+                    "The inventory exceeded the bounded slot count supported by the container-break snapshot."),
+            new ReasonCode("CONTAINER_SNAPSHOT_FAILED", 140,
+                    "Reading the container inventory failed before a complete snapshot could be recorded."),
+            new ReasonCode("CONTAINER_OBSERVATION_QUEUE_REJECTED", 140,
+                    "The bounded ingestion queue rejected the related container-break evidence batch."),
+            new ReasonCode("CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED", 140,
+                    "The container contents were observed before destruction, but available callbacks did not link resulting ground item entities to those contents.")
     );
     private static final List<Definition> DEFINITIONS = createDefinitions();
     private static final Map<String, Definition> BY_ID = indexById(DEFINITIONS);
@@ -262,6 +278,12 @@ public final class EventTaxonomy {
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "BREAK_BLOCK", "block_action", SourceReliability.GAME_CALLBACK_ATTEMPT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
+        audit(entries, "CONTAINER_BREAK_COMPLETED", "container_break",
+                SourceReliability.AUTHORITATIVE_GAME_RESULT, ActorStatus.PLAYER,
+                PrivacyClass.SENSITIVE_LOCATION, 140);
+        audit(entries, "CONTAINER_BREAK_UNRESOLVED", "container_break",
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 140);
         audit(entries, "INTERACT_BLOCK", "block_action", SourceReliability.GAME_CALLBACK_ATTEMPT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27, HISTORICAL_ONLY);
         audit(entries, "INTERACT_BLOCK_ATTEMPT", "block_action", SourceReliability.GAME_CALLBACK_ATTEMPT,

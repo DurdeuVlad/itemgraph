@@ -1462,4 +1462,54 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
   UTC labels, and preservation of resolver candidate ten on its own nine-row page.
 - Required post-batch checks are focused NeoForge and Fabric unit tests plus both-loader main/test compilation.
   Full loader suites, GameTests, and client screenshot replay remain deferred to the M8 milestone-end batch.
+## M8 issue #140: contents of player-broken containers
+
+Both loader GameTest suites run `ContainerBreakConformanceFixture` through the
+real `ServerPlayerGameMode.destroyBlock` path. It breaks an empty single chest, a
+separate single chest with exactly one five-item stack, a populated single chest
+with all 27 slots occupied (including component variants), and one half of a
+double chest with different contents in each half. It also cancels a real break
+through each loader's cancellation hook. Read-only database assertions require
+one completed parent per successful break, one unresolved drop-link row only for
+each nonempty snapshot, one
+`REMOVE_ITEM` row per non-empty slot, exact slot/count/fingerprint provenance,
+the broken container as source, `UNKNOWN` as destination, and a stable
+`break_event_id` link to the matching standard `BREAK_BLOCK` row. The double-
+chest assertion verifies that breaking one half does not count the surviving
+half's contents. A successful container break with no authoritative actor must
+persist one `CONTAINER_BREAK_UNRESOLVED` row with null player columns, stable
+`CONTAINER_BREAK_ACTOR_UNAVAILABLE` reason, and `actor_status=UNKNOWN`. Its
+redacted report case carries only a hashed evidence reference, relative fixture
+position, stable reason, and UNKNOWN actor status; it has no player alias or
+parent link. The redacted conformance report proves four player-attributed break
+cases, one actor-unavailable unresolved case, three nonempty drop-link outcomes,
+29 slot rows, and conservation of 386 source items.
+Empty-container assertions reject a drop-link reason in the completion payload and
+a separate `CONTAINER_BREAK_UNRESOLVED` row. Taxonomy and formatter tests require the
+unresolved event actor to be `UNKNOWN` and display `(actor unavailable)` when both
+player ID and name are absent; a present player name remains visible.
+The same live-server fixture also breaks a sign block entity, verifies the
+stable `CONTAINER_BLOCK_ENTITY_UNSUPPORTED` unresolved reason, and asserts that
+the canceled chest creates no contents event.
+
+`InternalObservationServiceTest` verifies that an audit-queue capacity failure
+rejects the related parent and item rows as one batch, and injects a second-slot
+write failure to prove the completion summary and first slot row roll back in the
+same transaction. `PendingEvidenceSpoolTest` round-trips nested related slot rows
+as one retry unit. `DESTROYED_CONTAINER` maps to `CONTAINER -> UNKNOWN` without
+creating a player item endpoint. Producer retries use stable parent, break, and
+per-slot event IDs; persisted queue retries retain the same immutable record and
+are covered by idempotency tests.
+
+The adapters deliberately do not link the container snapshot to emitted ground
+entities: the available 1.21.1 callbacks do not establish per-stack identity.
+For a nonempty snapshot the parent row records `drop_link_status=UNRESOLVED`, and a
+linked unresolved audit row records the stable reason code. An empty snapshot has no
+item-drop relation and records neither field nor unresolved drop-link row.
+Fabric obtains the successful-result boundary from `PlayerBlockBreakEvents.AFTER`;
+NeoForge uses the narrow `ServerPlayerGameMode.destroyBlock` wrapper because its
+`BlockEvent.BreakEvent` runs before mutation. No GriefLogger jar or database is
+loaded by these tests. Query databases read-only and run the repository's full CI
+commands only after the complete issue implementation batch; distributable jar
+tasks remain excluded until an explicit mod-version bump.
 
