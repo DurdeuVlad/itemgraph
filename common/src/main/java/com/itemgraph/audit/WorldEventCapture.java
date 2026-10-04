@@ -229,9 +229,16 @@ public final class WorldEventCapture {
             }
         }
 
-        if (changedPositionCount == 0) {
-            // The callback returned false for cancellation/failure, or no candidate
-            // block changed. Record the observed result without calling it a move.
+        boolean completeCoverage = hasCompletePistonCoverage(snapshot.resolverSucceeded(),
+                snapshot.candidatePositionCount(), snapshot.beforeStates().size(),
+                snapshot.unavailablePositionCount(), unavailableAfterCount);
+        boolean blockedByResolver = !snapshot.resolverSucceeded() && !returnedSuccess;
+        if (changedPositionCount == 0 && canRecordPistonUnchangedAttempt(snapshot.resolverSucceeded(),
+                returnedSuccess, "RETURN".equals(exitBoundary), snapshot.candidatePositionCount(),
+                snapshot.beforeStates().size(),
+                snapshot.unavailablePositionCount(), unavailableAfterCount)) {
+            // A failed resolver plus a false vanilla result directly establishes a
+            // blocked attempt. Other no-change results require a complete state scan.
             boolean accepted = InternalObservationService.getInstance().submitAuditEvent(WorldEventEvidence.create(
                     "PISTON_BLOCK_ATTEMPT", timestampMs, level.dimension().location().toString(),
                     snapshot.pistonPos().getX(), snapshot.pistonPos().getY(), snapshot.pistonPos().getZ(),
@@ -243,9 +250,7 @@ public final class WorldEventCapture {
         }
 
         boolean exceptionalExit = "THROW".equals(exitBoundary);
-        boolean partialCoverage = exceptionalExit
-                || snapshot.candidatePositionCount() > MAX_PISTON_POSITIONS
-                || snapshot.unavailablePositionCount() > 0 || unavailableAfterCount > 0
+        boolean partialCoverage = exceptionalExit || (!completeCoverage && !blockedByResolver)
                 || changedPositionCount > MAX_PISTON_EVIDENCE_ROWS || rejectedEvidenceCount > 0;
         if (partialCoverage) {
             Map<String, String> partialMetadata = new TreeMap<>(sourceMetadata);
@@ -273,6 +278,27 @@ public final class WorldEventCapture {
             LOGGER.error("ItemGraph rejected {} audit record(s) for piston cause {} because the bounded queue was full",
                     rejectedEvidenceCount, snapshot.causeEventId());
         }
+    }
+
+    static boolean hasCompletePistonCoverage(boolean resolverSucceeded, int candidatePositionCount,
+                                             int capturedPositionCount, int unavailableBeforeCount,
+                                             int unavailableAfterCount) {
+        return resolverSucceeded
+                && candidatePositionCount >= 0
+                && candidatePositionCount <= MAX_PISTON_POSITIONS
+                && capturedPositionCount == candidatePositionCount
+                && unavailableBeforeCount == 0
+                && unavailableAfterCount == 0;
+    }
+
+    static boolean canRecordPistonUnchangedAttempt(boolean resolverSucceeded, boolean callbackReturnedSuccess,
+                                                   boolean returnedNormally, int candidatePositionCount,
+                                                   int capturedPositionCount,
+                                                   int unavailableBeforeCount, int unavailableAfterCount) {
+        return returnedNormally && (hasCompletePistonCoverage(resolverSucceeded,
+                candidatePositionCount, capturedPositionCount,
+                unavailableBeforeCount, unavailableAfterCount)
+                || (!resolverSucceeded && !callbackReturnedSuccess));
     }
 
     private static void recordPistonCaptureFailure(ServerLevel level, BlockPos pistonPos, String causeEventId,

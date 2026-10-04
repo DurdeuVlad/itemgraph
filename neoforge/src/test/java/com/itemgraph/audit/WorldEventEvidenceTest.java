@@ -14,6 +14,25 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class WorldEventEvidenceTest {
     @Test
+    void pistonNoChangeEvidenceRequiresCompleteBeforeAndAfterCoverage() {
+        assertTrue(WorldEventCapture.canRecordPistonUnchangedAttempt(true, true, true, 4, 4, 0, 0));
+        assertTrue(WorldEventCapture.canRecordPistonUnchangedAttempt(false, false, true, 0, 0, 0, 0),
+                "a failed resolver with a false vanilla result directly establishes a blocked attempt");
+        assertFalse(WorldEventCapture.canRecordPistonUnchangedAttempt(false, true, true, 0, 0, 0, 0),
+                "failed piston resolution cannot establish an unchanged result");
+        assertFalse(WorldEventCapture.canRecordPistonUnchangedAttempt(true, false, true, 4, 3, 1, 0),
+                "unloaded before-state candidates make zero observed deltas inconclusive");
+        assertFalse(WorldEventCapture.canRecordPistonUnchangedAttempt(true, false, true, 4, 4, 0, 1),
+                "a candidate chunk disappearing after the callback makes zero deltas inconclusive");
+        assertFalse(WorldEventCapture.canRecordPistonUnchangedAttempt(true, false, true, 65, 64, 0, 0),
+                "truncated piston scans cannot establish an unchanged result");
+        assertFalse(WorldEventCapture.canRecordPistonUnchangedAttempt(false, false, false, 0, 0, 0, 0),
+                "a thrown callback is unresolved, not a normal blocked result");
+        assertFalse(WorldEventCapture.canRecordPistonUnchangedAttempt(true, false, false, 4, 4, 0, 0),
+                "a thrown callback cannot be converted into a normal unchanged result");
+    }
+
+    @Test
     void createsNonQuantityEvidenceWithUnknownActorAndStableRowIdentity() {
         InternalAuditEvent event = WorldEventEvidence.create(
                 "explosion_block_change", 1234L, "minecraft:overworld",

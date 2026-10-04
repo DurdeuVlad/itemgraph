@@ -80,9 +80,14 @@ MixinExtras `@WrapMethod`. At entry, ItemGraph resolves the vanilla piston struc
 without changing the world and snapshots the piston/head, moved-block sources,
 destinations, and destroyed positions. It reads at most 64 loaded positions and
 does not load chunks. At return, only changed states become observed
-`PISTON_BLOCK_MOVE` rows; a failed resolver or a trigger with no state delta is
-stored as `PISTON_BLOCK_ATTEMPT` with `outcome=UNCHANGED` and
-`source_reliability=GAME_CALLBACK_ATTEMPT`. It carries no before/after state
+`PISTON_BLOCK_MOVE` rows. A trigger with no state delta is stored as
+`PISTON_BLOCK_ATTEMPT` with `outcome=UNCHANGED` and
+`source_reliability=GAME_CALLBACK_ATTEMPT` when the resolver failed and vanilla
+returned `false`, or when the resolver succeeded and every candidate position
+was loaded and compared before and after within the 64-position bound. Other
+incomplete candidate coverage emits only
+`WORLD_EFFECT_UNRESOLVED` with `WORLD_EFFECT_PARTIAL`; zero sampled changes do
+not prove an unchanged result. An unchanged attempt carries no before/after state
 claim and is never presented as a successful transfer. Confirmed movement rows
 retain `DIRECT_STATE_DELTA` reliability. Rows share a
 `cause_event_id`, use `quantity=NONE`, omit player identity, and are submitted to
