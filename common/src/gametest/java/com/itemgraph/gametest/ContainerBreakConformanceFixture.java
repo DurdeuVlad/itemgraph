@@ -297,8 +297,10 @@ public final class ContainerBreakConformanceFixture {
             statement.setDouble(4, position.getZ());
             try (var rows = statement.executeQuery()) {
                 helper.assertTrue(rows.next(), "successful break without an actor must persist unresolved evidence");
-                helper.assertValueEqual(null, rows.getString(1), "actor-unavailable evidence must not invent a player UUID");
-                helper.assertValueEqual(null, rows.getString(2), "actor-unavailable evidence must not invent a player name");
+                helper.assertTrue(rows.getString(1) == null,
+                        "actor-unavailable evidence must not invent a player UUID");
+                helper.assertTrue(rows.getString(2) == null,
+                        "actor-unavailable evidence must not invent a player name");
                 JsonObject details = parse(rows.getString(3));
                 helper.assertValueEqual("UNKNOWN", details.get("actor_status").getAsString(),
                         "actor-unavailable evidence must persist UNKNOWN actor status");
