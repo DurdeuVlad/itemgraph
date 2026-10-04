@@ -434,16 +434,18 @@ public final class UnifiedEvidenceQueryService {
                     String action = rs.getString("transformation_type");
                     EventTaxonomy.Definition definition = EventTaxonomy
                             .find(action, EventTaxonomy.Surface.TRANSFORMATION).orElse(null);
-                    boolean unresolved = definition == null
-                            || (definition.fabric().status() != EventTaxonomy.LoaderStatus.IMPLEMENTED
-                            && definition.neoForge().status() != EventTaxonomy.LoaderStatus.IMPLEMENTED);
-                    String detail = valueOr(rs.getString("details"), "")
-                            + " source=" + valueOr(sourceItem, "(missing)")
+                    boolean unresolved = !EventTaxonomy.isTraceableTransformation(action);
+                    String detail = "source=" + valueOr(sourceItem, "(missing)")
                             + " result=" + valueOr(resultItem, "(missing)");
                     if (unresolved) {
                         String reason = definition == null ? "UNCLASSIFIED_TRANSFORMATION_TYPE"
-                                : definition.fabric().reasonCode();
-                        detail += " evidence=UNRESOLVED reason=" + reason + " quantity=UNKNOWN";
+                                : firstNonBlank(definition.fabric().reasonCode(),
+                                firstNonBlank(definition.neoForge().reasonCode(),
+                                        "TRANSFORMATION_CAUSE_UNSUPPORTED"));
+                        detail += " legacy_details=OMITTED evidence=UNRESOLVED reason=" + reason
+                                + " quantity=UNKNOWN";
+                    } else {
+                        detail = valueOr(rs.getString("details"), "") + " " + detail;
                     }
                     rows.add(new UnifiedEvidenceDetail(
                             "TRANSFORMATION", "transformation#" + rs.getLong("id"),

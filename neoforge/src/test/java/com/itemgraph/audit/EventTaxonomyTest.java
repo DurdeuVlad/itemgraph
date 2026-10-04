@@ -8,6 +8,7 @@ import com.itemgraph.audit.EventTaxonomy.Surface;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -55,7 +56,8 @@ class EventTaxonomyTest {
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
             assertTrue(reasons.add(reason.id()), "duplicate reason code: " + reason.id());
-            assertTrue(reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57, reason.id());
+            assertTrue(reason.ownerIssue() == 33 || (reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57),
+                    reason.id());
         }
     }
 
@@ -176,6 +178,12 @@ class EventTaxonomyTest {
                 creativeTransform.sourceReliability());
         assertEquals(EventTaxonomy.EndpointSemantics.UNKNOWN, creativeTransform.endpoints());
         assertEquals(QuantitySemantics.UNKNOWN, creativeTransform.quantity());
+        assertTrue(EventTaxonomy.traceableTransformationTypes().contains("CRAFT"));
+        assertFalse(EventTaxonomy.traceableTransformationTypes().contains("CREATIVE_ITEM_TRANSFORM"));
+        assertTrue(EventTaxonomy.isTraceableTransformation("ADMIN_ITEM_TRANSFORM"));
+        assertFalse(EventTaxonomy.isTraceableTransformation("FUTURE_TRANSFORM"));
+        assertTrue(EventTaxonomy.unresolvedReasonCodes().stream()
+                .anyMatch(reason -> reason.id().equals("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED")));
         assertFalse(creativeTransform.queryableOn(EventTaxonomy.Loader.FABRIC));
         assertFalse(creativeTransform.queryableOn(EventTaxonomy.Loader.NEOFORGE));
         assertFalse(EventTaxonomy.unifiedLookupActions().contains("CREATIVE_ITEM_TRANSFORM"));
@@ -184,5 +192,12 @@ class EventTaxonomyTest {
                 .forEach(definition -> assertEquals(definition.fabric(), definition.neoForge(),
                         "shared transformation queries need matching loader classifications: "
                                 + definition.id()));
+        List<String> implementedOnBothLoaders = EventTaxonomy.definitions().stream()
+                .filter(definition -> definition.surface() == Surface.TRANSFORMATION)
+                .filter(definition -> definition.fabric().status() == EventTaxonomy.LoaderStatus.IMPLEMENTED
+                        && definition.neoForge().status() == EventTaxonomy.LoaderStatus.IMPLEMENTED)
+                .map(EventTaxonomy.Definition::id)
+                .toList();
+        assertEquals(implementedOnBothLoaders, EventTaxonomy.traceableTransformationTypes());
     }
 }

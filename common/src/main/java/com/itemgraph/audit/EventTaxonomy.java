@@ -145,7 +145,9 @@ public final class EventTaxonomy {
             new ReasonCode("TRANSFORMATION_INPUTS_NOT_OBSERVED", 57,
                     "The operation output is known but one or more input stacks were not observed."),
             new ReasonCode("TRANSFORMATION_CANCELLED", 57,
-                    "The transformation operation was cancelled before a successful result.")
+                    "The transformation operation was cancelled before a successful result."),
+            new ReasonCode("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", 33,
+                    "Creative slot changes do not establish an item transformation cause.")
     );
     private static final List<Definition> DEFINITIONS = createDefinitions();
     private static final Map<String, Definition> BY_ID = indexById(DEFINITIONS);
@@ -177,14 +179,21 @@ public final class EventTaxonomy {
         return UNIFIED_LOOKUP_ACTIONS;
     }
 
-    /** Transformation IDs that must not be used as proven movement on either loader. */
-    public static List<String> unsupportedTransformations() {
+    /** Transformation IDs implemented on both loaders; shared queries have no loader provenance. */
+    public static List<String> traceableTransformationTypes() {
         return DEFINITIONS.stream()
                 .filter(definition -> definition.surface() == Surface.TRANSFORMATION)
-                .filter(definition -> definition.fabric().status() != LoaderStatus.IMPLEMENTED
-                        && definition.neoForge().status() != LoaderStatus.IMPLEMENTED)
+                .filter(definition -> definition.fabric().status() == LoaderStatus.IMPLEMENTED
+                        && definition.neoForge().status() == LoaderStatus.IMPLEMENTED)
                 .map(Definition::id)
                 .toList();
+    }
+
+    public static boolean isTraceableTransformation(String id) {
+        return find(id, Surface.TRANSFORMATION)
+                .map(definition -> definition.fabric().status() == LoaderStatus.IMPLEMENTED
+                        && definition.neoForge().status() == LoaderStatus.IMPLEMENTED)
+                .orElse(false);
     }
 
     public static Optional<Definition> find(String id) {

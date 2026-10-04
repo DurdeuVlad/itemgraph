@@ -32,6 +32,23 @@ class TraceQueryServiceTest extends QueryTestBase {
         return result.hops().stream().map(TraceHop::refId).toList();
     }
 
+    private void insertTransformation(String type, long actor, long source, long result,
+                                      int quantity, long timestamp) throws Exception {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations (transformation_type, player_node_id,
+                    source_fingerprint_id, result_fingerprint_id, quantity, timestamp_ms, details)
+                VALUES (?, ?, ?, ?, ?, ?, 'test fixture')
+                """)) {
+            statement.setString(1, type);
+            statement.setLong(2, actor);
+            statement.setLong(3, source);
+            statement.setLong(4, result);
+            statement.setInt(5, quantity);
+            statement.setLong(6, timestamp);
+            statement.executeUpdate();
+        }
+    }
+
     @Test
     void unsupportedLegacyCreativeTransformationCannotBecomeAnItemTraceHop() throws Exception {
         long player = insertPlayerNode("CreativeOperator");
@@ -53,6 +70,35 @@ class TraceQueryServiceTest extends QueryTestBase {
 
         assertTrue(trace.hops().isEmpty(),
                 "unresolved creative cause remains available in unified evidence, not as a proven movement hop");
+    }
+
+    @Test
+    void unknownAndMalformedTransformationTypesCannotBecomeObservedHops() throws Exception {
+        long player = insertPlayerNode("TransformationOperator");
+        long source = insertFingerprint("minecraft:diamond", "unknown-transform-source");
+        long result = insertFingerprint("minecraft:emerald", "unknown-transform-result");
+        insertTransformation("FUTURE_TRANSFORM", player, source, result, 5, now - 2_000);
+        insertTransformation("CRAFT ", player, source, result, 7, now - 1_000);
+
+        TraceResult trace = service.trace(conn, source, QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        assertTrue(trace.hops().isEmpty(),
+                "unknown and malformed transformation IDs must remain unresolved instead of asserting movement");
+    }
+
+    @Test
+    void implementedTransformationsRemainObservedTraceHops() throws Exception {
+        long player = insertPlayerNode("TransformationOperator");
+        long source = insertFingerprint("minecraft:diamond", "known-transform-source");
+        long result = insertFingerprint("minecraft:emerald", "known-transform-result");
+        insertTransformation("CRAFT", player, source, result, 5, now - 2_000);
+        insertTransformation("ADMIN_ITEM_TRANSFORM", player, source, result, 7, now - 1_000);
+
+        TraceResult trace = service.trace(conn, source, QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        assertTrue(trace.hops().get(0).detail().contains("TRANSFORMATION CRAFT ->"));
+        assertTrue(trace.hops().get(1).detail().contains("TRANSFORMATION ADMIN_ITEM_TRANSFORM ->"));
+        assertEquals(List.of(5, 7), trace.hops().stream().map(TraceHop::amount).toList());
     }
 
     /**
@@ -163,7 +209,7 @@ class TraceQueryServiceTest extends QueryTestBase {
         try (PreparedStatement pstmt = conn.prepareStatement("""
                 INSERT INTO ig_item_transformations (transformation_type, player_node_id,
                     source_fingerprint_id, result_fingerprint_id, quantity, timestamp_ms, details)
-                VALUES ('CRAFTING', ?, ?, ?, 1, ?, 'same-time transform')
+                VALUES ('CRAFT', ?, ?, ?, 1, ?, 'same-time transform')
                 """)) {
             for (int i = 0; i < 2; i++) {
                 pstmt.setLong(1, playerA);

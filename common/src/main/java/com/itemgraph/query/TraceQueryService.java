@@ -746,10 +746,12 @@ public final class TraceQueryService {
             LEFT JOIN ig_item_fingerprints r_fp ON r_fp.id = t.result_fingerprint_id
             WHERE (t.source_fingerprint_id = ? OR t.result_fingerprint_id = ?)
         """);
-        List<String> unsupportedTransformations = EventTaxonomy.unsupportedTransformations();
-        if (!unsupportedTransformations.isEmpty()) {
-            sql.append(" AND UPPER(t.transformation_type) NOT IN (")
-                    .append(String.join(",", java.util.Collections.nCopies(unsupportedTransformations.size(), "?")))
+        List<String> traceableTransformations = EventTaxonomy.traceableTransformationTypes();
+        if (traceableTransformations.isEmpty()) {
+            sql.append(" AND 1 = 0");
+        } else {
+            sql.append(" AND UPPER(t.transformation_type) IN (")
+                    .append(String.join(",", java.util.Collections.nCopies(traceableTransformations.size(), "?")))
                     .append(")");
         }
         if (window.sinceMs() != null) {
@@ -768,8 +770,8 @@ public final class TraceQueryService {
             int idx = 1;
             pstmt.setLong(idx++, fingerprintId);
             pstmt.setLong(idx++, fingerprintId);
-            for (String unsupportedTransformation : unsupportedTransformations) {
-                pstmt.setString(idx++, unsupportedTransformation);
+            for (String traceableTransformation : traceableTransformations) {
+                pstmt.setString(idx++, traceableTransformation);
             }
             if (window.sinceMs() != null) {
                 pstmt.setLong(idx++, window.sinceMs());

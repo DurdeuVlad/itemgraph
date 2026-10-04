@@ -90,6 +90,12 @@ before/after quantity deltas; they do not prove a transformation between the
 two fingerprints. The ID is therefore excluded from query suggestions. This
 support correction increments the taxonomy major version while preserving the
 stable identifier.
+Unified lookup continues to show the legacy row and its source/result
+fingerprints, but omits its free-form legacy details so an old numeric string
+cannot be mistaken for a proven quantity. Item traces include only transformation
+IDs with an implemented native writer on both loaders; shared queries have no
+loader provenance. Unknown, malformed, and unsupported IDs remain queryable
+evidence without becoming observed movement hops.
 
 ## Planned child issue families
 
