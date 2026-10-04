@@ -346,17 +346,18 @@ public final class ContainerBreakConformanceFixture {
                        AND player_uuid = ? AND x = ? AND y = ? AND z = ?
                      """);
              var observations = connection.prepareStatement("""
-                     SELECT COUNT(*) FROM ig_observations
-                     WHERE id > ? AND player_uuid = ? AND x = ? AND y = ? AND z = ?
+                     SELECT COUNT(*) FROM ig_observations o
+                     JOIN ig_nodes n ON n.id = o.node_id
+                     WHERE o.id > ? AND n.level_id = 'minecraft:overworld'
+                       AND n.x = ? AND n.y = ? AND n.z = ?
                      """)) {
             audit.setLong(1, auditWatermark);
             audit.setString(2, playerUuid);
             audit.setDouble(3, position.getX()); audit.setDouble(4, position.getY());
             audit.setDouble(5, position.getZ());
             observations.setLong(1, observationWatermark);
-            observations.setString(2, playerUuid);
-            observations.setDouble(3, position.getX()); observations.setDouble(4, position.getY());
-            observations.setDouble(5, position.getZ());
+            observations.setDouble(2, position.getX()); observations.setDouble(3, position.getY());
+            observations.setDouble(4, position.getZ());
             try (var auditRows = audit.executeQuery(); var observationRows = observations.executeQuery()) {
                 helper.assertTrue(auditRows.next() && auditRows.getInt(1) == 0,
                         "non-inventory block entity must not create container-break audit evidence");
