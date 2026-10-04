@@ -180,8 +180,8 @@ listed boundary; `Planned` means there is no user-facing implementation to use y
 | Optional historical GriefLogger import | `/ig ingest history` | Partial | `itemgraph.command` + `itemgraph.ingest` + `itemgraph.import`; read-only source import, configured only. |
 | Database, queue, and query bounds | `config/itemgraph*.toml`; [configuration reference](CONFIGURATION.md) | Shipped | Operator configuration; restart may be required. |
 | Third-party mod integration | `com.itemgraph.api` `PREVIEW_1`; [API example](../examples/api-consumer) | Preview | Trusted server-side mod code; source-scoped bounded observations and async queries. |
-| Rich result hover and safe location actions | Tracked by [#138](https://github.com/DurdeuVlad/itemgraph/issues/138) | Planned | Plain chat and page actions remain; no location click is available. |
-| Complete player-broken container contents | Tracked by [#140](https://github.com/DurdeuVlad/itemgraph/issues/140) | In progress | Until merged, do not assume every container-break inventory is captured. |
+| Rich result hover and safe location actions | `/ig event`, `/ig explain`, `/ig trace`, paged lookups | Implemented; M8 verification pending | Hover shows bounded evidence details; `[Go to ...]` is player-only, expires after two minutes, works once, and rechecks query permissions. |
+| Player-broken container contents | Native block-break evidence | Implemented; M8 verification pending | Per-slot removal is recorded; destination stays `UNKNOWN` until an authoritative drop link exists. |
 
 For exact command syntax and defaults, continue to [Query model](QUERY_MODEL.md). For
 parity gaps and work status, see [Feature parity inventory](FEATURE_PARITY_INVENTORY.md).

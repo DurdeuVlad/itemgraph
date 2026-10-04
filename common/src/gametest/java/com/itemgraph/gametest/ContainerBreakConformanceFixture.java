@@ -123,12 +123,12 @@ public final class ContainerBreakConformanceFixture {
                         && helper.getLevel().getBlockState(doubleLeft).isAir(),
                 "successful break of the left double-chest half must remove only that block");
 
-        BlockPos unsupportedPos = helper.absolutePos(new BlockPos(11, 1, 2));
-        helper.assertTrue(helper.getLevel().setBlock(unsupportedPos, Blocks.OAK_SIGN.defaultBlockState(), 3),
-                "could not place the unsupported block-entity fixture");
-        helper.assertTrue(player.gameMode.destroyBlock(unsupportedPos)
-                        && helper.getLevel().getBlockState(unsupportedPos).isAir(),
-                "successful non-container block-entity break must be reported as unsupported");
+        BlockPos nonInventoryPos = helper.absolutePos(new BlockPos(11, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(nonInventoryPos, Blocks.OAK_SIGN.defaultBlockState(), 3),
+                "could not place the non-inventory block-entity fixture");
+        helper.assertTrue(player.gameMode.destroyBlock(nonInventoryPos)
+                        && helper.getLevel().getBlockState(nonInventoryPos).isAir(),
+                "ordinary sign block entity must break successfully");
 
         BlockPos missingActorPos = helper.absolutePos(new BlockPos(13, 1, 2));
         helper.assertTrue(helper.getLevel().setBlock(missingActorPos, Blocks.CHEST.defaultBlockState(), 3),
@@ -165,7 +165,8 @@ public final class ContainerBreakConformanceFixture {
                             "container-break evidence must not be rejected or dropped");
                     assertNoCompletedBreakAt(helper, auditWatermark, playerUuid, canceledPos);
                     assertActorUnavailable(helper, auditWatermark, missingActorPos);
-                    assertUnsupportedBlockEntityUnresolved(helper, auditWatermark, playerUuid, unsupportedPos);
+                    assertNoContainerBreakEvidence(helper, auditWatermark, observationWatermark,
+                            playerUuid, nonInventoryPos);
                     assertLinkedBreakEvent(helper, auditWatermark, playerUuid, emptyPos);
                     assertLinkedBreakEvent(helper, auditWatermark, playerUuid, singlePos);
                     assertLinkedBreakEvent(helper, auditWatermark, playerUuid, doubleLeft);
@@ -333,25 +334,35 @@ public final class ContainerBreakConformanceFixture {
         }
     }
 
-    private static void assertUnsupportedBlockEntityUnresolved(GameTestHelper helper, long auditWatermark,
-                                                               String playerUuid, BlockPos position) {
+    private static void assertNoContainerBreakEvidence(GameTestHelper helper, long auditWatermark,
+                                                       long observationWatermark, String playerUuid,
+                                                       BlockPos position) {
         try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
-             var statement = connection.prepareStatement("""
-                     SELECT CAST(raw_data AS TEXT) FROM ig_audit_events
-                     WHERE id > ? AND event_type = 'CONTAINER_BREAK_UNRESOLVED' AND player_uuid = ?
-                       AND x = ? AND y = ? AND z = ?
-                     ORDER BY id
+             var audit = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM ig_audit_events
+                     WHERE id > ? AND event_type IN ('CONTAINER_BREAK_COMPLETED', 'CONTAINER_BREAK_UNRESOLVED')
+                       AND player_uuid = ? AND x = ? AND y = ? AND z = ?
+                     """);
+             var observations = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM ig_observations
+                     WHERE id > ? AND player_uuid = ? AND x = ? AND y = ? AND z = ?
                      """)) {
-            statement.setLong(1, auditWatermark);
-            statement.setString(2, playerUuid);
-            statement.setDouble(3, position.getX()); statement.setDouble(4, position.getY());
-            statement.setDouble(5, position.getZ());
-            try (var rows = statement.executeQuery()) {
-                helper.assertTrue(rows.next() && rows.getString(1).contains("CONTAINER_BLOCK_ENTITY_UNSUPPORTED"),
-                        "unsupported block entities must persist the stable unresolved reason");
+            audit.setLong(1, auditWatermark);
+            audit.setString(2, playerUuid);
+            audit.setDouble(3, position.getX()); audit.setDouble(4, position.getY());
+            audit.setDouble(5, position.getZ());
+            observations.setLong(1, observationWatermark);
+            observations.setString(2, playerUuid);
+            observations.setDouble(3, position.getX()); observations.setDouble(4, position.getY());
+            observations.setDouble(5, position.getZ());
+            try (var auditRows = audit.executeQuery(); var observationRows = observations.executeQuery()) {
+                helper.assertTrue(auditRows.next() && auditRows.getInt(1) == 0,
+                        "non-inventory block entity must not create container-break audit evidence");
+                helper.assertTrue(observationRows.next() && observationRows.getInt(1) == 0,
+                        "non-inventory block entity must not create item-content observations");
             }
         } catch (SQLException failure) {
-            throw new IllegalStateException("Could not inspect unsupported block-entity evidence", failure);
+            throw new IllegalStateException("Could not inspect non-inventory block-entity evidence", failure);
         }
     }
 

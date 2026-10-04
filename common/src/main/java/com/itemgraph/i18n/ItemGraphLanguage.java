@@ -1,8 +1,8 @@
 package com.itemgraph.i18n;
 
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.MissingResourceException;
-import java.util.HashSet;
 import java.util.Set;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -12,7 +12,6 @@ import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.ResourceBundle;
-import java.util.Set;
 
 /** Server-side ItemGraph-owned messages. Final strings are sent as literals so clients need no mod assets. */
 public final class ItemGraphLanguage {

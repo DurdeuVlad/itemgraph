@@ -724,7 +724,9 @@ ItemGraph JDBC connection.
   `(actor unavailable)` when no player identity was recorded. Oversized, missing-actor,
   vanished-block-entity, unsupported-block-entity,
   or failed snapshots become `CONTAINER_BREAK_UNRESOLVED` evidence with stable
-  reason codes; unsupported inventory adapters remain owned by #34.
+  reason codes. Non-inventory block entities are ignored; capability-backed
+  inventory adapters not implementing `Container` remain owned by #34 and do not
+  create false container-break incidents.
 
 ### Command-toggled container inspection (Issue 10)
 

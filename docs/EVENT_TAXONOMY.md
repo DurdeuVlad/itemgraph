@@ -122,8 +122,10 @@ and `TRANSFORMATION_INPUTS_NOT_OBSERVED` and `TRANSFORMATION_CANCELLED` (#57).
 unresolved cases lack an authoritative actor. Audit lookup labels a row with no
 player identity `(actor unavailable)` and never assigns a nearby player.
 Container-break reason codes (#140) distinguish actor unavailable,
-block entity unavailable or unsupported, slot limit exceeded, snapshot failure,
-queue rejection, and a drop relationship not authoritatively linked.
+block entity unavailable, inventory adapter explicitly known but unsupported,
+slot limit exceeded, snapshot failure, queue rejection, and a drop relationship
+not authoritatively linked. Non-inventory block entities such as signs are
+ignored and do not produce container-break events.
 Their exact definitions and owning issues are in
 `EventTaxonomy.unresolvedReasonCodes()`.
 

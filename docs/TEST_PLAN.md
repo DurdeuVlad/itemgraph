@@ -511,13 +511,15 @@ values, or proof of schema equivalence.
   transport, or complete command acceptance for #24. Independent adversarial
   review and the remaining cross-loader report review are required before #31
   can close.
+
+### Current release-contract classifications (#31)
+
 For each loader, `tools/itemgraph_feature_coverage.py` also emits a separate
 schema-v2 redacted sidecar for every compatibility-registry action. It records
 the exact-release writer disposition, ItemGraph implementation classification,
 profile source table, and count found in the selected replay. The sidecar
-explicitly separates a feature absent from this replay from an action that the
-verified release has no writer for; the current 13-event scenario still leaves
-additional covered-feature testing open under #31.
+explicitly separates a feature absent from a replay from an action that the
+verified release has no writer for; unobserved actions remain open under #31.
 It also emits unresolved rows for open issues #136, #137, #138, and #140, plus
 five durability categories. Exact 1.2.10-1.21.1 fixture facts remain separate
 from pinned 26.2 source-only research: the fixture confirms the REMOVE_ITEM
@@ -1505,9 +1507,9 @@ Empty-container assertions reject a drop-link reason in the completion payload a
 a separate `CONTAINER_BREAK_UNRESOLVED` row. Taxonomy and formatter tests require the
 unresolved event actor to be `UNKNOWN` and display `(actor unavailable)` when both
 player ID and name are absent; a present player name remains visible.
-The same live-server fixture also breaks a sign block entity, verifies the
-stable `CONTAINER_BLOCK_ENTITY_UNSUPPORTED` unresolved reason, and asserts that
-the canceled chest creates no contents event.
+The same live-server fixture breaks an ordinary sign block entity and asserts
+that it creates no container-break audit event or item-content observation; the
+canceled chest also creates no contents event.
 
 `InternalObservationServiceTest` verifies that an audit-queue capacity failure
 rejects the related parent and item rows as one batch, and injects a second-slot

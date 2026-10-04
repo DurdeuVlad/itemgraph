@@ -42,10 +42,14 @@ public final class ContainerBreakCapture {
 
     private ContainerBreakCapture() { }
 
-    /** Returns null for states without block entities; unsupported block entities become unresolved evidence. */
+    /** Returns null unless the block entity implements the inventory contract captured by #140. */
     public static Snapshot begin(ServerPlayer player, ServerLevel level, BlockPos pos,
                                  BlockState state, BlockEntity blockEntity) {
         if (level == null || pos == null || state == null || !state.hasBlockEntity()) return null;
+        // Signs and other non-inventory block entities are not container-loss incidents.
+        // Non-Container inventory adapters have no safe shared snapshot contract here and
+        // remain owned by #34; do not turn them into false unresolved container events.
+        if (blockEntity != null && !(blockEntity instanceof Container)) return null;
 
         String eventId = UUID.randomUUID().toString();
         long timestamp = System.currentTimeMillis();
@@ -56,10 +60,6 @@ public final class ContainerBreakCapture {
             unresolvedReason = "CONTAINER_BREAK_ACTOR_UNAVAILABLE";
         } else if (blockEntity == null) {
             unresolvedReason = "CONTAINER_BLOCK_ENTITY_UNAVAILABLE";
-        } else if (!(blockEntity instanceof Container)) {
-            // Non-Container modded inventory adapters belong to #34. Do not
-            // claim their contents from an unknown capability contract.
-            unresolvedReason = "CONTAINER_BLOCK_ENTITY_UNSUPPORTED";
         }
 
         List<Slot> slots = new ArrayList<>();
