@@ -156,8 +156,16 @@ Implemented and available (all require permission level 2):
 /ig status
 /ig audit
 /ig ingest now
+/ig ingest history
 /ig event   <observationId>
 /ig explain <edgeId>
+/ig lookup <eventType> [limit] [sinceMinutes]
+/ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]
+/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]
+/ig lookup page <page> <eventType> [limit] [sinceMinutes]
+/ig lookup action.<value> [user.<value>] [include.<value>] [exclude.<value>] [time.<value>] radius.<value>
+/ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]
+/ig page <page> [session]
 /ig trace item <query> [limit] [sinceMinutes]
 /ig trace player <playerName> [limit] [sinceMinutes]
 /ig trace container <x> <y> <z> [limit] [sinceMinutes]
@@ -167,14 +175,16 @@ Implemented and available (all require permission level 2):
 /ig inspect [on|off|status]
 ```
 
-- `/ig help`: bare `/itemgraph` or `/ig` shows the full live command tree. `/ig help <topic>` shows syntax, permission, defaults, query semantics, and an example; unknown topics list the valid topics.
+- `/ig help`: bare `/itemgraph` or `/ig` shows a short task-first overview. `/ig help commands` lists command paths by investigation task; `/ig help <topic>` shows syntax, permission, defaults, query semantics, and an example. Unknown topics list the valid topics.
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
 - `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows the chronological timeline, including transformations (`[TRANSFORMATION <type> <- <source>]`).
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
 - `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.
 - `/ig gui`: opens the same item/player/container timelines in a vanilla six-row chest menu. Each page has at most 45 timeline entries; entries distinguish observed from inferred movement, and selecting one opens evidence details. Ambiguous item matches and duplicate player/container nodes require candidate selection rather than silently choosing a target. The menu is permission-level 2, uses no custom client screen or packet, and rejects inventory-movement actions.
-- `/ig inspect`: toggles a per-player container-inspection mode. With it enabled, right-clicking a block whose block entity implements `Container` opens that exact dimension/position in the read-only flow browser instead of the normal container GUI. `on`, `off`, and `status` are deterministic forms. The mode requires permission level 2 on both command and click, clears on logout/server stop, and does not consume the held item or record the inspection click as a transfer.
-- `limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Player query results and the database-backed portion of `/ig status` return on the server thread. Entity-less server-thread console/RCON commands receive an acceptance message; completed query lines are logged because vanilla RCON returns its response buffer before asynchronous work completes. `/ig ingest now` queues one complete ingest-and-correlate cycle on the background worker. Full argument table and output format: [Query model](docs/QUERY_MODEL.md).
+- `/ig inspect`: toggles per-player inspection mode. Left-clicking a block shows that block's paginated audit history in chat. Right-clicking a block entity that implements `Container` opens the read-only flow browser instead of the normal container GUI. Double chests clicked on either half resolve to the same canonical anchor used when their contents are recorded. Other right-clicks show paginated block history; ordinary blocks select the block on the clicked face. A click is consumed only after the read-only request is accepted. `on`, `off`, and `status` are deterministic forms. The mode requires permission level 2 on both command and click, clears on logout/server stop, and does not use the held item or record an inspection click as a transfer.
+- `/ig lookup` and `/ig lookup filters` return native or unified evidence, depending on the syntax. Historical reads are asynchronous and read-only. `/ig ingest now` queues one complete ingest-and-correlate cycle; `/ig ingest history` is an optional read-only import from a configured legacy database. Full argument table and output format: [Query model](docs/QUERY_MODEL.md).
+
+New admins: start with the [admin quick start](docs/ADMIN_QUICK_START.md), which maps common incident questions to every live feature and explains how to interpret evidence.
 
 Sample `/ig trace item` output:
 

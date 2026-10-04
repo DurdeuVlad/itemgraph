@@ -9,6 +9,7 @@ import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.BlockInspectionTargets;
+import com.itemgraph.command.FlowBrowserService;
 import com.itemgraph.query.AuditEventQueryService;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import com.mojang.brigadier.ParseResults;
@@ -128,11 +129,21 @@ public final class FabricNativeAuditEventListener {
                                             ServerPlayer player, ServerLevel level,
                                             net.minecraft.world.InteractionHand hand, BlockPos pos,
                                             Direction face) {
+        return handleBlockUse(inspections, blockHistoryOpener,
+                blockHistoryOpener::open, player, level, hand, pos, face);
+    }
+
+    static InteractionResult handleBlockUse(InspectionService inspections,
+                                            BlockHistoryOpener blockHistoryOpener,
+                                            ContainerFlowOpener containerFlowOpener,
+                                            ServerPlayer player, ServerLevel level,
+                                            net.minecraft.world.InteractionHand hand, BlockPos pos,
+                                            Direction face) {
         if (hand != net.minecraft.world.InteractionHand.MAIN_HAND) {
             return InteractionResult.PASS;
         }
         InteractionResult inspectionResult = tryOpenInspection(
-                inspections, blockHistoryOpener, player, level, pos, face);
+                inspections, blockHistoryOpener, containerFlowOpener, player, level, pos, face);
         if (inspectionResult != null) {
             return inspectionResult;
         }
@@ -179,6 +190,7 @@ public final class FabricNativeAuditEventListener {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
                 return handleBlockUse(InspectionService.getInstance(),
                         FabricNativeAuditEventListener::openBlockHistory,
+                        FabricNativeAuditEventListener::openContainerFlow,
                         serverPlayer, serverLevel, hand, hit.getBlockPos(), hit.getDirection());
             }
             return InteractionResult.PASS;
@@ -232,6 +244,11 @@ public final class FabricNativeAuditEventListener {
         int open(ServerPlayer player, ServerLevel level, BlockPos pos);
     }
 
+    @FunctionalInterface
+    interface ContainerFlowOpener {
+        int open(ServerPlayer player, ServerLevel level, BlockPos pos);
+    }
+
     /**
      * Handles the Fabric equivalent of NeoForge's high-priority inspection
      * listener. All targets use the same exact, mixed-source timeline. A click
@@ -243,7 +260,19 @@ public final class FabricNativeAuditEventListener {
                                                 ServerLevel level,
                                                 BlockPos pos,
                                                 Direction face) {
-        if (inspections == null || blockHistoryOpener == null || player == null || level == null || pos == null
+        return tryOpenInspection(inspections, blockHistoryOpener,
+                blockHistoryOpener::open, player, level, pos, face);
+    }
+
+    static InteractionResult tryOpenInspection(InspectionService inspections,
+                                                BlockHistoryOpener blockHistoryOpener,
+                                                ContainerFlowOpener containerFlowOpener,
+                                                ServerPlayer player,
+                                                ServerLevel level,
+                                                BlockPos pos,
+                                                Direction face) {
+        if (inspections == null || blockHistoryOpener == null || containerFlowOpener == null
+                || player == null || level == null || pos == null
                 || !inspections.isEnabled(player.getUUID())) {
             return null;
         }
@@ -252,7 +281,14 @@ public final class FabricNativeAuditEventListener {
             return null;
         }
         BlockPos target = BlockInspectionTargets.resolveRightClickTarget(level, pos, face);
-        return blockHistoryOpener.open(player, level, target) == 0 ? null : InteractionResult.SUCCESS;
+        boolean container = level.getBlockEntity(target) instanceof Container;
+        BlockPos inspectionTarget = container
+                ? BlockInspectionTargets.canonicalPosition(level, target)
+                : target;
+        int accepted = container
+                ? containerFlowOpener.open(player, level, inspectionTarget)
+                : blockHistoryOpener.open(player, level, inspectionTarget);
+        return accepted == 0 ? null : InteractionResult.SUCCESS;
     }
 
     /** Left-click inspection applies to every block; consume breaking only after the query is accepted. */
@@ -275,6 +311,11 @@ public final class FabricNativeAuditEventListener {
     private static int openBlockHistory(ServerPlayer player, ServerLevel level, BlockPos pos) {
         return ItemGraphCommands.openBlockInspection(player.createCommandSourceStack(),
                 level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    private static int openContainerFlow(ServerPlayer player, ServerLevel level, BlockPos pos) {
+        return FlowBrowserService.openContainer(player.createCommandSourceStack(),
+                level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ(), null);
     }
 
     /**

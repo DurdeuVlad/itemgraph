@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -72,14 +74,33 @@ class ItemGraphCommandsHelpTest {
         List<String> successes = captureSuccesses(source);
 
         assertEquals(1, dispatcher.execute("itemgraph", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("/itemgraph is the full command root")));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("/ig help [topic]")));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("/ig gui container <dimension>")));
+        String overview = String.join("\n", successes);
+        assertTrue(overview.contains("Start with your question"));
+        assertTrue(overview.contains("/ig trace item <query>"));
+        assertTrue(overview.contains("/ig lookup near minecraft:overworld"));
+        assertTrue(overview.contains("/ig help commands"));
+        assertTrue(overview.contains("/ig help trace item"));
+        assertTrue(overview.contains("/ig help gui item"));
+        assertTrue(overview.contains("/ig help trace player"));
+        assertTrue(overview.contains("/ig help gui container"));
+        assertTrue(overview.contains("/ig help lookup near"));
+        assertTrue(overview.contains("/ig help inspect"));
+        assertTrue(overview.contains("/ig help status"));
+        assertTrue(overview.contains("/ig help audit"));
+        assertTrue(overview.contains("BREAK_BLOCK 20 1440"));
+        assertTrue(overview.contains("https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md"));
+        assertTrue(overview.contains("OBSERVED") || overview.contains("Inference is not observation"));
+        assertTrue(successes.size() <= 12, "first-use help should be a short task selector, not a syntax dump");
+        assertFalse(overview.contains("/ig lookup page <page> <eventType>"),
+                "full syntax belongs in the exhaustive commands topic");
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 20 1440", source),
+                "in-game help's copyable nearby audit example");
 
         successes.clear();
         assertEquals(1, dispatcher.execute("ig", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("/ig inspect [on|off|status]")));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("/ig page <page>")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("Where did an item go?")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("/ig help commands")));
     }
 
     @Test
@@ -126,10 +147,11 @@ class ItemGraphCommandsHelpTest {
         assertEquals(Set.of("item", "player", "container"), childNames(root, "gui"));
         assertEquals(Set.of("on", "off", "status"), childNames(root, "inspect"));
 
-        for (String topLevel : Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect")) {
+        for (String topLevel : Set.of("help", "commands", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect")) {
             assertNotNull(CommandHelp.topicLines(topLevel), "missing help topic for /ig " + topLevel);
         }
-        for (String path : List.of("ingest now", "ingest history", "trace item", "trace player", "trace container",
+        for (String path : List.of("ingest now", "ingest history", "lookup near", "lookup page", "lookup player",
+                "lookup filters", "lookup provenance", "trace item", "trace player", "trace container",
                 "gui item", "gui player", "gui container")) {
             List<String> lines = CommandHelp.topicLines(path);
             assertNotNull(lines, "missing help topic for /ig " + path);
@@ -143,8 +165,57 @@ class ItemGraphCommandsHelpTest {
                     "inspect help does not document /ig inspect " + child);
         }
         String pageHelp = String.join("\n", CommandHelp.topicLines("page"));
-        assertTrue(pageHelp.contains("Syntax: /ig page <page>"));
+        assertTrue(pageHelp.contains("Syntax: /ig page <page> [session]"));
         assertTrue(pageHelp.contains("per-player"));
+
+        String commandsHelp = String.join("\n", CommandHelp.topicLines("commands"));
+        assertTrue(CommandHelp.topicLines("commands").stream().allMatch(line -> line.length() <= 220),
+                "the grouped command catalog must avoid lines that become dense chat paragraphs");
+        for (CommandNode<CommandSourceStack> child : root.getChildren()) {
+            String commandPath = switch (child.getName()) {
+                case "lookup" -> "/ig lookup <eventType>";
+                case "ingest" -> "/ig ingest now";
+                default -> "/ig " + child.getName();
+            };
+            assertTrue(commandsHelp.contains(commandPath),
+                    "exhaustive in-game help omits registered root command " + child.getName());
+        }
+        for (String path : List.of(
+                "/ig help", "/ig status", "/ig audit", "/ig ingest now", "/ig ingest history",
+                "/ig event <observationId>", "/ig explain <edgeId>", "/ig page <page>",
+                "/ig lookup <eventType>", "/ig lookup near", "/ig lookup page", "/ig lookup player",
+                "/ig lookup filters", "/ig lookup provenance", "/ig trace item", "/ig trace player",
+                "/ig trace container", "/ig gui item", "/ig gui player", "/ig gui container",
+                "/ig inspect [on|off|status]")) {
+            assertTrue(commandsHelp.contains(path), "exhaustive in-game command help omits " + path);
+        }
+    }
+
+    @Test
+    void documentedQuickStartExamplesParseAgainstRegisteredCommandTree() throws Exception {
+        Path root = Path.of("").toAbsolutePath();
+        while (root != null && !Files.exists(root.resolve("docs/ADMIN_QUICK_START.md"))) {
+            root = root.getParent();
+        }
+        assertNotNull(root, "test process must be able to locate repository documentation");
+        String guide = Files.readString(root.resolve("docs/ADMIN_QUICK_START.md"));
+        String startMarker = "<!-- executable-command-examples:start -->";
+        String endMarker = "<!-- executable-command-examples:end -->";
+        int start = guide.indexOf(startMarker);
+        int end = guide.indexOf(endMarker);
+        assertTrue(start >= 0 && end > start, "quick-start command example markers must be paired");
+
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        List<String> examples = guide.substring(start + startMarker.length(), end).lines()
+                .map(String::strip)
+                .filter(line -> line.startsWith("/ig "))
+                .map(line -> line.substring(1))
+                .toList();
+        assertFalse(examples.isEmpty(), "quick start must contain executable /ig examples");
+        for (String example : examples) {
+            assertParsedCompletely(dispatcher.parse(example, source), "quick-start example /" + example);
+        }
     }
 
     @Test
@@ -162,7 +233,13 @@ class ItemGraphCommandsHelpTest {
         List<String> successes = captureSuccesses(source);
 
         assertEquals(1, dispatcher.execute("itemgraph help", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("limit=20") && line.contains("100")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("Start with your question")));
+
+        successes.clear();
+        assertEquals(1, dispatcher.execute("itemgraph help commands", source));
+        String commandsHelp = String.join("\n", successes);
+        assertTrue(commandsHelp.contains("all workflows"));
+        assertTrue(commandsHelp.contains("/ig ingest history"));
 
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help trace item", source));
@@ -183,7 +260,7 @@ class ItemGraphCommandsHelpTest {
         assertEquals(1, dispatcher.execute("itemgraph help inspect", source));
         String inspectHelp = String.join("\n", successes);
         assertTrue(inspectHelp.contains("Permission: level 2"));
-        assertTrue(inspectHelp.contains("does not consume the held item"));
+        assertTrue(inspectHelp.contains("held items are not used"));
         assertTrue(inspectHelp.contains("Example: /ig inspect on"));
 
         successes.clear();

@@ -685,27 +685,32 @@ ItemGraph JDBC connection.
   block-entity container (crafting grids and anvils) are not watched by the block
   container tracker; Ender Chest menus are handled by the player-owned tracker above.
 
-### Command-toggled container inspection (Issue 10)
+### Command-toggled in-world inspection (Issue 10)
 
 - `/ig inspect` stores only per-player UUID state in `InspectionService`; it is cleared on
   logout and server stop and is not persisted.
-- `InspectionListener` handles `PlayerInteractEvent.RightClickBlock` at `HIGHEST` priority.
-  It acts only when inspection is active, the player still has permission level 2, and the
-  clicked block entity implements `Container`. It submits the flow-browser query first; only
-  an accepted query cancels the click with `InteractionResult.SUCCESS`, which prevents both
-  the normal container GUI and held-item use path from running. A rejected query preserves
-  the ordinary container interaction instead of leaving the player with neither screen.
-- Fabric's `FabricNativeAuditEventListener` applies the same decision through
-  `UseBlockCallback`: it checks the server-side `Container`, calls the shared
-  `FlowBrowserService.openContainer`, and returns `SUCCESS` only after the query is accepted.
+- NeoForge's `InspectionListener` handles `PlayerInteractEvent.RightClickBlock` at `HIGHEST`
+  priority and left-click starts; Fabric's `FabricNativeAuditEventListener` applies the same
+  selection through `UseBlockCallback` and `AttackBlockCallback`.
+- A right-click whose target block entity implements `Container` calls the shared
+  `FlowBrowserService.openContainer` with the exact dimension and coordinates. Either half
+  of a valid double chest resolves to the canonical anchor used by container capture. Only
+  an accepted query consumes the click and prevents the normal container GUI and held-item
+  use path. A rejected query preserves ordinary container interaction.
+- Left-clicks call the bounded exact-position audit-history query. Non-container
+  right-clicks also query block history: supported functional blocks select the clicked
+  block, while ordinary blocks select the adjacent block on the clicked face. A rejected
+  query preserves normal Minecraft interaction. Every route requires current permission
+  level 2 and keeps its result private to the player.
   The Fabric disconnect callback clears that player's inspection state; server stop clears
   any remaining state. This follows Fabric's documented callback contract: listeners run
   until one returns a non-`PASS` `InteractionResult` ([Fabric 1.21.1 event guide](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md)).
 - Because the click is cancelled before `ContainerSessionListener` records it, inspection
   is not container-transfer evidence. The opened `FlowBrowserMenu` contains only a
   `SimpleContainer`, so its Open/Close lifecycle cannot create a block-entity-backed watch.
-- Unsupported blocks and inactive/disabled inspection return `PASS`-equivalent vanilla
-  behavior: the event remains uncancelled and the normal interaction pipeline proceeds.
+- Inactive/disabled inspection returns `PASS`-equivalent vanilla behavior: the event remains
+  uncancelled and the normal interaction pipeline proceeds. While inspection is enabled,
+  non-container right-clicks use the block-history route described above.
 
 ### Expanded Query UX
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.

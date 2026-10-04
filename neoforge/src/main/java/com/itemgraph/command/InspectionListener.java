@@ -2,6 +2,7 @@ package com.itemgraph.command;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
@@ -24,16 +25,30 @@ public class InspectionListener {
         int open(ServerPlayer player, Level level, BlockPos pos);
     }
 
+    @FunctionalInterface
+    interface ContainerFlowOpener {
+        int open(ServerPlayer player, Level level, BlockPos pos);
+    }
+
     private final InspectionService inspections;
     private final BlockHistoryOpener blockHistoryOpener;
+    private final ContainerFlowOpener containerFlowOpener;
 
     public InspectionListener() {
-        this(InspectionService.getInstance(), InspectionListener::openBlockHistory);
+        this(InspectionService.getInstance(), InspectionListener::openBlockHistory,
+                InspectionListener::openContainerFlow);
     }
 
     InspectionListener(InspectionService inspections, BlockHistoryOpener blockHistoryOpener) {
+        this(inspections, blockHistoryOpener,
+                (player, level, pos) -> blockHistoryOpener.open(player, level, pos));
+    }
+
+    InspectionListener(InspectionService inspections, BlockHistoryOpener blockHistoryOpener,
+                       ContainerFlowOpener containerFlowOpener) {
         this.inspections = inspections;
         this.blockHistoryOpener = blockHistoryOpener;
+        this.containerFlowOpener = containerFlowOpener;
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
@@ -54,7 +69,14 @@ public class InspectionListener {
         }
         BlockPos target = BlockInspectionTargets.resolveRightClickTarget(
                 level, event.getPos(), event.getHitVec().getDirection());
-        if (blockHistoryOpener.open(player, level, target) == 0) {
+        boolean container = level.getBlockEntity(target) instanceof Container;
+        BlockPos inspectionTarget = container
+                ? BlockInspectionTargets.canonicalPosition(level, target)
+                : target;
+        int accepted = container
+                ? containerFlowOpener.open(player, level, inspectionTarget)
+                : blockHistoryOpener.open(player, level, inspectionTarget);
+        if (accepted == 0) {
             return;
         }
         event.setCancellationResult(InteractionResult.SUCCESS);
@@ -98,5 +120,10 @@ public class InspectionListener {
     private static int openBlockHistory(ServerPlayer player, Level level, BlockPos pos) {
         return ItemGraphCommands.openBlockInspection(player.createCommandSourceStack(),
                 level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    private static int openContainerFlow(ServerPlayer player, Level level, BlockPos pos) {
+        return FlowBrowserService.openContainer(player.createCommandSourceStack(),
+                level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ(), null);
     }
 }

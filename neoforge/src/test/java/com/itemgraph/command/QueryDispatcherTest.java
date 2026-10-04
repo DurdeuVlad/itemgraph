@@ -626,6 +626,8 @@ class QueryDispatcherTest {
         DatabaseManager.getInstance().initialize(tempDir.resolve("inline-server-executor.db"));
         CommandSourceStack source = mock(CommandSourceStack.class);
         MinecraftServer server = mock(MinecraftServer.class);
+        CountDownLatch queryStarted = new CountDownLatch(1);
+        CountDownLatch releaseQuery = new CountDownLatch(1);
         CountDownLatch callbackExecuted = new CountDownLatch(1);
         AtomicBoolean consumerCalled = new AtomicBoolean();
         AtomicBoolean failureDelivered = new AtomicBoolean();
@@ -641,11 +643,25 @@ class QueryDispatcherTest {
             return null;
         }).when(server).execute(any(Runnable.class));
 
-        assertEquals(1, QueryDispatcher.dispatchData(source, "inline-callback", conn -> "page",
+        assertEquals(1, QueryDispatcher.dispatchData(source, "inline-callback", conn -> {
+            queryStarted.countDown();
+            try {
+                assertTrue(releaseQuery.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new SQLException(e);
+            }
+            return "page";
+        },
                 (returnedSource, result) -> consumerCalled.set(true), () -> {
                     failureDelivered.set(true);
                     failureThread.set(Thread.currentThread());
                 }));
+        try {
+            assertTrue(queryStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        } finally {
+            releaseQuery.countDown();
+        }
         assertTrue(callbackExecuted.await(5, java.util.concurrent.TimeUnit.SECONDS));
         assertFalse(consumerCalled.get(), "an off-thread inline callback must not access Minecraft state");
         assertTrue(failureDelivered.get(), "the failure callback must release browser loading state");
