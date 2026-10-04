@@ -54,17 +54,30 @@ public final class NativeAuditEventListener {
     @SubscribeEvent
     public void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            ItemGraphCommands.clearPageSession(player.getUUID());
-            submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
+            recordPlayerQuit(player);
         }
+    }
+
+    public static void recordPlayerQuit(ServerPlayer player) {
+        if (player == null || player.level().isClientSide()) {
+            return;
+        }
+        ItemGraphCommands.clearPageSession(player.getUUID());
+        submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onChat(ServerChatEvent event) {
         ServerPlayer player = event.getPlayer();
         if (player != null && !event.isCanceled()) {
-            submit("CHAT_MESSAGE", player, player.level(), player.blockPosition(),
-                    null, bounded(event.getRawText()));
+            recordChatMessage(player, event.getRawText());
+        }
+    }
+
+    /** Records the accepted server chat payload through the same path used by the native event callback. */
+    public static void recordChatMessage(ServerPlayer player, String message) {
+        if (player != null && !player.level().isClientSide()) {
+            submit("CHAT_MESSAGE", player, player.level(), player.blockPosition(), null, bounded(message));
         }
     }
 

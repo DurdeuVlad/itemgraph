@@ -80,16 +80,16 @@ public class TransformationEventListener {
     @SubscribeEvent
     public void onItemCrafted(PlayerEvent.ItemCraftedEvent event) {
         Player player = event.getEntity();
+        recordCrafted(player, event.getInventory(), event.getCrafting());
+    }
+
+    public void recordCrafted(Player player, Container matrix, ItemStack output) {
         if (player == null || player.level().isClientSide()) {
             return;
         }
-
-        ItemStack output = event.getCrafting();
         if (output == null || output.isEmpty()) {
             return;
         }
-
-        Container matrix = event.getInventory();
         CanonicalItem primaryIngredient = null;
         if (matrix != null) {
             for (int i = 0; i < matrix.getContainerSize(); i++) {

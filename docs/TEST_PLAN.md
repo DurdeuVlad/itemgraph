@@ -412,23 +412,24 @@ listener and durable audit queue without double-dispatching hooks from both a
 mock packet and an explicit callback. It verifies listener persistence, not the
 real-client placement or packet transport path.
 
-The same GameTest exports six persisted item movement and projectile rows plus
-ten audit events only after its durable read-only assertions pass. It pins each
-audit action to its expected namespaced subject, and pins block placement,
+The current GameTest exports eight persisted item-flow rows, one transformation,
+and sixteen audit events only after its durable read-only assertions pass. It
+pins each audit action to its expected namespaced subject, and pins block placement,
 block interaction, and kill positions relative to the template origin. Its
 `BREAK_BLOCK` report row is restricted to the successful source-water pickup at
 the fixture position; the separate synthetic water-source/lava-result guard
 probe remains a unit assertion and is excluded because GriefLogger cannot
 produce it through a real bucket pickup.
-`ItemGraphReplayReportFixture` queries `ig_observations` and the allowlisted
-`ig_audit_events` columns through `DatabaseManager.openReadOnlyConnection()`;
+`ItemGraphReplayReportFixture` queries `ig_observations`,
+`ig_item_transformations`, and allowlisted `ig_audit_events` columns through
+`DatabaseManager.openReadOnlyConnection()`;
 the artifact contains profile-normalized action identities, fixture-relative
 coordinates, namespaced subjects, and replay actor aliases, with no player
 UUIDs, names, database row IDs, audit detail, or raw payloads. CI validates
 separate native-only Fabric and NeoForge reports and uploads only the normalized
 JSON. This export validates covered events, report shape, redaction, and database
-invariants; it does not establish live GriefLogger runtime equivalence or complete
-exact-release feature coverage in #31. Staging soak and rollback rehearsal are
+invariants; it does not establish live GriefLogger runtime equivalence. Staging
+soak and rollback rehearsal are
 separate M10 operator/release gates. The raw schema-v5 report also contains an
 `AuditService.audit` summary from one read-only transaction snapshot over the
 complete isolated GameTest
@@ -448,13 +449,58 @@ For each loader, `tools/itemgraph_feature_coverage.py` emits a redacted sidecar
 for every compatibility-registry action and all eleven exact-release database
 table families. It records exact-release writer dispositions and replay counts
 separately from table-family dispositions. Reference tables are represented by
-native evidence fields; the report explicitly marks `usernames` as lacking a
-dedicated native username-history table and does not claim that category as
-covered. `not-observed-in-replay` means the current selected scenario did not
-exercise an action/category; it does not establish missing implementation or
-satisfy #31's remaining coverage criterion. Table-family counts are event
-signals, not GriefLogger source row counts, distinct reference values, or proof
-of schema equivalence.
+native evidence fields; `usernames` maps to the native UUID-keyed
+`ig_player_name_history` index populated from `PLAYER_JOIN` evidence. The report
+omits raw name-history values and UUIDs; its username category count is the
+number of normalized `PLAYER_JOIN` events, not distinct name-history rows.
+`not-observed-in-replay` means the current selected scenario did not exercise
+an action/category; it does not establish missing implementation. Table-family
+counts are event signals, not GriefLogger source row counts, distinct reference
+values, or proof of schema equivalence.
+
+### Native-only release-contract replay, #31 (2026-10-04)
+
+- Ran `:neoforge:test :neoforge:runGameTestServer :fabric:test
+  :fabric:runGameTest` with `ITEMGRAPH_DIFFERENTIAL_REPORT_DIR` set to the
+  ignored `build/local-replay-report` directory. The NeoForge GameTest server
+  used Minecraft 1.21.1, NeoForge 21.1.248, Java 21, and ItemGraph 0.3.2 only;
+  the Fabric server also ran the same native-only fixture. Neither loader
+  required a GriefLogger JAR or database. The combined Gradle run passed.
+- Each loader emitted 25 persisted native events. The profile-pinned normalizer
+  and coverage reporter accepted both reports: 20 of 28 registry actions were
+  observed, all six release event-table families were represented, four of five
+  reference-table families were represented, and `users` was actor-reference
+  only. The full Gradle result included 510 NeoForge unit tests, 6 NeoForge
+  GameTests, 75 Fabric unit tests, and 7 Fabric GameTests. Python normalizer,
+  coverage, and differential-report suites passed 63 tests.
+- Observed action categories include join/quit, chat, command attempt, item
+  add/remove/drop/pickup/throw/shoot/consume/break, craft, block break/place/
+  interaction, kill, and entity interaction outcomes. Chat and command rows are
+  separate from the six action-event tables. Reports omit player names and
+  UUIDs, chat/command text, audit detail, database row IDs, and absolute
+  coordinates. Both reports passed queue, persistence-accounting,
+  temporal-order, quantity-conservation, privacy, and whole-database integrity
+  checks with zero violations.
+- The eight registry actions without replay rows are classified: denied entity
+  interaction is an ItemGraph extension tracked by #75; `SMELT`,
+  `ANVIL_RENAME`, and `ANVIL_REPAIR` are transformation coverage tracked by
+  #57; `HOPPER_INSERT` and `HOPPER_EXTRACT` are automation extensions tracked
+  by #34; `ADD_ITEM_ENDER` and `REMOVE_ITEM_ENDER` have no writer in exact
+  release 1.2.10-1.21.1 and are documented under #76. The compatibility
+  registry and coverage sidecar assign each row its owner issue and writer
+  disposition. No exact-release no-writer action is treated as implemented
+  parity.
+- For the added chat, player-quit, consume, durability-break, and craft rows,
+  the GameTest invokes the same server-side capture methods used by the native
+  callbacks. The fixture proves those methods persist correctly through ItemGraph's
+  durable path; it does not independently prove loader callback delivery for
+  each of those scenarios. The report makes no connected-client or live
+  GriefLogger claim.
+- This proves native-only startup and the listed replay/report invariants; it
+  does not establish live GriefLogger runtime equivalence, GUI/client
+  transport, or complete command acceptance for #24. Independent adversarial
+  review and the remaining cross-loader report review are required before #31
+  can close.
 - explanation available
 
 ## Coffer/modded inventory test

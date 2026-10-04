@@ -15,6 +15,27 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Standalone historical player-name resolution (#31):** native `PLAYER_JOIN`
+  evidence now populates ItemGraph's UUID-keyed `ig_player_name_history` table.
+  Native audit user filters and suggestions resolve names recorded on prior
+  joins to every matching UUID without requiring GriefLogger. Imported
+  GriefLogger history remains an optional source. The native-only replay now
+  includes redacted `PLAYER_JOIN` signals so CI marks both the sessions and
+  usernames categories exercised without exporting names or UUIDs. Names
+  changed during an online session are not captured until a later join. Mod
+  version remains 0.3.2; no distributable jar is built.
+
+- **Issue #31 exact-release action-table replay:** the redacted ItemGraph-only
+  NeoForge and Fabric reports now include separate `chats` and `commands`
+  categories, one player quit, one consumed item, one durability break, and one
+  `CRAFT` transformation, in addition to the existing movement, projectile,
+  block, container, and entity evidence. Each loader report validates 25 events
+  against the pinned release profile and represents all six GriefLogger event
+  tables. Chat and command text, player names, UUIDs, absolute world coordinates, and
+  database row IDs remain excluded from the reports. Other ItemGraph extensions
+  stay explicitly assigned to their existing issues. Mod version remains 0.3.2;
+  no distributable jar is built.
+
 - **Issue #31 pickup coordinate rationale:** Documented the loader-specific
   drop hooks used by the replay fixtures. NeoForge's patched two-argument
   `Player.drop` fires `ItemTossEvent`; its three-argument overload bypasses that

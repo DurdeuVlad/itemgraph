@@ -1627,7 +1627,11 @@ public class InternalObservationService {
                             pstmt.setBytes(12, event.rawData());
                         }
                         pstmt.setString(13, event.ingestEventUuid());
-                        pstmt.executeUpdate();
+                        int insertedRows = pstmt.executeUpdate();
+                        if (insertedRows > 0 && "PLAYER_JOIN".equalsIgnoreCase(event.eventType())) {
+                            PlayerNameHistory.recordJoin(conn, event.playerUuid(), event.playerName(),
+                                    event.timestampMs());
+                        }
                         if ("BREAK_BLOCK".equalsIgnoreCase(event.eventType())) {
                             long removalId = findPersistedAuditEventId(conn, event.ingestEventUuid());
                             supersedeEarlierBlockInteractions(conn, event, removalId);

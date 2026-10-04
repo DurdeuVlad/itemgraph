@@ -245,6 +245,40 @@ class AuditEventQueryServiceTest {
     }
 
     @Test
+    void nativeHistoricalNameResolvesByUuidForDirectFilteredAndExactAuditLookups() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement("""
+                INSERT INTO ig_audit_events
+                    (event_type, timestamp_ms, player_uuid, player_name, level_id, x, y, z, subject_id)
+                VALUES ('BREAK_BLOCK', 10, 'uuid-alex', 'Alex', 'minecraft:overworld', 10, 64, 0, 'minecraft:stone')
+                """)) {
+            insert.executeUpdate();
+        }
+        try (PreparedStatement insert = conn.prepareStatement("""
+                INSERT INTO ig_player_name_history
+                    (player_uuid, normalized_name, player_name, first_seen_ms, last_seen_ms)
+                VALUES ('uuid-alex', 'oldalex', 'OldAlex', 1, 9),
+                       ('uuid-other', 'oldalex', 'OldAlex', 1, 9)
+                """)) {
+            insert.executeUpdate();
+        }
+        try (PreparedStatement insert = conn.prepareStatement("""
+                INSERT INTO ig_audit_events
+                    (event_type, timestamp_ms, player_uuid, player_name, level_id, x, y, z, subject_id)
+                VALUES ('BREAK_BLOCK', 9, 'uuid-other', 'Other', 'minecraft:overworld', 11, 64, 0, 'minecraft:dirt')
+                """)) {
+            insert.executeUpdate();
+        }
+
+        assertEquals(2, service.find(conn, "all", "OldAlex", QueryWindow.unbounded(), 10).size());
+        assertEquals(2, service.findFiltered(conn,
+                AuditLookupFilters.parse("user.oldalex radius.10", 100),
+                "minecraft:overworld", 10, 64, 0, 10, 0).size());
+        assertEquals(1, service.findExact(conn, "all", "OldAlex", QueryWindow.unbounded(),
+                "minecraft:overworld", List.of(new AuditEventQueryService.ExactPosition(10, 64, 0)),
+                10, 0).size());
+    }
+
+    @Test
     void formatterKeepsMultilineDetailsOnOneConsoleLine() throws Exception {
         try (PreparedStatement insert = conn.prepareStatement(
                 "INSERT INTO ig_audit_events (event_type, timestamp_ms, detail) VALUES ('CHAT_MESSAGE', 1, ?)") ) {

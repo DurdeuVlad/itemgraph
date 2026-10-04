@@ -24,8 +24,13 @@ public final class NativeItemActionEventListener {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
-        ItemStack original = event.getItem();
-        ItemStack result = event.getResultStack();
+        recordItemUseFinished(player, event.getItem(), event.getResultStack());
+    }
+
+    public static void recordItemUseFinished(ServerPlayer player, ItemStack original, ItemStack result) {
+        if (player == null || player.level().isClientSide()) {
+            return;
+        }
         if (original == null || original.isEmpty() || result == null) {
             return;
         }
@@ -46,7 +51,13 @@ public final class NativeItemActionEventListener {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
-        ItemStack original = event.getOriginal();
+        recordItemDestroyed(player, event.getOriginal());
+    }
+
+    public static void recordItemDestroyed(ServerPlayer player, ItemStack original) {
+        if (player == null || player.level().isClientSide()) {
+            return;
+        }
         if (original != null && !original.isEmpty()) {
             submitUnknown(player, "BREAK_ITEM", original.copy(), 1);
         }

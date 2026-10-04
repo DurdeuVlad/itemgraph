@@ -3,6 +3,7 @@ package com.itemgraph.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.db.DatabaseSettings;
+import com.itemgraph.db.migration.MigrationRunner;
 import com.itemgraph.query.QueryLimits;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
@@ -96,7 +97,7 @@ class ItemGraphStatusSecurityTest {
         when(database.isInitialized()).thenReturn(false);
         when(database.getSettings()).thenReturn(DatabaseSettings.mysqlMariaDb(
                 "sentinel-host", 3306, "sentinel-database", "sentinel-user", "sentinel-password", 5_000, true));
-        when(database.getCurrentSchemaVersion()).thenReturn(20);
+        when(database.getCurrentSchemaVersion()).thenReturn(MigrationRunner.LATEST_VERSION);
         QueryLimits.configureMaxPageSize(25);
 
         try (var databaseManager = mockStatic(DatabaseManager.class)) {
@@ -118,7 +119,7 @@ class ItemGraphStatusSecurityTest {
             assertEquals(1, successes.size());
             String status = successes.get(0);
             assertTrue(status.contains("backend=mysql_mariadb"));
-            assertTrue(status.contains("schemaVersion=20"));
+            assertTrue(status.contains("schemaVersion=" + MigrationRunner.LATEST_VERSION));
             assertTrue(status.contains("maxPageSize=25"));
             assertTrue(status.contains("databaseConnectionTimeoutMs=5000"));
             assertTrue(status.contains("useIndexes=true"));

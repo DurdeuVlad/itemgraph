@@ -20,6 +20,16 @@ class HistoricalUsernameSuggestionsTest {
              Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE ig_grieflogger_rows (table_name TEXT, payload_json TEXT)");
             statement.execute("""
+                    CREATE TABLE ig_player_name_history (
+                        player_uuid TEXT, normalized_name TEXT, player_name TEXT,
+                        first_seen_ms INTEGER, last_seen_ms INTEGER
+                    )
+                    """);
+            statement.execute("""
+                    INSERT INTO ig_player_name_history VALUES
+                    ('uuid-native', 'historicalnative', 'HistoricalNative', 5, 15)
+                    """);
+            statement.execute("""
                     INSERT INTO ig_grieflogger_rows VALUES
                     ('usernames', '{"id":1,"time":10,"uuid":"uuid-a","name":"Zelda"}'),
                     ('usernames', '{"id":2,"time":20,"uuid":"uuid-a","name":"Alice"}'),
@@ -30,7 +40,7 @@ class HistoricalUsernameSuggestionsTest {
                     ('users', '{"id":1,"name":"CurrentPlayer"}')
                     """);
 
-            assertEquals(List.of("Alice", "CurrentPlayer", "OBrien", "Zelda"),
+            assertEquals(List.of("Alice", "CurrentPlayer", "HistoricalNative", "OBrien", "Zelda"),
                     HistoricalUsernameSuggestions.load(connection));
         }
     }

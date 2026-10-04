@@ -488,7 +488,12 @@ public final class UnifiedEvidenceQueryService {
             appendPlaceholders(sql, users.size());
             sql.append(") OR LOWER(").append(uuidExpressions.get(i)).append(") IN (");
             appendPlaceholders(sql, users.size());
-            sql.append("))");
+            sql.append(") OR LOWER(").append(uuidExpressions.get(i)).append(") IN (")
+                    .append("SELECT LOWER(player_uuid) FROM ig_player_name_history ")
+                    .append("WHERE normalized_name IN (");
+            appendPlaceholders(sql, users.size());
+            sql.append(")))");
+            users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
             users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
             users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
         }

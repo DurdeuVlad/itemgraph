@@ -60,6 +60,26 @@ class UnifiedEvidenceQueryServiceTest {
     }
 
     @Test
+    void historicalNativeNameResolvesToTheSameUuidAcrossAuditAndItemFlow() throws Exception {
+        audit("BREAK_BLOCK", 1_000L, "minecraft:stone");
+        observation("ITEMGRAPH_INTERNAL", 2_000L, "DROP_ITEM", stoneFingerprint, 3);
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO ig_player_name_history (
+                    player_uuid, normalized_name, player_name, first_seen_ms, last_seen_ms
+                ) VALUES ('uuid-alex', 'oldalex', 'OldAlex', 100, 900)
+                """)) {
+            statement.executeUpdate();
+        }
+
+        AuditLookupFilters filters = AuditLookupFilters.parse("user.oldalex radius.100", 10_000L);
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(
+                conn, filters, "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(List.of("observation#1", "audit#1"),
+                rows.stream().map(UnifiedEvidenceDetail::evidenceId).toList());
+    }
+
+    @Test
     void auditEvidenceClassComesFromTaxonomyAndUnknownIdsStayUnclassified() throws Exception {
         audit("INTERACT_ENTITY_UNRESOLVED", 2_000L, "minecraft:villager");
         audit("FUTURE_MOD_EVENT", 1_000L, "example:subject");

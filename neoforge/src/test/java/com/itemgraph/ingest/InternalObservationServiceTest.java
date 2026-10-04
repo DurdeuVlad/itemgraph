@@ -140,6 +140,31 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void duplicateJoinEventIdentityCannotCreateUnsupportedNameHistory() throws Exception {
+        initializeTopologyDatabase();
+        InternalAuditEvent accepted = new InternalAuditEvent(
+                100L, "PLAYER_JOIN", "uuid-a", "Alice", "minecraft:overworld",
+                0, 64, 0, null, null, null, null,
+                "00000000-0000-0000-0000-000000000001", List.of());
+        InternalAuditEvent conflicting = new InternalAuditEvent(
+                200L, "PLAYER_JOIN", "uuid-b", "Mallory", "minecraft:overworld",
+                0, 64, 0, null, null, null, null,
+                "00000000-0000-0000-0000-000000000001", List.of());
+
+        persistAudit(accepted);
+        persistAudit(conflicting);
+
+        try (Statement statement = conn.createStatement();
+             ResultSet rows = statement.executeQuery(
+                     "SELECT player_uuid, normalized_name FROM ig_player_name_history")) {
+            assertTrue(rows.next());
+            assertEquals("uuid-a", rows.getString(1));
+            assertEquals("alice", rows.getString(2));
+            assertFalse(rows.next());
+        }
+    }
+
+    @Test
     void entityInteractionOutcomeSurvivesDatabaseRestartWithoutQuantityObservation() throws Exception {
         initializeTopologyDatabase();
         Path databasePath = tempDir.resolve("itemgraph.db");

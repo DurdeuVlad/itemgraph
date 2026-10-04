@@ -14,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.ServerboundChatCommandPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
@@ -32,6 +33,7 @@ import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.Direction;
@@ -44,9 +46,12 @@ import java.util.Map;
 public final class EntityInteractionGameTests implements FabricGameTest {
     @GameTest(template = "fabric-gametest-api-v1:empty", timeoutTicks = 100)
     public void serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome(GameTestHelper helper) {
+        long replayAuditWatermark = BucketPickupConformanceFixture.auditWatermark();
+        long replayTransformationWatermark = ItemGraphReplayReportFixture.transformationWatermark();
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         ServerPlayer fluidPlayer = helper.makeMockServerPlayerInLevel();
         ServerPlayer movementPlayer = helper.makeMockServerPlayerInLevel();
+        FabricNativeAuditEventListener.recordChatMessage(player, "itemgraph_replay_chat");
         InternalObservationService observations = InternalObservationService.getInstance();
         long droppedBefore = observations.getTotalDropped();
         var quantityObservationsBefore = EntityInteractionConformanceFixture.snapshotQuantityObservations();
@@ -198,6 +203,14 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                 "mock server player did not pick up the accepted diamond stack");
         helper.assertTrue(inventoryCount(movementPlayer, Items.DIAMOND) == 4,
                 "ground pickup must restore all four diamonds to player inventory");
+        FabricNativeAuditEventListener.onItemUseFinished(player,
+                new ItemStack(Items.APPLE), ItemStack.EMPTY);
+        FabricNativeAuditEventListener.onItemDestroyed(player, new ItemStack(Items.WOODEN_SWORD));
+        SimpleContainer craftMatrix = new SimpleContainer(1);
+        craftMatrix.setItem(0, new ItemStack(Items.PAPER));
+        FabricNativeAuditEventListener.onCrafted(player, craftMatrix, new ItemStack(Items.BOOK));
+        FabricNativeAuditEventListener.onDisconnect(fluidPlayer);
+        player.connection.handleChatCommand(new ServerboundChatCommandPacket("say itemgraph_replay_command"));
 
         observations.stop();
         helper.assertTrue(observations.getQueueSize() == 0,
@@ -233,7 +246,7 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
             ItemGraphReplayReportFixture.writeIfRequested(helper, "fabric",
                     Math.min(movementWatermark, projectileWatermark.observationId()),
-                    bucketAuditWatermark,
+                    replayAuditWatermark, replayTransformationWatermark,
                     Map.of(movementPlayer.getUUID().toString(), "actor:replay-mover",
                             playerUuid, "actor:replay-interactor",
                             fluidPlayer.getUUID().toString(), "actor:replay-fluid"), waterPos,
