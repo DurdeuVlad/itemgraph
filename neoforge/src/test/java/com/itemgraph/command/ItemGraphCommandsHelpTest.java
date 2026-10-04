@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -129,7 +131,8 @@ class ItemGraphCommandsHelpTest {
         for (String topLevel : Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect")) {
             assertNotNull(CommandHelp.topicLines(topLevel), "missing help topic for /ig " + topLevel);
         }
-        for (String path : List.of("ingest now", "ingest history", "trace item", "trace player", "trace container",
+        for (String path : List.of("ingest now", "ingest history", "lookup near", "lookup page", "lookup player",
+                "lookup filters", "lookup provenance", "trace item", "trace player", "trace container",
                 "gui item", "gui player", "gui container")) {
             List<String> lines = CommandHelp.topicLines(path);
             assertNotNull(lines, "missing help topic for /ig " + path);
@@ -145,6 +148,33 @@ class ItemGraphCommandsHelpTest {
         String pageHelp = String.join("\n", CommandHelp.topicLines("page"));
         assertTrue(pageHelp.contains("Syntax: /ig page <page>"));
         assertTrue(pageHelp.contains("per-player"));
+    }
+
+    @Test
+    void documentedQuickStartExamplesParseAgainstRegisteredCommandTree() throws Exception {
+        Path root = Path.of("").toAbsolutePath();
+        while (root != null && !Files.exists(root.resolve("docs/ADMIN_QUICK_START.md"))) {
+            root = root.getParent();
+        }
+        assertNotNull(root, "test process must be able to locate repository documentation");
+        String guide = Files.readString(root.resolve("docs/ADMIN_QUICK_START.md"));
+        String startMarker = "<!-- executable-command-examples:start -->";
+        String endMarker = "<!-- executable-command-examples:end -->";
+        int start = guide.indexOf(startMarker);
+        int end = guide.indexOf(endMarker);
+        assertTrue(start >= 0 && end > start, "quick-start command example markers must be paired");
+
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        List<String> examples = guide.substring(start + startMarker.length(), end).lines()
+                .map(String::strip)
+                .filter(line -> line.startsWith("/ig "))
+                .map(line -> line.substring(1))
+                .toList();
+        assertFalse(examples.isEmpty(), "quick start must contain executable /ig examples");
+        for (String example : examples) {
+            assertParsedCompletely(dispatcher.parse(example, source), "quick-start example /" + example);
+        }
     }
 
     @Test
@@ -183,7 +213,7 @@ class ItemGraphCommandsHelpTest {
         assertEquals(1, dispatcher.execute("itemgraph help inspect", source));
         String inspectHelp = String.join("\n", successes);
         assertTrue(inspectHelp.contains("Permission: level 2"));
-        assertTrue(inspectHelp.contains("does not consume the held item"));
+        assertTrue(inspectHelp.contains("held items are not used"));
         assertTrue(inspectHelp.contains("Example: /ig inspect on"));
 
         successes.clear();

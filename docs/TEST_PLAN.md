@@ -771,7 +771,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ItemEntityEventListenerPartialPickupTest` | pending-pickup resolution: emit on reduced count, drop on removal/expiry, keep while unchanged |
 | `FlowBrowserMenuTest` | vanilla six-row menu type, compact resolved-menu titles, textual provenance/confidence/evidence labels, every click category rejected or handled as navigation/detail only, and permission recheck (3 tests) |
 | `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container and `/ig inspect` command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
-| `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest`, `FabricNativeAuditEventListenerTest` | per-player inspect state, deterministic command forms, permission denial, supported/unsupported clicks, browser-queue rejection fallback, NeoForge logout and Fabric disconnect handlers, and canceled-click isolation from session tracking |
+| `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest`, `FabricNativeAuditEventListenerTest` | per-player inspect state, deterministic command forms, permission denial, block-history fallback, exact Container-to-flow-browser routing on both loaders, browser-queue rejection fallback, NeoForge logout and Fabric disconnect handlers, and canceled-click isolation from session tracking |
 | `ItemGraphCommandsHelpTest` | bare-root overview, every help topic, invalid-topic diagnostics, permission denial, registered-path/help synchronization, literal/player/item/dimension suggestions, published filter examples under both roots, aliases and bounds, value completion, page-session expiry, and vanilla `ClientboundCommandsPacket` command-tree encode/decode (expanded in #24) |
 | `FabricItemGraphCommandsParityTest` | Fabric-side command registration, all published lookup examples under both roots, filter aliases and bounds, action/user/item value suggestions, duplicate/conflicting/fifth-filter completion limits, permission denial, invalid pages, inspect/page syntax, and vanilla `ClientboundCommandsPacket` command-tree encode/decode |
 | `LookupPageSessionPolicyTest`, `FabricItemGraphPageDispatchTest`, `QueryDispatcherNoResultTest`, `QueryFormatterTest` | page expiry boundary and offset limits; generated Previous/Next commands retain the page-session UUID; exact-multiple row counts do not emit an empty next page; generic asynchronous failure delivery; empty unified-evidence message formatting; real Fabric filtered lookup against an empty ItemGraph database returns the documented message on the server thread. |
@@ -1362,4 +1362,32 @@ capture.
 Run the loader test suites and GameTest suites once after the whole #33
 implementation batch, then run the full M9 CI matrix after milestone work is
 complete. Do not build distributable artifacts unless the mod version is bumped.
+
+## M11 admin-first UX validation (automated batch complete; client replay pending)
+
+- `InspectionListenerTest.containerRightClickRoutesToFlowBrowserAndKeepsExactDimensionAndPosition`
+  and `FabricNativeAuditEventListenerTest.containerRightClickRoutesToFlowBrowserAndKeepsExactDimensionAndPosition`
+  verify that Container block entities take the flow-browser route and preserve their
+  clicked position and dimension. The paired `bothDoubleChestHalvesOpenTheCanonicalFlowBrowserTarget`
+  tests verify either half resolves to the canonical anchor used by capture. Their
+  `rejectedContainerFlowQueryPreservesVanillaContainerInteraction` counterparts verify
+  that queue rejection does not silently switch to a block-history query. Existing
+  non-container inspection tests continue to cover block-history behavior.
+- `ItemGraphCommandsHelpTest.helpListsEveryRegisteredCommandPath` (the registered-path
+  assertion in the current suite) checks `lookup near`, `lookup page`, `lookup player`,
+  `lookup filters`, and `lookup provenance` help topics. The quick-start's executable
+  commands are parsed against the registered Brigadier tree by
+  `documentedQuickStartExamplesParseAgainstRegisteredCommandTree`.
+- The completed grouped validation used
+  `./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`.
+  NeoForge unit tests: 518 total, 0 failures, 0 errors, 6 skipped. NeoForge GameTests: all 6
+  required tests passed. Fabric unit tests: 78 total, 0 failures, 0 errors, 2 skipped. Fabric
+  GameTests: all 7 required tests passed. The Fabric tasks were rerun as
+  `./gradlew :fabric:test :fabric:runGameTest` after a missing JUnit `fail` import in the new
+  regression test was fixed; the full command had already passed the NeoForge suites.
+- No connected-client clicks were performed, per the operator's instruction to skip live
+  clicks for #26. The #143 issue separately requests a connected-client UX replay at the
+  end of M11; that criterion remains unverified pending the operator's direction. Both
+  loader unit suites verify either double-chest half opens the canonical flow-browser
+  anchor. No distributable mod JAR or versioned release was built.
 

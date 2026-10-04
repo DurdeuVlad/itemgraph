@@ -15,7 +15,7 @@ final class CommandHelp {
 
     static final List<String> TOPIC_NAMES = List.of(
             "help", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain",
-            "lookup", "lookup player", "lookup filters",
+            "lookup", "lookup near", "lookup page", "lookup player", "lookup filters", "lookup provenance",
             "page",
             "trace", "trace item", "trace player", "trace container",
             "gui", "gui item", "gui player", "gui container", "inspect");
@@ -28,6 +28,8 @@ final class CommandHelp {
         return List.of(
                 "[ItemGraph] /itemgraph is the full command root; /ig is its alias. Permission level 2 is required.",
                 "[ItemGraph] /ig help [topic] — show all commands or one topic.",
+                "[ItemGraph] Start with a question: /ig trace item <query>, /ig lookup near <dimension> <x> <y> <z> <radius> <eventType>, or /ig gui container <dimension> <x> <y> <z>.",
+                "[ItemGraph] The ItemGraph admin quick-start guide maps common incident questions to commands and explains the evidence labels.",
                 "[ItemGraph] /ig status — show mod, GriefLogger, database, ingestion, and inference state.",
                 "[ItemGraph] /ig audit — verify ItemGraph database invariants asynchronously.",
                 "[ItemGraph] /ig page <page> — continue the issuing player's active lookup session.",
@@ -101,6 +103,16 @@ final class CommandHelp {
                 "[ItemGraph] Pages are 1-based; offsets are capped at 10,000 rows.",
                 "[ItemGraph] Example: /ig lookup BREAK_BLOCK 50 120");
         topics.put("lookup", lookup);
+        topics.put("lookup near", List.of(
+                "[ItemGraph] Syntax: /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]",
+                "[ItemGraph] dimension: exact resource location; x/y/z: block coordinates; radius is clamped to 1..1024 blocks.",
+                "[ItemGraph] Results are native OBSERVED audit events in the selected cube. The read-only query runs asynchronously.",
+                "[ItemGraph] Example: /ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 50 1440"));
+        topics.put("lookup page", List.of(
+                "[ItemGraph] Syntax: /ig lookup page <page> <eventType> [limit] [sinceMinutes]",
+                "[ItemGraph] page is 1-based; limit defaults to 20 and is capped at 100; sinceMinutes is omitted for all history.",
+                "[ItemGraph] This directly queries a bounded audit result page; /ig page <page> continues the issuing player's saved lookup session.",
+                "[ItemGraph] Example: /ig lookup page 2 BREAK_BLOCK 50 1440"));
         topics.put("lookup player", List.of(
                 "[ItemGraph] Syntax: /ig lookup player <playerName> <eventType> [limit] [sinceMinutes]",
                 "[ItemGraph] playerName is an exact stored player name; eventType uses the same values as /ig lookup.",
@@ -181,8 +193,8 @@ final class CommandHelp {
         List<String> inspect = List.of(
                 "[ItemGraph] Syntax: /ig inspect [on|off|status]",
                 "[ItemGraph] The command and each supported click enforce the same permission check. /ig inspect toggles; /ig inspect on enables; /ig inspect off disables; /ig inspect status reports without changing.",
-                "[ItemGraph] While enabled, left-click any block or right-click a block/container to open read-only history for the exact dimension and coordinates.",
-                "[ItemGraph] Container clicks open the flow browser; block clicks open paginated audit history. The click does not consume the held item or become transfer evidence; state clears on logout and server stop.",
+                "[ItemGraph] While enabled, left-click inspects that block; right-click a Container opens its flow browser; a right-click on a non-container opens paginated block history (ordinary blocks target the block on the clicked face).",
+                "[ItemGraph] The click is consumed only after the read-only request is accepted, so held items are not used and inspection is not transfer evidence. State clears on logout and server stop.",
                 "[ItemGraph] Example: /ig inspect on");
         topics.put("inspect", inspect);
         return Map.copyOf(topics);

@@ -33,6 +33,7 @@ Everything below this heading and above "Not yet implemented" is live.
 /ig status
 /ig audit
 /ig ingest now
+/ig ingest history
 /ig event   <observationId>
 /ig explain <edgeId>
 /ig trace item <query> [limit] [sinceMinutes]
@@ -45,7 +46,10 @@ Everything below this heading and above "Not yet implemented" is live.
 /ig lookup <eventType> [limit] [sinceMinutes]
 /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]
 /ig lookup player <playerName> <eventType> [limit] [sinceMinutes]
+/ig lookup page <page> <eventType> [limit] [sinceMinutes]
+/ig lookup action.<value> [user.<value>] [include.<value>] [exclude.<value>] [time.<value>] radius.<value>
 /ig lookup filters <filter1> [filter2] [filter3] [filter4] [filter5]
+/ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]
 /ig page <page> [session]
 ```
 
@@ -60,7 +64,7 @@ names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
 
 | Argument | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `topic` | string | overview | one live help topic; `help`, `status`, `audit`, `ingest`, `ingest now`, `event`, `explain`, `trace`, `trace item`, `trace player`, `trace container`, `gui`, `gui item`, `gui player`, `gui container`, or `inspect` |
+| `topic` | string | overview | one live help topic; see `/ig help` for the complete list, including `lookup near`, `lookup page`, `lookup filters`, and `lookup provenance` |
 | `observationId` | long ≥ 1 | — | `ig_observations.id` |
 | `edgeId` | long ≥ 1 | — | `ig_inferred_edges.id` |
 | `query` | string | — | registry ID, custom-name text, numeric fingerprint candidate, or quoted `"id:<fingerprintId>"`; suggests registered item IDs |
@@ -98,6 +102,9 @@ registered item IDs for item queries, and loaded dimension IDs for `/ig gui cont
 The test suite cross-checks the registered command tree against `CommandHelp`, so adding a
 command without help fails `ItemGraphCommandsHelpTest`.
 
+New operators can follow the [admin quick start](ADMIN_QUICK_START.md) for task-based
+recipes, feature status, safe first-use steps, and plain-language evidence definitions.
+
 ### Execution model
 
 `/ig event`, `/ig explain`, `/ig trace`, `/ig audit`, `/ig lookup`, and the database-backed portion of
@@ -116,13 +123,15 @@ results synchronously within the five-second buffer timeout. Player queries have
 SQLite cancellation deadline as well: the progress handler interrupts a selective scan so
 the single query worker cannot be monopolized by one lookup.
 
-`/ig inspect` changes only per-player volatile state and returns immediately. Left-click
-and right-click requests use the bounded query worker and open the same exact-position
-timeline. Container clicks include item observations whose source or destination endpoint
-is the inspected cell; double chests and doors query both validated physical positions in
-one globally paginated result. The inspector excludes rows with a schema V19 supersession
-link, while ordinary lookup shows those immutable rows with the replacement break ID and
-reason. A rejected query does not consume the gameplay click.
+`/ig inspect` changes only per-player volatile state and returns immediately. A left-click
+uses the bounded query worker for an exact-position audit-history page. Right-clicking a
+block entity implementing `Container` opens the vanilla flow browser and queries the
+container item-flow timeline. Either half of a valid double chest resolves to the same
+canonical anchor used by container capture. Other right-clicks open the audit-history view:
+supported functional blocks select the clicked block, and ordinary blocks select the
+adjacent block on the clicked face. A rejected query does not consume the gameplay click.
+The inspector excludes rows with a schema V19 supersession link, while ordinary lookup
+shows those immutable rows with the replacement break ID and reason.
 
 ### Unified filtered lookup
 
@@ -237,12 +246,14 @@ off`, and `/ig inspect status` are deterministic forms.
 
 While active, a server-side right-click on a block whose block entity implements `Container`
 opens that exact dimension/position in the read-only browser. After the browser query is
-accepted, the `RightClickBlock` event is cancelled with `InteractionResult.SUCCESS` at
-`HIGHEST` priority, so the normal container screen and held-item use path do not run. If the
-bounded query queue rejects the request, the vanilla interaction remains intact. Unsupported
-blocks retain vanilla behavior. The mode is per player UUID, requires permission level 2 on
-both command and click, and clears on logout and server stop. Opening ItemGraph's menu is
-not recorded as a container-transfer observation.
+accepted, the normal container screen and held-item use path do not run. If the bounded
+query queue rejects the request, vanilla interaction remains intact. Left-clicking any block
+continues to open that block's exact-position paginated audit-history view in chat.
+Right-clicking a non-container block opens block history too: supported functional blocks
+select the clicked block; ordinary blocks select the block on the clicked face. If that
+query is rejected, vanilla interaction remains intact. The mode is per player UUID, requires
+permission level 2 on both command and click, and clears on logout and server stop. Opening
+ItemGraph's menu is not recorded as a container-transfer observation.
 
 ### View an observation
 

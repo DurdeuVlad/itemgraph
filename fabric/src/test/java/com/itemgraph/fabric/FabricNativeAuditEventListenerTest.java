@@ -44,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.doReturn;
@@ -172,6 +173,91 @@ class FabricNativeAuditEventListenerTest {
 
         assertEquals(InteractionResult.SUCCESS, result);
         assertEquals(1, opens.get());
+    }
+
+    @Test
+    void containerRightClickRoutesToFlowBrowserAndKeepsExactDimensionAndPosition() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        when(level.dimension()).thenReturn(Level.NETHER);
+        BlockPos pos = BlockPos.ZERO;
+        AtomicInteger blockHistoryOpens = new AtomicInteger();
+        AtomicInteger flowBrowserOpens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
+                inspections,
+                (p, l, clickedPos) -> { blockHistoryOpens.incrementAndGet(); return 1; },
+                (openingPlayer, openingLevel, clickedPos) -> {
+                    assertSame(player, openingPlayer);
+                    assertSame(level, openingLevel);
+                    assertEquals(pos, clickedPos);
+                    assertEquals(Level.NETHER, openingLevel.dimension());
+                    flowBrowserOpens.incrementAndGet();
+                    return 1;
+                },
+                player, level, pos, Direction.UP);
+
+        assertEquals(InteractionResult.SUCCESS, result);
+        assertEquals(0, blockHistoryOpens.get());
+        assertEquals(1, flowBrowserOpens.get());
+    }
+
+    @Test
+    void bothDoubleChestHalvesOpenTheCanonicalFlowBrowserTarget() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos left = new BlockPos(10, 64, -20);
+        var leftState = Blocks.CHEST.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                        net.minecraft.world.level.block.state.properties.ChestType.LEFT);
+        var rightState = leftState.setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                net.minecraft.world.level.block.state.properties.ChestType.RIGHT);
+        BlockPos right = left.relative(net.minecraft.world.level.block.ChestBlock.getConnectedDirection(leftState));
+        BlockPos anchor = left.getX() <= right.getX() ? left : right;
+        when(level.getBlockState(left)).thenReturn(leftState);
+        when(level.getBlockState(right)).thenReturn(rightState);
+        BlockEntity chest = mock(BlockEntity.class,
+                org.mockito.Mockito.withSettings().extraInterfaces(Container.class));
+        when(level.getBlockEntity(left)).thenReturn(chest);
+        when(level.getBlockEntity(right)).thenReturn(chest);
+        AtomicInteger opens = new AtomicInteger();
+        FabricNativeAuditEventListener.ContainerFlowOpener opener = (p, l, pos) -> {
+            assertEquals(anchor, pos);
+            opens.incrementAndGet();
+            return 1;
+        };
+
+        assertEquals(InteractionResult.SUCCESS, FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> { fail("double chest must open the flow browser"); return 0; },
+                opener, player, level, left, Direction.UP));
+        assertEquals(InteractionResult.SUCCESS, FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> { fail("double chest must open the flow browser"); return 0; },
+                opener, player, level, right, Direction.UP));
+        assertEquals(2, opens.get());
+    }
+
+    @Test
+    void rejectedContainerFlowQueryPreservesVanillaContainerInteraction() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        AtomicInteger blockHistoryOpens = new AtomicInteger();
+        AtomicInteger flowBrowserOpens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
+                inspections,
+                (p, l, pos) -> { blockHistoryOpens.incrementAndGet(); return 1; },
+                (p, l, pos) -> { flowBrowserOpens.incrementAndGet(); return 0; },
+                player, level, BlockPos.ZERO, Direction.UP);
+
+        assertNull(result);
+        assertEquals(0, blockHistoryOpens.get(), "rejected flow must not silently switch query types");
+        assertEquals(1, flowBrowserOpens.get());
     }
 
     @Test
@@ -330,20 +416,23 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void acceptedBlockInspectionDoesNotEmitGameplayInteractionEvidence() {
+    void acceptedContainerInspectionDoesNotEmitGameplayInteractionEvidence() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
-        ServerLevel level = mock(ServerLevel.class);
+        ServerLevel level = serverLevelWithContainer();
         BlockPos pos = BlockPos.ZERO;
-        when(level.getBlockState(pos)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
         InternalObservationService service = mock(InternalObservationService.class);
 
         InteractionResult result;
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             result = FabricNativeAuditEventListener.handleBlockUse(
-                    inspections, (p, l, target) -> 1, player, level, InteractionHand.MAIN_HAND, pos, Direction.UP);
+                    inspections,
+                    (p, l, target) -> {
+                        throw new AssertionError("container inspection must not run block-history lookup");
+                    },
+                    (p, l, target) -> 1, player, level, InteractionHand.MAIN_HAND, pos, Direction.UP);
         }
 
         assertEquals(InteractionResult.SUCCESS, result);

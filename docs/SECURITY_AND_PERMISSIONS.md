@@ -19,6 +19,15 @@ For that reason, ItemGraph is not merely a convenience command. It is a privileg
 
 No sensitive graph access should be granted unless a permission explicitly allows it.
 
+### Current command implementation
+
+As of the current command tree, every `/itemgraph` and `/ig` command uses the shared
+vanilla permission-level-2 gate. The named `itemgraph.*` permissions listed below are a
+target policy, not active configuration keys; do not assign or document them as working
+nodes until [#137](https://github.com/DurdeuVlad/itemgraph/issues/137) is implemented and
+merged. Owners should grant the normal operator level only to trusted moderators. See the
+[admin quick start](ADMIN_QUICK_START.md) for the user-facing command workflows.
+
 ## Suggested permission structure
 
 Exact permission integration depends on the server's permission system.
