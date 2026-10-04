@@ -833,3 +833,53 @@ References: [GriefLogger feature overview](https://daqem.com/projects/grieflogge
 [item usage](https://daqem.com/projects/grieflogger/wiki/player-actions/item-usage),
 [player sessions](https://daqem.com/projects/grieflogger/wiki/player-actions/player-sessions),
 and [chat and commands](https://daqem.com/projects/grieflogger/wiki/player-actions/chat-commands).
+
+## Live command replay — 2026-10-04
+
+The lookup and command-root replay ran on an isolated local Minecraft 1.21.1 /
+NeoForge 21.1.248 development server from ItemGraph commit
+`9c14864fc95afd61ee482fc2d7f2005a80251f20`. The loaded mod list contained
+ItemGraph, Minecraft, and NeoForge; GriefLogger was absent. The server reported
+native observation capture enabled and initialized ItemGraph SQLite schema 20.
+The connecting client was a NeoForge 1.21.1 client instrumented with MC Pilot
+0.15.0 (MCT client mod 0.9.1); it had no ItemGraph client mod. This exercises
+the actual client-to-server command path and rendered chat, but is not an
+unmodified vanilla client.
+
+| Replay | `/ig` | `/itemgraph` | Observed result |
+| --- | --- | --- | --- |
+| 15 published filter examples from `FabricItemGraphCommandsParityTest` | All 15 issued by the client | All 15 issued by the client | 30 command attempts; rendered query headers and responses were captured. Matching `PLAYER_JOIN` evidence appeared for `action.join time.3d radius.50`; valid filters with no fixture match returned the explicit no-match response. |
+| Initial positive lookup: `lookup action.join time.3d radius.50` | Passed | Passed | Both roots returned observed `PLAYER_JOIN` rows with actor, dimension, coordinates, timestamps, and audit evidence IDs. |
+| Empty lookup: `lookup radius.50` | Passed | Passed | Both roots returned “No audit, item-flow, transformation, or imported evidence matched the requested filters.” |
+| Page controls | Passed | N/A | `/ig lookup radius.50` rendered `[Next]`. The MC Pilot chat-history response exposed its raw component with `clickEvent.action=run_command` and value `/ig page 2 <session-token>`. Invoking that command returned page 2 and `[Previous] [Next]`; the raw components exposed the matching page-1 and page-3 session commands. The JSONL event file stores the rendered labels but omits component payloads. |
+| Invalid page: `page 0` | Passed | N/A | Brigadier rejected page zero at the command boundary and rendered a red argument-bound error (`argument.integer.low`, bounds `[1,0]`). The client locale was Simplified Chinese, so the native Brigadier text rendered localized. |
+| Inspect `on`, `status`, `off` | Passed | Passed | In order, the client was sent `ig inspect on` → `Inspection enabled.`, `ig inspect status` → `Inspection is enabled.`, `ig inspect off` → `Inspection disabled.`, then the same three commands under `itemgraph` with the same three responses. MC Pilot chat history returned the six responses in that order. |
+| Non-operator command behavior | Passed | Passed | A second client without operator permission attempted `/ig lookup radius.50` and `/itemgraph help`; both rendered native unknown-command errors and no ItemGraph response. The raw Brigadier command-tree packet was not retained, so command-tree omission is not claimed as a directly captured fact. |
+
+The 15 published filter examples were replayed under each root: break-block
+include, user/time, comma-separated include, multiple actions, user exclusion,
+filter ordering, include-only, multi-item include, radius-only, TNT/time,
+multiple item actions, recent join, unmatched user, and multiple users. The
+full commands are maintained in
+[`FabricItemGraphCommandsParityTest`](../fabric/src/test/java/com/itemgraph/fabric/FabricItemGraphCommandsParityTest.java).
+Each MCT command-send call returned `sent: true`, and client history contains 15
+rendered query headers under each root. MC Pilot does not persist outgoing
+command text in its JSONL event log; the send receipts are in the task run
+transcript, not a committed raw transcript. Consequently, the JSONL file alone
+cannot pair every no-match result to its originating root. Automated Fabric and
+NeoForge tests separately assert that all 15 examples parse completely under
+both roots.
+The independent automated Fabric and NeoForge command suites remain the source
+for syntax, suggestion, permission, and loader-specific regression assertions;
+this replay adds connected-client evidence for rendered behavior. It does not
+claim physical clicking of page controls or inspector world targets.
+
+This replay is not the unmodified vanilla-client run required by issue #24, and
+it did not separately replay the pinned GriefLogger 26.2 source fixtures in the
+live client. Issues [#43](https://github.com/DurdeuVlad/itemgraph/issues/43)
+and [#54](https://github.com/DurdeuVlad/itemgraph/issues/54) are closed; their
+compatibility-profile and exact-release fixture evidence remains covered by the
+repository validators and automated tests. Do not treat this live replay alone
+as satisfying the remaining issue #24 verification gate.
+
+No release artifact was built and no version was changed for this verification.
