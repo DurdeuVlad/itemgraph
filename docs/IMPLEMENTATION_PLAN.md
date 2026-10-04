@@ -496,9 +496,10 @@ Reference pattern: the maintained multi-loader Minecraft template uses a loader-
 
 # M11 Admin-first investigation UX
 
-GitHub milestone [M11: Admin-first investigation UX](https://github.com/DurdeuVlad/itemgraph/milestone/7) groups two admin-facing changes:
+GitHub milestone [M11: Admin-first investigation UX](https://github.com/DurdeuVlad/itemgraph/milestone/7) groups three admin-facing changes:
 
 - [#142](https://github.com/DurdeuVlad/itemgraph/issues/142): a task-based quick start and current-feature map, grounded in the registered command tree and current permission behavior. Existing #11 remains the exhaustive syntax-reference issue.
 - [#143](https://github.com/DurdeuVlad/itemgraph/issues/143): route a right-click on a `Container` block entity to the shared vanilla flow browser while preserving existing block-history inspection for left-clicks and non-container targets.
+- [#145](https://github.com/DurdeuVlad/itemgraph/issues/145): replace the flat in-game help dump with a task-first overview and a separate exhaustive command catalog; keep detailed topics and the quick-start guide as the next step.
 
-The user asked to run expensive validation once at the end of a milestone. Therefore the NeoForge/Fabric full unit and GameTest suites, client UX replay, and final adversarial review are one M11 end batch after both issues are implemented. Focused source and documentation review continues during implementation. No production server, release artifact, version bump, or publication is in scope.
+The user asked to run expensive validation once at the end of a milestone. Therefore the NeoForge/Fabric full unit and GameTest suites, client UX replay, and final adversarial review are one M11 end batch after all three issues are implemented. Focused source and documentation review continues during implementation. No production server, release artifact, version bump, or publication is in scope.

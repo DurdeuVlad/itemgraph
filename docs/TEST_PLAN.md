@@ -1363,7 +1363,7 @@ Run the loader test suites and GameTest suites once after the whole #33
 implementation batch, then run the full M9 CI matrix after milestone work is
 complete. Do not build distributable artifacts unless the mod version is bumped.
 
-## M11 admin-first UX validation (automated batch complete; client replay pending)
+## M11 admin-first UX validation (final milestone batch complete)
 
 - `InspectionListenerTest.containerRightClickRoutesToFlowBrowserAndKeepsExactDimensionAndPosition`
   and `FabricNativeAuditEventListenerTest.containerRightClickRoutesToFlowBrowserAndKeepsExactDimensionAndPosition`
@@ -1378,16 +1378,49 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
   `lookup filters`, and `lookup provenance` help topics. The quick-start's executable
   commands are parsed against the registered Brigadier tree by
   `documentedQuickStartExamplesParseAgainstRegisteredCommandTree`.
-- The completed grouped validation used
+- Before issue #145 expanded M11, the #142/#143 implementation had a grouped baseline.
+  The final milestone-end batch, after all three issues were implemented, ran:
   `./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`.
-  NeoForge unit tests: 518 total, 0 failures, 0 errors, 6 skipped. NeoForge GameTests: all 6
-  required tests passed. Fabric unit tests: 78 total, 0 failures, 0 errors, 2 skipped. Fabric
-  GameTests: all 7 required tests passed. The Fabric tasks were rerun as
-  `./gradlew :fabric:test :fabric:runGameTest` after a missing JUnit `fail` import in the new
-  regression test was fixed; the full command had already passed the NeoForge suites.
-- No connected-client clicks were performed, per the operator's instruction to skip live
-  clicks for #26. The #143 issue separately requests a connected-client UX replay at the
-  end of M11; that criterion remains unverified pending the operator's direction. Both
-  loader unit suites verify either double-chest half opens the canonical flow-browser
-  anchor. No distributable mod JAR or versioned release was built.
+  It completed successfully. NeoForge unit tests: 518 total, 0 failures, 0 errors, 6 skipped;
+  all 6 required NeoForge GameTests passed. Fabric unit tests: 78 total, 0 failures, 0 errors,
+  2 skipped; all 7 required Fabric GameTests passed. XML test reports independently confirm
+  the unit-test totals and failure/error/skip counts.
+- Focused help validation passed after the final help edits:
+  `./gradlew :neoforge:test --tests com.itemgraph.command.ItemGraphCommandsHelpTest`.
+  The help suite checks the task-first overview, exhaustive command catalog, detailed topics,
+  suggestions, and executable examples. `python tools\validate_admin_ux_docs.py` and
+  `git diff --check` passed.
+- Isolated live-client replay used a fresh NeoForge 1.21.1 development server from the M11
+  worktree, bound to loopback port 25575, with ItemGraph and no other mods. The EULA was
+  accepted for this temporary test only. Both MCPilot clients were configured with `mute=true`.
+  `/ig help` returned question-based task routes, exact first commands, topic-help links,
+  permission level 2, the evidence-status caveat, and the Admin Quick Start link.
+  `/ig help commands` returned grouped command paths and distinguished documented
+  configuration/API surfaces from commands. A separate non-operator received Minecraft's
+  unknown-command response for `/ig help`, confirming that the permission-gated root is
+  unavailable to that player.
+- For inspector routing, the test created a chest at `minecraft:overworld (0,64,0)` and
+  populated it with five diamonds using server commands. With `/ig inspect on`, a right-click
+  opened `ItemGraph: container #2` rather than the vanilla chest inventory. Its tooltip named
+  the exact dimension, position, node, and time window; the item row was labeled
+  `[OBSERVED] 5x minecraft:diamond`. The MCPilot `gui snapshot` reply for slot 0 was
+  `type=minecraft:diamond`, `count=1`, `displayName=[OBSERVED] 5x minecraft:diamond`;
+  the displayed item is a one-count menu token carrying the five-item observed label. Selecting
+  it opened `Observation #1`. The screenshots show the location/window tooltip and selection
+  screen; the slot label is preserved here from the live MCPilot response because it is not
+  legible in the screenshots. This confirms click routing, read-only browser, location
+  disclosure, and selection path; the command-created fixture does not validate ordinary
+  player-transfer attribution or completeness.
+- Screenshots: [task-first help overview](test-evidence/m11-admin-first-ux/task-first-help-overview.png),
+  [container flow browser](test-evidence/m11-admin-first-ux/container-inspection.png), and
+  [selected observation](test-evidence/m11-admin-first-ux/container-flow-selection.png). The
+  catalog chat capture is [here](test-evidence/m11-admin-first-ux/command-catalog-chat.png).
+  Full chat history and GUI slot snapshots were also checked through MCPilot.
+- The user explicitly authorized this connected-client replay; the earlier decision to skip
+  live clicks for #26 does not apply. No production server, distributable mod JAR, version bump,
+  or publication was involved. Independent adversarial review caught a furnace/container route
+  mismatch in the feature map; the guide now routes furnaces to the flow browser, and the docs
+  validator checks the two routes in separate table rows. The reviewer rechecked the correction
+  and found no remaining P1/P2 issue. PR checks on the final pushed head remain required before
+  merge.
 

@@ -54,9 +54,10 @@ Everything below this heading and above "Not yet implemented" is live.
 ```
 
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
-under either name. Bare `/itemgraph` and bare `/ig` show the command overview. `/ig help
-[topic]` lists the same live tree or one detailed topic; an unknown topic fails with the
-valid topic list. The whole tree requires permission level 2 — the query subcommands
+under either name. Bare `/itemgraph` and bare `/ig` show a short task-first command
+overview. `/ig help commands` lists command paths grouped by investigation task, and
+`/ig help <topic>` shows one detailed topic; an unknown topic fails with the valid topic
+list. The whole tree requires permission level 2 — the query subcommands
 inherit the same gate as the operational ones rather than relaxing it, because a trace
 names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
 
@@ -64,7 +65,7 @@ names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
 
 | Argument | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `topic` | string | overview | one live help topic; see `/ig help` for the complete list, including `lookup near`, `lookup page`, `lookup filters`, and `lookup provenance` |
+| `topic` | string | overview | one live help topic; see `/ig help commands` for command paths and `/ig help` for task selection |
 | `observationId` | long ≥ 1 | — | `ig_observations.id` |
 | `edgeId` | long ≥ 1 | — | `ig_inferred_edges.id` |
 | `query` | string | — | registry ID, custom-name text, numeric fingerprint candidate, or quoted `"id:<fingerprintId>"`; suggests registered item IDs |
@@ -94,8 +95,10 @@ narrows a noisy fingerprint; it is not what makes the query safe.
 
 ### In-game help and completion
 
-`/ig help` and bare `/ig` enumerate every registered top-level command and leaf command.
-Topic help states syntax, level-2 permission, defaults, asynchronous/read-only behavior,
+`/ig help commands` and the feature map in
+[`ADMIN_QUICK_START.md`](ADMIN_QUICK_START.md) enumerate shipped command and feature
+surfaces. Bare `/ig` is deliberately task-first. Topic help states syntax, level-2
+permission, defaults, asynchronous/read-only behavior,
 observed-versus-inferred semantics, and at least one valid example. Brigadier suggestions
 cover command literals, live help topics, online player names for player arguments,
 registered item IDs for item queries, and loaded dimension IDs for `/ig gui container`.

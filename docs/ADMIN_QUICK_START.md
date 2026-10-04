@@ -37,14 +37,15 @@ For server setup and the exact database keys, see [Configuration](CONFIGURATION.
 | Which imported legacy row is this? | `/ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]` | Exact imported GriefLogger provenance; provenance-only rows do not add item quantity. |
 | How do I browse without a custom client? | `/ig gui item`, `/ig gui player`, or `/ig gui container` | A read-only vanilla six-row menu with candidate selection, evidence detail, and paging. |
 | What was recorded at the block I am looking at? | `/ig inspect on`, then left-click that block | An exact-position, paginated audit-history query in chat. |
-| What was recorded at this button, furnace, or other supported functional block? | `/ig inspect on`, then right-click the functional block | A paginated audit-history query for the clicked block. |
+| What was recorded at this button or another functional block that is not a container? | `/ig inspect on`, then right-click the block | A paginated audit-history query for the clicked block. |
 | What was recorded at the block behind the face I am pointing at? | `/ig inspect on`, then right-click an ordinary non-container block | A paginated audit-history query for the adjacent block on the clicked face. |
-| What flow touched a container I am looking at? | `/ig inspect on`, then right-click a block entity implementing `Container` | The read-only flow browser. Either half of a valid double chest opens the same canonical anchor used by container capture. |
+| What flow touched a container I am looking at? | `/ig inspect on`, then right-click a block entity implementing `Container` (for example, a chest or furnace) | The read-only flow browser. Either half of a valid double chest opens the same canonical anchor used by container capture. |
 | Is storage internally consistent? | `/ig audit` | Conservation, positivity, relational-integrity, and allocation-state results. |
 
-`/ig` and `/itemgraph` are the same command root. `/ig help` lists current commands;
-`/ig help lookup near`, `/ig help trace item`, and other topic forms give syntax and an
-example. `/ig page <page>` continues the issuing player's saved lookup session. By
+`/ig` and `/itemgraph` are the same command root. `/ig help` gives task-first starting
+points; `/ig help commands` groups every command path by investigation task. `/ig help
+lookup near`, `/ig help trace item`, and other topic forms give syntax and an example.
+`/ig page <page>` continues the issuing player's saved lookup session. By
 contrast, `/ig lookup page <page> <eventType> [limit] [sinceMinutes]` runs a direct page
 number query for that event type.
 

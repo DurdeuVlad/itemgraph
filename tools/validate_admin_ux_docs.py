@@ -55,6 +55,18 @@ for topic, marker in registration_markers.items():
         fail(f"{topic} is missing from the command reference")
 
 inspect_docs = (readme, query_model, quick_start)
+quick_start_rows = [line for line in quick_start.splitlines() if line.startswith("|")]
+if any(
+    "furnace" in row.lower() and "audit-history query" in row.lower()
+    for row in quick_start_rows
+):
+    fail("admin quick start routes a container furnace to block audit history")
+if not any(
+    "furnace" in row.lower() and "container" in row and "flow browser" in row.lower()
+    for row in quick_start_rows
+):
+    fail("admin quick start must identify a furnace as a container flow-browser target")
+
 for relative, document in zip(
     ("README.md", "docs/QUERY_MODEL.md", "docs/ADMIN_QUICK_START.md"), inspect_docs
 ):
