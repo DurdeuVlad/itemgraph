@@ -1423,4 +1423,13 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
   validator checks the two routes in separate table rows. The reviewer rechecked the correction
   and found no remaining P1/P2 issue. PR checks on the final pushed head remain required before
   merge.
+- The first CI run on the M11 PR failed one pre-existing NeoForge test:
+  `QueryDispatcherTest.testDispatchDataDropsInlineCallbackWhenServerExecutorRunsOffThread`.
+  Its query returned immediately, allowing the future to complete before `dispatchData`
+  registered its completion handler; the inline executor then ran on the test/server thread,
+  a valid synchronous path that the test incorrectly rejected. The test now blocks the query
+  on a latch until `dispatchData` returns, then releases it in `finally`, making the intended
+  off-thread inline-executor case deterministic. The focused test passed, and the complete
+  NeoForge/Fabric unit and GameTest batch passed again after this test-only correction. No
+  production code changed for this CI fix; a new CI run on the corrected commit is pending.
 
