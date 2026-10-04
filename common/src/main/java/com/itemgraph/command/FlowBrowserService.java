@@ -265,9 +265,9 @@ public final class FlowBrowserService {
 
     static List<String> pageCompanionLines(TracePage page, int pageIndex, int candidatePageIndex) {
         List<String> lines = new ArrayList<>();
-        String pagePrefix = t("browser.page_prefix", "[ItemGraph] Flow browser {0} {1} — ",
+        String pagePrefix = t("browser.page_prefix", "[ItemGraph] Flow browser {0} {1} —",
                 page.resolution() == TracePage.Resolution.AMBIGUOUS
-                        ? t("browser.candidate_page", "candidate page") : t("browser.page", "page"), pageIndex + 1);
+                        ? t("browser.candidate_page", "candidate page") : t("browser.page", "page"), pageIndex + 1) + " ";
         if (page.resolution() == TracePage.Resolution.AMBIGUOUS) {
             if (!page.candidates().isEmpty()) {
                 int start = candidatePageIndex * page.pageSize();
