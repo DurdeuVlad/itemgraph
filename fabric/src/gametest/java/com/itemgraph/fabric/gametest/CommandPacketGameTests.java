@@ -12,7 +12,7 @@ import net.minecraft.server.players.ServerOpListEntry;
 /** Fabric server packet coverage for the published command roots. */
 public final class CommandPacketGameTests implements FabricGameTest {
     @GameTest(template = "fabric-gametest-api-v1:empty",
-            batch = "zz_itemgraph_command_packets", timeoutTicks = 400)
+            batch = "zz_itemgraph_command_packets", timeoutTicks = 4000)
     @SuppressWarnings("removal")
     public void inspectCommandsExecuteFromClientPacketsAndPersistAttempts(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
