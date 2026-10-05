@@ -405,8 +405,9 @@ CREATE TABLE IF NOT EXISTS ig_item_transformations (
 Implemented transformation types:
 
 - `ANVIL_RENAME`: captured via NeoForge `AnvilRepairEvent` when an item receives a custom name or repair.
-- `CRAFTING`: captured via `ItemCraftedEvent` linking input item components to crafted output products.
-- `SMELTING`: captured via `ItemSmeltedEvent`.
+- `CRAFT_OUTPUT_UNRESOLVED` / `SMELT_OUTPUT_UNRESOLVED`: records the observed output stack, count, fingerprint, actor, time, and position. Inputs are explicitly unknown, the row is not a transformation edge, and it cannot create a trace link.
+- The raw fingerprint remains complete when a modded name or component summary is unusually long. Human-readable name/component summaries are capped at 512 characters and end with `…[truncated]`; this display bound does not alter the canonical fingerprint.
+- Legacy `CRAFT` / `SMELT` rows may contain a first-slot approximation or synthetic input from older captures. The current registry labels them unresolved and trace queries exclude them; their historical raw rows are preserved.
 
 In query output, transformations are represented chronologically as:
 

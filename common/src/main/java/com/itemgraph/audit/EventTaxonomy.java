@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "2.1.0";
+    public static final String VERSION = "3.0.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -129,6 +129,8 @@ public final class EventTaxonomy {
     private static final LoaderSupport IMPLEMENTED = new LoaderSupport(LoaderStatus.IMPLEMENTED, null);
     private static final LoaderSupport HISTORICAL_ONLY = new LoaderSupport(LoaderStatus.HISTORICAL_ONLY,
             "NO_NATIVE_WRITER_HISTORICAL_QUERY_ONLY");
+    private static final LoaderSupport LEGACY_TRANSFORMATION_INPUTS_UNVERIFIED = new LoaderSupport(
+            LoaderStatus.HISTORICAL_ONLY, "LEGACY_TRANSFORMATION_INPUTS_NOT_VERIFIED");
     private static final LoaderSupport CREATIVE_TRANSFORM_UNSUPPORTED = new LoaderSupport(
             LoaderStatus.UNSUPPORTED, "CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED");
     private static final List<ReasonCode> UNRESOLVED_REASON_CODES = List.of(
@@ -144,6 +146,8 @@ public final class EventTaxonomy {
                     "The available callback does not establish a projectile impact result."),
             new ReasonCode("TRANSFORMATION_INPUTS_NOT_OBSERVED", 57,
                     "The operation output is known but one or more input stacks were not observed."),
+            new ReasonCode("LEGACY_TRANSFORMATION_INPUTS_NOT_VERIFIED", 162,
+                    "The stored transformation predates complete input evidence and cannot establish lineage."),
             new ReasonCode("TRANSFORMATION_CANCELLED", 57,
                     "The transformation operation was cancelled before a successful result."),
             new ReasonCode("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", 33,
@@ -319,9 +323,18 @@ public final class EventTaxonomy {
                 27, "item_flow");
         action(entries, "SHOOT_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
                 27, "item_flow");
-        action(entries, "CRAFT", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
-                57, "transformation", "craft_item");
-        action(entries, "SMELT", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT, 57, "transformation");
+        historicalTransformation(entries, "CRAFT", "craft_item");
+        historicalTransformation(entries, "SMELT");
+        add(entries, "CRAFT_OUTPUT_UNRESOLVED", "item_processing", Surface.AUDIT_EVENT,
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE,
+                EndpointSemantics.PLAYER_CONTEXT, QuantitySemantics.UNKNOWN,
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION,
+                IMPLEMENTED, IMPLEMENTED, 162);
+        add(entries, "SMELT_OUTPUT_UNRESOLVED", "item_processing", Surface.AUDIT_EVENT,
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE,
+                EndpointSemantics.PLAYER_CONTEXT, QuantitySemantics.UNKNOWN,
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION,
+                IMPLEMENTED, IMPLEMENTED, 162);
         action(entries, "ANVIL_RENAME", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
                 57, "transformation", "anvil");
         action(entries, "ANVIL_REPAIR", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
@@ -452,9 +465,17 @@ public final class EventTaxonomy {
                 pending, pending, ownerIssue);
     }
 
+    private static void historicalTransformation(List<Definition> entries, String id, String... aliases) {
+        add(entries, id, "transformation", Surface.TRANSFORMATION, EvidenceClass.UNRESOLVED,
+                SourceReliability.UNRESOLVED_CAUSE, EndpointSemantics.UNKNOWN,
+                QuantitySemantics.UNKNOWN, ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION,
+                LEGACY_TRANSFORMATION_INPUTS_UNVERIFIED, LEGACY_TRANSFORMATION_INPUTS_UNVERIFIED,
+                57, aliases);
+    }
+
     private static EndpointSemantics auditEndpoints(String family) {
         return switch (family) {
-            case "player_session", "chat", "command" -> EndpointSemantics.PLAYER_CONTEXT;
+            case "player_session", "chat", "command", "item_processing" -> EndpointSemantics.PLAYER_CONTEXT;
             case "admin_item_command", "creative_inventory" -> EndpointSemantics.UNKNOWN;
             case "entity_interaction", "entity_lifecycle", "projectile" -> EndpointSemantics.ACTOR_AND_TARGET;
             default -> EndpointSemantics.WORLD_LOCATION;

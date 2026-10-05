@@ -22,7 +22,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "docs" / "GRIEFLOGGER_COMPATIBILITY.json"
 FIXTURE_PATH = ROOT / "docs" / "grieflogger-fixtures" / "1.2.10-1.21.1.json"
-REPORT_SCHEMA_VERSION = 6
+REPORT_SCHEMA_VERSION = 7
 LOADERS = {"fabric", "neoforge"}
 SYSTEMS = {"grieflogger", "itemgraph"}
 RUNTIME_MODES = {"grieflogger_present", "native_only"}
@@ -35,6 +35,7 @@ UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 ACTION_TABLES = {
     "ADD_ITEM": {"items", "containers"}, "REMOVE_ITEM": {"items", "containers"},
     "DROP_ITEM": {"items"}, "PICKUP_ITEM": {"items"}, "CRAFT": {"items"},
+    "CRAFT_OUTPUT_UNRESOLVED": {"items"}, "SMELT_OUTPUT_UNRESOLVED": {"items"},
     "BREAK_ITEM": {"items"}, "CONSUME_ITEM": {"items"}, "THROW_ITEM": {"items"},
     "SHOOT_ITEM": {"items"}, "PLACE_BLOCK": {"blocks"}, "BREAK_BLOCK": {"blocks"},
     "INTERACT_BLOCK_ATTEMPT": {"blocks"}, "KILL_ENTITY": {"blocks"},
@@ -85,7 +86,7 @@ DIFFERENTIAL_EXCEPTION_ISSUES = {
     "INTERACT_ENTITY_COMPLETED": 75,
     "INTERACT_ENTITY_DENIED": 75,
     "INTERACT_ENTITY_UNRESOLVED": 75,
-    "SMELT": 57,
+    "SMELT_OUTPUT_UNRESOLVED": 162,
     "ANVIL_RENAME": 57,
     "ANVIL_REPAIR": 57,
     "HOPPER_INSERT": 34,
@@ -201,7 +202,9 @@ def _validate_event(event: Any, index: int, registry: dict[str, Any], system: st
             raise ReportError(f"events[{index}].quantity must be a {direction} signed delta for this action")
     if quantity_semantics == "transformation" and (quantity is None or quantity <= 0):
         raise ReportError(f"events[{index}].quantity must be a positive transformed result count")
-    if quantity_semantics not in {"none", "observed_stack_count", "signed_delta", "transformation"}:
+    if quantity_semantics == "unknown" and quantity is not None:
+        raise ReportError(f"events[{index}].quantity must be null for unknown historical quantity semantics")
+    if quantity_semantics not in {"none", "observed_stack_count", "signed_delta", "transformation", "unknown"}:
         raise ReportError(f"events[{index}] has unsupported quantity semantics in the compatibility profile")
     if not _is_integer(event["occurred_at_ms"]):
         raise ReportError(f"events[{index}].occurred_at_ms must be an integer Unix-millisecond timestamp")

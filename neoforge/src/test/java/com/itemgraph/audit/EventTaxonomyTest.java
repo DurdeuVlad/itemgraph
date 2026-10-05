@@ -50,21 +50,26 @@ class EventTaxonomyTest {
                     definition.neoForge().reasonCode() == null, definition.id() + " NeoForge support");
         }
         assertTrue(EventTaxonomy.VERSION.matches("\\d+\\.\\d+\\.\\d+"));
-        assertEquals("2.1.0", EventTaxonomy.VERSION,
-                "adding the container-break event family is a taxonomy minor change");
+        assertEquals("3.0.0", EventTaxonomy.VERSION,
+                "removing unverified transformation lineage changes the event contract");
 
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
             assertTrue(reasons.add(reason.id()), "duplicate reason code: " + reason.id());
             assertTrue(reason.ownerIssue() == 33 || (reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57)
-                            || reason.ownerIssue() == 140,
+                            || reason.ownerIssue() == 140 || reason.ownerIssue() == 162,
                     reason.id());
         }
         assertTrue(reasons.contains("CONTAINER_BREAK_ACTOR_UNAVAILABLE"));
         assertTrue(reasons.contains("CONTAINER_BLOCK_ENTITY_UNAVAILABLE"));
         assertTrue(reasons.contains("CONTAINER_BLOCK_ENTITY_UNSUPPORTED"));
+        assertTrue(reasons.contains("LEGACY_TRANSFORMATION_INPUTS_NOT_VERIFIED"));
         assertTrue(reasons.contains("CONTAINER_SLOT_LIMIT_EXCEEDED"));
         assertTrue(reasons.contains("CONTAINER_SNAPSHOT_FAILED"));
+        assertTrue(EventTaxonomy.auditLookupTypes().contains("CRAFT_OUTPUT_UNRESOLVED"));
+        assertTrue(EventTaxonomy.auditLookupTypes().contains("SMELT_OUTPUT_UNRESOLVED"));
+        assertFalse(EventTaxonomy.isTraceableTransformation("CRAFT"));
+        assertFalse(EventTaxonomy.isTraceableTransformation("SMELT"));
     }
 
     @Test
@@ -199,7 +204,7 @@ class EventTaxonomyTest {
                 creativeTransform.sourceReliability());
         assertEquals(EventTaxonomy.EndpointSemantics.UNKNOWN, creativeTransform.endpoints());
         assertEquals(QuantitySemantics.UNKNOWN, creativeTransform.quantity());
-        assertTrue(EventTaxonomy.traceableTransformationTypes().contains("CRAFT"));
+        assertFalse(EventTaxonomy.traceableTransformationTypes().contains("CRAFT"));
         assertFalse(EventTaxonomy.traceableTransformationTypes().contains("CREATIVE_ITEM_TRANSFORM"));
         assertTrue(EventTaxonomy.isTraceableTransformation("ADMIN_ITEM_TRANSFORM"));
         assertFalse(EventTaxonomy.isTraceableTransformation("FUTURE_TRANSFORM"));

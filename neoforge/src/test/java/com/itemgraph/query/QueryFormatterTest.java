@@ -58,6 +58,20 @@ class QueryFormatterTest {
     }
 
     @Test
+    void unresolvedAuditEventsUseTheirTaxonomyEvidenceLabel() {
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
+        AuditEventDetail event = new AuditEventDetail(3, "CRAFT_OUTPUT_UNRESOLVED", 1_700_000_000_000L,
+                "player-uuid", "Admin", "minecraft:overworld", 1, 64, 2,
+                "minecraft:diamond", "reason=TRANSFORMATION_INPUTS_NOT_OBSERVED");
+
+        String formatted = String.join("\n", QueryFormatter.formatAuditEvents(List.of(event), "all"));
+
+        assertTrue(formatted.contains("[UNRESOLVED] audit#3 CRAFT_OUTPUT_UNRESOLVED"), formatted);
+        assertFalse(formatted.contains("[OBSERVED] audit#3"), formatted);
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
+    }
+
+    @Test
     void testFormatDuration() {
         assertEquals("0ms", QueryFormatter.formatDuration(0));
         assertEquals("999ms", QueryFormatter.formatDuration(999));

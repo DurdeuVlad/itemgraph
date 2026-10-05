@@ -162,6 +162,37 @@ class EventQueryServiceTest extends QueryTestBase {
     }
 
     @Test
+    void testCanonicalEventUuidDoesNotPresentLegacyCraftEndpointsAsLineage() throws Exception {
+        long actor = insertPlayerNode("Moderator");
+        long source = insertFingerprint("minecraft:wheat", "legacy-source");
+        long result = insertFingerprint("minecraft:bread", "legacy-result");
+        String eventUuid = "123e4567-e89b-12d3-a456-426614174011";
+        try (var insert = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations
+                    (transformation_type, player_node_id, source_fingerprint_id, result_fingerprint_id,
+                     quantity, timestamp_ms, details, ingest_event_uuid)
+                VALUES ('CRAFT', ?, ?, ?, 4, ?, 'synthetic ingredient wheat -> bread', ?)
+                """)) {
+            insert.setLong(1, actor);
+            insert.setLong(2, source);
+            insert.setLong(3, result);
+            insert.setLong(4, now);
+            insert.setString(5, eventUuid);
+            insert.executeUpdate();
+        }
+
+        UnifiedEvidenceDetail event = service.findTransformationByEventUuid(conn, eventUuid).orElseThrow();
+        String rendered = String.join("\n", QueryFormatter.formatUnifiedEvidence(List.of(event), "exact event UUID"));
+        assertEquals("UNRESOLVED", event.evidenceClass());
+        assertNull(event.quantity());
+        assertTrue(rendered.contains("historical result (unverified)=minecraft:bread"), rendered);
+        assertTrue(rendered.contains("historical_endpoints=UNVERIFIED"), rendered);
+        assertFalse(rendered.contains("minecraft:wheat"), rendered);
+        assertFalse(rendered.contains(" -> "), rendered);
+        assertFalse(rendered.contains("synthetic ingredient"), rendered);
+    }
+
+    @Test
     void testCanonicalEventUuidOpensUnresolvedAuditEvidenceAndBeforeAfterSummary() throws Exception {
         String eventUuid = "123e4567-e89b-12d3-a456-426614174020";
         String raw = "{\"event_id\":\"" + eventUuid + "\",\"mutation_event_id\":\"123e4567-e89b-12d3-a456-426614174021\","
@@ -191,6 +222,38 @@ class EventQueryServiceTest extends QueryTestBase {
         assertTrue(output.contains("target_entity_uuid=target-entity target_entity_type=minecraft:zombie"), output);
         assertTrue(output.contains("before=minecraft:iron_sword x1"), output);
         assertTrue(output.contains("after=example:custom_sword x1"), output);
+    }
+
+    @Test
+    void testCanonicalEventUuidOpensUnresolvedCraftOutputWithoutCreatingLineage() throws Exception {
+        String eventUuid = "123e4567-e89b-12d3-a456-426614174030";
+        String raw = "{\"event_id\":\"" + eventUuid + "\",\"event_type\":\"CRAFT_OUTPUT_UNRESOLVED\","
+                + "\"evidence_class\":\"UNRESOLVED\",\"reason_code\":\"TRANSFORMATION_INPUTS_NOT_OBSERVED\","
+                + "\"observed_output\":{\"item_id\":\"minecraft:iron_sword\",\"fingerprint_hash\":\"out-hash\",\"quantity\":2}}";
+        try (var insert = conn.prepareStatement("""
+                INSERT INTO ig_audit_events
+                    (event_type, timestamp_ms, player_uuid, player_name, level_id, x, y, z,
+                     subject_id, detail, source_type, source_event_id, raw_data, ingest_event_uuid)
+                VALUES ('CRAFT_OUTPUT_UNRESOLVED', ?, '00000000-0000-0000-0000-000000000001', 'Alice',
+                        'minecraft:overworld', 10, 64, 20, 'minecraft:iron_sword',
+                        'output=minecraft:iron_sword quantity=2 input=UNKNOWN lineage=NOT_ESTABLISHED',
+                        'ITEMGRAPH_INTERNAL', 31, ?, ?)
+                """)) {
+            insert.setLong(1, now);
+            insert.setBytes(2, raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            insert.setString(3, eventUuid);
+            insert.executeUpdate();
+        }
+
+        UnifiedEvidenceDetail event = service.findAuditEventByEventUuid(conn, eventUuid).orElseThrow();
+        assertEquals("UNRESOLVED", event.evidenceClass());
+        assertEquals("minecraft:iron_sword", event.subjectId());
+        String rendered = String.join("\n", QueryFormatter.formatUnifiedEvidence(List.of(event), "exact event UUID"));
+        assertTrue(rendered.contains("evidence_event_id=" + eventUuid), rendered);
+        assertTrue(rendered.contains("TRANSFORMATION_INPUTS_NOT_OBSERVED"), rendered);
+        assertTrue(rendered.contains("output_quantity=2"), rendered);
+        assertTrue(rendered.contains("output_fingerprint=out-hash"), rendered);
+        assertTrue(rendered.contains("input=UNKNOWN lineage=NOT_ESTABLISHED"), rendered);
     }
 
     /** A row the source recorded no destination for must still be returned, not dropped. */

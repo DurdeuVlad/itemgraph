@@ -238,7 +238,7 @@ Implemented:
 Acceptance:
 
 - Anvil item renaming observed, persisted, and surfaced chronologically in live item trace timelines.
-- Crafting and smelting operations link input and output fingerprints cleanly.
+- Crafting and smelting result takes retain output evidence when the complete input set is not observed; they never fabricate recipe inputs or lineage edges. See M9 issue #162.
 
 ## Phase 10 — Hardening & Auditing [COMPLETED]
 

@@ -161,7 +161,7 @@ class ItemGraphCommandsHelpTest {
         List<String> nl = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
         assertEquals(english.get(0), nl.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> nlFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("nl_nl");
-        assertEquals(174, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(185, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(nlFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (nlFallback.contains(english.get(i))) assertEquals(english.get(i), nl.get(i));
@@ -170,7 +170,7 @@ class ItemGraphCommandsHelpTest {
         List<String> zh = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
         assertEquals(english.get(0), zh.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> zhFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("zh_tw");
-        assertEquals(174, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(185, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(zhFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (zhFallback.contains(english.get(i))) assertEquals(english.get(i), zh.get(i));
@@ -509,6 +509,18 @@ class ItemGraphCommandsHelpTest {
 
         assertTrue(lookupHelp.contains(
                 "eventType: " + String.join(", ", AuditEventQueryService.EVENT_TYPES) + "."));
+    }
+
+    @Test
+    void transformationHelpExplainsOutputOnlyEvidenceAndLimits() {
+        String help = String.join("\n", CommandHelp.topicLines("lookup transformations"));
+        assertTrue(help.contains("CRAFT_OUTPUT_UNRESOLVED"));
+        assertTrue(help.contains("SMELT_OUTPUT_UNRESOLVED"));
+        assertTrue(help.contains("input is unknown; no lineage edge"));
+        assertTrue(help.contains("itemgraph.command.lookup"));
+        assertTrue(help.contains("itemgraph.audit"));
+        assertTrue(help.contains("Legacy CRAFT/SMELT is unresolved"));
+        assertTrue(help.contains("trade, enchanting, brewing, smithing"));
     }
 
     @Test

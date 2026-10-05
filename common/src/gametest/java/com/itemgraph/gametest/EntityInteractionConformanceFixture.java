@@ -1,5 +1,6 @@
 package com.itemgraph.gametest;
 
+import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.query.AuditEventDetail;
 import com.itemgraph.query.AuditEventQueryService;
@@ -96,7 +97,10 @@ public final class EntityInteractionConformanceFixture {
                 helper.assertValueEqual((double) position.getZ(), row.z(), "normalized event Z changed");
                 helper.assertValueEqual(subjectId, row.subjectId(), "normalized event subject changed");
 
-                String expectedLine = "[ItemGraph] [OBSERVED] audit#" + row.id() + " " + row.eventType()
+                String evidenceClass = EventTaxonomy.find(row.eventType(), EventTaxonomy.Surface.AUDIT_EVENT)
+                        .map(definition -> definition.evidenceClass().name())
+                        .orElse(EventTaxonomy.UNCLASSIFIED_EVIDENCE);
+                String expectedLine = "[ItemGraph] [" + evidenceClass + "] audit#" + row.id() + " " + row.eventType()
                         + " actor=" + playerName + " at " + DIMENSION + " ["
                         + position.getX() + ", " + position.getY() + ", " + position.getZ()
                         + "] time=" + QueryFormatter.formatTime(row.timestampMs())

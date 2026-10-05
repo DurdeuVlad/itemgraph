@@ -24,6 +24,9 @@ final class AdminMutationEvidenceLinks {
     }
 
     static String appendAuditDetail(String eventType, String detail, byte[] rawData) {
+        if ("CRAFT_OUTPUT_UNRESOLVED".equals(eventType) || "SMELT_OUTPUT_UNRESOLVED".equals(eventType)) {
+            return appendTransformationOutputDetail(eventType, detail, rawData);
+        }
         if (!isOutcomeEvent(eventType)) return detail;
         JsonObject payload = parse(rawData);
         if (payload == null) return detail;
@@ -53,6 +56,24 @@ final class AdminMutationEvidenceLinks {
             appendStack(values, payload, "before");
             appendStack(values, payload, "after");
         }
+        return String.join(" ", values);
+    }
+
+    private static String appendTransformationOutputDetail(String eventType, String detail, byte[] rawData) {
+        JsonObject payload = parse(rawData);
+        if (payload == null || !eventType.equals(string(payload, "event_type"))) return detail;
+        if (!payload.has("observed_output") || !payload.get("observed_output").isJsonObject()) return detail;
+        JsonObject output = payload.getAsJsonObject("observed_output");
+        List<String> values = new ArrayList<>();
+        if (detail != null && !detail.isBlank()) values.add(detail);
+        add(values, "evidence_event_id", canonicalUuid(string(payload, "event_id")));
+        add(values, "reason", string(payload, "reason_code"));
+        add(values, "output", string(output, "item_id"));
+        add(values, "output_quantity", integer(output, "quantity"));
+        add(values, "output_fingerprint", string(output, "fingerprint_hash"));
+        add(values, "output_name", string(output, "custom_name"));
+        add(values, "output_rarity", string(output, "rarity"));
+        add(values, "output_components", string(output, "component_summary"));
         return String.join(" ", values);
     }
 

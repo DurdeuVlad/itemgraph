@@ -43,7 +43,8 @@ public final class EventQueryService {
                 'ADMIN_ITEM_COMMAND_ATTEMPT', 'ADMIN_ITEM_COMMAND_EFFECT',
                 'ADMIN_ITEM_COMMAND_FAILURE', 'ADMIN_ITEM_COMMAND_UNRESOLVED',
                 'CREATIVE_SLOT_ATTEMPT', 'CREATIVE_SLOT_EFFECT',
-                'CREATIVE_BLOCK_ATTEMPT', 'CREATIVE_BLOCK_RESULT', 'CREATIVE_BLOCK_UNRESOLVED'
+                'CREATIVE_BLOCK_ATTEMPT', 'CREATIVE_BLOCK_RESULT', 'CREATIVE_BLOCK_UNRESOLVED',
+                'CRAFT_OUTPUT_UNRESOLVED', 'SMELT_OUTPUT_UNRESOLVED'
             )
             """;
 
@@ -79,17 +80,26 @@ public final class EventQueryService {
                 String action = rs.getString("transformation_type");
                 var definition = EventTaxonomy.find(action, EventTaxonomy.Surface.TRANSFORMATION).orElse(null);
                 boolean unresolved = !EventTaxonomy.isTraceableTransformation(action);
-                String detail = "evidence_event_id=" + eventUuid + " "
-                        + (rs.getString("details") == null ? "" : rs.getString("details") + " ")
-                        + "source=" + rs.getString("source_item") + " result=" + rs.getString("result_item");
-                if (unresolved) detail += " evidence=UNRESOLVED quantity=UNKNOWN";
+                String sourceItem = rs.getString("source_item");
+                String resultItem = rs.getString("result_item");
+                String detail;
+                String item;
+                if (unresolved) {
+                    detail = "evidence_event_id=" + eventUuid
+                            + " historical_endpoints=UNVERIFIED evidence=UNRESOLVED quantity=UNKNOWN";
+                    item = "historical result (unverified)=" + (resultItem == null ? "(missing)" : resultItem);
+                } else {
+                    detail = "evidence_event_id=" + eventUuid + " "
+                            + (rs.getString("details") == null ? "" : rs.getString("details") + " ")
+                            + "source=" + sourceItem + " result=" + resultItem;
+                    item = sourceItem + " -> " + resultItem;
+                }
                 return Optional.of(new UnifiedEvidenceDetail(
                         "TRANSFORMATION", "transformation#" + rs.getLong("id"),
                         rs.getLong("timestamp_ms"), rs.getString("level_id"),
                         nullableDouble(rs, "x"), nullableDouble(rs, "y"), nullableDouble(rs, "z"),
                         rs.getString("player_name") == null ? rs.getString("player_uuid") : rs.getString("player_name"),
-                        action, unresolved ? null : rs.getInt("quantity"),
-                        rs.getString("source_item") + " -> " + rs.getString("result_item"),
+                        action, unresolved ? null : rs.getInt("quantity"), item,
                         detail, unresolved || definition == null ? EventTaxonomy.EvidenceClass.UNRESOLVED.name()
                                 : definition.evidenceClass().name()));
             }

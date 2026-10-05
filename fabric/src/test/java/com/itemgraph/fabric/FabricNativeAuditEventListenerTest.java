@@ -48,6 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
@@ -873,9 +874,8 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void craftingResultRecordsTransformationWithPrimaryIngredient() {
+    void craftingResultRecordsUnresolvedOutputWithoutClaimingPartialRecipe() {
         InternalObservationService service = mock(InternalObservationService.class);
-        CanonicalItem source = new CanonicalItem("minecraft:wheat", "fp-wheat", null, null, null);
         CanonicalItem result = new CanonicalItem("minecraft:bread", "fp-bread", null, null, null);
         ServerPlayer player = mock(ServerPlayer.class);
         ServerLevel level = mock(ServerLevel.class);
@@ -897,18 +897,55 @@ class FabricNativeAuditEventListenerTest {
         try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
              MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
             observations.when(InternalObservationService::getInstance).thenReturn(service);
-            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(ingredient)).thenReturn(source);
             canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(output)).thenReturn(result);
             FabricNativeAuditEventListener.onCrafted(player, matrix, output);
         }
 
-        ArgumentCaptor<InternalObservationService.InternalTransformation> captured =
-                ArgumentCaptor.forClass(InternalObservationService.InternalTransformation.class);
-        verify(service).submitTransformation(captured.capture());
-        assertEquals("CRAFT", captured.getValue().transformationType());
-        assertEquals(source, captured.getValue().sourceItem());
-        assertEquals(result, captured.getValue().resultItem());
-        assertEquals(1, captured.getValue().quantity());
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        verify(service, never()).submitTransformation(any());
+        assertEquals("CRAFT_OUTPUT_UNRESOLVED", captured.getValue().eventType());
+        assertEquals("minecraft:bread", captured.getValue().subjectId());
+        assertTrue(captured.getValue().detail().contains("input=UNKNOWN"));
+        assertFalse(new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("minecraft:wheat"));
+    }
+
+    @Test
+    void smeltingResultRecordsUnresolvedOutputWithoutCreatingTransformation() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        CanonicalItem result = new CanonicalItem("minecraft:iron_ingot", "fp-ingot", null, null, null);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        UUID playerUuid = UUID.randomUUID();
+        ItemStack output = new ItemStack(Items.IRON_INGOT, 2);
+        when(player.level()).thenReturn(level);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getX()).thenReturn(1.0);
+        when(player.getY()).thenReturn(2.0);
+        when(player.getZ()).thenReturn(3.0);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(output)).thenReturn(result);
+            FabricNativeAuditEventListener.onSmelted(player, output);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        verify(service, never()).submitTransformation(any());
+        assertEquals("SMELT_OUTPUT_UNRESOLVED", captured.getValue().eventType());
+        assertEquals("minecraft:iron_ingot", captured.getValue().subjectId());
+        assertTrue(captured.getValue().detail().contains("quantity=2"));
+        assertTrue(captured.getValue().detail().contains("input=UNKNOWN"));
+        assertFalse(new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("smelt_ingredient"));
     }
 
     @Test
