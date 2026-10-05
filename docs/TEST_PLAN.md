@@ -1562,3 +1562,44 @@ batch passed on 2026-10-05; see the milestone batch above. No GriefLogger jar or
 database was loaded. PR CI remains required for issue acceptance; distributable jar
 tasks remain excluded until an explicit mod-version bump.
 
+## M12 admin-first UX batch — 2026-10-05
+
+The focused command-help suite passed after the five-message root overview and
+`/ig help guide` topic were finalized:
+
+```powershell
+.\gradlew.bat :neoforge:test --tests com.itemgraph.command.ItemGraphCommandsHelpTest
+```
+
+The end-of-milestone cross-loader batch then passed with 632 reported tests, zero
+failures/errors, and 8 skipped tests (NeoForge: 546 tests, 0 failures/errors, 6
+skipped; Fabric: 86 tests, 0 failures/errors, 2 skipped):
+
+```powershell
+.\gradlew.bat :neoforge:test :fabric:test --no-daemon --max-workers=1 --rerun-tasks
+```
+
+Fabric reported all 8 required GameTests passed; the NeoForge GameTest task also
+completed successfully. `python tools/validate_admin_ux_docs.py` and
+`git diff --check` passed. Independent UX review corrected an overbroad CurseForge
+claim about per-topic permission details; the README and local listing now direct
+admins to `/ig help permissions` for the complete node matrix.
+
+The connected-client check used MC Pilot client `itemgraph-qa-1.21.1-neoforge`
+against a fresh temporary NeoForge 21.1.248 / Minecraft 1.21.1 dev server on
+`127.0.0.1:25575`, with ItemGraph 0.3.2 as the only gameplay mod and native
+GriefLogger integration disabled. Bare `/ig` rendered all five overview messages
+at once in open chat. MC Pilot reported a 427×240 logical viewport at device scale
+factor 2 (854×480 effective). Screenshot: [help overview in open chat](test-evidence/m12-admin-first-ux/help-overview-open-chat.png).
+The QA client had every Minecraft sound category, including music, at `0.0` and
+its MC Pilot `mute` flag enabled. The isolated server, world, and database were
+under the temporary QA directory; the loopback server and client were stopped
+after capture. No production service, GriefLogger jar/database, external listing,
+version bump, or distributable ItemGraph jar was used.
+
+This proves #149's root-help layout and the M12 documentation/help contracts; it
+does not prove the separate #146 numbered menu companion labels. #146 remains
+open pending its dedicated screenshot, and the explicit skip of #26 live clicks
+is unchanged. M12 issue acceptance and merge remain tied to PR review/merge and
+the unresolved M8 evidence above.
+

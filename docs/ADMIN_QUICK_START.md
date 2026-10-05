@@ -3,9 +3,28 @@
 This guide is for a server admin investigating an item incident for the first time. It
 uses the current ItemGraph command tree and behavior for Minecraft 1.21.1. ItemGraph is a
 server-side NeoForge or Fabric mod; players do not need a client mod for commands or the
-vanilla flow browser. Unset command permission nodes fall back to vanilla permission
-level 2; configured providers can delegate commands by exact node. See
-[`/ig help permissions`](SECURITY_AND_PERMISSIONS.md).
+vanilla flow browser. Read section 0 before running commands; permission nodes and denial
+behavior are listed in [Security and permissions](SECURITY_AND_PERMISSIONS.md).
+
+## 0. Choose the server file and confirm access
+
+ItemGraph targets Minecraft 1.21.1. Choose the file for the server's loader; NeoForge is
+the primary loader and Fabric is also supported. Install ItemGraph on the server only;
+players do not need the mod on their clients. Use the standard loader file for standalone
+ItemGraph. A GriefLogger-compatible file is only for the exact GriefLogger release named
+by that file and is not required for standalone capture. Do not install both ItemGraph
+variants together. Download the approved release file, place it in the server's `mods/`
+folder, and restart. Current file names and compatibility targets are listed in the
+[README](../README.md).
+
+Before running a command, make sure your permission provider has not explicitly denied
+its required node. An unset node falls back to vanilla permission level 2; exact named
+nodes do not inherit from dotted parents, and explicit `false` denies even an operator.
+The `/ig` root and `/ig help` require `itemgraph.command`. If you cannot run help, ask a
+server owner to check the provider directly or grant the exact node; the command cannot
+explain a denial that blocks the help command itself. `/ig audit` additionally requires
+`itemgraph.audit`. The complete command-to-node table is in
+[Security and permissions](SECURITY_AND_PERMISSIONS.md).
 
 ## 1. Confirm that ItemGraph is ready
 
@@ -22,8 +41,10 @@ that the mod has captured an event. `/ig audit` runs a read-only database integr
 quantity-conservation check. Fix a reported database/queue problem before treating an
 empty search as evidence that nothing happened.
 
-If no events have been captured yet, use a test world or staging server to perform one
-ordinary action and confirm it appears. Do not test by changing production inventories.
+If no events have been captured yet, use a disposable test world or staging server to
+perform one ordinary action and confirm a matching observation appears. Do not test by
+changing production inventories. An empty result is not a capture test until you confirm
+that capture was active and the event type is supported.
 For server setup and the exact database keys, see [Configuration](CONFIGURATION.md).
 
 ## 2. Pick the investigation that matches your question
@@ -43,6 +64,7 @@ For server setup and the exact database keys, see [Configuration](CONFIGURATION.
 | What was recorded at the block behind the face I am pointing at? | `/ig inspect on`, then right-click an ordinary non-container block | A paginated audit-history query for the adjacent block on the clicked face. |
 | What flow touched a container I am looking at? | `/ig inspect on`, then right-click a block entity implementing `Container` (for example, a chest or furnace) | The read-only flow browser. Either half of a valid double chest opens the same canonical anchor used by container capture. |
 | Is storage internally consistent? | `/ig audit` | Conservation, positivity, relational-integrity, and allocation-state results. |
+| How do I run a filtered lookup from console? | `/ig lookup near <dimension> <x> <y> <z> <radius> <eventType> ...` | Coordinate-based nearby audit query; `/ig lookup <filters...>` is player-only because its radius uses the issuing player's position. |
 
 `/ig` and `/itemgraph` are the same command root. `/ig help` gives task-first starting
 points; `/ig help commands` groups every command path by investigation task. `/ig help
@@ -131,6 +153,21 @@ quantity. Names, enchantments, components, and fingerprints help distinguish ite
 and metadata; they are not permanent per-item UUIDs. Every inferred edge should link back
 to its evidence IDs and explanation.
 
+A confidence value is a deterministic score from documented evidence factors, not a
+calibrated probability that the history is true. Use `/ig explain <edgeId>` to see the
+factors, candidate counts, and supporting observations behind a link.
+
+### Coverage limits to check before trusting an empty result
+
+An empty query means no matching row exists in the evidence ItemGraph has stored for that
+query. It does not establish that nothing happened. Check the capture start time, event
+type, permissions, dimension, and target first. Current known limits include explosion
+and other environmental causes, Enderman causes, moving blocks, zero-net container
+sessions where items are taken and returned before close, and arbitrary modded backpacks
+or inventories without an adapter. Container GUI evidence is a net change over the
+open/close session, not a record of each click. The feature status and evidence boundary
+are listed in [Feature parity inventory](FEATURE_PARITY_INVENTORY.md).
+
 ## 5. Common failures and safe next steps
 
 | Message or symptom | What it means | Safe next step |
@@ -149,7 +186,7 @@ restart. ItemGraph validates this before opening its database and renders text
 on the server, so vanilla clients do not need the mod or network access. Missing
 keys fall back to English. Core query/detail/audit labels, inspection responses,
 flow-browser rows, controls, help entry text and navigation labels have translated
-entries. The explicit English fallback inventory currently contains 121 authored
+entries. The explicit English fallback inventory currently contains 125 authored
 source phrases, including detailed help topics. See
 [`CONFIGURATION.md`](CONFIGURATION.md) for exact evidence limits: the checked-in
 GriefLogger 1.2.10-1.21.1 artifact has no locale inventory, while the three
@@ -173,7 +210,7 @@ listed boundary; `Planned` means there is no user-facing implementation to use y
 | Native audit-event lookup | `/ig lookup <eventType>`, `near`, `player`, `page` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; protected message/command events also require `itemgraph.audit`; async, max 100 rows/page. |
 | Native audit events for one stored player name | `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; protected event types also require `itemgraph.audit`; exact stored-name match. |
 | Continue the issuing player's saved lookup | `/ig page <page> [session]` | Shipped | `itemgraph.command` + `itemgraph.command.page` + the originating lookup permission; protected sessions retain `itemgraph.audit`; private 30-minute session. |
-| Unified action/user/item/time/radius lookup | `/ig lookup action... radius...` or `/ig lookup filters ...` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; require `itemgraph.audit` when filters can include protected events; radius required, max five filters. |
+| Unified action/user/item/time/radius lookup | `/ig lookup action... radius...` or `/ig lookup filters ...` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; player-only because radius is centered on the issuing player; require `itemgraph.audit` when filters can include protected events; max five filters. Console admins can use `/ig lookup near` with explicit dimension and coordinates. |
 | Imported legacy-row provenance lookup | `/ig lookup provenance ...` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; imported `chats`/`commands` sources also require `itemgraph.audit`. |
 | Raw item-observation details | `/ig event <observationId>` | Shipped | `itemgraph.command` + `itemgraph.event` + `itemgraph.audit`; read-only. |
 | Inference explanation and evidence links | `/ig explain <edgeId>` | Shipped | `itemgraph.command` + `itemgraph.explain` + `itemgraph.audit`; confidence is deterministic. |

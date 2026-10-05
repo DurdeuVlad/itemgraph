@@ -61,18 +61,18 @@ class ItemGraphCommandsHelpTest {
 
         com.itemgraph.i18n.ItemGraphLanguage.setLocale("nl_nl");
         List<String> nl = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
-        assertTrue(nl.get(0).startsWith("[ItemGraph] Begin met je vraag."));
+        assertEquals(english.get(0), nl.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> nlFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("nl_nl");
-        assertEquals(121, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(125, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(nlFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (nlFallback.contains(english.get(i))) assertEquals(english.get(i), nl.get(i));
         }
         com.itemgraph.i18n.ItemGraphLanguage.setLocale("zh_tw");
         List<String> zh = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
-        assertTrue(zh.get(0).startsWith("[ItemGraph] 請從你的問題開始。"));
+        assertEquals(english.get(0), zh.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> zhFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("zh_tw");
-        assertEquals(121, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(125, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(zhFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (zhFallback.contains(english.get(i))) assertEquals(english.get(i), zh.get(i));
@@ -216,23 +216,19 @@ class ItemGraphCommandsHelpTest {
 
         assertEquals(1, dispatcher.execute("itemgraph", source));
         String overview = String.join("\n", successes);
-        assertTrue(overview.contains("Start with your question"));
+        assertTrue(overview.contains("Trace: /ig trace item <query>"));
         assertTrue(overview.contains("/ig trace item <query>"));
-        assertTrue(overview.contains("/ig lookup near minecraft:overworld"));
+        assertTrue(overview.contains("/ig lookup near <dimension>"));
         assertTrue(overview.contains("/ig help commands"));
-        assertTrue(overview.contains("/ig help trace item"));
-        assertTrue(overview.contains("/ig help gui item"));
-        assertTrue(overview.contains("/ig help trace player"));
-        assertTrue(overview.contains("/ig help gui container"));
-        assertTrue(overview.contains("/ig help lookup near"));
-        assertTrue(overview.contains("/ig help inspect"));
-        assertTrue(overview.contains("/ig help status"));
-        assertTrue(overview.contains("/ig help audit"));
-        assertTrue(overview.contains("delegate lookup with /ig help permissions"));
-        assertTrue(overview.contains("BREAK_BLOCK 20 1440"));
-        assertTrue(overview.contains("https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md"));
-        assertTrue(overview.contains("OBSERVED") || overview.contains("Inference is not observation"));
-        assertTrue(successes.size() <= 12, "first-use help should be a short task selector, not a syntax dump");
+        assertTrue(overview.contains("/ig trace player <name>"));
+        assertTrue(overview.contains("/ig inspect on"));
+        assertTrue(overview.contains("/ig event <id>"));
+        assertTrue(overview.contains("/ig explain <id>"));
+        assertTrue(overview.contains("/ig help permissions"));
+        assertTrue(overview.contains("audit: /ig audit"));
+        assertTrue(overview.contains("Setup: /ig help guide"));
+        assertTrue(overview.contains("inference is not observation"));
+        assertTrue(successes.size() <= 5, "first-use help must fit a normal chat view");
         assertFalse(overview.contains("/ig lookup page <page> <eventType>"),
                 "full syntax belongs in the exhaustive commands topic");
         assertParsedCompletely(dispatcher.parse(
@@ -241,7 +237,7 @@ class ItemGraphCommandsHelpTest {
 
         successes.clear();
         assertEquals(1, dispatcher.execute("ig", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("Where did an item go?")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("Trace: /ig trace item")));
         assertTrue(successes.stream().anyMatch(line -> line.contains("/ig help commands")));
     }
 
@@ -358,6 +354,10 @@ class ItemGraphCommandsHelpTest {
         assertTrue(pageHelp.contains("Syntax: /ig page <page> [session]"));
         assertTrue(pageHelp.contains("per-player"));
 
+        String filteredLookupHelp = String.join("\n", CommandHelp.topicLines("lookup filters"));
+        assertTrue(filteredLookupHelp.contains("Player-only"));
+        assertTrue(filteredLookupHelp.contains("From console, use /ig lookup near"));
+
         String commandsHelp = String.join("\n", CommandHelp.topicLines("commands"));
         assertTrue(CommandHelp.topicLines("commands").stream().allMatch(line -> line.length() <= 220),
                 "the grouped command catalog must avoid lines that become dense chat paragraphs");
@@ -423,12 +423,12 @@ class ItemGraphCommandsHelpTest {
         List<String> successes = captureSuccesses(source);
 
         assertEquals(1, dispatcher.execute("itemgraph help", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("Start with your question")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("Trace: /ig trace item <query>")));
 
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help commands", source));
         String commandsHelp = String.join("\n", successes);
-        assertTrue(commandsHelp.contains("all workflows"));
+        assertTrue(commandsHelp.contains("docs/ADMIN_QUICK_START.md"));
         assertTrue(commandsHelp.contains("/ig ingest history"));
 
         successes.clear();
@@ -488,6 +488,7 @@ class ItemGraphCommandsHelpTest {
         assertTrue(failure.getValue().getString().contains("Unknown help topic 'not-a-topic'"));
         assertTrue(failure.getValue().getString().contains("trace item"));
         assertTrue(failure.getValue().getString().contains("gui container"));
+        assertTrue(failure.getValue().getString().contains("guide"));
     }
 
     @Test

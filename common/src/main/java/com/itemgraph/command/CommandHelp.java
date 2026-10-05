@@ -16,7 +16,7 @@ public final class CommandHelp {
     private static final String PERMISSION_LINE = "[ItemGraph] Unset named permissions use vanilla permission level 2; see /ig help permissions.";
 
     static final List<String> TOPIC_NAMES = List.of(
-            "help", "commands", "permissions", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain",
+            "help", "commands", "permissions", "guide", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain",
             "goto",
             "lookup", "lookup near", "lookup page", "lookup player", "lookup filters", "lookup provenance",
             "page",
@@ -29,18 +29,11 @@ public final class CommandHelp {
 
     static List<String> overviewLines() {
         return List.of(
-                "[ItemGraph] Start with your question. Unset permissions require level 2; delegate lookup with /ig help permissions.",
-                "[ItemGraph] Where did an item go? /ig trace item <query> prints its time-ordered flow in chat; /ig gui item <query> opens the menu.",
-                "[ItemGraph] Help: /ig help trace item or /ig help gui item. A flow trace lists item events and links; the menu lets you select a flow entry.",
-                "[ItemGraph] What did a player/container record? /ig trace player <name> prints a timeline; /ig gui container <dimension> <x> <y> <z> opens a menu.",
-                "[ItemGraph] Help: /ig help trace player or /ig help gui container. Output is chat for trace and a vanilla menu for gui.",
-                "[ItemGraph] What happened nearby? /ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 20 1440 lists recorded block breaks.",
-                "[ItemGraph] Help: /ig help lookup near. For event types, use /ig help lookup.",
-                "[ItemGraph] What was recorded where I look? Run /ig inspect on, then left-click for block history or right-click; containers open the flow menu.",
-                "[ItemGraph] Help: /ig help inspect. What supports a conclusion? /ig event <observationId> shows a recorded row; /ig explain <edgeId> explains an inferred link.",
-                "[ItemGraph] Help: /ig help event or /ig help explain. /ig status shows service health; /ig audit checks integrity. Details: /ig help status or /ig help audit.",
-                "[ItemGraph] /ig help commands lists paths. OBSERVED=recorded; INFERRED=proposed link; AMBIGUOUS/UNRESOLVED=uncertain. Stored evidence may miss world events and does not identify permanent items.",
-                "[ItemGraph] Guide: https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md");
+                "[ItemGraph] Trace: /ig trace item <query> | /ig trace player <name>.",
+                "[ItemGraph] Nearby: /ig lookup near <dimension> <x> <y> <z> <radius> <eventType>.",
+                "[ItemGraph] Block: /ig inspect on (click block); evidence: /ig event <id> | /ig explain <id>.",
+                "[ItemGraph] Health: /ig status | audit: /ig audit | access: /ig help permissions.",
+                "[ItemGraph] Results can be incomplete; inference is not observation. Commands: /ig help commands. Setup: /ig help guide.");
     }
 
     /** Registers every static help sentence so catalog keys can be validated before database startup. */
@@ -83,20 +76,17 @@ public final class CommandHelp {
                 "[ItemGraph] Start with an admin question; use /ig help commands to find a command or /ig help <topic> for exact syntax.",
                 "[ItemGraph] Example: /ig help trace item"));
         topics.put("commands", List.of(
-                "[ItemGraph] COMMAND HELP — /ig help shows task routes; /ig help <topic> shows exact syntax and an example.",
-                "[ItemGraph] ITEM FLOW — /ig trace item <query> [limit] [sinceMinutes]; /ig gui item <query> [sinceMinutes].",
-                "[ItemGraph] PLAYER/CONTAINER — /ig trace player <playerName> [limit] [sinceMinutes]; /ig trace container <x> <y> <z> [limit] [sinceMinutes].",
-                "[ItemGraph] FLOW MENU — /ig gui player <playerName> [sinceMinutes]; /ig gui container <dimension> <x> <y> <z> [sinceMinutes].",
-                "[ItemGraph] AUDIT — /ig lookup <eventType> [limit] [sinceMinutes]; /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes].",
-                "[ItemGraph] AUDIT FILTERS — /ig lookup player <playerName> <eventType> [limit] [sinceMinutes]; /ig lookup page <page> <eventType> [limit] [sinceMinutes].",
-                "[ItemGraph] FILTER/PROVENANCE — /ig lookup <filters...>; /ig lookup filters <filters...>; /ig lookup provenance <sourceSha256> <table> <sourceKey> [limit].",
-                "[ItemGraph] MORE — /ig page <page> [session]; /ig inspect [on|off|status]; /ig event <observationId>; /ig explain <edgeId>; /ig goto <token>.",
-                "[ItemGraph] HEALTH/INGEST — /ig status; /ig audit; /ig ingest now. Optional read-only GriefLogger import: /ig ingest history (requires configured source DB).",
-                "[ItemGraph] HELP TOPICS — help, commands, permissions, status, audit, ingest [now|history], event, explain, page, inspect, goto.",
-                "[ItemGraph] HELP TOPICS — lookup [near|page|player|filters|provenance], trace [item|player|container], gui [item|player|container].",
-                "[ItemGraph] Configuration, the preview API, imports, and all workflows: see the Admin Quick Start in the ItemGraph project documentation.",
-                "[ItemGraph] Example: /ig trace item diamond",
-                "[ItemGraph] /itemgraph is the full command root; /ig is its alias. Configuration and the preview API are documented features, not commands."));
+                "[ItemGraph] Use /ig help <topic> for exact syntax and examples; groups below list topics.",
+                "[ItemGraph] ITEM FLOW — /ig trace item; /ig gui item.",
+                "[ItemGraph] PLAYER/CONTAINER — /ig trace player; /ig trace container; /ig gui player; /ig gui container.",
+                "[ItemGraph] AUDIT — /ig lookup <eventType>; /ig lookup near; /ig lookup player; /ig lookup page.",
+                "[ItemGraph] FILTER/PROVENANCE — /ig lookup <filters...>; /ig lookup filters; /ig lookup provenance.",
+                "[ItemGraph] DETAIL — /ig event <observationId>; /ig explain <edgeId>; /ig page <page>.",
+                "[ItemGraph] INSPECTION — /ig inspect [on|off|status]; /ig goto <token> is click-only.",
+                "[ItemGraph] HEALTH/INGEST — /ig status; /ig audit; /ig ingest now; /ig ingest history (optional import).",
+                "[ItemGraph] TOPICS — guide, permissions, status, audit, ingest, event, explain, page, inspect, lookup, trace, gui.",
+                "[ItemGraph] Setup, config, and API are docs, not commands. See docs/ADMIN_QUICK_START.md. /ig = /itemgraph.",
+                "[ItemGraph] Example: /ig trace item diamond"));
         topics.put("permissions", List.of(
                 "[ItemGraph] Grant a lookup-only moderator both itemgraph.command and itemgraph.command.lookup.",
                 "[ItemGraph] Add itemgraph.command.page for /ig page and lookup-page buttons; it is an independent node.",
@@ -106,6 +96,9 @@ public final class CommandHelp {
                 "[ItemGraph] NeoForge uses its PermissionAPI handler. Fabric bundles fabric-permissions-api 0.3.1; a compatible provider mod is needed to configure grants.",
                 "[ItemGraph] Full command-to-node matrix: docs/SECURITY_AND_PERMISSIONS.md",
                 "[ItemGraph] Example: grant itemgraph.command and itemgraph.command.lookup to a level-1 moderator."));
+        topics.put("guide", List.of(
+                "[ItemGraph] Admin quick start: https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md",
+                "[ItemGraph] Example: open the guide before configuring access or running the first capture check."));
         topics.put("status", List.of(
                 "[ItemGraph] Syntax: /ig status",
                 "[ItemGraph] Shows ItemGraph version, GriefLogger mode, database/schema state, checkpoints, queue totals, and last ingest/correlation results; database reads are asynchronous.",
@@ -146,7 +139,8 @@ public final class CommandHelp {
                 "[ItemGraph] The explicit extension spelling /ig lookup filters <filter1> ... is also accepted.",
                 "[ItemGraph] Filters use name.value: action, user, include, exclude, time (m/h/d/y), and radius.",
                 "[ItemGraph] action values cover native audit, item-flow, and transformation evidence (join, quit, chat, command_attempt, place_block, break_block, drop_item, pickup_item, craft, smelt, anvil_rename, anvil_repair, and more).",
-                "[ItemGraph] radius is required, uses the issuing player's current dimension and position, and searches a cube clamped to 1..1024 blocks.",
+                "[ItemGraph] Player-only: radius uses the issuing player's current dimension and position, in a cube clamped to 1..1024 blocks.",
+                "[ItemGraph] From console, use /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes].",
                 "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and unified evidence results default to 10 rows (maximum 100) with source and evidence IDs.",
                 "[ItemGraph] Example: /ig lookup action.break_block include.diamond_ore time.1h radius.50"));
         topics.put("lookup provenance", List.of(

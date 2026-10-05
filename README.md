@@ -59,7 +59,7 @@ available for forensic review and are excluded from current graph queries.
 Server messages can use `en_us`, `nl_nl`, or `zh_tw` through NeoForge
 `general.language` or Fabric `language`. Text is rendered server-side for vanilla
 clients; missing keys fall back to English. Help entry text and navigation labels
-have translated entries; 121 authored source phrases currently use the explicit
+have translated entries; 125 authored source phrases currently use the explicit
 English fallback inventory, including detailed help topics. The exact GriefLogger
 1.2.10-1.21.1 locale inventory is unknown; supported ItemGraph locales are
 based on pinned 26.2 source config research only.
@@ -160,6 +160,9 @@ The first useful vertical slice should:
 Implemented and available. Unset named permissions fall back to vanilla permission
 level 2; permission providers can delegate each sensitive surface by exact node. See
 `/ig help permissions` and [Security and permissions](docs/SECURITY_AND_PERMISSIONS.md).
+Every command requires `itemgraph.command` plus its exact leaf nodes where listed; nodes
+do not inherit through dotted names. An explicit permission-provider denial overrides
+operator status, while an unset node falls back to vanilla permission level 2.
 
 ```text
 /ig help [topic]
@@ -186,13 +189,13 @@ level 2; permission providers can delegate each sensitive surface by exact node.
 /ig inspect [on|off|status]
 ```
 
-- `/ig help`: bare `/itemgraph` or `/ig` shows a short task-first overview. `/ig help commands` lists command paths by investigation task; `/ig help <topic>` shows syntax, permission, defaults, query semantics, and an example. Unknown topics list the valid topics.
+- `/ig help`: bare `/itemgraph` or `/ig` shows a short task-first overview. `/ig help commands` lists command paths by investigation task; `/ig help <topic>` provides topic-specific guidance, with syntax and examples where applicable. Run `/ig help permissions` for the exact access nodes. Unknown topics list the valid topics.
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
 - `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows the chronological timeline, including transformations (`[TRANSFORMATION <type> <- <source>]`).
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
 - `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.
 - `/ig event`, `/ig explain`, and `/ig trace`: preserve their stable visible text and provide bounded hover fields for evidence class, safe item identity, canonical fingerprint hash, event kind, UTC time, and recorded endpoints. Recorded spatial endpoints include a player-only, one-use `[Go to ...]` link; it rechecks the originating query permissions when clicked and works only while that dimension is loaded.
-- `/ig gui`: opens item/player/container timelines in a vanilla six-row chest menu. Each page has at most nine entries. A numbered chat companion identifies each row by evidence class, safe item identity, event kind, and UTC time when available; row numbers match menu slots. Hover text and icons add detail. Ambiguous targets require candidate selection; missing identities have an explicit fallback. The command and every menu action require `itemgraph.gui`; the menu uses no custom client screen or packet and rejects inventory-movement actions.
+- `/ig gui`: opens item/player/container timelines in a vanilla six-row chest menu. Each page has at most nine entries. A numbered chat companion identifies each row by evidence class, safe item identity, event kind, and UTC time when available; row numbers match menu slots. Hover text and icons add detail. Ambiguous targets require candidate selection; missing identities have an explicit fallback. The command and every menu action require `itemgraph.command`, `itemgraph.gui`, and `itemgraph.audit`; see [Security and permissions](docs/SECURITY_AND_PERMISSIONS.md). The menu uses no custom client screen or packet and rejects inventory-movement actions.
 - `/ig inspect`: toggles per-player inspection mode. Left-clicking a block shows that block's paginated audit history in chat. Right-clicking a block entity that implements `Container` opens the read-only flow browser instead of the normal container GUI. Double chests clicked on either half resolve to the same canonical anchor used when their contents are recorded. Other right-clicks show paginated block history; ordinary blocks select the block on the clicked face. A click is consumed only after the read-only request is accepted. `on`, `off`, and `status` are deterministic forms. The command and each inspection click require `itemgraph.command.inspect`; an inspection click on a container also requires `itemgraph.gui`. Permission loss clears inspection mode, and inspection does not use the held item or record an inspection click as a transfer.
 - `/ig lookup`: a level-1 lookup-only moderator needs both `itemgraph.command` and `itemgraph.command.lookup`. Add `itemgraph.command.page` for `/ig page` and clickable page controls. Provider denies override operator level 2; unset nodes use the level-2 fallback. Use `/ig help permissions` for the other nodes.
 - `/ig lookup` and `/ig lookup filters` return native or unified evidence, depending on the syntax. Historical reads are asynchronous and read-only. `/ig ingest now` queues one complete ingest-and-correlate cycle; `/ig ingest history` is an optional read-only import from a configured legacy database. Full argument table and output format: [Query model](docs/QUERY_MODEL.md).
