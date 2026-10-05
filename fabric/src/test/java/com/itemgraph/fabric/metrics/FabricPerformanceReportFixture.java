@@ -35,7 +35,7 @@ final class FabricPerformanceReportFixture {
         var settings = DatabaseManager.getInstance().getSettings();
         String backend = settings == null ? "unknown" : settings.backend().name().toLowerCase(java.util.Locale.ROOT);
         StringBuilder json = new StringBuilder(1_800);
-        json.append("{\n  \"schema_version\": 2,\n  \"loader\": ").append(quote(loader))
+        json.append("{\n  \"schema_version\": 3,\n  \"loader\": ").append(quote(loader))
                 .append(",\n  \"scenario\": ").append(quote(scenario))
                 .append(",\n  \"minecraft_version\": \"1.21.1\",")
                 .append("\n  \"backend\": ").append(quote(backend)).append(',')
@@ -71,7 +71,9 @@ final class FabricPerformanceReportFixture {
                 .append(metrics.persistedItems())
                 .append(",\n    \"failed_batches\": ").append(metrics.persistenceFailures())
                 .append(",\n    \"largest_batch\": ").append(metrics.largestBatchSize())
-                .append("\n  },\n  \"components\": {\n    \"decode_failure_cache_insertions\": ")
+                .append("\n  },\n  \"components\": {\n    \"unresolved_payload_decode_failures\": ")
+                .append(metrics.unresolvedPayloadDecodeFailures())
+                .append(",\n    \"decode_failure_cache_insertions\": ")
                 .append(metrics.decodeFailureCacheInsertions())
                 .append(",\n    \"negative_cache_hits\": ").append(metrics.decodeCacheHits())
                 .append("\n  },\n  \"memory\": {\n    \"heap_used_bytes\": ").append(metrics.heapUsedBytes())

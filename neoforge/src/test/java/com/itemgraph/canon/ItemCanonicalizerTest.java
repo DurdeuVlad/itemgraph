@@ -79,6 +79,8 @@ class ItemCanonicalizerTest {
 
     @Test
     void repeatedMalformedPatchUsesOnePerRegistryFailureEntry() {
+        var metrics = com.itemgraph.metrics.OperationalMetrics.getInstance();
+        metrics.reset();
         ItemCanonicalizer.clearOpaqueDecodeFailureCache();
         byte[] malformedPatch = HexFormat.of().parseHex("0500000004");
 
@@ -86,10 +88,15 @@ class ItemCanonicalizerTest {
         ItemCanonicalizer.canonicalize("minecraft:diamond_sword", malformedPatch, registryAccess);
 
         assertEquals(1, ItemCanonicalizer.opaqueDecodeFailureCacheSize());
+        assertEquals(2, metrics.snapshot().unresolvedPayloadDecodeFailures(),
+                "the aggregate count includes the initial failed decode and the negative-cache hit");
+        assertEquals(1, metrics.snapshot().decodeFailureCacheInsertions());
+        assertEquals(1, metrics.snapshot().decodeCacheHits());
 
         // A new server registry context must permit a legitimate retry.
         ItemCanonicalizer.setRegistryAccess(registryAccess);
         assertEquals(0, ItemCanonicalizer.opaqueDecodeFailureCacheSize());
+        metrics.reset();
     }
 
     @Test

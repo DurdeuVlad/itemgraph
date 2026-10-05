@@ -48,6 +48,8 @@ class OperationalMetricsTest {
         metrics.recordQueueDepth(71);
         metrics.recordQueueDepth(12);
         metrics.recordQueueRejection(4);
+        metrics.recordUnresolvedPayloadDecodeFailure();
+        metrics.recordUnresolvedPayloadDecodeFailure();
         metrics.recordDecodeFailureCacheInsertion();
         metrics.recordDecodeCacheHit();
 
@@ -57,6 +59,7 @@ class OperationalMetricsTest {
         assertEquals(32, snapshot.largestBatchSize());
         assertEquals(71, snapshot.peakQueueDepth());
         assertEquals(4, snapshot.queueRejectedItems());
+        assertEquals(2, snapshot.unresolvedPayloadDecodeFailures());
         assertEquals(1, snapshot.decodeFailureCacheInsertions());
         assertEquals(1, snapshot.decodeCacheHits());
         assertTrue(snapshot.heapUsedBytes() >= 0);

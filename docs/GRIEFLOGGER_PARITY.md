@@ -481,6 +481,10 @@ rejects one event beyond the 10,000-item audit queue capacity and verifies every
 accepted event is durable after worker-owned shutdown draining. Idle baselines,
 adapter-specific load, and staging-derived latency/memory budgets remain open
 under [#32](https://github.com/DurdeuVlad/itemgraph/issues/32).
+`/ig status` and the redacted performance report also expose a count of failed
+component-payload decodes, including repeats served from the negative cache.
+This metric is specifically about undecodable serialized components; it is not
+a count of all unresolved ItemGraph evidence.
 Five isolated local NeoForge runs measured the 10,000-event SQLite shutdown
 drain at 626–666 ms; CI now applies a 1,000 ms regression budget to that exact
 healthy-database fixture. This is not a hard deadline for stalled JDBC I/O and

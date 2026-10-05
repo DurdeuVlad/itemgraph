@@ -1599,6 +1599,7 @@ public final class ItemGraphCommands {
                             + " correlationFailed=" + metrics.correlation().failed()
                             + " queuePeak=" + metrics.peakQueueDepth()
                             + " queueRejectedItems=" + metrics.queueRejectedItems()
+                            + " unresolvedPayloadDecodeFailures=" + metrics.unresolvedPayloadDecodeFailures()
                             + " decodeFailureCacheInsertions=" + metrics.decodeFailureCacheInsertions()
                             + " decodeCacheHits=" + metrics.decodeCacheHits()
                             + " heapUsedBytes=" + metrics.heapUsedBytes()
