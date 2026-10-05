@@ -55,8 +55,8 @@ Everything below this heading and above "Not yet implemented" is live.
 
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
 under either name. Bare `/itemgraph` and bare `/ig` show a short task-first command
-overview. `/ig help commands` lists command paths grouped by investigation task, and
-`/ig help <topic>` shows one detailed topic; an unknown topic fails with the valid topic
+overview. `/ig help commands` is a compact task hub pointing to detailed topics, and
+`/ig help <topic>` shows exact routes and one detailed topic; an unknown topic fails with the valid topic
 list. The root requires `itemgraph.command`; each command checks its named leaf permission
 and, for protected evidence, `itemgraph.audit` as listed in
 `docs/SECURITY_AND_PERMISSIONS.md`. When a permission provider has no explicit decision,
@@ -67,7 +67,7 @@ the command even for an operator.
 
 | Argument | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `topic` | string | overview | one live help topic; see `/ig help commands` for command paths and `/ig help` for task selection |
+| `topic` | string | overview | one live help topic; use `/ig help commands` to choose a task family, then `/ig help <topic>` for exact paths and syntax |
 | `observationId` | long ≥ 1 | — | `ig_observations.id` |
 | `edgeId` | long ≥ 1 | — | `ig_inferred_edges.id` |
 | `query` | string | — | registry ID, custom-name text, numeric fingerprint candidate, or quoted `"id:<fingerprintId>"`; suggests registered item IDs |
@@ -97,8 +97,8 @@ narrows a noisy fingerprint; it is not what makes the query safe.
 
 ### In-game help and completion
 
-`/ig help commands` and the feature map in
-[`ADMIN_QUICK_START.md`](ADMIN_QUICK_START.md) enumerate shipped command and feature
+`/ig help commands` routes users to detailed topic help; the feature map in
+[`ADMIN_QUICK_START.md`](ADMIN_QUICK_START.md) enumerates shipped command and feature
 surfaces. Bare `/ig` is deliberately task-first. Topic help states syntax, level-2
 permission, defaults, asynchronous/read-only behavior,
 observed-versus-inferred semantics, and at least one valid example. Brigadier suggestions
@@ -178,9 +178,10 @@ view rather than choosing a target silently. Candidate lists are capped at 10 ma
 paginate separately from nine-entry timeline pages. A
 resolved target with no rows shows an explicit empty state.
 
-Each entry names its evidence class, safe item identity (or an unavailable fallback), event
-kind, and UTC time in the numbered companion: `OBSERVED` or `INFERRED conf=X.XXXX`. Candidate
-pages are marked `AMBIGUOUS`; missing targets or empty histories are marked `UNRESOLVED`.
+Each numbered companion row names its evidence class and shortened safe item identity (or an
+unavailable fallback): `OBSERVED` or `INFERRED conf=X.XXXX`. Candidate pages are marked
+`AMBIGUOUS`; missing targets or empty histories are marked `UNRESOLVED`. The menu slot hover
+contains amount, event kind, exact UTC time, endpoints, evidence ID, and detail text.
 No raw NBT or component payload is shown. Selecting
 an observation opens its raw event detail; selecting a transformation opens its stored
 transformation detail; selecting an inferred edge opens `/ig explain`-equivalent detail with

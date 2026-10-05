@@ -53,6 +53,9 @@ class ItemGraphCommandsHelpTest {
     void statusHelpDistinguishesWorkerStartupFromDatabaseHealthAndCapture() {
         String statusHelp = String.join(" ", CommandHelp.topicLines("status"));
         assertTrue(statusHelp.contains("RUNNING means the worker started, not database health or capture success"));
+        assertTrue(statusHelp.contains("ACTION reports DB/capture state and a safe next step when known"));
+        assertTrue(statusHelp.contains("No reported stop still does not prove event coverage"));
+        assertTrue(statusHelp.contains("DIAGNOSTIC counters follow; they do not form a health score"));
         assertTrue(statusHelp.contains("facts, not calibrated health thresholds"));
         assertTrue(statusHelp.contains("units, reset windows, and recovery next steps"));
     }
@@ -61,8 +64,32 @@ class ItemGraphCommandsHelpTest {
     void commandOverviewFitsNarrowMinecraftChatAndRoutesByTask() {
         List<String> overview = CommandHelp.overviewLines();
         assertTrue(String.join(" ", overview).contains("/ig help journeys"));
+        assertTrue(String.join(" ", overview).contains("Required: itemgraph.command"));
         assertTrue(overview.stream().allMatch(line -> line.length() <= 80),
                 "the first-time command overview should not wrap multiple times in narrow chat");
+    }
+
+    @Test
+    void commandCatalogIsACompactTaskHubWithTopicContinuation() {
+        List<String> catalog = CommandHelp.topicLines("commands");
+        assertNotNull(catalog);
+        assertTrue(catalog.size() <= 10,
+                "the catalog and permission line should fit the visible narrow-chat first page");
+        assertTrue(catalog.stream().allMatch(line -> line.length() <= 80),
+                "short lines are a useful check, but pixel fit still requires a live client screenshot");
+        String hub = String.join("\n", catalog);
+        for (String route : List.of("/ig trace item diamond", "/ig help trace item",
+                "/ig gui item stone", "/ig help gui", "/ig trace player <playerName>",
+                "/ig help trace player", "/ig trace container", "/ig help trace container",
+                "/ig lookup near", "/ig help lookup", "/ig inspect",
+                "/ig event <observationId>", "/ig explain <edgeId>", "/ig status", "/ig audit",
+                "/ig ingest history", "/ig help <topic>", "/ig help guide")) {
+            assertTrue(hub.contains(route), "the task hub needs a pointer to " + route);
+        }
+        assertTrue(String.join(" ", catalog).contains("/ig help <topic>"),
+                "topic help is the explicit continuation for full syntax");
+        assertTrue(String.join(" ", catalog).contains("/ig help guide"),
+                "offline setup and API documentation must be discoverable");
     }
 
     @Test
@@ -87,19 +114,31 @@ class ItemGraphCommandsHelpTest {
     void eachAdminJourneyNamesPermissionsEvidenceContinuationAndSafeEmptyChecks() {
         assertJourneyTopic("journeys inspect", "/ig inspect on", "OBSERVED", "INFERRED",
                 "itemgraph.command.inspect", "itemgraph.audit", "itemgraph.gui",
-                "/ig lookup <eventType>", "Empty:", "dimension and time range");
+                "/ig lookup <eventType>", "/ig inspect off", "Empty:", "dimension and time range");
         assertJourneyTopic("journeys trace", "/ig trace item <query>", "OBS ID:",
                 "/ig event <observationId>", "INFERRED edge:", "/ig explain <edgeId>",
                 "itemgraph.trace", "itemgraph.audit", "itemgraph.event", "itemgraph.explain",
-                "Ambiguous matches", "Empty:", "event type is supported");
-        assertJourneyTopic("journeys near", "/ig lookup near", "OBSERVED audit rows",
+                "Ambiguous matches", "/ig trace item \"id:<fingerprintId>\"", "Empty:",
+                "event type is supported");
+        assertJourneyTopic("journeys near", "/ig lookup near", "Raw audit rows", "UNRESOLVED",
                 "/ig lookup <eventType>", "itemgraph.command.lookup", "itemgraph.audit",
                 "/ig page 2", "itemgraph.command.page", "Console near returns one page",
                 "has no nearby scope", "Empty:", "coordinates, range");
-        assertJourneyTopic("journeys filters", "/ig lookup <filters...>", "audit, observation",
-                "transformation, and import", "OBSERVED, INFERRED, UNRESOLVED, PROVENANCE_ONLY",
-                "action.<value> radius.50 time.1h", "itemgraph.command.lookup", "itemgraph.audit",
-                "itemgraph.command.page", "Radius is player-only", "Empty:", "supported events");
+        assertJourneyTopic("journeys filters", "/ig lookup <filters...>",
+                "OBSERVED: direct record", "INFERRED: proposed link", "AMBIGUOUS: competing trace matches",
+                "UNRESOLVED: no cause/destination is proven", "PROVENANCE_ONLY: import history",
+                "/ig event event:<uuid>", "/ig explain <edgeId>", "/ig gui item <query>",
+                "action.break_block radius.50 time.1h",
+                "itemgraph.command.lookup", "itemgraph.audit",
+                "itemgraph.command.page", "Radius is player-only", "Empty?", "Check support");
+        assertJourneyTopic("lookup admin", "ADMIN_ITEM_COMMAND_EFFECT", "ADMIN_ITEM_COMMAND_ATTEMPT",
+                "itemgraph.command.lookup + itemgraph.audit", "do not expose command arguments",
+                "/ig trace item \"id:<fingerprintId>\"");
+        assertJourneyTopic("lookup lifecycle", "KILL_ENTITY", "PROJECTILE_SPAWN_ACCEPTED", "THROW_ITEM",
+                "Syntax: /ig lookup <eventType>", "Perm: itemgraph.command.lookup + itemgraph.audit",
+                "Throw/shoot are attempts", "does not establish the killer");
+        assertJourneyTopic("lookup transformations", "action.craft", "action.smelt", "action.anvil_rename",
+                "Perm: itemgraph.command.lookup + itemgraph.audit", "trades are not captured yet");
         AuditLookupFilters exampleFilters = AuditLookupFilters.parse(
                 "action.break_block radius.50 time.1h", 1_000L);
         assertEquals(50.0, exampleFilters.radiusBlocks(),
@@ -143,6 +182,13 @@ class ItemGraphCommandsHelpTest {
         assertTrue(catalogue.contains("/ig event event:<uuid>"));
         assertTrue(catalogue.contains("/ig goto <token>"));
         assertTrue(catalogue.contains("internal and click-only"));
+        assertTrue(catalogue.contains("| Admin item-command outcomes |"));
+        assertTrue(catalogue.contains("| Creative inventory/block outcomes |"));
+        assertTrue(catalogue.contains("| Entity, death-drop, throw, and projectile-spawn audit |"));
+        assertTrue(catalogue.contains("| Craft, smelt, and anvil transformations |"));
+        assertTrue(catalogue.contains("| Broken-container slot-removal observations |"));
+        assertTrue(catalogue.contains("| Player-broken container break audit event |"));
+        assertTrue(catalogue.contains("Unregistered NeoForge modded inventories, backpacks, pipes"));
         assertFalse(catalogue.contains("PR CI pending"));
         assertFalse(catalogue.contains("local tests passed"));
     }
@@ -157,25 +203,30 @@ class ItemGraphCommandsHelpTest {
         }
         assertTrue(com.itemgraph.i18n.ItemGraphLanguage.sourceInventory().containsAll(english));
 
-        com.itemgraph.i18n.ItemGraphLanguage.setLocale("nl_nl");
-        List<String> nl = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
-        assertEquals(english.get(0), nl.get(0), "The new task route must be inventoried as English fallback until translated");
-        Set<String> nlFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("nl_nl");
-        assertEquals(185, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
-        assertTrue(nlFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
-        for (int i = 0; i < english.size(); i++) {
-            if (nlFallback.contains(english.get(i))) assertEquals(english.get(i), nl.get(i));
+        try {
+            com.itemgraph.i18n.ItemGraphLanguage.setLocale("nl_nl");
+            List<String> nl = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
+            assertEquals(english.get(0), nl.get(0), "Help remains English until this locale has a translation");
+            Set<String> nlFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("nl_nl");
+            assertTrue(nlFallback.containsAll(english),
+                    "Every help sentence must be registered as an explicit English fallback");
+            assertTrue(nlFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
+            for (int i = 0; i < english.size(); i++) {
+                if (nlFallback.contains(english.get(i))) assertEquals(english.get(i), nl.get(i));
+            }
+            com.itemgraph.i18n.ItemGraphLanguage.setLocale("zh_tw");
+            List<String> zh = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
+            assertEquals(english.get(0), zh.get(0), "Help remains English until this locale has a translation");
+            Set<String> zhFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("zh_tw");
+            assertTrue(zhFallback.containsAll(english),
+                    "Every help sentence must be registered as an explicit English fallback");
+            assertTrue(zhFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
+            for (int i = 0; i < english.size(); i++) {
+                if (zhFallback.contains(english.get(i))) assertEquals(english.get(i), zh.get(i));
+            }
+        } finally {
+            com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
         }
-        com.itemgraph.i18n.ItemGraphLanguage.setLocale("zh_tw");
-        List<String> zh = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
-        assertEquals(english.get(0), zh.get(0), "The new task route must be inventoried as English fallback until translated");
-        Set<String> zhFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("zh_tw");
-        assertEquals(185, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
-        assertTrue(zhFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
-        for (int i = 0; i < english.size(); i++) {
-            if (zhFallback.contains(english.get(i))) assertEquals(english.get(i), zh.get(i));
-        }
-        com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
     }
 
     @Test
@@ -321,7 +372,7 @@ class ItemGraphCommandsHelpTest {
         assertTrue(overview.contains("/ig event <id>"));
         assertTrue(overview.contains("/ig explain <id>"));
         assertTrue(overview.contains("/ig help permissions"));
-        assertTrue(overview.contains("audit: /ig audit"));
+        assertTrue(overview.contains("itemgraph.command"));
         assertTrue(overview.contains("inferred edge"));
         assertTrue(successes.size() <= 5, "first-use help must fit a normal chat view");
         assertFalse(overview.contains("/ig lookup page <page> <eventType>"),
@@ -414,7 +465,7 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
-    void helpListsEveryRegisteredCommandPath() {
+    void commandHelpHubRoutesToDetailedHelpAndEveryRegisteredPathIsCovered() {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         assertEquals(Set.of("itemgraph", "ig"), dispatcher.getRoot().getChildren().stream()
                         .map(CommandNode::getName).collect(Collectors.toSet()),
@@ -453,17 +504,21 @@ class ItemGraphCommandsHelpTest {
         assertTrue(filteredLookupHelp.contains("Player-only"));
         assertTrue(filteredLookupHelp.contains("From console, use /ig lookup near"));
 
-        String commandsHelp = String.join("\n", CommandHelp.topicLines("commands"));
+        String commandsHub = String.join("\n", CommandHelp.topicLines("commands"));
+        assertTrue(commandsHub.contains("/ig help <topic>"), "the command hub must route to detailed topics");
         assertTrue(CommandHelp.topicLines("commands").stream().allMatch(line -> line.length() <= 220),
                 "the grouped command catalog must avoid lines that become dense chat paragraphs");
+        String detailedHelp = CommandHelp.TOPIC_NAMES.stream()
+                .flatMap(topic -> CommandHelp.topicLines(topic).stream())
+                .collect(Collectors.joining("\n"));
         for (CommandNode<CommandSourceStack> child : root.getChildren()) {
             String commandPath = switch (child.getName()) {
                 case "lookup" -> "/ig lookup <eventType>";
                 case "ingest" -> "/ig ingest now";
                 default -> "/ig " + child.getName();
             };
-            assertTrue(commandsHelp.contains(commandPath),
-                    "exhaustive in-game help omits registered root command " + child.getName());
+            assertTrue(detailedHelp.contains(commandPath),
+                    "detailed help topics omit registered root command " + child.getName());
         }
         for (String path : List.of(
                 "/ig help", "/ig status", "/ig audit", "/ig ingest now", "/ig ingest history",
@@ -472,7 +527,7 @@ class ItemGraphCommandsHelpTest {
                 "/ig lookup filters", "/ig lookup provenance", "/ig trace item", "/ig trace player",
                 "/ig trace container", "/ig gui item", "/ig gui player", "/ig gui container",
                 "/ig inspect [on|off|status]")) {
-            assertTrue(commandsHelp.contains(path), "exhaustive in-game command help omits " + path);
+            assertTrue(detailedHelp.contains(path), "detailed in-game topic help omits " + path);
         }
     }
 
@@ -535,8 +590,12 @@ class ItemGraphCommandsHelpTest {
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help commands", source));
         String commandsHelp = String.join("\n", successes);
-        assertTrue(commandsHelp.contains("docs/ADMIN_QUICK_START.md"));
+        assertTrue(commandsHelp.contains("/ig help guide"));
         assertTrue(commandsHelp.contains("/ig ingest history"));
+
+        successes.clear();
+        assertEquals(1, dispatcher.execute("itemgraph help guide", source));
+        assertTrue(String.join("\n", successes).contains("Admin quick start:"));
 
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help trace item", source));
@@ -578,6 +637,7 @@ class ItemGraphCommandsHelpTest {
             assertEquals(1, dispatcher.execute("itemgraph help " + topic, source), topic);
             assertFalse(successes.isEmpty(), topic);
             String lines = String.join("\n", successes);
+            assertTrue(lines.contains("Help requires itemgraph.command"), topic);
             assertTrue(lines.contains("Unset grants use level 2"), topic);
             assertTrue(lines.contains("Example"), topic);
         }

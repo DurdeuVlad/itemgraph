@@ -55,6 +55,9 @@ public final class ItemGraphLanguage {
             "trace.counts", "trace.transformation_reference", "trace.transformation_reference_item",
             "trace.hop_during", "trace.hop_at", "status.source_disabled", "status.source_available",
             "status.source_unavailable", "status.summary", "status.connected", "status.disconnected", "status.not_configured",
+            "status.action.db_disconnected", "status.action.recovery_blocked", "status.action.recovery_loading",
+            "status.action.capture_stopped", "status.action.capture_disabled", "status.action.dropped_records",
+            "status.action.no_stop_reported",
             "query.db_unavailable_status", "query.db_unavailable", "query.accepted_log", "query.interrupted",
             "query.timed_out", "query.server_unavailable", "browser.timeline_stale", "browser.amount",
             "browser.time_window", "browser.time", "browser.from", "browser.to", "browser.evidence_observation",
@@ -66,6 +69,7 @@ public final class ItemGraphLanguage {
             "explain.evidence_row", "trace.fingerprint_candidate_row", "browser.detail.time",
             "browser.detail.quantity", "browser.detail.item", "browser.detail.stored_details",
             "browser.detail.title", "browser.detail.observation", "browser.detail.transformation",
+            "browser.menu_slot",
             "browser.detail.inference_edge", "browser.detail.previous", "browser.detail.previous_unavailable",
             "browser.detail.next", "browser.detail.next_unavailable", "browser.detail.back");
     private static final Pattern ARGUMENT = Pattern.compile("\\{(\\d+)(?:,[^{}]*)?}");

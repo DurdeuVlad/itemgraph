@@ -192,7 +192,7 @@ operator status, while an unset node falls back to vanilla permission level 2.
 Native ItemGraph event capture starts automatically when enabled in config.
 `/ig ingest now` is only needed to sync from a configured GriefLogger source.
 
-- `/ig help`: bare `/itemgraph` or `/ig` shows a short task-first overview. `/ig help commands` lists command paths by investigation task; `/ig help <topic>` provides topic-specific guidance, with syntax and examples where applicable. Run `/ig help permissions` for the exact access nodes. Unknown topics list the valid topics.
+- `/ig help`: bare `/itemgraph` or `/ig` shows a short task-first overview. `/ig help commands` is a compact task hub that points to detailed topics; `/ig help <topic>` provides exact routes, syntax, and examples where applicable. Run `/ig help permissions` for the exact access nodes. Unknown topics list the valid topics.
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
 - `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows supported chronological lineage, including anvil transformations. Craft/smelt outputs with unobserved inputs remain unresolved audit events and do not create trace edges.
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
