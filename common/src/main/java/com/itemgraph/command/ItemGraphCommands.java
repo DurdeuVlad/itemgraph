@@ -897,7 +897,8 @@ public final class ItemGraphCommands {
                     + " " + filters.window().normalizedPredicate());
             lines.addAll(QueryFormatter.formatTrace(result));
             return QueryDispatcher.QueryOutput.found(List.copyOf(lines));
-        });
+        }, player -> player.hasPermissions(4),
+                "[ItemGraph] Item metadata filters require permission level 4.");
     }
 
     /** /ig trace player <player> [limit] [sinceMinutes] */
@@ -1246,6 +1247,12 @@ public final class ItemGraphCommands {
                     "[ItemGraph] No active lookup page session. Run /ig lookup first."));
             return 0;
         }
+        if (session.filters() != null && !session.filters().itemPredicates().isEmpty()
+                && !source.hasPermission(4)) {
+            source.sendFailure(Component.literal(
+                    "[ItemGraph] Item metadata filters require permission level 4."));
+            return 0;
+        }
         return dispatchAuditPage(source, "lookup page", session, page, true);
     }
 
@@ -1259,7 +1266,7 @@ public final class ItemGraphCommands {
         String filter = session.filterDescription() + " page=" + effectivePage
                 + " limit=" + clampedLimit
                 + (effectivePage == requestedPage ? "" : " requestedPage=" + requestedPage + " offset=" + offset);
-        return QueryDispatcher.dispatch(source, label, conn -> {
+        QueryDispatcher.Query query = conn -> {
             List<String> lines;
             int returnedRows;
             if (session.filters() != null) {
@@ -1293,7 +1300,13 @@ public final class ItemGraphCommands {
             }
             return QueryDispatcher.QueryOutput.found(
                     lines, actions);
-        });
+        };
+        if (session.filters() != null && !session.filters().itemPredicates().isEmpty()) {
+            return QueryDispatcher.dispatch(source, label, query,
+                    player -> player.hasPermissions(4),
+                    "[ItemGraph] Item metadata filters require permission level 4.");
+        }
+        return QueryDispatcher.dispatch(source, label, query);
     }
 
     static void rememberPageSession(CommandSourceStack source, AuditPageSession session) {

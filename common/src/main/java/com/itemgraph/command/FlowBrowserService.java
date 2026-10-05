@@ -173,12 +173,12 @@ public final class FlowBrowserService {
         }
         AbstractContainerMenu expectedMenu = requester.containerMenu;
         session.loading = true;
+        int requiredPermission = session.target.metadataPredicates().isEmpty() ? 2 : 4;
         int accepted = QueryDispatcher.dispatchData(source, "gui flow",
                 conn -> session.target.load(conn, session.window, cursor, direction),
                 (returnedSource, page) -> {
                     session.loading = false;
                     if (!(returnedSource.getEntity() instanceof ServerPlayer player)
-                            || !returnedSource.hasPermission(session.target.metadataPredicates().isEmpty() ? 2 : 4)
                             || player.containerMenu != expectedMenu) {
                         return;
                     }
@@ -193,7 +193,9 @@ public final class FlowBrowserService {
                             && page.fingerprint().componentIndexUnresolved();
                     session.target = session.target.resolved(page);
                     showPage(player, session);
-                }, () -> session.loading = false);
+                }, () -> session.loading = false,
+                player -> player.hasPermissions(requiredPermission),
+                "[ItemGraph] Permission changed before the flow page could be delivered.");
         if (accepted == 0) {
             session.loading = false;
         }
@@ -325,18 +327,20 @@ public final class FlowBrowserService {
         }
         browser.loading = true;
         AbstractContainerMenu expectedMenu = player.containerMenu;
+        int requiredPermission = browser.target.metadataPredicates().isEmpty() ? 2 : 4;
         int accepted = QueryDispatcher.dispatchData(player.createCommandSourceStack(), "gui detail",
                 conn -> detailLines(conn, hop),
                 (source, lines) -> {
                     browser.loading = false;
                     if (source.getEntity() instanceof ServerPlayer viewer
-                            && source.hasPermission(browser.target.metadataPredicates().isEmpty() ? 2 : 4)
                             && viewer.containerMenu == expectedMenu) {
                         DetailSession detail = new DetailSession(browser, detailTitle(hop), lines, 0);
                         showDetails(viewer, detail);
                     }
                 },
-                () -> browser.loading = false);
+                () -> browser.loading = false,
+                currentPlayer -> currentPlayer.hasPermissions(requiredPermission),
+                "[ItemGraph] Permission changed before the flow details could be delivered.");
         if (accepted == 0) {
             browser.loading = false;
         }

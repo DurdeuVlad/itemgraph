@@ -118,7 +118,9 @@ Queries should have:
 `/ig lookup` is an operator-only audit query. Item metadata predicates (`item`, `fingerprint`,
 `name`, `damage`, `trim`, `enchantment`, `lore`, and `component`) and exports using them
 require permission level 4. Component query values are bounded canonical JSON; queries do
-not return arbitrary component payloads. `CHAT_MESSAGE` and
+not return arbitrary component payloads. Saved-page continuations recheck level 4 before
+dispatching and again on the live player before delivering rows or paging actions, so a
+permission demotion during an async page query suppresses its result. `CHAT_MESSAGE` and
 `COMMAND_ATTEMPT` and `COMMAND_EXECUTED` rows can contain private conversation, command arguments, or
 credentials accidentally typed into chat, so they must remain restricted to the
 audit permission and must never be included in player-facing flow views.

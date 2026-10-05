@@ -15,7 +15,9 @@ The project follows a simple pre-1.0 development changelog model.
   permission level 4. The preview Java API advances to PREVIEW_3 with item metadata selectors
   and absolute query windows. Local validation passed 614 unit tests and 8 required GameTests
   on each loader. SQLite cursor parity passed locally; the equivalent MySQL/MariaDB fixture is
-  in CI, and measured #32 latency budgets remain pending.
+  in CI, and measured #32 latency budgets remain pending. Metadata-filtered saved-page
+  continuations recheck permission level 4 before dispatch and against the live player again
+  before delivering asynchronous rows or paging actions.
   No version bump or distributable JAR was created.
 
 - **Issue #37 bounded incident bundles:** added `/ig export`, level-4 `/ig export full`,

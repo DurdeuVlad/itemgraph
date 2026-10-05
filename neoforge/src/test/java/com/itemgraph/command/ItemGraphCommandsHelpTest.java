@@ -272,6 +272,58 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
+    void metadataFilteredPageRechecksPermissionAfterDemotionAndAllowsOrdinaryPaging() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        UUID metadataOwnerId = UUID.randomUUID();
+        ServerPlayer metadataPlayer = mock(ServerPlayer.class);
+        when(metadataPlayer.getUUID()).thenReturn(metadataOwnerId);
+        Level metadataLevel = mock(Level.class);
+        when(metadataPlayer.level()).thenReturn(metadataLevel);
+        when(metadataLevel.dimension()).thenReturn(Level.OVERWORLD);
+        CommandSourceStack metadataSource = sourceForPlayer(metadataPlayer);
+        when(metadataSource.hasPermission(4)).thenReturn(true);
+
+        assertEquals(0, dispatcher.execute(
+                "itemgraph lookup item.minecraft:diamond radius.20", metadataSource));
+        assertTrue(ItemGraphCommands.hasPageSessionOwner(metadataOwnerId),
+                "the level-4 metadata lookup must create a saved session before its query is dispatched");
+
+        org.mockito.Mockito.clearInvocations(metadataSource);
+        when(metadataSource.hasPermission(4)).thenReturn(false);
+        assertEquals(0, dispatcher.execute("itemgraph page 2", metadataSource));
+        ArgumentCaptor<Component> metadataFailure = ArgumentCaptor.forClass(Component.class);
+        verify(metadataSource).sendFailure(metadataFailure.capture());
+        assertEquals("[ItemGraph] Item metadata filters require permission level 4.",
+                metadataFailure.getValue().getString());
+        verify(metadataSource, never()).sendSuccess(any(), anyBoolean());
+        ItemGraphCommands.clearPageSession(metadataOwnerId);
+
+        UUID ordinaryOwnerId = UUID.randomUUID();
+        ServerPlayer ordinaryPlayer = mock(ServerPlayer.class);
+        when(ordinaryPlayer.getUUID()).thenReturn(ordinaryOwnerId);
+        Level ordinaryLevel = mock(Level.class);
+        when(ordinaryPlayer.level()).thenReturn(ordinaryLevel);
+        when(ordinaryLevel.dimension()).thenReturn(Level.OVERWORLD);
+        CommandSourceStack ordinarySource = sourceForPlayer(ordinaryPlayer);
+        when(ordinarySource.hasPermission(4)).thenReturn(false);
+        assertEquals(0, dispatcher.execute(
+                "itemgraph lookup action.break_block radius.20", ordinarySource));
+        assertTrue(ItemGraphCommands.hasPageSessionOwner(ordinaryOwnerId),
+                "a level-2 ordinary lookup must still create a saved session");
+
+        org.mockito.Mockito.clearInvocations(ordinarySource);
+        assertEquals(0, dispatcher.execute("itemgraph page 2", ordinarySource));
+        ArgumentCaptor<Component> ordinaryFailure = ArgumentCaptor.forClass(Component.class);
+        verify(ordinarySource).sendFailure(ordinaryFailure.capture());
+        assertFalse(ordinaryFailure.getValue().getString().contains("metadata filters require permission level 4"),
+                "ordinary non-metadata paging must continue to dispatch at level 2");
+        assertTrue(ordinaryFailure.getValue().getString().contains("database is not connected"),
+                "the uninitialized test database should be the only reason this ordinary page is rejected");
+        verify(ordinarySource, never()).sendSuccess(any(), anyBoolean());
+        ItemGraphCommands.clearPageSession(ordinaryOwnerId);
+    }
+
+    @Test
     void pageSessionTokensAreIsolatedByPlayerAndExplicitlyClearable() throws Exception {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         UUID ownerId = UUID.randomUUID();
