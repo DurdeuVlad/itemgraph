@@ -95,7 +95,7 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             }),
         }
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "loader": loader,
         "scenario": scenario,
         "minecraft_version": "1.21.1",
@@ -136,6 +136,7 @@ def report(loader: str, scenario: str, accepted: int) -> dict:
             "largest_batch": 0 if idle_baseline else min(accepted, 100 if shutdown_saturation else 1_000),
         },
         "components": {
+            "unresolved_payload_decode_failures": 500 if correlation_burst else 0,
             "decode_failure_cache_insertions": 1 if correlation_burst else 0,
             "negative_cache_hits": 499 if correlation_burst else 0,
         },
@@ -333,6 +334,12 @@ class PerformanceReportValidationTest(unittest.TestCase):
         candidate = report("neoforge", "correlation_burst", 500)
         candidate["components"]["negative_cache_hits"] = 498
         with self.assertRaisesRegex(ReportError, "counters disagree with component metrics"):
+            validate_report(candidate)
+
+    def test_rejects_missing_malformed_payload_encounters_in_aggregate_metric(self) -> None:
+        candidate = report("neoforge", "correlation_burst", 500)
+        candidate["components"]["unresolved_payload_decode_failures"] = 1
+        with self.assertRaisesRegex(ReportError, "count every malformed payload encounter"):
             validate_report(candidate)
 
     def test_rejects_shutdown_saturation_report_when_accepted_rows_are_not_durable(self) -> None:

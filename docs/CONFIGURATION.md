@@ -18,7 +18,6 @@ initialization logs also identify the selected backend.
 | ItemGraph setting | NeoForge TOML path | Fabric properties key | Type / default | Accepted values | Reload |
 |---|---|---|---|---|---|
 | Server message language | `general.language` | `language` | string / `en_us` | `en_us`, `nl_nl`, `zh_tw` | Restart |
-| Server message language | `general.language` | `language` | string / `en_us` | `en_us`, `nl_nl`, `zh_tw` | Restart |
 | SQLite path | `general.database_path` | `database_path` | string / `itemgraph/itemgraph.db` | Non-empty path; relative paths resolve from the game directory | Restart |
 | Storage backend | `general.database_backend` | `database_backend` | string / `sqlite` | `sqlite`, `mysql`, `mariadb`, `mysql_mariadb` | Restart |
 | Network DB host | `general.database_host` | `database_host` | string / `127.0.0.1` | Required and non-blank for MySQL/MariaDB | Restart |
@@ -147,9 +146,14 @@ network path.
 `/itemgraph status` (alias `/ig status`) reports aggregate enqueue, persistence,
 query, and correlation counts, failures, and bounded p95 latency upper bounds. It
 also reports queue peak/rejected-item totals, persisted item and batch totals,
-decode-failure cache insertion/hit totals, and current JVM heap use. These
-counters contain no item payloads, player names, UUIDs, coordinates, or database
-credentials. They reset when the ingestion service starts.
+unresolved component-payload decode failures, decode-failure cache insertion/hit
+totals, and current JVM heap use. The unresolved-payload counter includes every
+failed decode encounter, including repeats returned from the negative cache; it
+does not count other unresolved evidence classes. These counters contain no item
+payloads, player names, UUIDs, coordinates, or database credentials. They reset
+when the ingestion service starts. See the [performance test plan](TEST_PLAN.md#performance-test-plan)
+for the exact CI workloads, enforced fixture limits, and budgets that remain
+unmeasured.
 
 CI stores redacted JSON reports for the NeoForge SQLite 8,000-event burst, the
 Fabric SQLite 32-event tick-flush probe, NeoForge and Fabric network probes

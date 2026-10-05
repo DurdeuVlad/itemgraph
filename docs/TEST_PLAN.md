@@ -577,7 +577,10 @@ Verify that ItemGraph reports authoritative inventory evidence independent of cl
 CI integration tests and GameTests emit redacted performance JSON under
 `ITEMGRAPH_PERFORMANCE_REPORT_DIR`. `tools/validate_itemgraph_performance_report.py`
 checks the pinned report schema, loader/backend identity, exact durable row
-counts, queue accounting, and existing server-thread submission ceilings.
+counts, queue accounting, unresolved component-payload decode failures, and
+existing server-thread submission ceilings. The unresolved-payload metric counts
+every failed serialized `DataComponentPatch` decode, including negative-cache
+hits; it does not represent every unresolved observation or graph event.
 `tools/test_validate_itemgraph_performance_report.py` covers malformed schemas,
 rejection accounting, and the complete artifact set. CI uploads the validated
 `itemgraph-performance-reports` artifact for 14 days.
@@ -619,7 +622,7 @@ runtime's `grieflogger_runtime_state`: loader GameTests query the loader and
 assert absence, while NeoForge JUnit probes without an initialized mod list
 record `unavailable`. The validator requires `absent` for GameTest reports,
 rejects `present` everywhere, and permits `unavailable` only for those
-NeoForge JUnit scenarios. Reports use schema version 2 for this explicit
+NeoForge JUnit scenarios. Reports use schema version 3 for the explicit
 three-state provenance.
 The validator requires the enqueue sample count to equal this scenario's
 attempted-event count, and each network

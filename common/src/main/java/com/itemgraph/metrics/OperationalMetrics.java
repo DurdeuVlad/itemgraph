@@ -23,6 +23,7 @@ public final class OperationalMetrics {
     private final LongAdder persistedItems = new LongAdder();
     private final LongAdder persistenceFailures = new LongAdder();
     private final LongAdder queueRejectedItems = new LongAdder();
+    private final LongAdder unresolvedPayloadDecodeFailures = new LongAdder();
     private final LongAdder decodeFailureCacheInsertions = new LongAdder();
     private final LongAdder decodeCacheHits = new LongAdder();
     private final AtomicLong peakQueueDepth = new AtomicLong();
@@ -68,6 +69,11 @@ public final class OperationalMetrics {
         decodeFailureCacheInsertions.increment();
     }
 
+    /** Counts every malformed component-payload encounter, including negative-cache hits. */
+    public void recordUnresolvedPayloadDecodeFailure() {
+        unresolvedPayloadDecodeFailures.increment();
+    }
+
     public void recordDecodeCacheHit() {
         decodeCacheHits.increment();
     }
@@ -78,7 +84,8 @@ public final class OperationalMetrics {
         return new Snapshot(
                 enqueue.snapshot(), persistenceCommit.snapshot(), query.snapshot(), correlation.snapshot(),
                 persistedItems.sum(), persistenceFailures.sum(), queueRejectedItems.sum(),
-                peakQueueDepth.get(), largestBatchSize.get(), decodeFailureCacheInsertions.sum(),
+                peakQueueDepth.get(), largestBatchSize.get(), unresolvedPayloadDecodeFailures.sum(),
+                decodeFailureCacheInsertions.sum(),
                 decodeCacheHits.sum(), heap.getUsed(), heap.getMax());
     }
 
@@ -91,6 +98,7 @@ public final class OperationalMetrics {
         persistedItems.reset();
         persistenceFailures.reset();
         queueRejectedItems.reset();
+        unresolvedPayloadDecodeFailures.reset();
         decodeFailureCacheInsertions.reset();
         decodeCacheHits.reset();
         peakQueueDepth.set(0L);
@@ -107,6 +115,7 @@ public final class OperationalMetrics {
             long queueRejectedItems,
             long peakQueueDepth,
             long largestBatchSize,
+            long unresolvedPayloadDecodeFailures,
             long decodeFailureCacheInsertions,
             long decodeCacheHits,
             long heapUsedBytes,

@@ -60,8 +60,8 @@ def _integer(value: Any, name: str, minimum: int = 0) -> int:
 
 def validate_report(report: Any) -> dict[str, Any]:
     value = _object(report, "performance report", TOP_LEVEL_FIELDS)
-    if type(value["schema_version"]) is not int or value["schema_version"] != 2:
-        raise ReportError("schema_version must be integer 2")
+    if type(value["schema_version"]) is not int or value["schema_version"] != 3:
+        raise ReportError("schema_version must be integer 3")
     if value["loader"] not in LOADERS:
         raise ReportError("loader must be fabric or neoforge")
     if value["scenario"] not in {
@@ -162,7 +162,7 @@ def validate_report(report: Any) -> dict[str, Any]:
         raise ReportError("largest persistence batch exceeds the configured maximum batch size")
 
     components = _object(value["components"], "components", {
-        "decode_failure_cache_insertions", "negative_cache_hits",
+        "unresolved_payload_decode_failures", "decode_failure_cache_insertions", "negative_cache_hits",
     })
     for key, item in components.items():
         _integer(item, f"components.{key}")
@@ -217,17 +217,23 @@ def validate_report(report: Any) -> dict[str, Any]:
         insertions = _integer(workload.get("malformed_cache_insertions"),
                               "workload.malformed_cache_insertions")
         cache_hits = _integer(workload.get("malformed_cache_hits"), "workload.malformed_cache_hits")
+        unresolved_failures = _integer(components["unresolved_payload_decode_failures"],
+                                       "components.unresolved_payload_decode_failures")
         first_decode_ns = _integer(workload.get("malformed_first_decode_ns"),
                                    "workload.malformed_first_decode_ns", 1)
         total_elapsed_ns = _integer(workload.get("malformed_total_elapsed_ns"),
                                      "workload.malformed_total_elapsed_ns", 1)
         if repetitions != 500 or insertions != 1 or cache_hits != repetitions - 1:
             raise ReportError("correlation_burst must decode one malformed component payload and hit cache 499 times")
+        if unresolved_failures != repetitions:
+            raise ReportError("correlation_burst must count every malformed payload encounter, including cache hits")
         if total_elapsed_ns < first_decode_ns:
             raise ReportError("malformed payload workload elapsed time is shorter than its first decode")
         if (components["decode_failure_cache_insertions"] != insertions
                 or components["negative_cache_hits"] != cache_hits):
             raise ReportError("malformed payload workload counters disagree with component metrics")
+    elif components["unresolved_payload_decode_failures"] != 0:
+        raise ReportError("only correlation_burst may include malformed payload decode failures")
     network_scenarios = {"backend_mariadb_matrix", "backend_mysql_matrix",
                          "backend_fabric_mariadb_matrix", "backend_fabric_mysql_matrix"}
     if value["scenario"] in network_scenarios:
@@ -325,7 +331,7 @@ def _validate_idle_report(value: dict[str, Any]) -> dict[str, Any]:
     if any(_integer(item, f"persistence.{key}") != 0 for key, item in persistence.items()):
         raise ReportError("idle baseline must not persist or fail a batch")
     components = _object(value["components"], "components", {
-        "decode_failure_cache_insertions", "negative_cache_hits",
+        "unresolved_payload_decode_failures", "decode_failure_cache_insertions", "negative_cache_hits",
     })
     if any(_integer(item, f"components.{key}") != 0 for key, item in components.items()):
         raise ReportError("idle baseline must not decode component payloads")
