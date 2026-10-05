@@ -2,7 +2,7 @@
 
 **Reviewed:** 2026-10-05
 
-**ItemGraph snapshot:** `codex/issue55-world-causes-pr`, HEAD `79f917af20c52b01b962146d6e6d5eff24255768`, plus the uncommitted changes in this worktree at review time. #55 world/environment capture and pre-world-load admission are implemented in this worktree and remain under review; they are not yet merged or released. The focused startup-worker regression passed with staged recovery settings; live-server verification after the lifecycle change remains pending.
+**ItemGraph snapshot:** PR #130 head `e6a4172cff510d5795c9ba46c91bfbfdeee0b73c`, based on `main` at `919a4f0b061974583f2079fc2858bea4228626b3`. This reviewed snapshot includes #55 world/environment capture and pre-world-load admission; the PR remains unmerged and unreleased. The focused startup-worker regression passed with staged recovery settings; live-server verification after the lifecycle change remains pending.
 
 **GriefLogger target:** published `1.2.10-1.21.1` Fabric and NeoForge artifacts, pinned in [`docs/grieflogger-fixtures/1.2.10-1.21.1.json`](grieflogger-fixtures/1.2.10-1.21.1.json)
 **GriefLogger source reviewed:** ref `26.2`, commit [`d315098b3f37317a5cddfbd75086f4f912f16a83`](https://github.com/DAQEM/GriefLogger/commit/d315098b3f37317a5cddfbd75086f4f912f16a83)
