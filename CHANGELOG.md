@@ -8,6 +8,11 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Fixed
 
+- **First-time administrator help (#153):** `/ig help commands` now fits a compact command-family overview with its continuation on the last row; `/ig help journeys` gives direct inspect, trace, nearby, raw-evidence, and inferred-edge routes. `/ig help lookup world` appears in topic suggestions; the filtered-lookup journey explains `AMBIGUOUS` results and its candidate route; `/ig status` leads with a localized next action; the feature map marks incident export unavailable until #37 ships. Added regression coverage for help discovery, narrow chat line lengths, status actions, and the export boundary. The live screenshots still show the previous longer catalog and need recapture after a permitted dev-server run.
+- **Sensitive entity and transformation lookup permissions (#56, #57):** direct and filtered `KILL_ENTITY`, `PROJECTILE_SPAWN_ACCEPTED`, `CRAFT`, `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR` queries now require `itemgraph.audit`, carried through saved pages and location actions. Added task-first lifecycle/transformation help and exact admin-guide coverage boundaries. No version bump or distributable jar.
+- **Taxonomy-based location privacy:** every `EventTaxonomy` row classified `SENSITIVE_LOCATION`, including block/container/entity interactions and item-flow/automation actions, now requires `itemgraph.audit` for direct or filtered lookup; saved pages and one-use location links retain that grant. Regression coverage compares the permission policy against the taxonomy.
+- **World-effect callback outcomes (#55):** a fire or burnout write that returns `false` without changing the block type now persists as `WORLD_EFFECT_ATTEMPT` with `outcome=UNCHANGED` and `GAME_CALLBACK_ATTEMPT` reliability. Throws with no confirmed block delta remain `WORLD_EFFECT_UNRESOLVED`; Enderman rows carry typed actor identity separately from owner-provenance status, and lookup shows the world/entity actor kind. The taxonomy advances to 2.2.0; the mod version remains 0.3.2 and no distributable jar is built.
+- **Startup world-event admission (#55):** NeoForge stages the configured database and opens bounded capture at `ServerAboutToStartEvent`; Fabric stages its settings and opens capture before database initialization in `SERVER_STARTING`. Recovery-spool paths use the configured database directory, and startup events remain queued until the persistence worker can flush them. A focused regression verifies durable persistence after initialization. The live-server warning check remains pending a permitted dev-server run; no version bump or distributable jar is built.
 - **Issue #33 command-to-item evidence links:** admin and creative outcomes now list bounded UUIDs for accepted item observations, transformations, and unresolved before/after audit records. `/ig event event:<uuid>` opens each evidence type under the existing event and audit permissions; transformation details distinguish the affected player/entity from the command actor. Outcomes say `LINKED`, `PARTIAL_LINK_LIST`, `UNRESOLVED_EVIDENCE_RECORDED`, or `NO_ITEM_EVIDENCE_RECORDED` according to the captured records. Mod version remains 0.3.2; no distributable jar is built.
 - **Flow-browser row labels (#146):** display only the observed action or transformation kind in the numbered companion; internal parent, break, and evidence UUIDs remain out of the concise event label. The admin guide now explains how to map rows to slots and read hovered detail-page fields. No version bump or distributable jar.
 - **Protected evidence query gating:** `/ig event`, `/ig explain`, `/ig trace`, and the flow browser now require `itemgraph.audit` together with their existing leaf permission before any query or candidate lookup. Async delivery, GUI pages/details, menu validity/clicks, and page-derived location tokens retain and recheck the complete permission set, preventing protected observation or inferred-edge metadata from leaking through candidates, counts, errors, or navigation. Explain hover detail is attached only to its inferred summary line; cited observation rows keep their observed wording.
@@ -167,10 +172,11 @@ The project follows a simple pre-1.0 development changelog model.
   types and unified lookup aliases now use the shared registry. Definitions
   specify evidence class, capture reliability, endpoint and quantity semantics,
   actor status, privacy class, loader support, evidence-ID contract, aliases,
-  and owning issue. #55–#57 event families and stable unresolved reason codes
-  are listed as planned until loader adapters and fixtures prove support. This
-  is a taxonomy version only; the ItemGraph mod remains 0.3.2 and no distributable
-  JAR is built.
+  and owning issue. Issue #55 now has paired Fabric and NeoForge capture for
+  explosions, pistons, flowing fluids, fire, Enderman block movement, and
+  falling blocks. Issues #56–#57 remain planned until loader adapters and
+  fixtures prove support. The taxonomy version is 2.1.0; ItemGraph remains
+  version 0.3.2 and no distributable JAR is built.
 - **Creative transformation evidence boundary:** taxonomy `2.0.0` retains
   `CREATIVE_ITEM_TRANSFORM` for classification but marks it unsupported on both
   loaders with `CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED`. Creative slot packets
@@ -178,6 +184,21 @@ The project follows a simple pre-1.0 development changelog model.
   the ID retains `UNRESOLVED` evidence with `UNKNOWN` quantity and no longer
   appears in lookup suggestions. Mod version remains 0.3.2; no distributable
   JAR is built.
+
+- **Issue #55 world and environmental causes:** both loaders record confirmed
+  explosion, piston, fluid, fire, Enderman block-movement, and falling-block
+  state changes into ItemGraph-owned storage. Bounded snapshots preserve
+  confirmed deltas and emit classified unresolved evidence when coverage is
+  partial or callbacks fail. Blocked piston results are recorded as attempts,
+  separately from direct state deltas. Events do not invent player actors or
+  item quantities. CI now emits redacted cross-loader reports for explosion,
+  piston, and environmental replays; it requires exact explosion/piston
+  sequences, deterministic environmental multisets, matching fire/Enderman
+  evidence contracts, and zero whole-graph conservation or integrity
+  violations. Report audits run off-thread on a consistent read snapshot, and
+  only allowlisted cause aliases enter artifacts. Full #55 replay/conservation,
+  privacy, and incident-export acceptance remains open.
+  Mod version remains 0.3.2; no distributable JAR is built.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus ten allowlisted audit
   events, including `PLACE_BLOCK`, `INTERACT_BLOCK_ATTEMPT`, and `KILL_ENTITY`,

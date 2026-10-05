@@ -767,8 +767,8 @@ ItemGraph JDBC connection.
 ## Transformation Lineage (Phase 9)
 
 Item transformations (identity shifts) are tracked in `ig_item_transformations`:
-- Records transitions linking source fingerprint to result fingerprint (`ANVIL_RENAME`, `CRAFTING`, `SMELTING`).
-- Captured via `TransformationEventListener` (`AnvilRepairEvent`, `ItemCraftedEvent`, `ItemSmeltedEvent`).
+- Records transitions linking source fingerprint to result fingerprint (`ANVIL_RENAME`, `ANVIL_REPAIR`, `CRAFT`, `SMELT`).
+- Captured via `TransformationEventListener` from anvil, crafting, and smelting result transitions.
 - Persisted asynchronously via `InternalObservationService` with a memory-bounded queue (10,000 capacity).
 - Surfaced chronologically in item trace timelines as `[TRANSFORMATION <type> <- <source>]` hops.
 

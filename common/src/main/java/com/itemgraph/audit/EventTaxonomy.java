@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "2.1.0";
+    public static final String VERSION = "2.2.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -304,6 +304,25 @@ public final class EventTaxonomy {
                 ActorStatus.PLAYER, PrivacyClass.PLAYER_ACTIVITY, 27);
         audit(entries, "PROJECTILE_SPAWN_ACCEPTED", "projectile", SourceReliability.AUTHORITATIVE_GAME_RESULT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
+        audit(entries, "EXPLOSION_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "PISTON_BLOCK_MOVE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "PISTON_BLOCK_ATTEMPT", "world_environment", SourceReliability.GAME_CALLBACK_ATTEMPT,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "WORLD_EFFECT_ATTEMPT", "world_environment", SourceReliability.GAME_CALLBACK_ATTEMPT,
+                ActorStatus.WORLD, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "FLUID_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.WORLD, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "FIRE_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.WORLD, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "ENDERMAN_BLOCK_MOVE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.ENTITY, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "FALLING_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.ENTITY, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "WORLD_EFFECT_UNRESOLVED", "world_environment", EvidenceClass.UNRESOLVED,
+                SourceReliability.UNRESOLVED_CAUSE, ActorStatus.UNKNOWN,
+                PrivacyClass.SENSITIVE_LOCATION, 55);
 
         // Canonical action names and user-facing aliases shared by audit,
         // observation, and transformation lookup parsing.
@@ -362,14 +381,6 @@ public final class EventTaxonomy {
 
         // Planned child-issue entries are intentionally not exposed as supported
         // lookup actions until loader adapters and reproducible fixtures exist.
-        planned(entries, Surface.AUDIT_EVENT, "EXPLOSION_BLOCK_CHANGE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "FLUID_BLOCK_CHANGE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "FIRE_BLOCK_CHANGE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "PISTON_BLOCK_MOVE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "ENDERMAN_BLOCK_MOVE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "FALLING_BLOCK_CHANGE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "DISPENSER_EFFECT", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "DROPPER_EFFECT", "world_environment", QuantitySemantics.UNKNOWN, 55);
         planned(entries, Surface.AUDIT_EVENT, "ENTITY_SPAWN", "entity_lifecycle", QuantitySemantics.NONE, 56);
         planned(entries, Surface.AUDIT_EVENT, "ENTITY_DESPAWN", "entity_lifecycle", QuantitySemantics.NONE, 56);
         planned(entries, Surface.AUDIT_EVENT, "ENTITY_KILL", "entity_lifecycle", QuantitySemantics.NONE, 56);
@@ -445,10 +456,11 @@ public final class EventTaxonomy {
                                 QuantitySemantics quantity, int ownerIssue) {
         LoaderSupport pending = new LoaderSupport(LoaderStatus.PLANNED,
                 "IMPLEMENTATION_PENDING_ISSUE_" + ownerIssue);
-        add(entries, id, family, surface, EvidenceClass.OBSERVED,
-                SourceReliability.AUTHORITATIVE_GAME_RESULT,
+        add(entries, id, family, surface, EvidenceClass.UNRESOLVED,
+                SourceReliability.UNRESOLVED_CAUSE,
                 plannedEndpoints(family),
-                quantity, ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
+                surface == Surface.AUDIT_EVENT ? QuantitySemantics.NONE : quantity,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
                 pending, pending, ownerIssue);
     }
 

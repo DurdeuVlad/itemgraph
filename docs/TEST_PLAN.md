@@ -22,6 +22,54 @@ Testing should focus on correctness, explainability, quantity conservation, temp
 - integration tests where feasible
 - staging server controlled scenarios
 
+## Issue #55 world-cause capture conformance
+
+NeoForge and Fabric GameTests use the shared
+`ExplosionWorldEventConformanceFixture`, `PistonWorldEventConformanceFixture`,
+and `EnvironmentalWorldEventConformanceFixture` against ItemGraph's own database. The
+successful case requires a confirmed before/after block-state delta, dimension
+and block endpoint, one stable cause ID shared across affected blocks, unique
+ItemGraph evidence IDs, an unknown actor, and `quantity=NONE`. A no-block-effect
+explosion must leave no confirmed-change row. Partial snapshot coverage must
+emit `WORLD_EFFECT_UNRESOLVED` with `WORLD_EFFECT_PARTIAL`. No game-thread code
+may perform database queries or load chunks to complete the snapshot.
+The partial case builds a bounded snapshot from one loaded, one distant,
+unloaded, and one invalid candidate so the unresolved-row writer and its coverage counts are
+deterministic; it does not simulate a native explosion exceeding the candidate
+or row caps.
+
+The piston fixture triggers a real powered extension and a blocked extension.
+It checks the world result, persisted source/destination state deltas, unique
+evidence IDs, one cause ID shared across changed positions, actor absence, and
+`quantity=NONE`. Confirmed `PISTON_BLOCK_MOVE` rows require a real state delta
+and `DIRECT_STATE_DELTA` reliability. The blocked fixture persists
+`PISTON_BLOCK_ATTEMPT` with `UNCHANGED` and `GAME_CALLBACK_ATTEMPT` reliability,
+without before/after state fields. The exceptional fixture simulates a throw after one sampled block
+changes and verifies that the confirmed delta links to a
+`WORLD_EFFECT_UNRESOLVED` row with reason `WORLD_EFFECT_PARTIAL` and
+`callback_exception_count=1`. NeoForge cancellation semantics remain
+result-only unless the event source reports cancellation explicitly.
+
+**Two-loader runtime result (2026-10-03):** `:common:verifySharedLoaderBoundary`,
+`:neoforge:test`, `:fabric:test`, `:fabric:compileGametestJava`,
+`:neoforge:runGameTestServer`, and `:fabric:runGameTest` all passed in one
+consolidated run. Each isolated runtime loaded ItemGraph 0.3.2, Minecraft 1.21.1,
+and its own loader without GriefLogger; all seven required GameTests passed on
+each loader. The fixtures cover confirmed, no-effect, partial-coverage, and
+over-cap explosion snapshots; piston extension and blocked results; fluid
+spread; fire block changes; Enderman block take/place; and falling-block source
+and landing states. It also simulates a thrown fluid callback after a block
+delta and a falling-block source removal before an entity return; both must
+persist an observed delta linked to an unresolved row, and the falling source
+must not invent an entity UUID. A separate early falling-block throw must emit
+only an unresolved row without a source-removal claim. The environmental fixture removes continuing
+fire/fluid effects before the queue throughput probe. Fixture reads wait for
+durable rows at unique world coordinates because earlier queued events may
+become durable later. These results verify the named vanilla capture paths
+without GriefLogger.
+Issue #55 still has broader replay/conservation, privacy, and incident-export
+acceptance to complete; this run does not close the issue.
+
 Never use production as the primary test environment.
 
 ## Stalled JDBC shutdown and pending-evidence recovery
@@ -1323,7 +1371,8 @@ evidence/reliability/endpoint/quantity/actor/privacy/loader/owner fields,
 reason-code uniqueness, version shape, and unknown-ID behavior. It also checks
 the legacy unified-lookup aliases (including the `interact_block` mapping),
 that each shared query choice is implemented or historical-queryable on both
-loaders, and that planned #55–#57 definitions do not claim runtime support.
+loaders, and that implemented #55 definitions match their writers and planned
+#56–#57 definitions do not claim runtime support.
 They validate the shared taxonomy contract; they do not prove loader event capture,
 database persistence of new event families, or runtime parity. Those checks
 belong to the child issue fixtures and the consolidated M9 acceptance pass.

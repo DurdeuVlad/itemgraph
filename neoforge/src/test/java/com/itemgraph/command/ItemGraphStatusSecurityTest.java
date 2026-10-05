@@ -80,7 +80,8 @@ class ItemGraphStatusSecurityTest {
         assertEquals(0, dispatcher.execute("ig status", source));
 
         assertTrue(successes.size() > 1, "runtime diagnostics must still print when database statistics are unavailable");
-        String status = successes.get(0);
+        assertTrue(successes.get(0).contains("ACTION:"), "status must lead with its actionable next step");
+        String status = successes.stream().filter(line -> line.contains("backend=")).findFirst().orElseThrow();
         assertTrue(status.contains("backend=sqlite"));
         assertTrue(status.contains("schemaVersion=0"));
         assertTrue(status.contains("maxPageSize=10"));
@@ -123,7 +124,7 @@ class ItemGraphStatusSecurityTest {
             assertEquals(0, dispatcher.execute("ig status", source));
 
             assertTrue(successes.size() > 1, "runtime diagnostics must remain available without a database connection");
-            String status = successes.get(0);
+            String status = successes.stream().filter(line -> line.contains("backend=")).findFirst().orElseThrow();
             assertTrue(status.contains("backend=mysql_mariadb"));
             assertTrue(status.contains("schemaVersion=" + MigrationRunner.LATEST_VERSION));
             assertTrue(status.contains("maxPageSize=25"));

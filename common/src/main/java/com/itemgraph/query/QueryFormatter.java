@@ -1,5 +1,9 @@
 package com.itemgraph.query;
 
+import com.itemgraph.audit.EventTaxonomy;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
+
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -95,10 +99,14 @@ public final class QueryFormatter {
             String supersession = event.supersedingEventId() == null ? ""
                     : " superseded_by=audit#" + event.supersedingEventId()
                     + " reason=" + event.supersessionReason();
-            lines.add(PREFIX + t("audit_events.row", "[OBSERVED] audit#{0} {1} actor={2} at {3} [{4}, {5}, {6}] time={7}{8}{9}{10}",
-                    event.id(), event.eventType(), actor, event.levelName(), formatCoordinate(event.x()),
-                    formatCoordinate(event.y()), formatCoordinate(event.z()), formatTime(event.timestampMs()),
-                    subject, detail, supersession));
+            String evidenceClass = EventTaxonomy.find(event.eventType(), EventTaxonomy.Surface.AUDIT_EVENT)
+                    .map(definition -> definition.evidenceClass().name())
+                    .orElse(EventTaxonomy.UNCLASSIFIED_EVIDENCE);
+            lines.add(PREFIX + t("audit_events.row_classified",
+                    "[{0}] audit#{1} {2} actor={3} at {4} [{5}, {6}, {7}] time={8}{9}{10}{11}",
+                    evidenceClass, event.id(), event.eventType(), actor, event.levelName(),
+                    formatCoordinate(event.x()), formatCoordinate(event.y()), formatCoordinate(event.z()),
+                    formatTime(event.timestampMs()), subject, detail, supersession));
         }
         return lines;
     }
@@ -109,7 +117,35 @@ public final class QueryFormatter {
         if ("CONTAINER_BREAK_UNRESOLVED".equals(event.eventType())) {
             return "(actor unavailable)";
         }
-        return "(unknown player)";
+        String typedEntity = typedEntityActor(event.detail());
+        if (typedEntity != null) return typedEntity;
+        EventTaxonomy.ActorStatus actorStatus = EventTaxonomy.find(
+                        event.eventType(), EventTaxonomy.Surface.AUDIT_EVENT)
+                .map(EventTaxonomy.Definition::actor)
+                .orElse(EventTaxonomy.ActorStatus.UNKNOWN);
+        return switch (actorStatus) {
+            case WORLD -> "world/environment";
+            case ENTITY -> "(entity actor unavailable)";
+            case PLAYER -> "(player identity unavailable)";
+            case UNKNOWN -> "(actor unknown)";
+        };
+    }
+
+    private static String typedEntityActor(String detail) {
+        if (detail == null || detail.isBlank()) return null;
+        try {
+            JsonElement parsed = JsonParser.parseString(detail);
+            if (!parsed.isJsonObject() || !parsed.getAsJsonObject().has("actor")) return null;
+            var actor = parsed.getAsJsonObject().getAsJsonObject("actor");
+            if (actor == null || !actor.has("kind") || !"ENTITY".equals(actor.get("kind").getAsString())) {
+                return null;
+            }
+            String type = actor.has("entity_type") ? actor.get("entity_type").getAsString() : "unknown entity";
+            String uuid = actor.has("entity_uuid") ? actor.get("entity_uuid").getAsString() : null;
+            return uuid == null ? "entity:" + type : "entity:" + type + " id=" + uuid;
+        } catch (RuntimeException malformedDetail) {
+            return null;
+        }
     }
 
     /** Formats the cross-table GriefLogger-compatible lookup timeline. */

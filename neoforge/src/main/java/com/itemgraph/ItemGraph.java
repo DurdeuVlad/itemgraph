@@ -14,6 +14,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
@@ -43,6 +44,7 @@ public class ItemGraph {
         com.itemgraph.api.ItemGraphApiLifecycle.setRuntimeInformation(runtimeInformation);
 
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
+        NeoForge.EVENT_BUS.addListener(this::onServerAboutToStart);
         NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener(this::onServerStopped);
@@ -69,18 +71,29 @@ public class ItemGraph {
         ItemGraphCommands.register(event.getDispatcher());
     }
 
-    private void onServerStarting(ServerStartingEvent event) {
-        ItemCanonicalizer.setRegistryAccess(event.getServer().registryAccess());
+    private void onServerAboutToStart(ServerAboutToStartEvent event) {
+        prepareCaptureStartup(event.getServer());
+        // Open bounded intake before the server starts loading worlds. In
+        // particular, world-generation events can arrive while JDBC setup is
+        // still running in the later ServerStarting callback.
+        com.itemgraph.ingest.InternalObservationService.getInstance().start();
+    }
+
+    private void prepareCaptureStartup(net.minecraft.server.MinecraftServer server) {
+        ItemCanonicalizer.setRegistryAccess(server.registryAccess());
         var operationalSettings = ItemGraphConfig.operationalSettings();
         com.itemgraph.command.CommandHelp.initializeMessages();
         com.itemgraph.i18n.ItemGraphLanguage.setLocale(ItemGraphConfig.language());
+        operationalSettings.apply();
+        CorrelationEngine.setDefaultWindowSeconds(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.get());
+        DatabaseManager.getInstance().prepareSettings(ItemGraphConfig.databaseSettings());
+    }
+
+    private void onServerStarting(ServerStartingEvent event) {
         var databaseSettings = ItemGraphConfig.databaseSettings();
         var griefLoggerIntegrationEnabled = ItemGraphConfig.griefLoggerIntegrationEnabled();
         var griefLoggerDatabasePath = ItemGraphConfig.griefLoggerDatabasePath();
-        operationalSettings.apply();
-        CorrelationEngine.setDefaultWindowSeconds(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.get());
         DatabaseManager.getInstance().initialize(databaseSettings);
-        com.itemgraph.ingest.InternalObservationService.getInstance().start();
         com.itemgraph.ingest.IngestionService.getInstance().setAdapter(
                 new com.itemgraph.ingest.GriefLoggerAdapter(griefLoggerDatabasePath, griefLoggerIntegrationEnabled));
         com.itemgraph.ingest.IngestionService.getInstance().start();

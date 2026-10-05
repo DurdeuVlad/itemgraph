@@ -58,6 +58,23 @@ class QueryFormatterTest {
     }
 
     @Test
+    void worldAndEntityCausesRenderTheirTypedActorInsteadOfAnUnknownPlayer() {
+        String entityId = "ca09b379-5162-4b1c-bdd3-9442fe5ef109";
+        AuditEventDetail enderman = new AuditEventDetail(3, "ENDERMAN_BLOCK_MOVE", 1_700_000_000_002L,
+                null, null, "minecraft:overworld", 1, 64, 2, "minecraft:dirt",
+                "{\"actor\":{\"kind\":\"ENTITY\",\"entity_type\":\"minecraft:enderman\","
+                        + "\"entity_uuid\":\"" + entityId + "\"},\"owner_provenance\":{\"status\":\"NOT_APPLICABLE\"}}");
+        AuditEventDetail fire = new AuditEventDetail(4, "FIRE_BLOCK_CHANGE", 1_700_000_000_003L,
+                null, null, "minecraft:overworld", 1, 64, 2, "minecraft:oak_log", "{}");
+
+        String formatted = String.join("\n", QueryFormatter.formatAuditEvents(List.of(enderman, fire), "all"));
+
+        assertTrue(formatted.contains("actor=entity:minecraft:enderman id=" + entityId), formatted);
+        assertTrue(formatted.contains("actor=world/environment"), formatted);
+        assertFalse(formatted.contains("(unknown player)"), formatted);
+    }
+
+    @Test
     void testFormatDuration() {
         assertEquals("0ms", QueryFormatter.formatDuration(0));
         assertEquals("999ms", QueryFormatter.formatDuration(999));
