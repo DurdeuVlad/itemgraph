@@ -635,7 +635,8 @@ class ItemGraphCommandsHelpTest {
         assertTrue(help.contains("itemgraph.command.lookup"));
         assertTrue(help.contains("itemgraph.audit"));
         assertTrue(help.contains("Legacy CRAFT/SMELT is unresolved"));
-        assertTrue(help.contains("trade, enchanting, brewing, smithing"));
+        assertTrue(help.contains("trades are not captured yet"));
+        assertTrue(help.contains("enchanting, brewing, smithing"));
     }
 
     @Test

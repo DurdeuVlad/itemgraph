@@ -78,18 +78,15 @@ public final class CommandHelp {
                 "[ItemGraph] Start with an admin question; use /ig help commands to find a command or /ig help <topic> for exact syntax.",
                 "[ItemGraph] Example: /ig help trace item"));
         topics.put("commands", List.of(
-                "[ItemGraph] Use /ig help <topic> for exact syntax and examples; groups below list topics.",
-                "[ItemGraph] ITEM FLOW — /ig trace item; /ig gui item.",
-                "[ItemGraph] PLAYER/CONTAINER — /ig trace player; /ig trace container; /ig gui player; /ig gui container.",
-                "[ItemGraph] AUDIT — /ig lookup <eventType>; /ig lookup near; /ig lookup player; /ig lookup page.",
-                "[ItemGraph] TRANSFORM — /ig help lookup transformations.",
-                "[ItemGraph] FILTER/PROVENANCE — /ig lookup <filters...>; /ig lookup filters; /ig lookup provenance.",
-                "[ItemGraph] DETAIL — /ig event <observationId>; /ig explain <edgeId>; /ig page <page>.",
-                "[ItemGraph] INSPECTION — /ig inspect [on|off|status]; /ig goto <token> is click-only.",
-                "[ItemGraph] HEALTH/INGEST — /ig status; /ig audit; /ig ingest now; /ig ingest history (optional import).",
-                "[ItemGraph] TOPICS — guide, journeys, permissions, status, audit, ingest, event, explain, page, inspect, lookup, trace, gui.",
-                "[ItemGraph] Setup, config, and API are docs, not commands. See docs/ADMIN_QUICK_START.md. /ig = /itemgraph.",
-                "[ItemGraph] Example: /ig trace item diamond"));
+                "[ItemGraph] ITEM: /ig trace item diamond; /ig help trace item.",
+                "[ItemGraph] GUI: /ig gui item stone; /ig help gui; /ig gui container.",
+                "[ItemGraph] PLAYER: /ig trace player <playerName>; /ig help trace player.",
+                "[ItemGraph] CONTAINER: /ig trace container; /ig help trace container.",
+                "[ItemGraph] AUDIT: /ig lookup near; /ig help lookup; /ig inspect.",
+                "[ItemGraph] EVIDENCE: /ig event <observationId>; /ig explain <edgeId>.",
+                "[ItemGraph] PAGES: /ig page <page>; /ig goto <token> is click-only.",
+                "[ItemGraph] OPS: /ig status; /ig audit; /ig ingest history; /ig ingest now.",
+                "[ItemGraph] Example: /ig help trace item; /ig help <topic>; /ig help guide."));
         topics.put("permissions", List.of(
                 "[ItemGraph] All commands need itemgraph.command; status/help need only it.",
                 "[ItemGraph] Example lookup: itemgraph.command + itemgraph.command.lookup.",
@@ -225,18 +222,17 @@ public final class CommandHelp {
                 "[ItemGraph] A death-drop trace does not identify the killer or cause.",
                 "[ItemGraph] Example: /ig lookup THROW_ITEM 50 1440"));
         topics.put("lookup transformations", List.of(
-                "[ItemGraph] Craft/smelt output is observed; recipe inputs are unknown.",
+                "[ItemGraph] Craft/smelt output only; input is unknown; no lineage edge.",
+                "[ItemGraph] Types: CRAFT_OUTPUT_UNRESOLVED, SMELT_OUTPUT_UNRESOLVED.",
                 "[ItemGraph] Example: /ig lookup CRAFT_OUTPUT_UNRESOLVED 50 1440",
-                "[ItemGraph] Open output evidence: /ig event event:<evidence-uuid>.",
-                "[ItemGraph] No craft/smelt lineage edge is recorded.",
-                "[ItemGraph] Anvil rename/repair: /ig trace item <item-id>.",
-                "[ItemGraph] Filter: /ig lookup filters action.anvil_rename time.24h.",
-                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup +",
+                "[ItemGraph] Detail: /ig event event:<evidence-uuid>.",
+                "[ItemGraph] Filters: action.craft, action.smelt, action.anvil_rename/repair.",
+                "[ItemGraph] Rename/repair: /ig trace item <item-id>; /ig help journeys trace.",
+                "[ItemGraph] Lookup: itemgraph.command + itemgraph.command.lookup +",
                 "[ItemGraph] itemgraph.audit.",
-                "[ItemGraph] Trace needs itemgraph.trace + itemgraph.audit.",
-                "[ItemGraph] Legacy CRAFT/SMELT is unresolved, not trace lineage.",
-                "[ItemGraph] Trades, enchanting, brewing, smithing, grindstone,",
-                "[ItemGraph] and loot generation are not captured."));
+                "[ItemGraph] Trace follow-up needs itemgraph.trace + itemgraph.audit.",
+                "[ItemGraph] Legacy CRAFT/SMELT is unresolved; trades are not captured yet:",
+                "[ItemGraph] enchanting, brewing, smithing, grindstone, and loot."));
         topics.put("lookup page", List.of(
                 "[ItemGraph] Syntax: /ig lookup page <page> <eventType> [limit] [sinceMinutes]",
                 "[ItemGraph] page is 1-based; limit defaults to 20 and is capped at 100; sinceMinutes is omitted for all history.",
