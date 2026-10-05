@@ -13,7 +13,6 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 
 import java.util.Map;
-import java.util.UUID;
 
 /** Captures only the exact block written by an Enderman place goal. */
 @Mixin(targets = "net.minecraft.world.entity.monster.EnderMan$EndermanLeaveBlockGoal")
@@ -23,16 +22,12 @@ public abstract class EndermanLeaveBlockGoalMixin {
     @WrapOperation(method = "tick", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;I)Z"))
     private boolean itemgraph$capturePlaceBlock(Level level, BlockPos pos, BlockState state, int flags,
                                                  Operation<Boolean> original) {
-        BlockState before = WorldEventCapture.safeSnapshotBlockState(level, pos);
-        try {
-            return original.call(level, pos, state, flags);
-        } finally {
-            Map<String, String> metadata = new java.util.TreeMap<>(
-                    WorldEventCapture.entityProvenanceMetadata(enderman, null, false));
-            metadata.put("entity_uuid", enderman.getUUID().toString());
-            metadata.put("movement", "PLACE_BLOCK");
-            WorldEventCapture.recordDirectBlockChange(level, pos, before, "ENDERMAN_BLOCK_MOVE", "enderman",
-                    "EndermanLeaveBlockGoal.tick.setBlock", UUID.randomUUID().toString(), metadata, false);
-        }
+        Map<String, String> metadata = new java.util.TreeMap<>(
+                WorldEventCapture.entityProvenanceMetadata(enderman, null, false));
+        metadata.put("entity_uuid", enderman.getUUID().toString());
+        metadata.put("movement", "PLACE_BLOCK");
+        return WorldEventCapture.captureDirectBlockWrite(level, pos, "ENDERMAN_BLOCK_MOVE", "enderman",
+                "EndermanLeaveBlockGoal.tick.setBlock", false, metadata,
+                () -> original.call(level, pos, state, flags));
     }
 }

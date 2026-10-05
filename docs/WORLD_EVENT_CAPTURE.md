@@ -150,8 +150,10 @@ uses bounded result-boundary mixins for those vanilla methods:
   no confirmed block delta is retained as `WORLD_EFFECT_UNRESOLVED` with
   `WORLD_EFFECT_PARTIAL`.
 * `EndermanTakeBlockGoal.tick` wraps its exact `Level.removeBlock` call and
-  `EndermanLeaveBlockGoal.tick` wraps its exact `Level.setBlock` call. A row is
-  emitted only when that target's state changes. The payload records the Enderman
+  `EndermanLeaveBlockGoal.tick` wraps its exact `Level.setBlock` call. A changed
+  target emits `ENDERMAN_BLOCK_MOVE`; a false callback with no state change emits
+  `WORLD_EFFECT_ATTEMPT` with `callback_result=RETURNED_FALSE`; a thrown callback
+  emits unresolved `WORLD_EFFECT_PARTIAL` evidence. The payload records the Enderman
   as a typed entity actor, including its entity UUID and registry type; its
   `owner_provenance.status=NOT_APPLICABLE` remains distinct from actor identity.
   The row never writes the entity UUID to player identity columns or attributes

@@ -608,6 +608,14 @@ public final class WorldEventCapture {
     public static boolean captureDirectBlockWrite(Level level, BlockPos pos, String eventType,
                                                    String family, String boundary, boolean blockTypeOnly,
                                                    java.util.function.BooleanSupplier write) {
+        return captureDirectBlockWrite(level, pos, eventType, family, boundary, blockTypeOnly, Map.of(), write);
+    }
+
+    /** Runs and records a boolean block write while retaining source metadata on attempts and deltas. */
+    public static boolean captureDirectBlockWrite(Level level, BlockPos pos, String eventType,
+                                                   String family, String boundary, boolean blockTypeOnly,
+                                                   Map<String, String> sourceMetadata,
+                                                   java.util.function.BooleanSupplier write) {
         BlockState before = safeSnapshotBlockState(level, pos);
         Boolean result = null;
         boolean returned = false;
@@ -617,7 +625,7 @@ public final class WorldEventCapture {
             return result;
         } finally {
             recordDirectBlockChange(level, pos, before, eventType, family, boundary,
-                    UUID.randomUUID().toString(), Map.of(), blockTypeOnly, result, !returned);
+                    UUID.randomUUID().toString(), sourceMetadata, blockTypeOnly, result, !returned);
         }
     }
 

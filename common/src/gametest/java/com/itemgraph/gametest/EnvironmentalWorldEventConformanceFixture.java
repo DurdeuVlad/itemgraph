@@ -25,6 +25,7 @@ public final class EnvironmentalWorldEventConformanceFixture {
     public record Scenario(BlockPos fluidSource, BlockPos fluidTarget, BlockPos fireCenter,
                            BlockPos fireFailedWriteTarget,
                            BlockPos endermanTakeTarget, BlockPos endermanPlaceTarget,
+                           BlockPos endermanTakeFailedTarget, BlockPos endermanPlaceFailedTarget,
                            String endermanEntityId, BlockPos fallingSource, BlockPos fallingLanding,
                            long fallingEvidenceWatermark, BlockPos exceptionalFluidTarget,
                            BlockPos exceptionalFallingSource, BlockPos earlyFallingSource) { }
@@ -47,6 +48,8 @@ public final class EnvironmentalWorldEventConformanceFixture {
         BlockPos earlyFallingSource = helper.absolutePos(new BlockPos(9, 8, 6));
         boolean setupComplete = false;
         FixtureEnderman enderman = null;
+        BlockPos endermanTakeFailedTarget = null;
+        BlockPos endermanPlaceFailedTarget = null;
         try {
             level.setBlock(fluidSource.below(), Blocks.STONE.defaultBlockState(), 3);
             level.setBlock(fluidSource.north(), Blocks.STONE.defaultBlockState(), 3);
@@ -89,6 +92,22 @@ public final class EnvironmentalWorldEventConformanceFixture {
             enderman.moveTo(endermanCenter.getX() + 0.5, endermanCenter.getY(), endermanCenter.getZ() + 0.5,
                     0.0F, 0.0F);
             level.addFreshEntity(enderman);
+            endermanTakeFailedTarget = endermanCenter.east(2).above();
+            endermanPlaceFailedTarget = endermanCenter.west(2).above();
+            level.setBlock(endermanTakeFailedTarget, Blocks.STONE.defaultBlockState(), 3);
+            level.setBlock(endermanPlaceFailedTarget, Blocks.STONE.defaultBlockState(), 3);
+            var takeFailureMetadata = new java.util.TreeMap<>(
+                    WorldEventCapture.entityProvenanceMetadata(enderman, null, false));
+            takeFailureMetadata.put("entity_uuid", enderman.getUUID().toString());
+            takeFailureMetadata.put("movement", "TAKE_BLOCK");
+            WorldEventCapture.captureDirectBlockWrite(level, endermanTakeFailedTarget, "ENDERMAN_BLOCK_MOVE",
+                    "enderman", "EndermanTakeBlockGoal.tick.removeBlock", false, takeFailureMetadata, () -> false);
+            var placeFailureMetadata = new java.util.TreeMap<>(
+                    WorldEventCapture.entityProvenanceMetadata(enderman, null, false));
+            placeFailureMetadata.put("entity_uuid", enderman.getUUID().toString());
+            placeFailureMetadata.put("movement", "PLACE_BLOCK");
+            WorldEventCapture.captureDirectBlockWrite(level, endermanPlaceFailedTarget, "ENDERMAN_BLOCK_MOVE",
+                    "enderman", "EndermanLeaveBlockGoal.tick.setBlock", false, placeFailureMetadata, () -> false);
             BlockPos takeTarget = null;
             BlockPos placeTarget = null;
             Goal takeGoal = enderman.findGoal("EndermanTakeBlockGoal");
@@ -175,7 +194,8 @@ public final class EnvironmentalWorldEventConformanceFixture {
                     earlyFallingBefore, Blocks.SAND.defaultBlockState());
             setupComplete = true;
             return new Scenario(fluidSource, fluidTarget, firePos, fireFailedWriteTarget, takeTarget, placeTarget,
-                    enderman.getUUID().toString(), fallingSource, fallingLanding, fallingEvidenceWatermark,
+                    endermanTakeFailedTarget, endermanPlaceFailedTarget, enderman.getUUID().toString(),
+                    fallingSource, fallingLanding, fallingEvidenceWatermark,
                     exceptionalFluidTarget, exceptionalFallingSource, earlyFallingSource);
         } finally {
             if (enderman != null) {
@@ -183,7 +203,8 @@ public final class EnvironmentalWorldEventConformanceFixture {
             }
             if (!setupComplete) {
                 clearEnvironmentalBlocks(level, fluidSource, firePos, fallingSource, floor.above(),
-                        exceptionalFluidTarget, exceptionalFallingSource, earlyFallingSource, fireFailedWriteTarget);
+                        exceptionalFluidTarget, exceptionalFallingSource, earlyFallingSource, fireFailedWriteTarget,
+                        endermanTakeFailedTarget, endermanPlaceFailedTarget);
             }
         }
     }
@@ -210,6 +231,10 @@ public final class EnvironmentalWorldEventConformanceFixture {
                 "TAKE_BLOCK", "EndermanTakeBlockGoal.tick.removeBlock");
         assertEndermanBoundary(helper, scenario.endermanPlaceTarget(), scenario.endermanEntityId(),
                 "PLACE_BLOCK", "EndermanLeaveBlockGoal.tick.setBlock");
+        assertEndermanAttempt(helper, scenario.endermanTakeFailedTarget(), scenario.endermanEntityId(),
+                "TAKE_BLOCK", "EndermanTakeBlockGoal.tick.removeBlock");
+        assertEndermanAttempt(helper, scenario.endermanPlaceFailedTarget(), scenario.endermanEntityId(),
+                "PLACE_BLOCK", "EndermanLeaveBlockGoal.tick.setBlock");
         assertFallingBlockPath(helper, scenario.fallingSource(), scenario.fallingLanding(),
                 scenario.fallingEvidenceWatermark());
         assertExceptionalPair(helper, "FLUID_BLOCK_CHANGE", scenario.exceptionalFluidTarget(), "fluid");
@@ -221,7 +246,8 @@ public final class EnvironmentalWorldEventConformanceFixture {
     public static void cleanup(GameTestHelper helper, Scenario scenario) {
         clearEnvironmentalBlocks(helper.getLevel(), scenario.fluidSource(), scenario.fireCenter(),
                 scenario.fallingSource(), scenario.fallingLanding(), scenario.exceptionalFluidTarget(),
-                scenario.exceptionalFallingSource(), scenario.earlyFallingSource(), scenario.fireFailedWriteTarget());
+                scenario.exceptionalFallingSource(), scenario.earlyFallingSource(), scenario.fireFailedWriteTarget(),
+                scenario.endermanTakeFailedTarget(), scenario.endermanPlaceFailedTarget());
     }
 
     private static void clearEnvironmentalBlocks(ServerLevel level, BlockPos fluidSource, BlockPos fireCenter,
@@ -229,7 +255,9 @@ public final class EnvironmentalWorldEventConformanceFixture {
                                                  BlockPos exceptionalFluidTarget,
                                                  BlockPos exceptionalFallingSource,
                                                  BlockPos earlyFallingSource,
-                                                 BlockPos fireFailedWriteTarget) {
+                                                 BlockPos fireFailedWriteTarget,
+                                                 BlockPos endermanTakeFailedTarget,
+                                                 BlockPos endermanPlaceFailedTarget) {
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 2; dy++) {
                 for (int dz = -1; dz <= 1; dz++) {
@@ -250,6 +278,12 @@ public final class EnvironmentalWorldEventConformanceFixture {
         level.setBlock(earlyFallingSource, Blocks.AIR.defaultBlockState(), 3);
         level.setBlock(earlyFallingSource.below(), Blocks.AIR.defaultBlockState(), 3);
         level.setBlock(fireFailedWriteTarget, Blocks.AIR.defaultBlockState(), 3);
+        if (endermanTakeFailedTarget != null) {
+            level.setBlock(endermanTakeFailedTarget, Blocks.AIR.defaultBlockState(), 3);
+        }
+        if (endermanPlaceFailedTarget != null) {
+            level.setBlock(endermanPlaceFailedTarget, Blocks.AIR.defaultBlockState(), 3);
+        }
     }
 
     private static void assertFailedFireWrite(GameTestHelper helper, BlockPos target) {
@@ -442,6 +476,54 @@ public final class EnvironmentalWorldEventConformanceFixture {
             }
         } catch (SQLException failure) {
             throw new IllegalStateException("Could not inspect Enderman " + movement + " evidence", failure);
+        }
+    }
+
+    private static void assertEndermanAttempt(GameTestHelper helper, BlockPos target, String entityId,
+                                              String movement, String captureBoundary) {
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement("""
+                     SELECT event_type, player_uuid, detail, raw_data FROM ig_audit_events
+                     WHERE x = ? AND y = ? AND z = ? AND event_type = 'WORLD_EFFECT_ATTEMPT'
+                     ORDER BY id
+                     """)) {
+            statement.setDouble(1, target.getX());
+            statement.setDouble(2, target.getY());
+            statement.setDouble(3, target.getZ());
+            try (var rows = statement.executeQuery()) {
+                helper.assertTrue(rows.next(), movement + " callback returning false was not recorded at " + target);
+                helper.assertTrue(rows.getString("player_uuid") == null,
+                        movement + " attempt must not fabricate a player actor");
+                String detail = rows.getString("detail");
+                helper.assertValueEqual(detail, new String(rows.getBytes("raw_data"), StandardCharsets.UTF_8),
+                        movement + " attempt raw and formatted evidence differ");
+                var payload = JsonParser.parseString(detail).getAsJsonObject();
+                helper.assertValueEqual("OBSERVED", payload.get("evidence_class").getAsString(),
+                        movement + " false callback must remain a directly observed attempt");
+                helper.assertValueEqual("UNCHANGED", payload.get("outcome").getAsString(),
+                        movement + " false callback must not claim a block change");
+                helper.assertValueEqual("NONE", payload.get("quantity_semantics").getAsString(),
+                        movement + " false callback must not claim item quantity");
+                helper.assertFalse(payload.has("before_state"), "failed callback must not claim a state delta");
+                helper.assertFalse(payload.has("after_state"), "failed callback must not claim a state delta");
+                helper.assertValueEqual("ENTITY", payload.getAsJsonObject("actor").get("kind").getAsString(),
+                        movement + " attempt must preserve entity actor kind");
+                helper.assertValueEqual(entityId,
+                        payload.getAsJsonObject("actor").get("entity_uuid").getAsString(),
+                        movement + " attempt must preserve Enderman identity");
+                var metadata = payload.getAsJsonObject("metadata");
+                helper.assertValueEqual("RETURNED_FALSE", metadata.get("callback_result").getAsString(),
+                        movement + " attempt must preserve callback result");
+                helper.assertValueEqual(entityId, metadata.get("entity_uuid").getAsString(),
+                        movement + " attempt metadata must preserve Enderman identity");
+                helper.assertValueEqual(movement, metadata.get("movement").getAsString(),
+                        movement + " attempt metadata must preserve direction");
+                helper.assertValueEqual(captureBoundary, metadata.get("capture_boundary").getAsString(),
+                        movement + " attempt came from the wrong write boundary");
+                helper.assertFalse(rows.next(), movement + " failed callback must emit exactly one attempt row");
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not inspect Enderman " + movement + " attempt", failure);
         }
     }
 
