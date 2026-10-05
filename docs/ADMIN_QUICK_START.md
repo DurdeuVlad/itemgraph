@@ -150,6 +150,10 @@ parent inheritance.
 `/ig` and `/itemgraph` are the same command root. `/ig help` gives task-first starting
 points; `/ig help commands` groups every command path by investigation task. `/ig help
 lookup near`, `/ig help trace item`, and other topic forms give syntax and an example.
+For complete first-time routes, use `/ig help journeys inspect`,
+`/ig help journeys trace`, `/ig help journeys near`, or
+`/ig help journeys filters`. Each states the permission nodes, result meaning,
+next command, and checks for an empty result.
 `/ig help goto` explains that `[Go to ...]` is an in-game click action; do not type its token.
 `/ig page <page>` continues the issuing player's saved lookup session. By
 contrast, `/ig lookup page <page> <eventType> [limit] [sinceMinutes]` runs a direct page
@@ -352,7 +356,7 @@ restart. ItemGraph validates this before opening its database and renders text
 on the server, so vanilla clients do not need the mod or network access. Missing
 keys fall back to English. Core query/detail/audit labels, inspection responses,
 flow-browser rows, controls, help entry text and navigation labels have translated
-entries. The explicit English fallback inventory currently contains 139 authored
+entries. The explicit English fallback inventory currently contains 174 authored
 source phrases, including detailed help topics. See
 [`CONFIGURATION.md`](CONFIGURATION.md) for exact evidence limits: the checked-in
 GriefLogger 1.2.10-1.21.1 artifact has no locale inventory, while the three
@@ -369,7 +373,7 @@ listed boundary; `Planned` means there is no user-facing implementation to use y
 
 | Feature | Entry point | Status | Permission / effect |
 | --- | --- | --- | --- |
-| Live command overview and topic help | bare `/ig`, `/ig help`, `/ig help <topic>`, `/ig help journeys` | Shipped | `itemgraph.command`; unset uses level 2; read-only. The journeys topic links inspection, trace details, nearby audit paging, and player-versus-console filters. |
+| Live command overview and topic help | bare `/ig`, `/ig help`, `/ig help <topic>`, `/ig help journeys` and its four subtopics | Shipped | `itemgraph.command`; unset uses level 2; read-only. Journey topics give exact permission bundles, evidence meaning, follow-up commands, and safe empty-result checks for inspection, trace, nearby audit, and filtered player/console lookup. |
 | Fine-grained command permissions | `/ig help permissions`; [security and permissions](SECURITY_AND_PERMISSIONS.md) | Shipped | Exact per-surface nodes, explicit deny, level-2 fallback, and async/menu rechecks. |
 | Runtime, database, queues, and worker status | `/ig status` | Shipped | `itemgraph.command`; capture state and worker metrics print before database statistics are queried, so they remain visible if that query fails; database-only counts can be unavailable; read-only. |
 | Database invariants and quantity audit | `/ig audit` | Shipped | `itemgraph.command` + `itemgraph.audit`; async, read-only. |

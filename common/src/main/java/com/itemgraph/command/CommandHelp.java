@@ -17,6 +17,7 @@ public final class CommandHelp {
 
     static final List<String> TOPIC_NAMES = List.of(
             "help", "commands", "permissions", "guide", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain", "journeys",
+            "journeys inspect", "journeys trace", "journeys near", "journeys filters",
             "goto",
             "lookup", "lookup near", "lookup page", "lookup player", "lookup filters", "lookup provenance",
             "page",
@@ -97,17 +98,57 @@ public final class CommandHelp {
                 "[ItemGraph] Full command-to-node matrix: docs/SECURITY_AND_PERMISSIONS.md",
                 "[ItemGraph] Example: grant itemgraph.command and itemgraph.command.lookup to a level-1 moderator."));
         topics.put("journeys", List.of(
-                "[ItemGraph] INSPECT: /ig inspect on; left-click blocks, right-click containers.",
-                "[ItemGraph] TRACE: /ig trace item <query> follows an item or item type.",
-                "[ItemGraph] Open trace observation# IDs with /ig event <observationId>.",
-                "[ItemGraph] Explain an inferred edge with /ig explain <edgeId>.",
-                "[ItemGraph] Admin/creative outcome UUIDs: /ig event event:<uuid>.",
-                "[ItemGraph] Syntax: /ig help lookup near and /ig help lookup filters.",
-                "[ItemGraph] Players page saved results with Next or /ig page 2.",
-                "[ItemGraph] Console near returns one page and saves no coordinates.",
-                "[ItemGraph] Direct page: /ig lookup page <page> <eventType> (no near scope).",
-                "[ItemGraph] Exact grants: /ig help permissions; roles: /ig help guide.",
+                "[ItemGraph] Inspect: /ig help journeys inspect; trace: /ig help journeys trace.",
+                "[ItemGraph] Nearby: /ig help journeys near; filtered: /ig help journeys filters.",
+                "[ItemGraph] Trace observation IDs use /ig event <observationId>.",
+                "[ItemGraph] Inferred edge IDs use /ig explain <edgeId>.",
+                "[ItemGraph] Admin/creative outcome UUIDs use /ig event event:<uuid>.",
+                "[ItemGraph] Player paging: /ig page 2; console near returns one page.",
+                "[ItemGraph] Direct event pages have no nearby scope: /ig lookup page.",
+                "[ItemGraph] Roles: /ig help guide; exact nodes: /ig help permissions.",
                 "[ItemGraph] Example: /ig help journeys"));
+        topics.put("journeys inspect", List.of(
+                "[ItemGraph] Start: /ig inspect on; left-click blocks or right-click containers.",
+                "[ItemGraph] History is OBSERVED; copy event type: /ig lookup <eventType>.",
+                "[ItemGraph] Container rows label OBSERVED or INFERRED evidence.",
+                "[ItemGraph] OBS ID: /ig event <observationId>; edge: /ig explain <edgeId>.",
+                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.inspect.",
+                "[ItemGraph] History needs itemgraph.audit; containers also need itemgraph.gui.",
+                "[ItemGraph] Empty: check capture time, supported event, target, and grants.",
+                "[ItemGraph] Also check dimension and time range; empty is not proof of no event.",
+                "[ItemGraph] Example: /ig help journeys inspect"));
+        topics.put("journeys trace", List.of(
+                "[ItemGraph] Start: /ig trace item <query> follows an item or item type.",
+                "[ItemGraph] OBS ID: /ig event <observationId> opens raw evidence.",
+                "[ItemGraph] INFERRED edge: /ig explain <edgeId> shows its evidence and reason.",
+                "[ItemGraph] Perm: itemgraph.command + itemgraph.trace + itemgraph.audit.",
+                "[ItemGraph] Detail adds itemgraph.event or itemgraph.explain, respectively.",
+                "[ItemGraph] Ambiguous matches are candidates; choose the matching fingerprint.",
+                "[ItemGraph] Empty: check capture, item or target, time window, and grants.",
+                "[ItemGraph] Also confirm that the event type is supported; empty is not proof.",
+                "[ItemGraph] Example: /ig help journeys trace"));
+        topics.put("journeys near", List.of(
+                "[ItemGraph] Start: /ig lookup near; exact syntax: /ig help lookup near.",
+                "[ItemGraph] OBSERVED audit rows; copy type to /ig lookup <eventType>.",
+                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup.",
+                "[ItemGraph] Protected event families also need itemgraph.audit.",
+                "[ItemGraph] Player pages: /ig page 2; add itemgraph.command.page.",
+                "[ItemGraph] Console near returns one page and saves no coordinates.",
+                "[ItemGraph] /ig lookup page <page> <eventType> has no nearby scope.",
+                "[ItemGraph] Empty: check capture, event type, coordinates, range, and grants.",
+                "[ItemGraph] Empty means no stored match; it does not prove no event occurred.",
+                "[ItemGraph] Example: /ig help journeys near"));
+        topics.put("journeys filters", List.of(
+                "[ItemGraph] Start: /ig lookup <filters...>; syntax: /ig help lookup filters.",
+                "[ItemGraph] Rows span audit, observation, transformation, and import evidence.",
+                "[ItemGraph] Classes: OBSERVED, INFERRED, UNRESOLVED, PROVENANCE_ONLY.",
+                "[ItemGraph] Narrow action: /ig lookup action.<value> time.1h.",
+                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup.",
+                "[ItemGraph] Paging: itemgraph.command.page; protected: itemgraph.audit.",
+                "[ItemGraph] Radius is player-only; console uses /ig lookup near.",
+                "[ItemGraph] Empty: check capture time, filter values, target, and grants.",
+                "[ItemGraph] Also check supported events and time range; empty is not proof.",
+                "[ItemGraph] Example: /ig help journeys filters"));
         topics.put("guide", List.of(
                 "[ItemGraph] Admin quick start: https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md",
                 "[ItemGraph] Example: open the guide before configuring access or running the first capture check."));

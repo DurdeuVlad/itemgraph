@@ -70,19 +70,50 @@ class ItemGraphCommandsHelpTest {
         List<String> journeyLines = CommandHelp.topicLines("journeys");
         String journeys = String.join("\n", journeyLines);
         assertTrue(journeys.contains("/ig event <observationId>"));
-        assertTrue(journeys.contains("Admin/creative outcome UUIDs: /ig event event:<uuid>"));
+        assertTrue(journeys.contains("Admin/creative outcome UUIDs use /ig event event:<uuid>"));
         assertFalse(journeys.contains("copy event:<uuid> from /ig trace"));
         assertTrue(journeys.contains("/ig explain <edgeId>"));
-        assertTrue(journeys.contains("/ig help lookup near and /ig help lookup filters"));
-        assertTrue(journeys.contains("Players page saved results with Next or /ig page 2"));
-        assertTrue(journeys.contains("Console near returns one page and saves no coordinates"));
-        assertTrue(journeys.contains("Direct page: /ig lookup page <page> <eventType> (no near scope)"));
-        assertTrue(journeys.contains("Exact grants: /ig help permissions"));
+        assertTrue(journeys.contains("/ig help journeys near"));
+        assertTrue(journeys.contains("/ig help journeys filters"));
+        assertTrue(journeys.contains("Player paging: /ig page 2; console near returns one page."));
         String longestLine = journeyLines.stream().max(java.util.Comparator.comparingInt(String::length)).orElse("");
         assertTrue(longestLine.length() <= 80,
                 () -> "journey help line exceeds narrow Minecraft chat width (" + longestLine.length() + "): " + longestLine);
         assertTrue(journeyLines.size() <= 12,
                 "journey help should fit a compact chat overview including its shared permission message");
+    }
+
+    @Test
+    void eachAdminJourneyNamesPermissionsEvidenceContinuationAndSafeEmptyChecks() {
+        assertJourneyTopic("journeys inspect", "/ig inspect on", "OBSERVED", "INFERRED",
+                "itemgraph.command.inspect", "itemgraph.audit", "itemgraph.gui",
+                "/ig lookup <eventType>", "Empty:", "dimension and time range");
+        assertJourneyTopic("journeys trace", "/ig trace item <query>", "OBS ID:",
+                "/ig event <observationId>", "INFERRED edge:", "/ig explain <edgeId>",
+                "itemgraph.trace", "itemgraph.audit", "itemgraph.event", "itemgraph.explain",
+                "Ambiguous matches", "Empty:", "event type is supported");
+        assertJourneyTopic("journeys near", "/ig lookup near", "OBSERVED audit rows",
+                "/ig lookup <eventType>", "itemgraph.command.lookup", "itemgraph.audit",
+                "/ig page 2", "itemgraph.command.page", "Console near returns one page",
+                "has no nearby scope", "Empty:", "coordinates, range");
+        assertJourneyTopic("journeys filters", "/ig lookup <filters...>", "audit, observation",
+                "transformation, and import", "OBSERVED, INFERRED, UNRESOLVED, PROVENANCE_ONLY",
+                "action.<value>", "itemgraph.command.lookup", "itemgraph.audit",
+                "itemgraph.command.page", "Radius is player-only", "Empty:", "supported events");
+    }
+
+    private static void assertJourneyTopic(String topic, String... requiredText) {
+        List<String> lines = CommandHelp.topicLines(topic);
+        assertNotNull(lines, "missing help topic " + topic);
+        String content = String.join("\n", lines);
+        for (String required : requiredText) {
+            assertTrue(content.contains(required), () -> topic + " is missing: " + required);
+        }
+        String longestLine = lines.stream().max(java.util.Comparator.comparingInt(String::length)).orElse("");
+        assertTrue(longestLine.length() <= 80,
+                () -> topic + " has a line wider than 80 chars: " + longestLine);
+        assertTrue(lines.size() <= 12,
+                () -> topic + " exceeds 12 chat messages including shared permission guidance");
     }
 
     @Test
@@ -126,7 +157,7 @@ class ItemGraphCommandsHelpTest {
         List<String> nl = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
         assertEquals(english.get(0), nl.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> nlFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("nl_nl");
-        assertEquals(139, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(174, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(nlFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (nlFallback.contains(english.get(i))) assertEquals(english.get(i), nl.get(i));
@@ -135,7 +166,7 @@ class ItemGraphCommandsHelpTest {
         List<String> zh = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
         assertEquals(english.get(0), zh.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> zhFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("zh_tw");
-        assertEquals(139, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(174, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(zhFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (zhFallback.contains(english.get(i))) assertEquals(english.get(i), zh.get(i));

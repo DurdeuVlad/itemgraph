@@ -59,7 +59,7 @@ available for forensic review and are excluded from current graph queries.
 Server messages can use `en_us`, `nl_nl`, or `zh_tw` through NeoForge
 `general.language` or Fabric `language`. Text is rendered server-side for vanilla
 clients; missing keys fall back to English. Help entry text and navigation labels
-have translated entries; 139 authored source phrases currently use the explicit
+have translated entries; 174 authored source phrases currently use the explicit
 English fallback inventory, including detailed help topics. The exact GriefLogger
 1.2.10-1.21.1 locale inventory is unknown; supported ItemGraph locales are
 based on pinned 26.2 source config research only.
