@@ -116,6 +116,11 @@ public record TraceHop(
                     + " parent_event_id=" + obs.parentEventUuid()
                     + " break_event_id=" + obs.breakEventUuid() + "]";
         }
+        if (obs.mutationEventUuid() != null) {
+            detail += " [mutation_event_id=" + obs.mutationEventUuid();
+            if (obs.commandAttemptEventUuid() != null) detail += " command_attempt_event_id=" + obs.commandAttemptEventUuid();
+            detail += "]";
+        }
         return new TraceHop(
                 Kind.OBSERVED,
                 obs.id(),

@@ -291,6 +291,8 @@ public final class UnifiedEvidenceQueryService {
                     }
                     detail = ContainerBreakEvidenceLinks.appendAuditDetail(
                             rs.getString("event_type"), detail, rs.getBytes("raw_data"));
+                    detail = AdminMutationEvidenceLinks.appendAuditDetail(
+                            rs.getString("event_type"), detail, rs.getBytes("raw_data"));
                     rows.add(new UnifiedEvidenceDetail(
                             valueOr(rs.getString("source_type"), "AUDIT"),
                             "audit#" + rs.getLong("id"),
@@ -376,6 +378,8 @@ public final class UnifiedEvidenceQueryService {
                             + " origin=" + valueOr(rs.getString("origin_label"), "(unlabeled)")
                             + " destination=" + valueOr(rs.getString("dest_label"), "(unlabeled)");
                     detail = ContainerBreakEvidenceLinks.appendObservationDetail(detail, rs.getBytes("raw_data"));
+                    detail = AdminMutationEvidenceLinks.appendObservationDetail(
+                            rs.getString("action_type"), detail, rs.getBytes("raw_data"));
                     String rowLevel = rs.getString("level_id");
                     Double rowX = nullableDouble(rs, "x");
                     Double rowY = nullableDouble(rs, "y");
@@ -407,6 +411,7 @@ public final class UnifiedEvidenceQueryService {
             throws SQLException {
         StringBuilder sql = new StringBuilder("""
                 SELECT t.id, t.transformation_type, t.quantity, t.timestamp_ms, t.details,
+                       t.ingest_event_uuid,
                        p.level_id, p.x, p.y, p.z, p.custom_label AS player_name,
                        p.owner_uuid AS player_uuid,
                        source_fp.item_id AS source_item, result_fp.item_id AS result_item
@@ -449,6 +454,10 @@ public final class UnifiedEvidenceQueryService {
                                 + " quantity=UNKNOWN";
                     } else {
                         detail = valueOr(rs.getString("details"), "") + " " + detail;
+                    }
+                    String eventUuid = rs.getString("ingest_event_uuid");
+                    if (AdminMutationEvidenceLinks.isCanonicalUuid(eventUuid)) {
+                        detail += " evidence_event_id=" + eventUuid;
                     }
                     rows.add(new UnifiedEvidenceDetail(
                             "TRANSFORMATION", "transformation#" + rs.getLong("id"),

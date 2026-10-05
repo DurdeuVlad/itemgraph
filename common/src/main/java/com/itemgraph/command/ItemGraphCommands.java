@@ -142,9 +142,9 @@ public final class ItemGraphCommands {
                                 .then(Commands.literal("history").requires(source -> ItemGraphPermissions.canUse(source, ItemGraphPermissions.IMPORT))
                                         .executes(ItemGraphCommands::ingestHistory)))
 
-                        // /ig event <observationId>
+                        // /ig event <observationId|event:uuid>
                         .then(Commands.literal("event").requires(source -> ItemGraphPermissions.canUseAll(source, ItemGraphPermissions.EVENT, ItemGraphPermissions.AUDIT))
-                                .then(Commands.argument("observationId", LongArgumentType.longArg(1))
+                                .then(Commands.argument("observationIdOrEventUuid", StringArgumentType.greedyString())
                                         .executes(ItemGraphCommands::event)))
 
                         // /ig explain <edgeId>
@@ -775,20 +775,46 @@ public final class ItemGraphCommands {
         };
     }
 
-    /** /ig event <observationId> - one raw observation, labelled OBSERVED. */
+    /** /ig event <observationId|event:uuid> - one raw observation, labelled OBSERVED. */
     private static int event(CommandContext<CommandSourceStack> ctx) {
-        long observationId = LongArgumentType.getLong(ctx, "observationId");
-        return QueryDispatcher.dispatch(ctx.getSource(), List.of(ItemGraphPermissions.EVENT, ItemGraphPermissions.AUDIT), "event", conn ->
-                EVENT_QUERIES.findObservation(conn, observationId)
-                        .map(obs -> {
-                            List<String> lines = QueryFormatter.formatEvent(obs);
-                            return QueryDispatcher.QueryOutput.found(lines,
-                                    locationActions(obs.origin(), obs.destination()), List.of(),
-                                    hoverEveryLine(lines.size(), chatHover("OBSERVED", obs.fingerprint(),
-                                            obs.actionType(), obs.timestampMs(), obs.origin(), obs.destination())));
-                        })
-                        .orElseGet(() -> QueryDispatcher.QueryOutput.notFound(
-                                QueryFormatter.eventNotFound(observationId))));
+        String query = StringArgumentType.getString(ctx, "observationIdOrEventUuid");
+        Long observationId = null;
+        String eventUuid = null;
+        if (query.startsWith("event:")) {
+            eventUuid = query.substring("event:".length());
+        } else {
+            try { observationId = Long.parseLong(query); } catch (NumberFormatException ignored) { }
+        }
+        final Long parsedObservationId = observationId;
+        final String parsedEventUuid = eventUuid;
+        return QueryDispatcher.dispatch(ctx.getSource(), List.of(ItemGraphPermissions.EVENT, ItemGraphPermissions.AUDIT), "event", conn -> {
+            var observation = parsedObservationId != null && parsedObservationId > 0
+                    ? EVENT_QUERIES.findObservation(conn, parsedObservationId)
+                    : EVENT_QUERIES.findObservationByEventUuid(conn, parsedEventUuid);
+            if (observation.isPresent()) {
+                var obs = observation.get();
+                List<String> lines = QueryFormatter.formatEvent(obs);
+                return QueryDispatcher.QueryOutput.found(lines,
+                        locationActions(obs.origin(), obs.destination()), List.of(),
+                        hoverEveryLine(lines.size(), chatHover("OBSERVED", obs.fingerprint(),
+                                obs.actionType(), obs.timestampMs(), obs.origin(), obs.destination())));
+            }
+            if (parsedEventUuid != null) {
+                var transformation = EVENT_QUERIES.findTransformationByEventUuid(conn, parsedEventUuid);
+                if (transformation.isPresent()) {
+                    return QueryDispatcher.QueryOutput.found(QueryFormatter.formatUnifiedEvidence(
+                            List.of(transformation.get()), "exact event UUID"));
+                }
+                var auditEvent = EVENT_QUERIES.findAuditEventByEventUuid(conn, parsedEventUuid);
+                if (auditEvent.isPresent()) {
+                    return QueryDispatcher.QueryOutput.found(QueryFormatter.formatUnifiedEvidence(
+                            List.of(auditEvent.get()), "exact event UUID"));
+                }
+            }
+            return QueryDispatcher.QueryOutput.notFound(parsedObservationId != null
+                    ? QueryFormatter.eventNotFound(parsedObservationId)
+                    : QueryFormatter.eventUuidNotFound(parsedEventUuid));
+        });
     }
 
     /** /ig explain <edgeId> - one inferred edge plus every observation it cites. */

@@ -226,6 +226,12 @@ public final class QueryFormatter {
         if (obs.itemEntityUuid() != null) {
             lines.add(indent + t("detail.entity_uuid", "entity UUID: {0}", obs.itemEntityUuid()));
         }
+        if (obs.mutationEventUuid() != null) {
+            lines.add(indent + "mutation event: " + obs.mutationEventUuid());
+        }
+        if (obs.commandAttemptEventUuid() != null) {
+            lines.add(indent + "command attempt: " + obs.commandAttemptEventUuid());
+        }
         if (obs.sourceGroup() != null) {
             ObservationDetail.SourceGroup group = obs.sourceGroup();
             if ("CONFIRMED".equals(group.state())) {
@@ -244,6 +250,12 @@ public final class QueryFormatter {
 
     public static String eventNotFound(long observationId) {
         return PREFIX + t("error.observation_not_found", "No observation #{0} exists in ig_observations.", observationId);
+    }
+
+    public static String eventUuidNotFound(String eventUuid) {
+        return PREFIX + (AdminMutationEvidenceLinks.isCanonicalUuid(eventUuid)
+                ? "No item observation, transformation, or audit event is linked to event:" + eventUuid + ". Check the audit outcome's item_flow_link_status."
+                : "Invalid event UUID. Use /ig event event:<canonical-uuid> or /ig event <observationId>.");
     }
 
     // ------------------------------------------------------------------

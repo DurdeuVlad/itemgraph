@@ -40,7 +40,9 @@ public record ObservationDetail(
         String dispositionReason,
         String evidenceEventUuid,
         String parentEventUuid,
-        String breakEventUuid
+        String breakEventUuid,
+        String mutationEventUuid,
+        String commandAttemptEventUuid
 ) {
 
     public record SourceGroup(
@@ -68,7 +70,7 @@ public record ObservationDetail(
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint, actionType,
                 amount, correlatedAtMs, correlationStatus, itemEntityUuid, null, null, null, null,
-                null, null, null);
+                null, null, null, null, null);
     }
 
     public ObservationDetail(
@@ -90,7 +92,7 @@ public record ObservationDetail(
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
                 actionType, amount, correlatedAtMs, correlationStatus, itemEntityUuid,
-                timestampEndMs, captureType, sourceGroup, null, null, null, null);
+                timestampEndMs, captureType, sourceGroup, null, null, null, null, null, null);
     }
 
     public ObservationDetail(
@@ -102,7 +104,7 @@ public record ObservationDetail(
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
                 actionType, amount, correlatedAtMs, correlationStatus, itemEntityUuid,
-                timestampEndMs, captureType, sourceGroup, dispositionReason, null, null, null);
+                timestampEndMs, captureType, sourceGroup, dispositionReason, null, null, null, null, null);
     }
 
     public ObservationDetail(
@@ -120,7 +122,7 @@ public record ObservationDetail(
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
                 actionType, amount, correlatedAtMs, correlationStatus, null, null, null, null, null,
-                null, null, null);
+                null, null, null, null, null);
     }
 
     public ObservationDetail(
@@ -137,7 +139,7 @@ public record ObservationDetail(
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
                 actionType, amount, correlatedAtMs, null, null, null, null, null, null,
-                null, null, null);
+                null, null, null, null, null);
     }
 
     /** Retired pre-use quantity rows remain visible as unresolved evidence. */
