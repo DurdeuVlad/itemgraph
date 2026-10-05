@@ -146,7 +146,7 @@ EXPECTED_ACTION_CONTRACT: dict[str, tuple[str, str, str, str]] = {
     "REMOVE_ITEM": ("REMOVE_ITEM", "compatible", "observed", "signed_delta"),
     "DROP_ITEM": ("DROP_ITEM", "compatible", "observed", "signed_delta"),
     "PICKUP_ITEM": ("PICKUP_ITEM", "compatible", "observed", "signed_delta"),
-    "CRAFT_ITEM": ("CRAFT", "extended", "observed", "transformation"),
+    "CRAFT_ITEM": ("CRAFT_OUTPUT_UNRESOLVED", "compatible", "unresolved", "observed_stack_count"),
     "CONSUME_ITEM": ("CONSUME_ITEM", "compatible", "observed", "signed_delta"),
     "BREAK_ITEM": ("BREAK_ITEM", "compatible", "observed", "signed_delta"),
     "THROW_ITEM": ("THROW_ITEM", "compatible", "observed", "observed_stack_count"),
@@ -176,7 +176,9 @@ ENTITY_EXTENSION_CONTRACT = {
     "compatibility_mapping": False,
 }
 EXPECTED_EXTENSION_ACTION_CONTRACT: dict[str, tuple[str, str, str]] = {
-    "SMELT": ("extended", "observed", "transformation"),
+    "CRAFT": ("unresolved", "unresolved", "unknown"),
+    "SMELT": ("unresolved", "unresolved", "unknown"),
+    "SMELT_OUTPUT_UNRESOLVED": ("extended", "unresolved", "observed_stack_count"),
     "ANVIL_RENAME": ("extended", "observed", "transformation"),
     "ANVIL_REPAIR": ("extended", "observed", "transformation"),
     "HOPPER_INSERT": ("extended", "observed", "signed_delta"),
@@ -416,9 +418,16 @@ def validate_registry(registry: dict[str, Any]) -> None:
                 == (expected_status, expected_evidence, expected_quantity),
                 f"actions[{index}] ItemGraph-only contract for {itemgraph} changed",
             )
-            require("owner_issue" not in row, f"actions[{index}] ItemGraph-only action {itemgraph} must not claim an owner issue")
+            if expected_status == "unresolved":
+                require(row.get("owner_issue") == 162,
+                        f"actions[{index}] historical-only transformation {itemgraph} must remain owned by issue #162")
+            else:
+                require("owner_issue" not in row,
+                        f"actions[{index}] ItemGraph-only action {itemgraph} must not claim an owner issue")
         if row.get("status") == "unresolved":
-            require(isinstance(row.get("owner_issue"), int), f"actions[{index}] unresolved row needs owner_issue")
+            expected_owner = 162 if itemgraph in {"CRAFT", "SMELT"} else 27
+            require(row.get("owner_issue") == expected_owner,
+                    f"actions[{index}] unresolved row must remain owned by issue #{expected_owner}")
         if isinstance(row.get("evidence_issue"), int):
             expected_evidence_issue = 75 if source_action == "INTERACT_ENTITY" else 76
             require(row["evidence_issue"] == expected_evidence_issue,

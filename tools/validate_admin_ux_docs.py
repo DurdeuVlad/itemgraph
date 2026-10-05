@@ -38,6 +38,17 @@ for topic in topics:
         fail(f"live help topic {topic!r} has no detailed topic entry")
     if topic not in quick_start:
         fail(f"admin quick start omits live help topic {topic!r}")
+for topic in topic_map:
+    if topic not in topics:
+        fail(f"detailed help topic {topic!r} is not discoverable through suggestions")
+
+feature_map = quick_start.split("## Feature map: currently available surfaces", 1)
+if len(feature_map) != 2:
+    fail("admin quick start is missing its feature map")
+feature_rows = [line for line in feature_map[1].splitlines() if line.startswith("| ")]
+feature_names = [row.split("|", 2)[1].strip() for row in feature_rows[2:]]
+if len(feature_names) != len(set(feature_names)):
+    fail("admin quick start feature map contains duplicate feature rows")
 
 registration_markers = {
     "lookup near": "buildNearLookupCommand",

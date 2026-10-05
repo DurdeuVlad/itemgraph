@@ -20,6 +20,7 @@ public final class CommandHelp {
             "journeys inspect", "journeys trace", "journeys near", "journeys filters",
             "goto",
             "lookup", "lookup near", "lookup page", "lookup player", "lookup filters", "lookup provenance",
+            "lookup transformations",
             "page",
             "trace", "trace item", "trace player", "trace container",
             "gui", "gui item", "gui player", "gui container", "inspect");
@@ -81,6 +82,7 @@ public final class CommandHelp {
                 "[ItemGraph] ITEM FLOW — /ig trace item; /ig gui item.",
                 "[ItemGraph] PLAYER/CONTAINER — /ig trace player; /ig trace container; /ig gui player; /ig gui container.",
                 "[ItemGraph] AUDIT — /ig lookup <eventType>; /ig lookup near; /ig lookup player; /ig lookup page.",
+                "[ItemGraph] TRANSFORM — /ig help lookup transformations.",
                 "[ItemGraph] FILTER/PROVENANCE — /ig lookup <filters...>; /ig lookup filters; /ig lookup provenance.",
                 "[ItemGraph] DETAIL — /ig event <observationId>; /ig explain <edgeId>; /ig page <page>.",
                 "[ItemGraph] INSPECTION — /ig inspect [on|off|status]; /ig goto <token> is click-only.",
@@ -179,6 +181,18 @@ public final class CommandHelp {
                 "[ItemGraph] dimension: exact resource location; x/y/z: block coordinates; radius is clamped to 1..1024 blocks.",
                 "[ItemGraph] Results are native OBSERVED audit events in the selected cube. The read-only query runs asynchronously.",
                 "[ItemGraph] Example: /ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 50 1440"));
+        topics.put("lookup transformations", List.of(
+                "[ItemGraph] Craft/smelt: CRAFT_OUTPUT_UNRESOLVED / SMELT_OUTPUT_UNRESOLVED.",
+                "[ItemGraph] Example: /ig lookup CRAFT_OUTPUT_UNRESOLVED 50 1440",
+                "[ItemGraph] Open detail: /ig event event:<evidence-uuid>.",
+                "[ItemGraph] Output is observed; input is unknown; no lineage edge.",
+                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup.",
+                "[ItemGraph] Protected results also need itemgraph.audit.",
+                "[ItemGraph] Anvil rename/repair: /ig trace item <item-id>.",
+                "[ItemGraph] Trace perms: itemgraph.command + itemgraph.trace + itemgraph.audit.",
+                "[ItemGraph] Legacy CRAFT/SMELT is unresolved, not trace lineage.",
+                "[ItemGraph] Not covered: trade, enchanting, brewing, smithing.",
+                "[ItemGraph] Not covered: grindstone and loot generation."));
         topics.put("lookup page", List.of(
                 "[ItemGraph] Syntax: /ig lookup page <page> <eventType> [limit] [sinceMinutes]",
                 "[ItemGraph] page is 1-based; limit defaults to 20 and is capped at 100; sinceMinutes is omitted for all history.",

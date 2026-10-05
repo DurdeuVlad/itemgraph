@@ -42,6 +42,13 @@ the player has vanilla permission level 2. An unset node resolves to vanilla lev
 | `/ig ingest now` | `itemgraph.command` + `itemgraph.ingest` | Command execution |
 | `/ig ingest history` | `itemgraph.command` + `itemgraph.ingest` + `itemgraph.import` | Command execution |
 
+Craft and smelt output lookups (`CRAFT_OUTPUT_UNRESOLVED` and
+`SMELT_OUTPUT_UNRESOLVED`) expose item fingerprints, actor, and position. They
+require `itemgraph.command.lookup` and `itemgraph.audit`; saved pages and
+one-use location actions retain both grants. Raw event details additionally
+require `itemgraph.event` and `itemgraph.audit`. The output-only records do not
+create trace lineage.
+
 The browser opened by right-clicking a container in inspection mode additionally
 requires `itemgraph.gui`; the inspection click itself requires `itemgraph.command.inspect`.
 Inspection mode is cleared when its named permission is revoked. Page sessions remain

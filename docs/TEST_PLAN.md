@@ -1155,8 +1155,10 @@ shutdown, the isolated SQLite database contained rows for every exercised event,
 and the bot received results from both generic and filtered `/ig lookup` commands.
 The same staging checkout persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows,
 and `/ig inspect on` opened a read-only `minecraft:generic_9x6` flow browser for
-the populated chest. The remaining cutover work is the documented migration and
-retention procedure; no production change is authorized by this test.
+the populated chest. Those craft/smelt rows predate #162 and are historical
+evidence only; current capture stores unresolved output evidence without lineage.
+The remaining cutover work is the documented migration and retention procedure;
+no production change is authorized by this test.
 
 The 2026-09-30 NeoForge staging startup additionally ran `:neoforge:runServer`
 with the shared `common` and `core` source sets attached to the ModDev run. It
@@ -1325,8 +1327,13 @@ the legacy unified-lookup aliases (including the `interact_block` mapping),
 that each shared query choice is implemented or historical-queryable on both
 loaders, and that planned #55–#57 definitions do not claim runtime support.
 They validate the shared taxonomy contract; they do not prove loader event capture,
-database persistence of new event families, or runtime parity. Those checks
-belong to the child issue fixtures and the consolidated M9 acceptance pass.
+database persistence of new event families, or runtime parity. #162 additionally
+requires focused fixtures proving result-only craft/smelt rows preserve observed
+output metadata, carry the unresolved reason and event ID, and never appear as
+trace hops. The consolidated M9 acceptance pass must persist and replay both
+`CRAFT_OUTPUT_UNRESOLVED` and `SMELT_OUTPUT_UNRESOLVED` on NeoForge and Fabric,
+then assert neither event creates a trace hop. Those checks belong to the child
+issue fixtures and the consolidated M9 acceptance pass.
 
 # Issue #33 administrative item capture batch
 

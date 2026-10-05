@@ -19,7 +19,7 @@ an unknown taxonomy classification, not the `UNRESOLVED` evidence class.
 
 ## Versioning
 
-The taxonomy version is `2.1.0` (`EventTaxonomy.VERSION`) and is independent of
+The taxonomy version is `3.0.0` (`EventTaxonomy.VERSION`) and is independent of
 the ItemGraph mod version and GriefLogger registry version.
 
 - Increment the major taxonomy version when an existing ID is removed, renamed,
@@ -73,15 +73,19 @@ event coverage or full GriefLogger parity.
 | Block actions | `PLACE_BLOCK`, `BREAK_BLOCK`, `INTERACT_BLOCK`, `INTERACT_BLOCK_ATTEMPT` | `PLACE_BLOCK` uses NeoForge's cancellable `EntityPlaceEvent`; `BREAK_BLOCK` uses NeoForge's cancellable `BreakEvent`, documented as a player attempt. The shared taxonomy conservatively labels both as attempts across loaders. [NeoForge 1.21.1 `EntityPlaceEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.EntityPlaceEvent.html), [NeoForge 1.21.1 `BreakEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.BreakEvent.html). Both are player-attributed at a sensitive world location. |
 | Entity interaction | `INTERACT_ENTITY`, `INTERACT_ENTITY_COMPLETED`, `INTERACT_ENTITY_DENIED`, `INTERACT_ENTITY_UNRESOLVED` | Attempt, method/callback result, or explicit unresolved boundary; no quantity claim. |
 | Entity/projectile | `KILL_ENTITY`, `THROW_ITEM`, `SHOOT_ITEM`, `PROJECTILE_SPAWN_ACCEPTED` | Captured player/entity event boundary; projectile attempt and accepted spawn remain distinct. |
+| Item processing | `CRAFT_OUTPUT_UNRESOLVED`, `SMELT_OUTPUT_UNRESOLVED` | A player took a craft/smelt result; output fingerprint/count and event metadata are observed, but input stacks are not. `UNRESOLVED`, `TRANSFORMATION_INPUTS_NOT_OBSERVED`, `quantity=UNKNOWN`; no lineage edge. |
 
 The item-flow and transformation action IDs are cataloged on their own storage
 surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,
 `PICKUP_ITEM`, `THROW_ITEM`, `SHOOT_ITEM`, `BREAK_ITEM`, `CONSUME_ITEM`,
 `HOPPER_INSERT`, `HOPPER_EXTRACT`, `DEATH_DROP`, `ADD_ITEM_ENDER`,
-`REMOVE_ITEM_ENDER`, `CRAFT`, `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR`.
-Quantity rows use signed deltas; transformations use explicit input/output
-semantics. The code-level definitions identify issue ownership and the exact
-surface for each ID.
+`REMOVE_ITEM_ENDER`, legacy `CRAFT` / `SMELT`, `ANVIL_RENAME`, and
+`ANVIL_REPAIR`. Craft/smelt outputs use `CRAFT_OUTPUT_UNRESOLVED` and
+`SMELT_OUTPUT_UNRESOLVED` on the audit surface because the current hooks cannot
+observe complete inputs. Their result fingerprints and output counts are kept
+in raw audit evidence; the unknown input is not a fingerprint or trace edge.
+Legacy craft/smelt transformations are historical-only and unresolved. The
+code-level definitions identify issue ownership and the exact surface for each ID.
 
 `CREATIVE_ITEM_TRANSFORM` remains classifiable for forward compatibility but is
 `UNSUPPORTED` on both loaders with reason

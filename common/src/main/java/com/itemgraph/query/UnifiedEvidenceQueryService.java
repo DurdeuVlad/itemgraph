@@ -465,7 +465,8 @@ public final class UnifiedEvidenceQueryService {
                             nullableDouble(rs, "x"), nullableDouble(rs, "y"), nullableDouble(rs, "z"),
                             firstNonBlank(rs.getString("player_name"), rs.getString("player_uuid")),
                             action, unresolved ? null : Integer.valueOf(rs.getInt("quantity")),
-                            sourceItem + " -> " + resultItem,
+                            unresolved ? "historical result (unverified)=" + valueOr(resultItem, "(missing)")
+                                    : sourceItem + " -> " + resultItem,
                             detail, unresolved ? EventTaxonomy.EvidenceClass.UNRESOLVED.name()
                                     : definition.evidenceClass().name()));
                 }

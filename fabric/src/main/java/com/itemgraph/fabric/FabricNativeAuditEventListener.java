@@ -4,6 +4,7 @@ import com.itemgraph.fabric.mixin.BucketItemAccessor;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.audit.AdminMutationCapture;
 import com.itemgraph.audit.ContainerBreakCapture;
+import com.itemgraph.audit.TransformationOutputEvidence;
 import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
@@ -913,13 +914,12 @@ public final class FabricNativeAuditEventListener {
         if (player == null || output == null || output.isEmpty() || player.level().isClientSide()) {
             return;
         }
-        CanonicalItem source = firstContainerItem(matrix);
-        if (source == null) {
-            source = syntheticSource("minecraft:ingredient");
-        }
         CanonicalItem result = ItemCanonicalizer.canonicalizeStack(output);
-        submitTransformation(player, "CRAFT", source, result, output.getCount(),
-                "Crafted " + output.getCount() + "x " + result.itemId() + " from " + source.itemId());
+        InternalObservationService.getInstance().submitAuditEvent(TransformationOutputEvidence.create(
+                "CRAFT_OUTPUT_UNRESOLVED", System.currentTimeMillis(),
+                player.getUUID().toString(), player.getGameProfile().getName(),
+                player.level().dimension().location().toString(), player.getX(), player.getY(), player.getZ(),
+                result, output.getCount(), "Fabric crafting result slot before input consumption"));
     }
 
     /** Records a furnace, blast-furnace, or smoker result taken by a player. */
@@ -928,9 +928,11 @@ public final class FabricNativeAuditEventListener {
             return;
         }
         CanonicalItem result = ItemCanonicalizer.canonicalizeStack(output);
-        CanonicalItem source = syntheticSource("minecraft:smelt_ingredient");
-        submitTransformation(player, "SMELT", source, result, output.getCount(),
-                "Smelted " + output.getCount() + "x " + result.itemId());
+        InternalObservationService.getInstance().submitAuditEvent(TransformationOutputEvidence.create(
+                "SMELT_OUTPUT_UNRESOLVED", System.currentTimeMillis(),
+                player.getUUID().toString(), player.getGameProfile().getName(),
+                player.level().dimension().location().toString(), player.getX(), player.getY(), player.getZ(),
+                result, output.getCount(), "Fabric furnace result slot before input consumption"));
     }
 
     /** Records an anvil rename or repair before the input slots are consumed. */
@@ -954,23 +956,6 @@ public final class FabricNativeAuditEventListener {
                 + "' -> '" + (resultName == null ? result.itemId() : resultName) + "'"
                 : "Anvil repair/combine on " + output.getItem();
         submitTransformation(player, type, source, result, output.getCount(), details);
-    }
-
-    private static CanonicalItem firstContainerItem(Container container) {
-        if (container == null) {
-            return null;
-        }
-        for (int i = 0; i < container.getContainerSize(); i++) {
-            ItemStack stack = container.getItem(i);
-            if (stack != null && !stack.isEmpty()) {
-                return ItemCanonicalizer.canonicalizeStack(stack);
-            }
-        }
-        return null;
-    }
-
-    private static CanonicalItem syntheticSource(String itemId) {
-        return new CanonicalItem(itemId, ItemCanonicalizer.sha256Hex("id=" + itemId), null, null, null);
     }
 
     private static void submitTransformation(ServerPlayer player, String type, CanonicalItem source,

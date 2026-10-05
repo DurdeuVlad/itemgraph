@@ -30,7 +30,7 @@ EXPECTED_ACTION_COUNTS = {
     "SHOOT_ITEM": 1,
     "CONSUME_ITEM": 1,
     "BREAK_ITEM": 1,
-    "CRAFT": 1,
+    "CRAFT_OUTPUT_UNRESOLVED": 1,
     "BREAK_BLOCK": 1,
     "PLACE_BLOCK": 1,
     "INTERACT_BLOCK_ATTEMPT": 1,
@@ -48,6 +48,7 @@ EXPECTED_AUDIT_ACTION_SUBJECT_COUNTS = {
     ("INTERACT_ENTITY", "minecraft:armor_stand"): 2,
     ("INTERACT_ENTITY_COMPLETED", "minecraft:armor_stand"): 2,
     ("INTERACT_ENTITY_UNRESOLVED", "minecraft:armor_stand"): 1,
+    ("CRAFT_OUTPUT_UNRESOLVED", "minecraft:book"): 1,
 }
 EXPECTED_BLOCK_AUDIT_POSITIONS = {
     "PLACE_BLOCK": {"x": 14, "y": 2, "z": 2},
