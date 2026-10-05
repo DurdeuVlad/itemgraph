@@ -15,45 +15,56 @@ For that reason, ItemGraph is not merely a convenience command. It is a privileg
 
 ## Default policy
 
-**Default deny.**
+**Non-operators are denied by default.** When no permissions provider has an
+explicit decision for a node, ItemGraph falls back to vanilla permission level 2.
+A provider's explicit `false` denies that node even to a level-2 operator.
 
-No sensitive graph access should be granted unless a permission explicitly allows it.
+### Active command permission nodes
 
-### Current command implementation
+The command root requires `itemgraph.command`; commands with a listed leaf node require
+both `itemgraph.command` and that leaf node. Permission nodes are exact strings; dots do not imply parent or wildcard inheritance.
+Thus a lookup-only moderator must receive both `itemgraph.command` and
+`itemgraph.command.lookup`. A provider's explicit `false` denies access even when
+the player has vanilla permission level 2. An unset node resolves to vanilla level 2.
 
-As of the current command tree, every `/itemgraph` and `/ig` command uses the shared
-vanilla permission-level-2 gate. The named `itemgraph.*` permissions listed below are a
-target policy, not active configuration keys; do not assign or document them as working
-nodes until [#137](https://github.com/DurdeuVlad/itemgraph/issues/137) is implemented and
-merged. Owners should grant the normal operator level only to trusted moderators. See the
-[admin quick start](ADMIN_QUICK_START.md) for the user-facing command workflows.
+| Command or action | Required named node(s) | Rechecked at |
+| --- | --- | --- |
+| `/itemgraph`, `/ig`, help, status | `itemgraph.command` | Brigadier command registration/execution; status result delivery |
+| `/ig lookup ...` | `itemgraph.command` + `itemgraph.command.lookup`; broad or protected audit results also require `itemgraph.audit` | Query construction, asynchronous result delivery, and next-page existence checks |
+| `/ig page ...` and clickable lookup page controls | `itemgraph.command` + `itemgraph.command.page` + the originating lookup permission; protected sessions retain `itemgraph.audit` | Command execution, async result delivery, and before page controls or counts are produced |
+| `/ig goto <token>` result-location action | `itemgraph.command` + every exact permission node used by the originating query | One-use player-bound token, again at click execution; dimension must be loaded and coordinates finite |
+| `/ig inspect ...` and inspection-mode block clicks | `itemgraph.command` + `itemgraph.command.inspect`; inspection block-history queries and continuations that can include protected evidence also require `itemgraph.audit` | Toggle/status/click recognition: command + INSPECT; history query and delivery: INSPECT + AUDIT; container browser additionally requires GUI |
+| `/ig trace ...` | `itemgraph.command` + `itemgraph.trace` + `itemgraph.audit` | Command execution and asynchronous result delivery; gated before candidate resolution so protected-only fingerprints/counts cannot leak |
+| `/ig event ...` | `itemgraph.command` + `itemgraph.event` + `itemgraph.audit` | Command execution and asynchronous result delivery |
+| `/ig explain ...` | `itemgraph.command` + `itemgraph.explain` + `itemgraph.audit` | Command execution and asynchronous result delivery |
+| `/ig audit` | `itemgraph.command` + `itemgraph.audit` | Command execution and asynchronous result delivery |
+| `/ig gui ...`, container flow menus | `itemgraph.command` + `itemgraph.gui` + `itemgraph.audit` | Command execution, async page/detail delivery, menu validity, and every menu click/navigation action |
+| `/ig ingest now` | `itemgraph.command` + `itemgraph.ingest` | Command execution |
+| `/ig ingest history` | `itemgraph.command` + `itemgraph.ingest` + `itemgraph.import` | Command execution |
 
-## Suggested permission structure
+The browser opened by right-clicking a container in inspection mode additionally
+requires `itemgraph.gui`; the inspection click itself requires `itemgraph.command.inspect`.
+Inspection mode is cleared when its named permission is revoked. Page sessions remain
+player-scoped; permissions do not relax the existing session-token ownership checks.
 
-Exact permission integration depends on the server's permission system.
+### Loader provider behavior
 
-Conceptual permissions:
+- **NeoForge 1.21.1:** ItemGraph registers boolean `PermissionNode` values through
+  `PermissionGatherEvent.Nodes` and resolves them with `PermissionAPI`. The default
+  node resolver is `ServerPlayer.createCommandSourceStack().hasPermission(2)`. Console
+  and command-block sources use vanilla permission level 2 because NeoForge's node API
+  accepts a player.
+- **Fabric 1.21.1:** ItemGraph embeds `fabric-permissions-api` `0.3.1`, so no extra
+  API mod is required. `Permissions.check(source, node, 2)` uses the compatible
+  permission-provider decision when present and vanilla permission level 2 when the
+  provider returns `DEFAULT` or no provider is installed. To assign named grants,
+  operators still need a compatible provider mod such as their server's permission
+  manager.
 
-```text
-itemgraph.admin
-itemgraph.trace.item
-itemgraph.trace.player
-itemgraph.trace.container
-itemgraph.event.view
-itemgraph.explain
-itemgraph.lookup.audit
-itemgraph.status
-itemgraph.export
-```
-
-Potential restricted sub-permissions:
-
-```text
-itemgraph.view.coordinates
-itemgraph.view.player_inventory
-itemgraph.view.faction_storage
-itemgraph.view.names
-```
+There is no required LuckPerms or other permission-manager dependency. Keep default
+access at level 2 when the provider is absent. Do not assign permissions by wildcard
+unless the installed provider's documented policy explicitly expands that wildcard.
+See `/ig help permissions` and the [admin quick start](ADMIN_QUICK_START.md).
 
 ## Player-facing mode
 
@@ -124,10 +135,13 @@ Queries should have:
 - pagination
 - rate limits if necessary
 
-`/ig lookup` is an operator-only audit query. `CHAT_MESSAGE` and
-`COMMAND_ATTEMPT` and `COMMAND_EXECUTED` rows can contain private conversation, command arguments, or
-credentials accidentally typed into chat, so they must remain restricted to the
-audit permission and must never be included in player-facing flow views.
+Lookup-only access covers the explicitly selected, non-sensitive event types.
+`CHAT_MESSAGE`, `COMMAND_ATTEMPT`, and `COMMAND_EXECUTED` rows can contain private
+conversation, command arguments, or credentials accidentally typed into chat, so
+they require both `itemgraph.command.lookup` and `itemgraph.audit`. An `all` query
+or filter with no explicit event type can include these rows and therefore requires
+`itemgraph.audit` before the result query or next-page probe runs. The same policy
+applies to case aliases, player and near forms, and saved-page continuation.
 
 Issue #33 administrative item-command and creative-inventory records are also
 staff-private. `/give`, `/clear`, and `/item` attempt rows retain only the command
@@ -142,20 +156,47 @@ command issuer; a differing effective entity is retained separately as
 endpoint and exact stack in staff-private evidence without implying that the source
 slot lost quantity.
 Keep `ADMIN_ITEM_COMMAND_*`, `CREATIVE_SLOT_*`, `CREATIVE_BLOCK_*`,
-`ADMIN_ITEM_*`, and `CREATIVE_ITEM_*` restricted to the audit permission. Do not
-surface these rows in player-facing flow views. A pre-execution loader callback is
+`ADMIN_ITEM_*`, and `CREATIVE_ITEM_*` restricted to the audit permission. Event-type
+lookups and action filters that can return these categories require
+`itemgraph.command.lookup` plus `itemgraph.audit`; broad lookup filters require
+audit permission. Flow views are available only to users with the audit grant. A pre-execution loader callback is
 only an attempt; only a post-mutation slot comparison can produce item-flow evidence.
 
-The `/ig gui` browser remains level-2 only. `FlowBrowserMenu` rechecks permission while
-open and on every click, and the menu never delegates an item-movement action to
+The `/ig event`, `/ig explain`, `/ig trace`, and flow-browser surfaces are gated by `itemgraph.audit`
+because those queries can include staff-private administrative-item and creative-inventory evidence,
+including inferred edges supported by those observations. The audit gate is checked before any query,
+candidate resolution, async result delivery, and every menu action; this avoids leaking protected-only
+matches through counts, candidate pages, or error distinctions. The `/ig gui` browser also requires
+`itemgraph.command` and `itemgraph.gui`. `FlowBrowserMenu` rechecks both named permissions while open
+and on every click, and the menu never delegates an item-movement action to
 `ChestMenu`; it handles only page navigation, flow selection, detail display, and close.
-All page/detail SQL runs through the read-only `QueryDispatcher` connection.
+All page/detail SQL runs through the read-only `QueryDispatcher` connection. Its
+numbered chat companion contains only rows from that authorized query and labels each
+with evidence class, a safe item identity or explicit fallback, event kind, and UTC
+time where available; the number maps to the corresponding menu slot. It does not
+expose raw NBT/component payloads, unrelated players, or hidden inventories.
 
-`/ig inspect` is likewise level-2 only. The command cannot be enabled by a non-operator,
+`/ig inspect` requires both `itemgraph.command` and `itemgraph.command.inspect`.
 `InspectionListener` rechecks permission on every supported-container click, and permission
 loss clears that player's inspection mode without suppressing the ordinary block interaction.
-Inspection opens only ItemGraph's read-only menu; it does not grant access to the clicked
-container's contents and does not relax any GUI permission checks.
+Inspection block-history requests return bounded chat history. Right-clicking a supported
+container opens the read-only flow browser, which additionally checks `itemgraph.gui` and
+`itemgraph.audit`;
+inspection does not grant access to the live container inventory or relax any GUI check.
+The inspection-mode toggle, `on`, `off`, `status`, and supported-click recognition require
+`itemgraph.command.inspect`. A block-history request queries `eventType=all`, so it can
+include staff-private evidence and additionally requires `itemgraph.audit` before the
+query and before a page-continuation probe. Grant `itemgraph.audit` only to inspectors who
+should see protected chat, command, administrative-item, and creative-inventory evidence.
+
+Rich `/ig event`, `/ig explain`, `/ig trace`, and history lookup chat rows keep their
+stable formatted text visible and attach a bounded hover summary containing evidence class,
+safe item identity, canonical fingerprint hash when present, event kind, exact UTC time, and
+recorded endpoints. Hover text never includes raw NBT or component serialization. A result
+location link uses a short-lived one-use token bound to the requesting player and the exact
+permission nodes used by that query. The server rechecks those nodes on click and resolves
+only the recorded dimension and finite coordinates; a token cannot be replayed by another
+player or after a permission is revoked.
 
 ## Preview API boundary
 

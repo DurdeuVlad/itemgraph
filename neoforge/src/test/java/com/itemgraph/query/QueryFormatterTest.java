@@ -10,9 +10,51 @@ import static org.junit.jupiter.api.Assertions.*;
 class QueryFormatterTest {
 
     @Test
+    void localizedObservationKeepsForensicValuesAndChangesOnlyAuthoredLabels() {
+        NodeRef origin = new NodeRef(1, "PLAYER", "Alice", "minecraft:overworld", null, null, null);
+        FingerprintRef fp = new FingerprintRef(1, "minecraft:diamond_sword", "Excalibur", "hash123");
+        ObservationDetail obs = new ObservationDetail(
+                42L, "GRIEFLOGGER", 999L, 1_000_000L, origin, null, fp,
+                "DROP_ITEM", 4, null, null, null);
+
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("nl_nl");
+        List<String> nl = QueryFormatter.formatEvent(obs);
+        assertTrue(nl.stream().anyMatch(line -> line.contains("tijd:") && line.contains("1970-01-01 00:16:40 UTC")));
+        assertTrue(nl.stream().anyMatch(line -> line.contains("DROP_ITEM") && line.contains("4x")));
+        assertTrue(nl.stream().anyMatch(line -> line.contains("minecraft:diamond_sword") && line.contains("Excalibur")));
+
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("zh_tw");
+        List<String> zh = QueryFormatter.formatEvent(obs);
+        assertTrue(zh.stream().anyMatch(line -> line.contains("時間：") && line.contains("1970-01-01 00:16:40 UTC")));
+        assertTrue(zh.stream().anyMatch(line -> line.contains("DROP_ITEM") && line.contains("4x")));
+        assertTrue(zh.stream().anyMatch(line -> line.contains("minecraft:diamond_sword") && line.contains("Excalibur")));
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
+    }
+
+    @Test
     void testFormatTime() {
         assertEquals("1970-01-01 00:00:00 UTC", QueryFormatter.formatTime(0L));
         assertEquals("2023-11-14 22:13:20 UTC", QueryFormatter.formatTime(1_700_000_000_000L));
+    }
+
+    @Test
+    void unresolvedContainerBreakWithoutPlayerIdentityRendersActorUnavailable() {
+        AuditEventDetail missingActor = new AuditEventDetail(1, "CONTAINER_BREAK_UNRESOLVED", 1_700_000_000_000L,
+                null, null, "minecraft:overworld", 1, 64, 2, "minecraft:chest", "reason=CONTAINER_BREAK_ACTOR_UNAVAILABLE");
+        AuditEventDetail knownActor = new AuditEventDetail(2, "CONTAINER_BREAK_UNRESOLVED", 1_700_000_000_001L,
+                "player-uuid", "Admin", "minecraft:overworld", 1, 64, 2, "minecraft:chest", "reason=CONTAINER_OBSERVATION_QUEUE_REJECTED");
+
+        String formatted = String.join("\n", QueryFormatter.formatAuditEvents(List.of(missingActor, knownActor), "all"));
+
+        assertTrue(formatted.contains("actor=(actor unavailable)"), formatted);
+        assertTrue(formatted.contains("actor=Admin"), formatted);
+        assertFalse(formatted.contains("actor=(unknown player)"), formatted);
+
+        UnifiedEvidenceDetail unified = new UnifiedEvidenceDetail("AUDIT", "audit#1", 1_700_000_000_000L,
+                "minecraft:overworld", 1d, 64d, 2d, null, "CONTAINER_BREAK_UNRESOLVED", 0,
+                "minecraft:chest", "reason=CONTAINER_BREAK_ACTOR_UNAVAILABLE", "UNRESOLVED");
+        String unifiedFormatted = String.join("\n", QueryFormatter.formatUnifiedEvidence(List.of(unified), "all"));
+        assertTrue(unifiedFormatted.contains("actor=(actor unavailable)"), unifiedFormatted);
     }
 
     @Test

@@ -285,8 +285,17 @@ public class InternalObservationService {
             byte[] rawData,
             Long sourceEventId,
             String ingestEventUuid,
-            List<AuditEventQueryService.ExactPosition> supersessionPositions
+            List<AuditEventQueryService.ExactPosition> supersessionPositions,
+            List<InternalObservation> relatedObservations
     ) {
+        public InternalAuditEvent(long timestampMs, String eventType, String playerUuid, String playerName,
+                                  String levelName, double x, double y, double z, String subjectId,
+                                  String detail, byte[] rawData, Long sourceEventId, String ingestEventUuid,
+                                  List<AuditEventQueryService.ExactPosition> supersessionPositions) {
+            this(timestampMs, eventType, playerUuid, playerName, levelName, x, y, z, subjectId, detail,
+                    rawData, sourceEventId, ingestEventUuid, supersessionPositions, List.of());
+        }
+
         public InternalAuditEvent(
                 long timestampMs,
                 String eventType,
@@ -344,6 +353,13 @@ public class InternalObservationService {
             rawData = rawData == null ? null : rawData.clone();
             ingestEventUuid = normalizeIngestEventUuid(ingestEventUuid);
             supersessionPositions = List.copyOf(supersessionPositions == null ? List.of() : supersessionPositions);
+            relatedObservations = List.copyOf(relatedObservations == null ? List.of() : relatedObservations);
+        }
+
+        public InternalAuditEvent withRelatedObservations(List<InternalObservation> observations) {
+            return new InternalAuditEvent(timestampMs, eventType, playerUuid, playerName, levelName,
+                    x, y, z, subjectId, detail, rawData, sourceEventId, ingestEventUuid,
+                    supersessionPositions, observations);
         }
 
         @Override
@@ -360,6 +376,8 @@ public class InternalObservationService {
     private final Object observationQueueLock = new Object();
     private final BlockingQueue<InternalTransformation> transformationQueue = new LinkedBlockingQueue<>(RECOVERY_QUEUE_CAPACITY);
     private final BlockingQueue<InternalAuditEvent> auditEventQueue = new LinkedBlockingQueue<>(RECOVERY_QUEUE_CAPACITY);
+    private final java.util.concurrent.atomic.AtomicInteger auditQueuedRecords = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger auditQueuedObservations = new java.util.concurrent.atomic.AtomicInteger();
     // Serializes queue mutations with depth sampling so a fast drain cannot hide a
     // just-accepted backlog from the queue peak metric.
     private final Object queueMutationLock = new Object();
@@ -672,7 +690,7 @@ public class InternalObservationService {
             synchronized (queueMutationLock) {
                 if (snapshot.observations().size() + queue.size() > RECOVERY_QUEUE_CAPACITY
                         || snapshot.transformations().size() + transformationQueue.size() > RECOVERY_QUEUE_CAPACITY
-                        || snapshot.auditEvents().size() + auditEventQueue.size() > RECOVERY_QUEUE_CAPACITY) {
+                        || auditRecordCount(snapshot.auditEvents()) + auditQueueRecordCount() > RECOVERY_QUEUE_CAPACITY) {
                     throw new java.io.IOException("pending evidence exceeds the configured recovery queue capacity; original file was preserved");
                 }
                 if (!path.equals(evidenceSpoolPath)) recoveryEvents.clear();
@@ -686,6 +704,8 @@ public class InternalObservationService {
                 queue.clear();
                 transformationQueue.clear();
                 auditEventQueue.clear();
+                auditQueuedRecords.set(0);
+                auditQueuedObservations.set(0);
                 snapshot.observations().forEach(event -> {
                     queue.add(event);
                     recoveryEvents.put("observation:" + event.ingestEventUuid(), event);
@@ -701,6 +721,10 @@ public class InternalObservationService {
                 queue.addAll(newObservations);
                 transformationQueue.addAll(newTransformations);
                 auditEventQueue.addAll(newAuditEvents);
+                List<InternalAuditEvent> restoredAuditEvents = new ArrayList<>(snapshot.auditEvents());
+                restoredAuditEvents.addAll(newAuditEvents);
+                auditQueuedRecords.set(auditRecordCount(restoredAuditEvents));
+                auditQueuedObservations.set(auditObservationCount(restoredAuditEvents));
             }
             LOGGER.warn("Restored {} pending ItemGraph evidence records from {}", snapshot.size(), path);
             queueFlushDue.set(true);
@@ -772,6 +796,8 @@ public class InternalObservationService {
             queue.clear();
             transformationQueue.clear();
             auditEventQueue.clear();
+            auditQueuedRecords.set(0);
+            auditQueuedObservations.set(0);
             pendingTransformations.set(0);
             inFlightSnapshot = new PendingEvidenceSpool.Snapshot(List.of(), List.of(), List.of());
             OperationalMetrics.getInstance().recordQueueDepth(0);
@@ -828,6 +854,60 @@ public class InternalObservationService {
         boolean accepted = false;
         try {
             accepted = submitAllNow(observations);
+            return accepted;
+        } finally {
+            OperationalMetrics.getInstance().recordEnqueue(System.nanoTime() - enqueueStarted, accepted);
+        }
+    }
+
+    /** Atomically admits audit summaries and their related slot observations. */
+    public boolean submitEvidenceBatch(List<InternalObservation> observations,
+                                       List<InternalAuditEvent> auditEvents) {
+        long enqueueStarted = System.nanoTime();
+        boolean accepted = false;
+        try {
+            if (observations == null || auditEvents == null || auditEvents.isEmpty()
+                    || observations.stream().anyMatch(Objects::isNull)
+                    || auditEvents.stream().anyMatch(Objects::isNull)) {
+                return false;
+            }
+            List<InternalAuditEvent> durableAuditEvents = new ArrayList<>(auditEvents);
+            if (!observations.isEmpty()) {
+                durableAuditEvents.set(0, auditEvents.get(0).withRelatedObservations(observations));
+            }
+            synchronized (submissionLifecycleLock) {
+                int eventCount = observations.size() + auditEvents.size();
+                if (captureEnabled && !acceptingSubmissions) {
+                    recordPostStopRejection(eventCount);
+                    return false;
+                }
+                if (!captureEnabled) return true;
+                synchronized (observationQueueLock) {
+                    synchronized (queueMutationLock) {
+                        if (!acceptingSubmissions) {
+                            recordPostStopRejection(eventCount);
+                            return false;
+                        }
+                        if (queue.size() + observations.size() > QUEUE_CAPACITY
+                                || auditQueueRecordCount() + eventCount > QUEUE_CAPACITY) {
+                            long dropped = totalDropped.addAndGet(eventCount);
+                            OperationalMetrics.getInstance().recordQueueRejection(eventCount);
+                            if (dropped == eventCount || dropped % 1000 < eventCount) {
+                                LOGGER.warn("Rejected container-break evidence batch of {} records ({} dropped total; evidence loss)",
+                                        eventCount, dropped);
+                            }
+                            return false;
+                        }
+                        auditEventQueue.addAll(durableAuditEvents);
+                        auditQueuedRecords.addAndGet(eventCount);
+                        auditQueuedObservations.addAndGet(observations.size());
+                        totalEnqueued.addAndGet(eventCount);
+                        OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
+                        accepted = true;
+                    }
+                }
+            }
+            if (accepted) signalQueuedWork();
             return accepted;
         } finally {
             OperationalMetrics.getInstance().recordEnqueue(System.nanoTime() - enqueueStarted, accepted);
@@ -957,19 +1037,23 @@ public class InternalObservationService {
             if (!captureEnabled) {
                 return true;
             }
+            int eventRecordCount = 1 + event.relatedObservations().size();
             boolean ok;
             synchronized (queueMutationLock) {
                 if (!acceptingSubmissions) {
-                    recordPostStopRejection(1);
+                    recordPostStopRejection(eventRecordCount);
                     return false;
                 }
-                ok = auditEventQueue.size() < QUEUE_CAPACITY && auditEventQueue.offer(event);
+                ok = auditQueueRecordCount() + eventRecordCount <= QUEUE_CAPACITY
+                        && auditEventQueue.offer(event);
                 if (ok) {
-                    totalEnqueued.incrementAndGet();
+                    auditQueuedRecords.addAndGet(eventRecordCount);
+                    auditQueuedObservations.addAndGet(event.relatedObservations().size());
+                    totalEnqueued.addAndGet(eventRecordCount);
                     OperationalMetrics.getInstance().recordQueueDepth(getQueueSize());
                 } else {
-                    long dropped = totalDropped.incrementAndGet();
-                    OperationalMetrics.getInstance().recordQueueRejection(1);
+                    long dropped = totalDropped.addAndGet(eventRecordCount);
+                    OperationalMetrics.getInstance().recordQueueRejection(eventRecordCount);
                     if (dropped == 1 || dropped % 1000 == 0) {
                         LOGGER.warn("Native audit event queue is full — dropped {} ({} dropped total; evidence loss)",
                                 event.eventType(), dropped);
@@ -984,11 +1068,15 @@ public class InternalObservationService {
     }
 
     public int getQueueSize() {
-        return queue.size() + transformationQueue.size() + auditEventQueue.size();
+        return queue.size() + transformationQueue.size() + auditQueuedRecords.get();
+    }
+
+    private int auditQueueRecordCount() {
+        return auditQueuedRecords.get();
     }
 
     public int getObservationQueueSize() {
-        return queue.size();
+        return queue.size() + auditQueuedObservations.get();
     }
 
     public int getTransformationQueueSize() {
@@ -1038,6 +1126,8 @@ public class InternalObservationService {
                 queue.clear();
                 transformationQueue.clear();
                 auditEventQueue.clear();
+                auditQueuedRecords.set(0);
+                auditQueuedObservations.set(0);
                 inFlightSnapshot = new PendingEvidenceSpool.Snapshot(List.of(), List.of(), List.of());
             }
             synchronized (evidenceSpoolLock) {
@@ -1090,6 +1180,8 @@ public class InternalObservationService {
                             queue.drainTo(obsBatch, maxBatchSize);
                             transformationQueue.drainTo(transBatch, maxBatchSize);
                             auditEventQueue.drainTo(auditBatch, maxBatchSize);
+                            auditQueuedRecords.addAndGet(-auditRecordCount(auditBatch));
+                            auditQueuedObservations.addAndGet(-auditObservationCount(auditBatch));
                             inFlightSnapshot = new PendingEvidenceSpool.Snapshot(obsBatch, transBatch, auditBatch);
                         }
 
@@ -1139,18 +1231,19 @@ public class InternalObservationService {
                         }
 
                         if (!auditBatch.isEmpty()) {
+                            int auditRecordCount = auditRecordCount(auditBatch);
                             try {
-                                persistMeasured(auditBatch.size(), () -> persistAuditEvents(auditBatch));
+                                persistMeasured(auditRecordCount, () -> persistAuditEvents(auditBatch));
                                 resetAuditRetryState();
                                 totalAuditEvents.addAndGet(auditBatch.size());
-                                totalPersisted.addAndGet(auditBatch.size());
+                                totalPersisted.addAndGet(auditRecordCount);
                                 acknowledgeRecovered(auditEventIds(auditBatch));
                             } catch (Exception e) {
                                 if (running.get()) {
                                     requeueAuditBatch(auditBatch, e);
                                 } else {
                                     boolean spooled = preserveFailedShutdownBatch("audit events", e);
-                                    reportShutdownPersistenceFailure("audit events", auditBatch.size(), e, spooled);
+                                    reportShutdownPersistenceFailure("audit events", auditRecordCount, e, spooled);
                                     handoffShutdownRecords(spooled, e);
                                 }
                             }
@@ -1199,6 +1292,14 @@ public class InternalObservationService {
 
     private static List<String> auditEventIds(List<InternalAuditEvent> events) {
         return events.stream().map(event -> "audit:" + event.ingestEventUuid()).toList();
+    }
+
+    private static int auditRecordCount(List<InternalAuditEvent> events) {
+        return events.stream().mapToInt(event -> 1 + event.relatedObservations().size()).sum();
+    }
+
+    private static int auditObservationCount(List<InternalAuditEvent> events) {
+        return events.stream().mapToInt(event -> event.relatedObservations().size()).sum();
     }
 
     private boolean preserveFailedShutdownBatch(String batchType, Exception failure) {
@@ -1350,6 +1451,18 @@ public class InternalObservationService {
                     rollbackFailed = true;
                     transactionFailure.addSuppressed(rollbackFailure);
                 }
+                // NodeManager caches generated row IDs before the transaction
+                // commits. A rollback can remove those nodes while leaving the
+                // cache populated, so a retry would attach observations to
+                // nonexistent or subsequently reused IDs. Clearing is a cheap
+                // read-through reset; the database remains the identity source.
+                if (!commitSucceeded) {
+                    try {
+                        IngestionService.getInstance().getNodeManager().clearCaches();
+                    } catch (RuntimeException cacheFailure) {
+                        transactionFailure.addSuppressed(cacheFailure);
+                    }
+                }
             }
         } finally {
             try {
@@ -1411,14 +1524,19 @@ public class InternalObservationService {
         }
         synchronized (queueMutationLock) {
             for (InternalAuditEvent event : batch) {
-                if (!auditEventQueue.offer(event)) {
-                    long dropped = totalDropped.incrementAndGet();
-                    OperationalMetrics.getInstance().recordQueueRejection(1);
+                int eventRecordCount = 1 + event.relatedObservations().size();
+                if (auditQueueRecordCount() + eventRecordCount > QUEUE_CAPACITY
+                        || !auditEventQueue.offer(event)) {
+                    int rejectedRecords = eventRecordCount;
+                    long dropped = totalDropped.addAndGet(rejectedRecords);
+                    OperationalMetrics.getInstance().recordQueueRejection(rejectedRecords);
                     if (dropped == 1 || dropped % 1000 == 0) {
                         LOGGER.warn("Native audit queue remained full while retrying; dropped {} ({} dropped total; evidence loss)",
                                 event.eventType(), dropped);
                     }
                 } else {
+                    auditQueuedRecords.addAndGet(1 + event.relatedObservations().size());
+                    auditQueuedObservations.addAndGet(event.relatedObservations().size());
                     signalQueuedWork();
                 }
             }
@@ -1605,6 +1723,10 @@ public class InternalObservationService {
                 """;
                 try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
                     for (InternalAuditEvent event : batch) {
+                        // Related observations are part of this audit event's durable unit.
+                        // Persist them inside the same transaction, before exposing a
+                        // completion summary that claims the snapshot is complete.
+                        persistBatchRowsLocked(conn, event.relatedObservations());
                         pstmt.setString(1, event.eventType());
                         pstmt.setLong(2, event.timestampMs());
                         setNullableString(pstmt, 3, event.playerUuid());
@@ -1867,9 +1989,14 @@ public class InternalObservationService {
     }
 
     private void persistBatchLocked(Connection conn, List<InternalObservation> batch) throws SQLException {
+        runTransaction(conn, () -> persistBatchRowsLocked(conn, batch));
+    }
+
+    /** Writes observation rows into the caller's transaction. */
+    private void persistBatchRowsLocked(Connection conn, List<InternalObservation> batch) throws SQLException {
+        if (batch.isEmpty()) return;
         NodeManager nodeManager = IngestionService.getInstance().getNodeManager();
 
-        runTransaction(conn, () -> {
             // The source ID deduplicates producer identities. The separate queued
             // identity also makes retries safe when a DB commit succeeds but the
             // worker loses the acknowledgement and replays the same batch.
@@ -1936,7 +2063,7 @@ public class InternalObservationService {
                                     conn, obs.targetLevelName(),
                                     obs.targetX(), obs.targetY(), obs.targetZ());
                         }
-                        case "ADMIN_REMOVE_CONTAINER" -> {
+                        case "ADMIN_REMOVE_CONTAINER", "DESTROYED_CONTAINER" -> {
                             originNodeId = nodeManager.getOrCreateContainerNode(
                                     conn, obs.targetLevelName(),
                                     obs.targetX(), obs.targetY(), obs.targetZ());
@@ -2055,7 +2182,6 @@ public class InternalObservationService {
                     pstmt.executeUpdate();
                 }
             }
-        });
     }
 
     /**

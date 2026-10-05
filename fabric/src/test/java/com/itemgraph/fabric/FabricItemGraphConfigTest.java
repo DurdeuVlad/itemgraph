@@ -79,6 +79,19 @@ class FabricItemGraphConfigTest {
         assertTrue(loaded.operationalSettings().captureEnabled());
         assertFalse(loaded.griefLoggerIntegrationEnabled());
         assertEquals("indefinite", loaded.operationalSettings().rawEvidenceRetention());
+        assertEquals("en_us", loaded.language());
+    }
+
+    @Test
+    void validatesLanguageBeforeReturningServerConfiguration(@TempDir Path tempDir) throws Exception {
+        Path config = tempDir.resolve("config");
+        Files.createDirectories(config);
+        Files.writeString(config.resolve("itemgraph.properties"), "language=nl_nl\n");
+        assertEquals("nl_nl", FabricItemGraphConfig.load(tempDir, config).language());
+        Files.writeString(config.resolve("itemgraph.properties"), "language=zh_cn\n");
+        IOException error = assertThrows(IOException.class, () -> FabricItemGraphConfig.load(tempDir, config));
+        assertTrue(error.getMessage().contains("general.language"));
+        assertTrue(error.getMessage().contains("en_us, nl_nl, zh_tw"));
     }
 
     @Test

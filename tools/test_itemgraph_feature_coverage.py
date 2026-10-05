@@ -256,6 +256,58 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
             self.assertNotIn(forbidden, serialized)
         self.assertIn("runtime_evidence_count", serialized)
 
+    def test_feature_and_durability_contract_rows_keep_release_and_source_evidence_separate(self) -> None:
+        output = coverage_module.build_coverage(self.report)
+        features = {row["owner_issue"]: row for row in output["feature_requirements"]}
+        self.assertEqual({136, 137, 138, 140}, set(features))
+        self.assertEqual("not-recorded-in-exact-release-fixture", features[136]["exact_release"]["status"])
+        self.assertEqual("source-only", features[136]["pinned_source"]["status"])
+        self.assertEqual("named-nodes-not-recorded-in-exact-release-fixture",
+                         features[137]["exact_release"]["status"])
+        self.assertEqual("rich-interactions-not-recorded-in-exact-release-fixture",
+                         features[138]["exact_release"]["status"])
+        self.assertEqual("writer-class-confirmed-details-unproven",
+                         features[140]["exact_release"]["status"])
+        self.assertEqual("source-only", features[140]["pinned_source"]["status"])
+        self.assertTrue(all(row["acceptance_status"] == "unresolved"
+                            for row in output["feature_requirements"] + output["durability_requirements"]))
+        self.assertEqual(5, len(output["durability_requirements"]))
+        self.assertTrue(all(row["exact_release"]["status"] == "not-established-by-exact-release-fixture"
+                            for row in output["durability_requirements"]))
+        self.assertTrue(all(row["pinned_source"]["status"] == "source-only-research"
+                            for row in output["durability_requirements"]))
+        self.assertEqual(4, output["summary"]["open_feature_requirements_unresolved"])
+        self.assertEqual(5, output["summary"]["durability_requirements_unresolved"])
+
+    def test_contract_validator_rejects_missing_duplicate_malformed_misclassified_and_private_rows(self) -> None:
+        output = coverage_module.build_coverage(self.report)
+        cases = []
+
+        missing = copy.deepcopy(output)
+        missing["feature_requirements"].pop()
+        cases.append((missing, "missing rows"))
+
+        duplicate = copy.deepcopy(output)
+        duplicate["feature_requirements"].append(copy.deepcopy(duplicate["feature_requirements"][0]))
+        cases.append((duplicate, "duplicate requirement IDs"))
+
+        malformed = copy.deepcopy(output)
+        malformed["durability_requirements"][0]["exact_release"] = "unknown"
+        cases.append((malformed, "malformed, misclassified"))
+
+        misclassified = copy.deepcopy(output)
+        misclassified["feature_requirements"][0]["pinned_source"]["status"] = "exact-release"
+        cases.append((misclassified, "malformed, misclassified"))
+
+        private = copy.deepcopy(output)
+        private["feature_requirements"][0]["player_uuid"] = "private-player-id"
+        cases.append((private, "malformed, misclassified"))
+
+        for candidate, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(differential.ReportError, message):
+                    coverage_module.validate_coverage(candidate)
+
     def test_rejects_grieflogger_report_and_non_native_runtime(self) -> None:
         wrong_system = copy.deepcopy(self.report)
         wrong_system["system"] = "grieflogger"

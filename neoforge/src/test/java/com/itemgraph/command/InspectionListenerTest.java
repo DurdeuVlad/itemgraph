@@ -50,6 +50,26 @@ class InspectionListenerTest {
     @AfterEach
     void tearDown() {
         service.clear();
+        ItemGraphPermissions.setChecker(null);
+    }
+
+    @Test
+    void explicitInspectDenialClearsActiveInspectionAndDoesNotOpenHistory() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.INSPECT));
+        AtomicInteger opens = new AtomicInteger();
+        InspectionListener inspector = new InspectionListener(service,
+                (p, targetLevel, pos) -> { opens.incrementAndGet(); return 1; });
+
+        inspector.onLeftClickBlock(leftClick(player, CONTAINER_POS));
+
+        assertFalse(service.isEnabled(playerUuid));
+        assertEquals(0, opens.get(), "the explicit node denial must win even when vanilla level 2 is present");
     }
 
     @Test

@@ -1,5 +1,17 @@
 # GriefLogger replacement parity
 
+## Locale research and ItemGraph contract
+
+The checked-in GriefLogger 1.2.10-1.21.1 release fixture contains no locale
+inventory, so its exact-release locale set is **unknown**. Separately, the
+pinned GriefLogger 26.2 source config permits `en_us` (default), `nl_nl`, and
+`zh_tw`; `zh_cn` is packaged in that source but is not selectable in its config.
+That newer source inventory is research only and is not evidence about the exact
+1.2.10 release. Its `LanguageManager` falls back per key to `en_us`, and also
+downloads/caches Mojang language resources. ItemGraph supports only its own
+offline `en_us`, `nl_nl`, and `zh_tw` catalogs, uses English per-key fallback,
+and performs no language HTTP requests or GriefLogger code/resource reuse.
+
 This document defines the compatibility contract and acceptance boundary for
 replacing GriefLogger as the native server audit source. Compatibility is
 behavioral and evidence-preserving; ItemGraph keeps its own command names and
@@ -241,7 +253,15 @@ The published [lookup command](https://daqem.com/projects/grieflogger/wiki/inspe
 and [inspect reference](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/inspect-command)
 are the operator-facing command contract. ItemGraph registers `/itemgraph` as
 the full root and redirects `/ig` to the same node; it does not register `/gl`
-or `/grieflogger`. Both roots use permission level 2. The direct lookup form
+or `/grieflogger`. The root uses `itemgraph.command`; `/ig lookup`, `/ig page`,
+`/ig inspect`, `/ig trace`, `/ig event`, `/ig explain`, `/ig audit`, `/ig gui`,
+and `/ig ingest` use their exact namespaced permission nodes. Both roots preserve
+vanilla permission level 2 for unset nodes, and an explicit provider denial wins
+over operator status. Dotted nodes do not inherit from parents. NeoForge registers
+native boolean `PermissionNode` values; Fabric embeds `fabric-permissions-api`
+0.3.1 so its permission API is available without an external API-mod dependency.
+The provider matrix and each async/menu recheck are documented in
+[`SECURITY_AND_PERMISSIONS.md`](SECURITY_AND_PERMISSIONS.md). The direct lookup form
 accepts the six documented `name.value` filters and one-letter aliases, quoted
 comma-separated values, at most five filters, required radius, cubic distance,
 and AND semantics. The explicit `/ig lookup filters` spelling is an ItemGraph
@@ -338,7 +358,7 @@ not an unmodified vanilla-client test.
 
 | GriefLogger capability | ItemGraph native source | Storage | Query/UI status | Evidence status |
 | --- | --- | --- | --- | --- |
-| Container add/remove net deltas | `ContainerSessionListener`, capability wrappers | `ig_observations` | `/ig trace` and `/ig gui` | Open-session net deltas are implemented and tested; the 2026-09-29 Fabric replay persisted `ADD_ITEM` and `REMOVE_ITEM` rows. A player breaking a populated container is not yet captured as a contents-removal outcome; tracked by [#140](https://github.com/DurdeuVlad/itemgraph/issues/140). |
+| Container add/remove net deltas and player-break contents | `ContainerSessionListener`, capability wrappers, `ContainerBreakCapture`, Fabric `PlayerBlockBreakEvents`, NeoForge `AdminCreativeBlockResultMixin` | `ig_observations`, `ig_audit_events` | `/ig trace`, `/ig gui`, `/ig lookup` | Session deltas remain interval evidence. The #140 boundary captures each non-empty slot as a `REMOVE_ITEM` sourced from the broken container and routed to `UNKNOWN`; player actor is not a destination. The completion event links its deterministic `break_event_id` to the standard `BREAK_BLOCK` row, and parent plus slot rows commit atomically. Item-entity outputs remain explicitly unlinked unless a later authoritative hook proves a relationship. Cross-loader GameTests cover empty, one-stack, full single chest, component variants, canceled breaks, and breaking one half of a double chest. |
 | Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge paths and Fabric normal, vanilla player-death, and custom death-event item additions are implemented; the Fabric replay persisted accepted `DROP_ITEM` and `PICKUP_ITEM` rows |
 | Hopper/mechanical automation (ItemGraph supplemental) | NeoForge capability wrappers; Fabric `HopperBlockEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | GriefLogger's published feature surface has no hopper or mechanical-automation event; ItemGraph records successful vanilla hopper net deltas with unknown endpoints, while modded automation adapters remain an optional extension |
 | Crafting and smelting; anvil lineage extension | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | GriefLogger records crafting and furnace output under `CRAFT_ITEM`; both loaders preserve that source meaning and add ItemGraph `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR` lineage rows at server result-take boundaries. The profile-pinned local replay now persists one `CRAFT` transformation on each loader; smelting and anvil extensions remain issue-linked and are not claimed as observed by that replay. |
@@ -696,15 +716,43 @@ the exact 1.2.10-1.21.1 artifact has a writer or verifies
 even when GriefLogger has no corresponding writer. `not-observed-in-replay`
 means only that the current selected scenario did not exercise the action or
 category; it does not mean the ItemGraph implementation is absent. In the
-2026-10-04 replay, six unobserved actions are ItemGraph extensions: denied
+2026-10-05 replay, eight actions are unobserved: six are ItemGraph extensions—denied
 entity interaction (#75), `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR`
 (transformation coverage, #57), and `HOPPER_INSERT` and `HOPPER_EXTRACT`
-(automation extensions, #34). `ADD_ITEM_ENDER` and `REMOVE_ITEM_ENDER` are
-verified no-writer actions in exact release 1.2.10-1.21.1 (#76). Each row has
+(automation extensions, #34); two, `ADD_ITEM_ENDER` and `REMOVE_ITEM_ENDER`, are
+verified no-writer actions in exact release 1.2.10-1.21.1 (#76). Separately,
+`INTERACT_ENTITY` has no exact-release action ID or writer; it is a 26.2
+pinned-source-only action and ItemGraph extension tracked by #75. Each row has
 an owner issue in the compatibility registry; no missing extension is treated
 as demonstrated runtime behavior. The report is pinned to the
 same compatibility profile and exact-release fixture hashes, and contains no
 event IDs, player identity, raw payload, world position, or database row ID.
+`coverage_status` is independent of exact-release writer availability: an
+ItemGraph extension may be observed even when GriefLogger has no corresponding
+writer. `not-observed-in-replay` means only that the selected scenario did not
+exercise the action or category; it does not mean the ItemGraph implementation
+is absent, and it does not satisfy #31's outstanding coverage criterion. The
+report is pinned to the compatibility profile and exact-release fixture
+hashes, and contains no event IDs, player identity, raw payload, world
+position, or database row ID.
+
+Schema v2 also contains explicit redacted rows for open requirements #136
+(server-side localization), #137 (named permission nodes), #138 (history chat
+hover/page/location actions), and #140 (player-broken container contents), plus
+five #31 durability categories: transaction boundaries, queue admission versus
+durable persistence, failure/retry/rejection, shutdown drain/flush, and restart
+recovery. Exact-release claims are limited to the checked-in GriefLogger
+1.2.10-1.21.1 fixture. That fixture confirms the `REMOVE_ITEM` writer class
+`BreakContainerEvent` for both audited loaders, but does not establish break
+timing details; locale inventory, named permission nodes, rich history chat
+payloads, and durability semantics are not recorded there. Details from pinned
+GriefLogger 26.2 source are labeled `source-only-research`, never exact-release
+behavior. ItemGraph's separate unit tests are listed as implementation evidence,
+not as passes in the current 2026-10-05 25-event replay. Every listed open acceptance
+remains `unresolved` until issue-specific evidence and acceptance criteria pass.
+The sidecar validator rejects missing, duplicate, changed, misclassified, or
+extra (including privacy-bearing) requirement-row fields, and checks profile
+and fixture hashes before writing the artifact.
 
 ## Verification notes
 
@@ -947,3 +995,18 @@ claimed as an unmodified vanilla client; neither server loaded the GriefLogger
 runtime or opened its database. CI validates the exact GriefLogger
 1.2.10-1.21.1 release fixture and the selected 26.2 source decisions without
 loading a GriefLogger jar into the live servers.
+
+## M8 structured chat and flow-browser scanability
+
+ItemGraph query lines retain their stable `QueryFormatter` text. Player chat adds bounded
+hover data from typed evidence records (evidence class, item identity, canonical fingerprint
+hash, event kind, UTC timestamp, and endpoints), and a location link is bound to the issuing
+player plus the exact originating permission nodes. Each nine-entry vanilla flow-browser
+page has one numbered chat row per menu slot; candidate selection uses its own bounded page
+so all ten resolver candidates remain reachable. Observed, inferred, source-group ambiguous,
+recorded transformation, and unresolved page states have distinct text. This presentation
+adds no dependency on the GriefLogger runtime and does not copy its code. Focused loader tests
+are the validation boundary for this change. The complete NeoForge and Fabric unit/GameTest
+batch passed on 2026-10-05; exact results are recorded in `docs/TEST_PLAN.md` under
+“M8 milestone batch, 2026-10-05”. Locale resolution is implemented under #136 and included in
+that batch. Refreshed normal-scale UI evidence for the new chat companion remains open under #146.

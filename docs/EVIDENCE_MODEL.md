@@ -30,6 +30,25 @@ Examples:
 
 Observed evidence should include the source and original source identifier whenever available.
 
+For a successful player-caused container break, ItemGraph records the exact
+pre-break non-empty slot stacks as observed `REMOVE_ITEM` rows. The source is the
+container block entity at its dimension and coordinates. The player is retained
+as actor evidence; the destination is `UNKNOWN` because the snapshot does not
+prove that the player or a ground item entity received a particular stack. Each
+row includes slot, item registry ID, canonical fingerprint, quantity, its own
+event ID, and the parent `CONTAINER_BREAK_COMPLETED` event ID. That parent also
+stores `break_event_id`, which equals the standard `BREAK_BLOCK` row's
+`ingest_event_uuid`. The parent and all slot rows persist in one transaction, so
+a partial slot write cannot leave a false complete-snapshot claim. A canceled or
+failed break emits no removal row. A nonempty snapshot also emits a separate
+`CONTAINER_BREAK_UNRESOLVED` event using
+`CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED` until an authoritative
+callback can associate a specific resulting entity with source contents. An empty
+snapshot has no item-drop relationship to resolve, so it emits only its successful
+zero-content summary. Missing actors, vanished block entities, unsupported block-entity
+inventory contracts, and failed or oversized snapshots use distinct stable
+unresolved reason codes; no unsupported inventory adapter is queried.
+
 Raw observations and audit events are retained indefinitely. Legacy migrations V3, V4,
 and V5 preserve every pre-reset observation's source identifiers, timestamp, endpoints,
 fingerprint values, action, quantity, and `raw_data` bytes in

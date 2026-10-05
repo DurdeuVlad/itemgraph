@@ -8,6 +8,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -43,6 +44,36 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class FabricItemGraphPageDispatchTest {
+
+    @Test
+    void fabricChatBoundaryPreservesVisibleQueryLineAndUsesStructuredSafeHoverFields() {
+        String visible = "[OBSERVED] CHEST minecraft:overworld 3,64,4 -> PLAYER Admin : 1x at 2026-10-05T12:00:00Z";
+        QueryDispatcher.ChatHoverDetail hover = new QueryDispatcher.ChatHoverDetail(
+                "OBSERVED", "minecraft:diamond", "sha256:canonical", "DROP_ITEM",
+                "2026-10-05T12:00:00Z", "CHEST minecraft:overworld 3,64,4", "PLAYER Admin");
+
+        Component result = QueryDispatcher.chatLine(visible, hover);
+        String hoverText = result.getStyle().getHoverEvent()
+                .getValue(HoverEvent.Action.SHOW_TEXT).getString();
+
+        assertEquals(visible, result.getString());
+        assertTrue(hoverText.contains("Canonical metadata fingerprint: sha256:canonical"));
+        assertTrue(hoverText.contains("UTC time: 2026-10-05T12:00:00Z"));
+        assertFalse(hoverText.toLowerCase().contains("nbt"));
+    }
+    @Test
+    void lookupContinuationRetainsOriginAndAuditGatesOnFabric() {
+        assertEquals(List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT),
+                ItemGraphCommands.lookupPermissionsForType("COMMAND_EXECUTED"));
+        ItemGraphCommands.AuditPageSession session = new ItemGraphCommands.AuditPageSession(
+                UUID.randomUUID(), "CHAT_MESSAGE", null, QueryWindow.unbounded(), 20, null,
+                null, null, null, null, null, null, "chat lookup",
+                ItemGraphPermissions.LOOKUP, true, System.currentTimeMillis());
+
+        assertEquals(List.of(ItemGraphPermissions.PAGE, ItemGraphPermissions.LOOKUP,
+                        ItemGraphPermissions.AUDIT), ItemGraphCommands.pagePermissionsFor(session));
+    }
+
     @BeforeAll
     static void bootstrapMinecraftRegistries() {
         SharedConstants.tryDetectVersion();
@@ -58,6 +89,37 @@ class FabricItemGraphPageDispatchTest {
         ItemGraphCommands.clearPageSessions();
         QueryDispatcher.shutdown();
         DatabaseManager.getInstance().close();
+        ItemGraphPermissions.setChecker(null);
+    }
+
+    @Test
+    void lookupOnlyGrantCannotReadSensitiveAliasesOrContinueProtectedSessionOnFabric() throws Exception {
+        ItemGraphPermissions.setChecker((source, node) -> List.of(ItemGraphPermissions.COMMAND,
+                ItemGraphPermissions.LOOKUP, ItemGraphPermissions.PAGE).contains(node));
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        for (String command : List.of(
+                "ig lookup CHAT_MESSAGE",
+                "ig lookup chat_message",
+                "itemgraph lookup player Alex COMMAND_ATTEMPT",
+                "ig lookup near minecraft:overworld 0 64 0 5 COMMAND_EXECUTED",
+                "ig lookup filters action.chat_message radius.5")) {
+            CommandSourceStack source = sourceFor(UUID.randomUUID());
+            assertEquals(0, dispatcher.execute(command, source), command);
+            assertFailure(source, command.contains("filters") || command.contains("action.")
+                    ? "[ItemGraph] This lookup can include protected audit events and requires itemgraph.audit."
+                    : "[ItemGraph] You do not have permission to use this ItemGraph command.");
+        }
+
+        UUID ownerId = UUID.randomUUID();
+        CommandSourceStack pageSource = sourceFor(ownerId);
+        ItemGraphCommands.AuditPageSession session = new ItemGraphCommands.AuditPageSession(
+                UUID.randomUUID(), "COMMAND_ATTEMPT", null, QueryWindow.unbounded(), 20, null,
+                null, null, null, null, null, null, "command lookup",
+                ItemGraphPermissions.LOOKUP, true, System.currentTimeMillis());
+        ItemGraphCommands.rememberPageSession(pageSource, session);
+
+        assertEquals(0, dispatcher.execute("ig page 2 " + session.sessionId(), pageSource));
+        assertFailure(pageSource, "[ItemGraph] You do not have permission to use this ItemGraph command.");
     }
 
     @Test

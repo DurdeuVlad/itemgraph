@@ -19,7 +19,7 @@ an unknown taxonomy classification, not the `UNRESOLVED` evidence class.
 
 ## Versioning
 
-The taxonomy version is `2.0.0` (`EventTaxonomy.VERSION`) and is independent of
+The taxonomy version is `2.1.0` (`EventTaxonomy.VERSION`) and is independent of
 the ItemGraph mod version and GriefLogger registry version.
 
 - Increment the major taxonomy version when an existing ID is removed, renamed,
@@ -118,6 +118,14 @@ Initial unresolved reason codes are `WORLD_EVENT_API_UNAVAILABLE`,
 `WORLD_EFFECT_PARTIAL`, and `CAUSE_NOT_REPORTED` (#55);
 `ENTITY_CAUSE_NOT_REPORTED` and `PROJECTILE_IMPACT_NOT_AUTHORITATIVE` (#56);
 and `TRANSFORMATION_INPUTS_NOT_OBSERVED` and `TRANSFORMATION_CANCELLED` (#57).
+`CONTAINER_BREAK_UNRESOLVED` has taxonomy actor status `UNKNOWN` because some
+unresolved cases lack an authoritative actor. Audit lookup labels a row with no
+player identity `(actor unavailable)` and never assigns a nearby player.
+Container-break reason codes (#140) distinguish actor unavailable,
+block entity unavailable, inventory adapter explicitly known but unsupported,
+slot limit exceeded, snapshot failure, queue rejection, and a drop relationship
+not authoritatively linked. Non-inventory block entities such as signs are
+ignored and do not produce container-break events.
 Their exact definitions and owning issues are in
 `EventTaxonomy.unresolvedReasonCodes()`.
 

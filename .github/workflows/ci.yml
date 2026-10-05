@@ -84,6 +84,9 @@ jobs:
       - name: Test normalized differential replay report comparator
         run: python3 tools/test_itemgraph_differential_report.py
 
+      - name: Test container-break report validation
+        run: python3 tools/test_validate_itemgraph_container_break_report.py
+
       - name: Test native feature coverage report
         run: python3 tools/test_itemgraph_feature_coverage.py
 
@@ -157,6 +160,10 @@ jobs:
             python3 tools/itemgraph_feature_coverage.py \
               --input "$REPORT_DIR/normalized/itemgraph-$loader.json" \
               --output "$REPORT_DIR/normalized/itemgraph-$loader-coverage.json"
+            python3 tools/validate_itemgraph_container_break_report.py \
+              --loader "$loader" \
+              --input "$REPORT_DIR/raw/itemgraph-$loader-container-break.raw.json" \
+              --output "$REPORT_DIR/normalized/itemgraph-$loader-container-break.json"
           done
 
       - name: Upload redacted replay reports

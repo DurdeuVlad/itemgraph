@@ -1,6 +1,7 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.command.ItemGraphCommands;
+import com.itemgraph.command.ItemGraphPermissions;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.query.AuditLookupFilters;
@@ -29,6 +30,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -95,6 +97,20 @@ class FabricItemGraphCommandsParityTest {
                 "eventType: " + String.join(", ", AuditEventQueryService.EVENT_TYPES) + "."));
     }
 
+    @Test
+    void protectedEvidenceSurfacesFailClosedWithoutAuditOnFabric() throws Exception {
+        ItemGraphPermissions.setChecker((checkedSource, node) -> Set.of(ItemGraphPermissions.COMMAND,
+                ItemGraphPermissions.EVENT, ItemGraphPermissions.EXPLAIN, ItemGraphPermissions.TRACE,
+                ItemGraphPermissions.GUI).contains(node));
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        for (String command : List.of("ig event 1", "ig explain 1", "ig trace item diamond", "ig gui item diamond")) {
+            assertThrows(com.mojang.brigadier.exceptions.CommandSyntaxException.class,
+                    () -> dispatcher.execute(command, source), command);
+            verify(source, never()).sendSuccess(any(), anyBoolean());
+        }
+    }
+
     @BeforeAll
     static void bootstrapMinecraftRegistries() {
         SharedConstants.tryDetectVersion();
@@ -108,6 +124,7 @@ class FabricItemGraphCommandsParityTest {
     @AfterEach
     void clearInspectionState() {
         inspectionService.clear();
+        ItemGraphPermissions.setChecker(null);
     }
 
     @Test
@@ -155,6 +172,50 @@ class FabricItemGraphCommandsParityTest {
         assertFalse(inspectionService.isEnabled(playerUuid));
         assertTrue(messages.isEmpty(), "a denied inspect command must not emit a success receipt");
         verify(denied, never()).sendFailure(any());
+    }
+
+    @Test
+    void namedPermissionNodesAllowLookupAndExplicitlyDenyIndependentSurfacesOnFabric() {
+        CommandSourceStack levelOne = source();
+        when(levelOne.hasPermission(2)).thenReturn(false);
+        Map<String, Boolean> decisions = Map.ofEntries(
+                Map.entry(ItemGraphPermissions.COMMAND, true),
+                Map.entry(ItemGraphPermissions.LOOKUP, true),
+                Map.entry(ItemGraphPermissions.INSPECT, false),
+                Map.entry(ItemGraphPermissions.PAGE, false),
+                Map.entry(ItemGraphPermissions.TRACE, false),
+                Map.entry(ItemGraphPermissions.EVENT, false),
+                Map.entry(ItemGraphPermissions.EXPLAIN, false),
+                Map.entry(ItemGraphPermissions.AUDIT, false),
+                Map.entry(ItemGraphPermissions.GUI, false),
+                Map.entry(ItemGraphPermissions.INGEST, false),
+                Map.entry(ItemGraphPermissions.IMPORT, false));
+        ItemGraphPermissions.setChecker((source, node) -> decisions.getOrDefault(node, source.hasPermission(2)));
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+
+        assertFalse(dispatcher.parse("itemgraph lookup BREAK_BLOCK", levelOne).getReader().canRead());
+        for (String denied : List.of("itemgraph inspect on", "itemgraph page 1", "itemgraph trace item stone",
+                "itemgraph event 1", "itemgraph explain 1", "itemgraph audit", "itemgraph gui item stone",
+                "itemgraph ingest now", "itemgraph ingest history")) {
+            assertTrue(dispatcher.parse(denied, levelOne).getReader().canRead(),
+                    "explicit permission denial must win for " + denied);
+        }
+
+        CommandSourceStack operator = source();
+        assertFalse(ItemGraphPermissions.check(operator, ItemGraphPermissions.INSPECT),
+                "explicit deny must override operator permission");
+        assertTrue(ItemGraphPermissions.check(operator, "itemgraph.unset"),
+                "unset permission must use the vanilla level-2 fallback");
+    }
+
+    @Test
+    void absentPermissionProviderKeepsVanillaLevelTwoFallbackOnFabric() {
+        CommandSourceStack levelOne = source();
+        when(levelOne.hasPermission(2)).thenReturn(false);
+        ItemGraphPermissions.setChecker(null);
+        assertFalse(ItemGraphPermissions.canUse(levelOne, ItemGraphPermissions.LOOKUP));
+
+        assertTrue(ItemGraphPermissions.canUse(source(), ItemGraphPermissions.LOOKUP));
     }
 
     @Test

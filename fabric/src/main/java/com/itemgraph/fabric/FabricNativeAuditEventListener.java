@@ -3,11 +3,13 @@ package com.itemgraph.fabric;
 import com.itemgraph.fabric.mixin.BucketItemAccessor;
 import com.itemgraph.ingest.InternalObservationService;
 import com.itemgraph.audit.AdminMutationCapture;
+import com.itemgraph.audit.ContainerBreakCapture;
 import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.command.ItemGraphCommands;
+import com.itemgraph.command.ItemGraphPermissions;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.command.FlowBrowserService;
 import com.itemgraph.query.AuditEventQueryService;
@@ -47,6 +49,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.lang.StackWalker;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
@@ -71,6 +74,9 @@ public final class FabricNativeAuditEventListener {
     private static final int MAX_DEATH_CAPTURE_DEPTH = 8;
     private static final StackWalker DEATH_STACK_WALKER = StackWalker.getInstance();
     private static final ThreadLocal<Deque<DeathCapture>> PENDING_PLAYER_DEATHS = new ThreadLocal<>();
+    private static final ThreadLocal<Deque<ContainerBreakAttempt>> PENDING_CONTAINER_BREAKS = new ThreadLocal<>();
+
+    private record ContainerBreakAttempt(ContainerBreakCapture.Snapshot snapshot) { }
 
     private record DropCapture(Set<ItemEntity> addedEntities, String actionType) {
     }
@@ -162,9 +168,21 @@ public final class FabricNativeAuditEventListener {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.getPlayer()));
         ServerMessageEvents.CHAT_MESSAGE.register(FabricNativeAuditEventListener::onChat);
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) -> {
-            if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel) {
-                AdminMutationCapture.beginCreativeBlockBreakSafely(serverPlayer,
-                        BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos);
+            Deque<ContainerBreakAttempt> attempts = PENDING_CONTAINER_BREAKS.get();
+            if (attempts == null) {
+                attempts = new ArrayDeque<>();
+                PENDING_CONTAINER_BREAKS.set(attempts);
+            }
+            if (level instanceof ServerLevel serverLevel) {
+                if (player instanceof ServerPlayer serverPlayer) {
+                    AdminMutationCapture.beginCreativeBlockBreakSafely(serverPlayer,
+                            BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos);
+                }
+                attempts.push(new ContainerBreakAttempt(ContainerBreakCapture.begin(
+                        player instanceof ServerPlayer serverPlayer ? serverPlayer : null,
+                        serverLevel, pos, state, blockEntity)));
+            } else {
+                attempts.push(new ContainerBreakAttempt(null));
             }
             return true;
         });
@@ -180,8 +198,10 @@ public final class FabricNativeAuditEventListener {
                         BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), null,
                         supersessionPositions);
             }
+            completeContainerBreakAttempt(true);
         });
         PlayerBlockBreakEvents.CANCELED.register((level, player, pos, state, blockEntity) -> {
+            completeContainerBreakAttempt(false);
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel) {
                 AdminMutationCapture.finishCreativeBlockBreakSafely(serverPlayer, pos, true, false);
             }
@@ -200,7 +220,7 @@ public final class FabricNativeAuditEventListener {
                     || !InspectionService.getInstance().isEnabled(serverPlayer.getUUID())) {
                 return InteractionResult.PASS;
             }
-            if (!serverPlayer.createCommandSourceStack().hasPermission(2)) {
+            if (!ItemGraphPermissions.canUse(serverPlayer.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
                 InspectionService.getInstance().clear(serverPlayer.getUUID());
                 return InteractionResult.PASS;
             }
@@ -222,6 +242,14 @@ public final class FabricNativeAuditEventListener {
                         BuiltInRegistries.ENTITY_TYPE.getKey(victim.getType()).toString(), null);
             }
         });
+    }
+
+    private static void completeContainerBreakAttempt(boolean successful) {
+        Deque<ContainerBreakAttempt> attempts = PENDING_CONTAINER_BREAKS.get();
+        if (attempts == null || attempts.isEmpty()) return;
+        ContainerBreakAttempt attempt = attempts.pop();
+        if (attempts.isEmpty()) PENDING_CONTAINER_BREAKS.remove();
+        ContainerBreakCapture.complete(attempt.snapshot(), successful);
     }
 
     public static void onDisconnect(ServerPlayer player) {
@@ -276,7 +304,7 @@ public final class FabricNativeAuditEventListener {
                 || !inspections.isEnabled(player.getUUID())) {
             return null;
         }
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
             return null;
         }
@@ -301,7 +329,7 @@ public final class FabricNativeAuditEventListener {
                 || !inspections.isEnabled(player.getUUID())) {
             return null;
         }
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
             return null;
         }
@@ -1134,12 +1162,15 @@ public final class FabricNativeAuditEventListener {
     private static void submit(String eventType, ServerPlayer player, Level level, BlockPos pos,
                                String subjectId, String detail,
                                List<AuditEventQueryService.ExactPosition> supersessionPositions) {
+        String linkedBreakEventId = eventType.equals("BREAK_BLOCK") && level instanceof ServerLevel serverLevel
+                ? ContainerBreakCapture.activeBreakEventId(player, serverLevel, pos) : null;
         InternalObservationService.getInstance().submitAuditEvent(
                 new InternalObservationService.InternalAuditEvent(
                         System.currentTimeMillis(), eventType,
                         player.getUUID().toString(), player.getGameProfile().getName(),
                         level.dimension().location().toString(),
-                        pos.getX(), pos.getY(), pos.getZ(), subjectId, detail, null, supersessionPositions));
+                        pos.getX(), pos.getY(), pos.getZ(), subjectId, detail, null,
+                        null, linkedBreakEventId, supersessionPositions));
     }
 
     private static String bounded(String value) {

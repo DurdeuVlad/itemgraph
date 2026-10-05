@@ -42,14 +42,19 @@ class PendingEvidenceSpoolTest {
                 3456L, "BREAK_BLOCK", "00000000-0000-0000-0000-000000000001", "Alex",
                 "minecraft:overworld", 10, 11, 12, "minecraft:stone", "test", new byte[]{4, 5},
                 null, "00000000-0000-0000-0000-000000000005",
-                List.of(new AuditEventQueryService.ExactPosition(10, 11, 12)));
+                List.of(new AuditEventQueryService.ExactPosition(10, 11, 12)))
+                .withRelatedObservations(List.of(new InternalObservation(
+                        3456L, "REMOVE_ITEM", "00000000-0000-0000-0000-000000000001", "Alex",
+                        "minecraft:overworld", 10, 11, 12, "minecraft:overworld", 10.0, 11.0, 12.0,
+                        "DESTROYED_CONTAINER", item.itemId(), new byte[]{9}, item, 3, null, null, null,
+                        "00000000-0000-0000-0000-000000000006")));
         PendingEvidenceSpool.Snapshot expected = new PendingEvidenceSpool.Snapshot(
                 List.of(observation), List.of(transformation), List.of(audit));
 
         PendingEvidenceSpool.write(path, expected);
         PendingEvidenceSpool.Snapshot actual = PendingEvidenceSpool.read(path);
 
-        assertEquals(3, actual.size());
+        assertEquals(4, actual.size());
         assertEquals(observation.ingestEventUuid(), actual.observations().getFirst().ingestEventUuid());
         assertArrayEquals(observation.rawData(), actual.observations().getFirst().rawData());
         assertEquals(item, actual.observations().getFirst().item());
@@ -57,6 +62,35 @@ class PendingEvidenceSpoolTest {
         assertEquals(audit.ingestEventUuid(), actual.auditEvents().getFirst().ingestEventUuid());
         assertArrayEquals(audit.rawData(), actual.auditEvents().getFirst().rawData());
         assertEquals(audit.supersessionPositions(), actual.auditEvents().getFirst().supersessionPositions());
+        assertEquals("00000000-0000-0000-0000-000000000006",
+                actual.auditEvents().getFirst().relatedObservations().getFirst().ingestEventUuid());
+    }
+
+    @Test
+    void legacySeparateContainerRowsAreRegroupedBeforeRecovery() throws Exception {
+        Path path = tempDir.resolve("legacy-container.json");
+        String parentId = "00000000-0000-0000-0000-000000000011";
+        InternalObservation slot = new InternalObservation(
+                100L, "REMOVE_ITEM", "00000000-0000-0000-0000-000000000001", "Alex",
+                "minecraft:overworld", 1, 64, 2, "minecraft:overworld", 3.0, 64.0, 2.0,
+                "DESTROYED_CONTAINER", "minecraft:diamond", ("{\"cause_event_id\":\"" + parentId + "\"}")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                new CanonicalItem("minecraft:diamond", "fingerprint", null, null, null), 3,
+                null, null, null, "00000000-0000-0000-0000-000000000012");
+        InternalAuditEvent completed = new InternalAuditEvent(
+                100L, "CONTAINER_BREAK_COMPLETED", "00000000-0000-0000-0000-000000000001", "Alex",
+                "minecraft:overworld", 1, 64, 2, "minecraft:chest", "contents_snapshot=complete",
+                ("{\"event_id\":\"" + parentId + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        PendingEvidenceSpool.write(path, new PendingEvidenceSpool.Snapshot(
+                List.of(slot), List.of(), List.of(completed)));
+        PendingEvidenceSpool.Snapshot recovered = PendingEvidenceSpool.read(path);
+
+        assertTrue(recovered.observations().isEmpty(), "legacy slot rows must not recover in a separate queue");
+        assertEquals(1, recovered.auditEvents().getFirst().relatedObservations().size());
+        assertEquals(slot.ingestEventUuid(),
+                recovered.auditEvents().getFirst().relatedObservations().getFirst().ingestEventUuid());
+        assertEquals(2, recovered.size(), "the grouped recovery snapshot must still count both records");
     }
 
     @Test

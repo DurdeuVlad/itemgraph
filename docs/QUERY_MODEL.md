@@ -159,17 +159,27 @@ opened or modified by this path.
 /ig gui container <dimension> <x> <y> <z> [sinceMinutes]
 ```
 
-These player-only, permission-level-2 commands open a vanilla `MenuType.GENERIC_9x6`
+These player-only GUI-permission commands open a vanilla `MenuType.GENERIC_9x6`
 through `SimpleMenuProvider`; there is no custom `MenuType`, client screen, packet, or
-ItemGraph item. The first 45 slots hold flow entries and the sixth row is reserved for
-navigation. Item queries use the same fingerprint resolver as `/ig trace item`, player
+ItemGraph item. Each timeline page contains at most nine entries; the sixth row is reserved
+for navigation and detail pagination. Since vanilla chest menus show item labels only when
+hovered, opening a page also sends a numbered chat companion with one concise description
+per row. The row number is the one-based menu slot, so admins can scan meaning without
+hovering and use the matching slot to open details. Icons and hover text add detail but are
+not the only row labels. The detail view shows one paper icon per field; hover an icon to read
+its full text, use the labeled page controls for additional fields, and select Back to return.
+Item queries use the same fingerprint resolver as `/ig trace item`, player
 queries use the same player-node lookup as `/ig trace player`, and container queries match
 the explicit dimension and coordinates through the same container-node lookup as the trace
 service. Ambiguous item, player-node, or container-node matches open a candidate-selection
-view rather than choosing a target silently. Candidate lists are capped at 10 matches. A
+view rather than choosing a target silently. Candidate lists are capped at 10 matches and
+paginate separately from nine-entry timeline pages. A
 resolved target with no rows shows an explicit empty state.
 
-Each entry names its provenance in text: `[OBSERVED]` or `[INFERRED conf=X.XXXX]`. Selecting
+Each entry names its evidence class, safe item identity (or an unavailable fallback), event
+kind, and UTC time in the numbered companion: `OBSERVED` or `INFERRED conf=X.XXXX`. Candidate
+pages are marked `AMBIGUOUS`; missing targets or empty histories are marked `UNRESOLVED`.
+No raw NBT or component payload is shown. Selecting
 an observation opens its raw event detail; selecting a transformation opens its stored
 transformation detail; selecting an inferred edge opens `/ig explain`-equivalent detail with
 the stored explanation and evidence IDs. Session intervals, UNKNOWN endpoints,
@@ -180,13 +190,24 @@ and each action.
 
 Pages use keyset pagination, not offsets. The stable total-order cursor is
 `(timestamp_ms, provenance kind, row id, source kind)`; each database source fetches at most
-46 rows for a 45-entry page, merges them by the same ordering, and keeps the `QueryWindow`
+10 rows for a nine-entry page, merges them by the same ordering, and keeps the `QueryWindow`
 resolved when the GUI was opened. This prevents ties at page boundaries from skipping or
 repeating observations, edges, or transformations. Next pages query after the last entry;
 previous pages query before the first entry in reverse order and reverse the bounded result for
 display, so navigation does not retain an unbounded list of prior cursors or use offsets. The
 SQL and formatting use the existing `QueryDispatcher` read-only worker; menu creation and state changes happen on the server
 thread. The vanilla menu path follows the NeoForge 1.21.1 [`ChestMenu`](https://lexxie.dev/neoforge/1.21.1/net/minecraft/world/inventory/ChestMenu.html), [`SimpleMenuProvider`](https://lexxie.dev/neoforge/1.21.1/net/minecraft/world/SimpleMenuProvider.html), and [`AbstractContainerMenu`](https://lexxie.dev/neoforge/1.21.1/net/minecraft/world/inventory/AbstractContainerMenu.html) APIs. The cursor follows keyset-pagination guidance to include all tie-breakers from the stable order in the cursor predicate ([GitLab keyset pagination](https://docs.gitlab.com/development/database/keyset_pagination/)). Each page uses a new read-only connection rather than a long-lived SQLite snapshot; ingestion or correlation can change later pages while the GUI is open. Keyset correctness is guaranteed across page boundaries for an unchanged result set, not as a multi-page snapshot. Reopen the GUI to refresh the timeline.
+
+### Structured chat details and location actions
+
+The visible `QueryFormatter` lines for `/ig event`, `/ig explain`, `/ig trace`, and paged
+history lookups remain unchanged. Player chat rows may carry a bounded hover payload with
+evidence class, safe item identity, canonical fingerprint hash when present, event kind,
+exact UTC timestamp, and recorded endpoints. Raw NBT and component serialization are never
+included. Console output stays plain text. Recorded spatial endpoints may add a `[Go to ...]`
+action that works only for the requesting player through a short-lived, one-use token; the
+token stores the exact permission nodes for the originating query and checks them again on
+click. The target dimension must currently be loaded, and all target coordinates must be finite.
 
 ### Not-found handling
 
@@ -430,7 +451,7 @@ Implemented:
 - a separate 50-row cap on the `/ig explain` evidence listing, with its own truncation line
 - textual cross-references: every hop names `observation#<id>`, `transformation#<id>`, or
   `edge#<id>`; `/ig event <id>` is for observations and `/ig explain <id>` is for edges
-- GUI paging: `/ig gui` returns at most 45 entries per page using the composite keyset cursor
+- GUI paging: `/ig gui` returns at most nine entries per page using the composite keyset cursor
   described above; equal timestamps are ordered by provenance, row ID, and source table
 - audit lookup paging: `/ig lookup page` adds permission-checked Previous/Next chat actions
   that rerun the same bounded event-type and time-window filters

@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import com.itemgraph.audit.AuditReport;
+import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.audit.AuditService;
 import com.itemgraph.correlation.CorrelationResult;
 import com.itemgraph.db.DatabaseManager;
@@ -79,6 +80,8 @@ public final class ItemGraphCommands {
             "join", "quit", "add_item", "remove_item", "drop_item", "pickup_item",
             "craft_item", "break_item", "consume_item", "throw_item", "shoot_item",
             "add_item_ender", "remove_item_ender");
+    private static final Set<String> AUDIT_ONLY_LOOKUP_TYPES = Set.of(
+            "CHAT_MESSAGE", "COMMAND_ATTEMPT", "COMMAND_EXECUTED");
     private static volatile RuntimeInformationPort runtimeInformation = new RuntimeInformationPort() {
         @Override public String modVersion() { return "unknown"; }
         @Override public boolean isModLoaded(String modId) { return false; }
@@ -98,7 +101,19 @@ public final class ItemGraphCommands {
             List<AuditEventQueryService.ExactPosition> exactPositions,
             AuditLookupFilters filters,
             String filterDescription,
+            String originatingPermission,
+            boolean requiresAuditPermission,
             long createdAtMs) {
+        AuditPageSession(UUID sessionId, String eventType, String playerName, QueryWindow window, int limit,
+                        String levelId, Double centerX, Double centerY, Double centerZ, Double radius,
+                        List<AuditEventQueryService.ExactPosition> exactPositions, AuditLookupFilters filters,
+                        String filterDescription, long createdAtMs) {
+            this(sessionId, eventType, playerName, window, limit, levelId, centerX, centerY, centerZ, radius,
+                    exactPositions, filters, filterDescription, ItemGraphPermissions.LOOKUP,
+                    eventType == null || "all".equalsIgnoreCase(eventType)
+                            || AUDIT_ONLY_LOOKUP_TYPES.contains(eventType.toUpperCase(java.util.Locale.ROOT)),
+                    createdAtMs);
+        }
     }
 
     private ItemGraphCommands() {}
@@ -110,7 +125,7 @@ public final class ItemGraphCommands {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         LiteralCommandNode<CommandSourceStack> root = dispatcher.register(
                 Commands.literal("itemgraph")
-                        .requires(source -> source.hasPermission(2))
+                        .requires(source -> ItemGraphPermissions.check(source, ItemGraphPermissions.COMMAND))
                         .executes(ItemGraphCommands::help)
                         .then(Commands.literal("help")
                                 .executes(ItemGraphCommands::help)
@@ -118,25 +133,27 @@ public final class ItemGraphCommands {
                                         .suggests(ItemGraphCommands::suggestHelpTopics)
                                         .executes(ItemGraphCommands::helpTopic)))
                         .then(Commands.literal("status").executes(ItemGraphCommands::status))
-                        .then(Commands.literal("audit").executes(ItemGraphCommands::audit))
+                        .then(Commands.literal("audit").requires(source -> ItemGraphPermissions.canUse(source, ItemGraphPermissions.AUDIT))
+                                .executes(ItemGraphCommands::audit))
                         .then(buildStandalonePageCommand())
                         .then(buildLookupCommand())
-                        .then(Commands.literal("ingest")
+                        .then(Commands.literal("ingest").requires(source -> ItemGraphPermissions.canUse(source, ItemGraphPermissions.INGEST))
                                 .then(Commands.literal("now").executes(ItemGraphCommands::ingestNow))
-                                .then(Commands.literal("history").executes(ItemGraphCommands::ingestHistory)))
+                                .then(Commands.literal("history").requires(source -> ItemGraphPermissions.canUse(source, ItemGraphPermissions.IMPORT))
+                                        .executes(ItemGraphCommands::ingestHistory)))
 
                         // /ig event <observationId>
-                        .then(Commands.literal("event")
+                        .then(Commands.literal("event").requires(source -> ItemGraphPermissions.canUseAll(source, ItemGraphPermissions.EVENT, ItemGraphPermissions.AUDIT))
                                 .then(Commands.argument("observationId", LongArgumentType.longArg(1))
                                         .executes(ItemGraphCommands::event)))
 
                         // /ig explain <edgeId>
-                        .then(Commands.literal("explain")
+                        .then(Commands.literal("explain").requires(source -> ItemGraphPermissions.canUseAll(source, ItemGraphPermissions.EXPLAIN, ItemGraphPermissions.AUDIT))
                                 .then(Commands.argument("edgeId", LongArgumentType.longArg(1))
                                         .executes(ItemGraphCommands::explain)))
 
                         // /ig trace ...
-                        .then(Commands.literal("trace")
+                        .then(Commands.literal("trace").requires(source -> ItemGraphPermissions.canUseAll(source, ItemGraphPermissions.TRACE, ItemGraphPermissions.AUDIT))
                                 // /ig trace item <query> [limit] [sinceMinutes]
                                 .then(Commands.literal("item")
                                         .then(Commands.argument("itemQuery", StringArgumentType.string())
@@ -179,7 +196,8 @@ public final class ItemGraphCommands {
         );
 
         LiteralCommandNode<CommandSourceStack> gui = Commands.literal("gui")
-                .requires(source -> source.hasPermission(2) && source.getEntity() instanceof ServerPlayer)
+                .requires(source -> ItemGraphPermissions.canUseAll(source, ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT)
+                        && source.getEntity() instanceof ServerPlayer)
                 .then(Commands.literal("item")
                         .then(Commands.argument("itemQuery", StringArgumentType.string())
                                 .suggests(ItemGraphCommands::suggestItemIds)
@@ -206,21 +224,101 @@ public final class ItemGraphCommands {
         root.addChild(gui);
 
         LiteralCommandNode<CommandSourceStack> inspect = Commands.literal("inspect")
-                .requires(source -> source.hasPermission(2))
+                .requires(source -> ItemGraphPermissions.canUse(source, ItemGraphPermissions.INSPECT))
                 .executes(ItemGraphCommands::inspectToggle)
                 .then(Commands.literal("on").executes(ctx -> inspectSet(ctx, true)))
                 .then(Commands.literal("off").executes(ctx -> inspectSet(ctx, false)))
                 .then(Commands.literal("status").executes(ItemGraphCommands::inspectStatus))
                 .build();
         root.addChild(inspect);
+        root.addChild(Commands.literal("goto")
+                .then(Commands.argument("token", StringArgumentType.word())
+                        .executes(ItemGraphCommands::navigateToResultLocation))
+                .build());
         dispatcher.register(Commands.literal("ig")
-                .requires(source -> source.hasPermission(2))
+                .requires(source -> ItemGraphPermissions.check(source, ItemGraphPermissions.COMMAND))
                 .executes(ItemGraphCommands::help)
                 .redirect(root));
     }
 
+    private static int navigateToResultLocation(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        UUID token;
+        try {
+            token = UUID.fromString(StringArgumentType.getString(ctx, "token"));
+        } catch (IllegalArgumentException invalidToken) {
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("goto.invalid", "[ItemGraph] This location link is invalid or expired.")));
+            return 0;
+        }
+        if (!QueryDispatcher.consumeLocationGrant(source, token)) {
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("goto.rejected",
+                    "[ItemGraph] This location link expired, belongs to another player, or its query permission was revoked.")));
+            return 0;
+        }
+        return 1;
+    }
+
+    private static List<QueryDispatcher.LocationAction> locationActions(NodeRef... nodes) {
+        return java.util.Arrays.stream(nodes)
+                .filter(java.util.Objects::nonNull)
+                .filter(node -> node.levelId() != null && node.x() != null && node.y() != null && node.z() != null)
+                .filter(node -> Double.isFinite(node.x()) && Double.isFinite(node.y()) && Double.isFinite(node.z()))
+                .map(node -> new QueryDispatcher.LocationAction(node.levelId(), node.x(), node.y(), node.z()))
+                .distinct().limit(8).toList();
+    }
+
+    private static List<QueryDispatcher.LocationAction> locationsForHops(TraceResult result) {
+        List<NodeRef> nodes = new java.util.ArrayList<>();
+        result.hops().forEach(hop -> {
+            nodes.add(hop.origin());
+            nodes.add(hop.destination());
+        });
+        return locationActions(nodes.toArray(NodeRef[]::new));
+    }
+
+    private static QueryDispatcher.ChatHoverDetail chatHover(String evidenceClass, FingerprintRef item,
+                                                               String eventKind, long timestampMs,
+                                                               NodeRef origin, NodeRef destination) {
+        return new QueryDispatcher.ChatHoverDetail(evidenceClass,
+                item == null ? "item identity unavailable" : item.describe(),
+                item == null || item.fingerprintHash() == null ? "not recorded" : item.fingerprintHash(),
+                eventKind, QueryFormatter.formatTime(timestampMs),
+                origin == null ? "endpoint not recorded" : origin.describe(),
+                destination == null ? "endpoint not recorded" : destination.describe());
+    }
+
+    private static Map<Integer, QueryDispatcher.ChatHoverDetail> hoverEveryLine(
+            int lineCount, QueryDispatcher.ChatHoverDetail detail) {
+        Map<Integer, QueryDispatcher.ChatHoverDetail> hovers = new java.util.HashMap<>();
+        for (int i = 0; i < lineCount; i++) hovers.put(i, detail);
+        return Map.copyOf(hovers);
+    }
+
+    private static Map<Integer, QueryDispatcher.ChatHoverDetail> traceHovers(TraceResult result) {
+        Map<Integer, QueryDispatcher.ChatHoverDetail> hovers = new java.util.HashMap<>();
+        for (int i = 0; i < result.hops().size(); i++) {
+            var hop = result.hops().get(i);
+            String evidenceClass = hop.source() == com.itemgraph.query.TraceHop.Source.TRANSFORMATION
+                    ? "OBSERVED / TRANSFORMATION"
+                    : hop.detail() != null && hop.detail().contains("[source group ambiguous #")
+                        ? "OBSERVED / AMBIGUOUS SOURCE GROUP"
+                        : hop.kind() == com.itemgraph.query.TraceHop.Kind.OBSERVED ? "OBSERVED"
+                        : "INFERRED conf=" + QueryFormatter.formatConfidence(hop.confidence());
+            hovers.put(i + 2, chatHover(evidenceClass, hop.item(), hop.detail(), hop.timestampMs(),
+                    hop.origin(), hop.destination()));
+        }
+        return Map.copyOf(hovers);
+    }
+
+    static Map<Integer, QueryDispatcher.ChatHoverDetail> explainSummaryHover(
+            com.itemgraph.query.EdgeExplanation edge) {
+        return Map.of(0, chatHover("INFERRED conf=" + QueryFormatter.formatConfidence(edge.confidence()),
+                edge.fingerprint(), "inferred transfer", edge.timeStart(), edge.from(), edge.to()));
+    }
+
     private static LiteralArgumentBuilder<CommandSourceStack> buildLookupCommand() {
-        LiteralArgumentBuilder<CommandSourceStack> lookup = Commands.literal("lookup");
+        LiteralArgumentBuilder<CommandSourceStack> lookup = Commands.literal("lookup")
+                .requires(source -> ItemGraphPermissions.canUse(source, ItemGraphPermissions.LOOKUP));
 
         // Event types are finite command literals rather than a custom Brigadier
         // argument. Vanilla can serialize these nodes to connected clients; a
@@ -284,15 +382,15 @@ public final class ItemGraphCommands {
         String canonicalEventType = commandEventType.toUpperCase(java.util.Locale.ROOT);
         LiteralArgumentBuilder<CommandSourceStack> type = Commands.literal(commandEventType)
                 .executes(ctx -> lookupAudit(ctx, canonicalEventType,
-                        playerArgument == null ? null : StringArgumentType.getString(ctx, playerArgument),
+                        optionalPlayerArgument(ctx, playerArgument),
                         QueryLimits.DEFAULT_LIMIT, null));
         var limitArgument = Commands.argument("limit", IntegerArgumentType.integer(1))
                 .executes(ctx -> lookupAudit(ctx, canonicalEventType,
-                        playerArgument == null ? null : StringArgumentType.getString(ctx, playerArgument),
+                        optionalPlayerArgument(ctx, playerArgument),
                         IntegerArgumentType.getInteger(ctx, "limit"), null));
         limitArgument.then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
                 .executes(ctx -> lookupAudit(ctx, canonicalEventType,
-                        playerArgument == null ? null : StringArgumentType.getString(ctx, playerArgument),
+                        optionalPlayerArgument(ctx, playerArgument),
                         IntegerArgumentType.getInteger(ctx, "limit"),
                         LongArgumentType.getLong(ctx, "sinceMinutes"))));
         type.then(limitArgument);
@@ -300,7 +398,7 @@ public final class ItemGraphCommands {
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> buildStandalonePageCommand() {
-        return Commands.literal("page")
+        return Commands.literal("page").requires(source -> ItemGraphPermissions.canUse(source, ItemGraphPermissions.PAGE))
                 .then(Commands.argument("page", IntegerArgumentType.integer(1))
                         .executes(ctx -> lookupAuditSessionPage(ctx,
                                 IntegerArgumentType.getInteger(ctx, "page"), null))
@@ -315,19 +413,30 @@ public final class ItemGraphCommands {
             String playerArgument) {
         var type = Commands.argument("eventType", StringArgumentType.word())
                 .executes(ctx -> lookupAudit(ctx, StringArgumentType.getString(ctx, "eventType"),
-                        playerArgument == null ? null : StringArgumentType.getString(ctx, playerArgument),
+                        optionalPlayerArgument(ctx, playerArgument),
                         QueryLimits.DEFAULT_LIMIT, null));
         var limit = Commands.argument("limit", IntegerArgumentType.integer(1))
                 .executes(ctx -> lookupAudit(ctx, StringArgumentType.getString(ctx, "eventType"),
-                        playerArgument == null ? null : StringArgumentType.getString(ctx, playerArgument),
+                        optionalPlayerArgument(ctx, playerArgument),
                         IntegerArgumentType.getInteger(ctx, "limit"), null));
         limit.then(Commands.argument("sinceMinutes", LongArgumentType.longArg(1))
                 .executes(ctx -> lookupAudit(ctx, StringArgumentType.getString(ctx, "eventType"),
-                        playerArgument == null ? null : StringArgumentType.getString(ctx, playerArgument),
+                        optionalPlayerArgument(ctx, playerArgument),
                         IntegerArgumentType.getInteger(ctx, "limit"),
                         LongArgumentType.getLong(ctx, "sinceMinutes"))));
         type.then(limit);
         return type;
+    }
+
+    private static String optionalPlayerArgument(CommandContext<CommandSourceStack> ctx, String argumentName) {
+        if (argumentName == null) {
+            return null;
+        }
+        try {
+            return StringArgumentType.getString(ctx, argumentName);
+        } catch (IllegalArgumentException notOnThisCommandBranch) {
+            return null;
+        }
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> buildPagedLookupCommand() {
@@ -485,7 +594,7 @@ public final class ItemGraphCommands {
     private static int help(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack source = ctx.getSource();
         CommandHelp.overviewLines().forEach(line ->
-                source.sendSuccess(() -> Component.literal(line), false));
+                source.sendSuccess(() -> Component.literal(ItemGraphLanguage.sourceText(line)), false));
         return 1;
     }
 
@@ -494,11 +603,11 @@ public final class ItemGraphCommands {
         String topic = StringArgumentType.getString(ctx, "topic");
         List<String> lines = CommandHelp.topicLines(topic);
         if (lines == null) {
-            source.sendFailure(Component.literal(
-                    "[ItemGraph] Unknown help topic '" + topic + "'. Valid topics: " + CommandHelp.validTopicsText()));
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("help.unknown_topic",
+                    "[ItemGraph] Unknown help topic ''{0}''. Valid topics: {1}", topic, CommandHelp.validTopicsText())));
             return 0;
         }
-        lines.forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
+        lines.forEach(line -> source.sendSuccess(() -> Component.literal(ItemGraphLanguage.sourceText(line)), false));
         return 1;
     }
 
@@ -535,8 +644,9 @@ public final class ItemGraphCommands {
             return canonical;
         }
         source.sendFailure(Component.literal(
-                "[ItemGraph] Unknown audit event type '" + eventType + "'. Valid values: "
-                        + String.join(", ", AuditEventQueryService.EVENT_TYPES)));
+                ItemGraphLanguage.text("lookup.unknown_event_type",
+                        "[ItemGraph] Unknown audit event type '{0}'. Valid values: {1}", eventType,
+                        String.join(", ", AuditEventQueryService.EVENT_TYPES))));
         return null;
     }
 
@@ -668,9 +778,15 @@ public final class ItemGraphCommands {
     /** /ig event <observationId> - one raw observation, labelled OBSERVED. */
     private static int event(CommandContext<CommandSourceStack> ctx) {
         long observationId = LongArgumentType.getLong(ctx, "observationId");
-        return QueryDispatcher.dispatch(ctx.getSource(), "event", conn ->
+        return QueryDispatcher.dispatch(ctx.getSource(), List.of(ItemGraphPermissions.EVENT, ItemGraphPermissions.AUDIT), "event", conn ->
                 EVENT_QUERIES.findObservation(conn, observationId)
-                        .map(obs -> QueryDispatcher.QueryOutput.found(QueryFormatter.formatEvent(obs)))
+                        .map(obs -> {
+                            List<String> lines = QueryFormatter.formatEvent(obs);
+                            return QueryDispatcher.QueryOutput.found(lines,
+                                    locationActions(obs.origin(), obs.destination()), List.of(),
+                                    hoverEveryLine(lines.size(), chatHover("OBSERVED", obs.fingerprint(),
+                                            obs.actionType(), obs.timestampMs(), obs.origin(), obs.destination())));
+                        })
                         .orElseGet(() -> QueryDispatcher.QueryOutput.notFound(
                                 QueryFormatter.eventNotFound(observationId))));
     }
@@ -678,9 +794,21 @@ public final class ItemGraphCommands {
     /** /ig explain <edgeId> - one inferred edge plus every observation it cites. */
     private static int explain(CommandContext<CommandSourceStack> ctx) {
         long edgeId = LongArgumentType.getLong(ctx, "edgeId");
-        return QueryDispatcher.dispatch(ctx.getSource(), "explain", conn ->
+        return QueryDispatcher.dispatch(ctx.getSource(), List.of(ItemGraphPermissions.EXPLAIN, ItemGraphPermissions.AUDIT), "explain", conn ->
                 EXPLAIN_QUERIES.findEdge(conn, edgeId)
-                        .map(edge -> QueryDispatcher.QueryOutput.found(QueryFormatter.formatExplain(edge)))
+                        .map(edge -> {
+                            List<NodeRef> nodes = new java.util.ArrayList<>();
+                            nodes.add(edge.from());
+                            nodes.add(edge.to());
+                            edge.evidence().forEach(obs -> {
+                                nodes.add(obs.origin());
+                                nodes.add(obs.destination());
+                            });
+                            List<String> lines = QueryFormatter.formatExplain(edge);
+                            return QueryDispatcher.QueryOutput.found(lines,
+                                    locationActions(nodes.toArray(NodeRef[]::new)), List.of(),
+                                    explainSummaryHover(edge));
+                        })
                         .orElseGet(() -> QueryDispatcher.QueryOutput.notFound(
                                 QueryFormatter.explainNotFound(edgeId))));
     }
@@ -692,7 +820,7 @@ public final class ItemGraphCommands {
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
 
-        return QueryDispatcher.dispatch(ctx.getSource(), "trace item", conn -> {
+        return QueryDispatcher.dispatch(ctx.getSource(), List.of(ItemGraphPermissions.TRACE, ItemGraphPermissions.AUDIT), "trace item", conn -> {
             List<FingerprintRef> candidates = TRACE_QUERIES.resolveFingerprints(conn, query);
             if (candidates.isEmpty()) {
                 return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchFingerprint(query));
@@ -702,7 +830,9 @@ public final class ItemGraphCommands {
             }
             FingerprintRef fp = candidates.get(0);
             TraceResult result = TRACE_QUERIES.trace(conn, fp.id(), limit, window);
-            return QueryDispatcher.QueryOutput.found(QueryFormatter.formatTrace(result));
+            List<String> lines = QueryFormatter.formatTrace(result);
+            return QueryDispatcher.QueryOutput.found(lines, locationsForHops(result), List.of(),
+                    traceHovers(result));
         });
     }
 
@@ -713,7 +843,7 @@ public final class ItemGraphCommands {
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
 
-        return QueryDispatcher.dispatch(ctx.getSource(), "trace player", conn -> {
+        return QueryDispatcher.dispatch(ctx.getSource(), List.of(ItemGraphPermissions.TRACE, ItemGraphPermissions.AUDIT), "trace player", conn -> {
             List<NodeRef> candidates = TRACE_QUERIES.resolvePlayerNodes(conn, player);
             if (candidates.isEmpty()) {
                 return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget("player '" + player + "'"));
@@ -726,7 +856,9 @@ public final class ItemGraphCommands {
             if (result.hops().isEmpty()) {
                 return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget("player '" + player + "'"));
             }
-            return QueryDispatcher.QueryOutput.found(QueryFormatter.formatTrace(result));
+            List<String> lines = QueryFormatter.formatTrace(result);
+            return QueryDispatcher.QueryOutput.found(lines, locationsForHops(result), List.of(),
+                    traceHovers(result));
         });
     }
 
@@ -739,7 +871,7 @@ public final class ItemGraphCommands {
                 ? QueryWindow.unbounded()
                 : QueryWindow.lastMinutes(sinceMinutes, System.currentTimeMillis());
 
-        return QueryDispatcher.dispatch(ctx.getSource(), "trace container", conn -> {
+        return QueryDispatcher.dispatch(ctx.getSource(), List.of(ItemGraphPermissions.TRACE, ItemGraphPermissions.AUDIT), "trace container", conn -> {
             String target = "container at [" + x + ", " + y + ", " + z + "]";
             List<NodeRef> candidates = TRACE_QUERIES.resolveContainerNodes(conn, null, x, y, z);
             if (candidates.isEmpty()) {
@@ -752,7 +884,9 @@ public final class ItemGraphCommands {
             if (result.hops().isEmpty()) {
                 return QueryDispatcher.QueryOutput.notFound(QueryFormatter.traceNoSuchTarget(target));
             }
-            return QueryDispatcher.QueryOutput.found(QueryFormatter.formatTrace(result));
+            List<String> lines = QueryFormatter.formatTrace(result);
+            return QueryDispatcher.QueryOutput.found(lines, locationsForHops(result), List.of(),
+                    traceHovers(result));
         });
     }
 
@@ -783,8 +917,8 @@ public final class ItemGraphCommands {
         }
         boolean enabled = InspectionService.getInstance().toggle(player.getUUID());
         ctx.getSource().sendSuccess(() -> Component.literal(enabled
-                ? "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable."
-                : "[ItemGraph] Inspection disabled."), false);
+                ? ItemGraphLanguage.text("inspect.enabled_full", "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable.")
+                : ItemGraphLanguage.text("inspect.disabled", "[ItemGraph] Inspection disabled.")), false);
         return 1;
     }
 
@@ -797,11 +931,11 @@ public final class ItemGraphCommands {
         boolean changed = InspectionService.getInstance().setEnabled(player.getUUID(), enabled);
         ctx.getSource().sendSuccess(() -> Component.literal(enabled
                 ? changed
-                        ? "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history."
-                        : "[ItemGraph] Inspection is already enabled."
+                        ? ItemGraphLanguage.text("inspect.enabled", "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history.")
+                        : ItemGraphLanguage.text("inspect.already_enabled", "[ItemGraph] Inspection is already enabled.")
                 : changed
-                        ? "[ItemGraph] Inspection disabled."
-                        : "[ItemGraph] Inspection is already disabled."), false);
+                        ? ItemGraphLanguage.text("inspect.disabled", "[ItemGraph] Inspection disabled.")
+                        : ItemGraphLanguage.text("inspect.already_disabled", "[ItemGraph] Inspection is already disabled.")), false);
         return 1;
     }
 
@@ -812,8 +946,9 @@ public final class ItemGraphCommands {
             return 0;
         }
         boolean enabled = InspectionService.getInstance().isEnabled(player.getUUID());
-        ctx.getSource().sendSuccess(() -> Component.literal(
-                "[ItemGraph] Inspection is " + (enabled ? "enabled" : "disabled") + "."), false);
+        ctx.getSource().sendSuccess(() -> Component.literal(ItemGraphLanguage.text("inspect.status",
+                "[ItemGraph] Inspection is {0}.", ItemGraphLanguage.text(enabled ? "inspect.enabled_word" : "inspect.disabled_word",
+                        enabled ? "enabled" : "disabled"))), false);
         return 1;
     }
 
@@ -821,13 +956,13 @@ public final class ItemGraphCommands {
         if (source.getEntity() instanceof ServerPlayer player) {
             return player;
         }
-        source.sendFailure(Component.literal("[ItemGraph] Inspection requires a player."));
+        source.sendFailure(Component.literal(ItemGraphLanguage.text("inspect.requires_player", "[ItemGraph] Inspection requires a player.")));
         return null;
     }
 
     /** /ig audit - database invariant verification */
     private static int audit(CommandContext<CommandSourceStack> ctx) {
-        return QueryDispatcher.dispatch(ctx.getSource(), "audit", conn -> {
+        return QueryDispatcher.dispatch(ctx.getSource(), ItemGraphPermissions.AUDIT, "audit", conn -> {
             AuditReport report = AUDIT_SERVICE.audit(conn);
             return QueryDispatcher.QueryOutput.found(QueryFormatter.formatAudit(report));
         });
@@ -864,9 +999,10 @@ public final class ItemGraphCommands {
      * near lookups continue to use the documented minimum radius of one block.
      */
     public static int openBlockInspection(CommandSourceStack source, String dimension, int x, int y, int z) {
-        if (!(source.getEntity() instanceof ServerPlayer player) || !source.hasPermission(2)) {
+        if (!(source.getEntity() instanceof ServerPlayer player)
+                || !ItemGraphPermissions.canUse(source, ItemGraphPermissions.INSPECT)) {
             source.sendFailure(Component.literal(
-                    "[ItemGraph] Block inspection requires a permission-level-2 player."));
+                    ItemGraphLanguage.text("inspect.block_permission", "[ItemGraph] Block inspection requires a player with itemgraph.command and itemgraph.command.inspect.")));
             return 0;
         }
         List<AuditEventQueryService.ExactPosition> positions = BlockInspectionTargets.resolve(
@@ -875,9 +1011,9 @@ public final class ItemGraphCommands {
                 UUID.randomUUID(), "all", null, QueryWindow.unbounded(), QueryLimits.DEFAULT_LIMIT,
                 dimension, (double) x, (double) y, (double) z, 0.0, positions, null,
                 "inspect block=" + dimension + " [" + x + "," + y + "," + z + "]",
-                System.currentTimeMillis());
+                ItemGraphPermissions.INSPECT, true, System.currentTimeMillis());
         rememberPageSession(source, session);
-        int accepted = dispatchAuditPage(source, "inspect block", session, 1, true);
+        int accepted = dispatchAuditPage(source, ItemGraphPermissions.INSPECT, "inspect block", session, 1, true);
         if (accepted == 0) {
             forgetPageSession(source, session.sessionId());
         }
@@ -893,14 +1029,21 @@ public final class ItemGraphCommands {
         }
         if (!(source.getEntity() instanceof ServerPlayer player)) {
             source.sendFailure(Component.literal(
-                    "[ItemGraph] Filtered lookup requires a permission-level-2 player so radius can use the current position."));
+                    ItemGraphLanguage.text("lookup.player_required", "[ItemGraph] Filtered lookup requires a player with itemgraph.command and itemgraph.command.lookup so radius can use the current position.")));
             return 0;
         }
         AuditLookupFilters filters;
         try {
             filters = AuditLookupFilters.parse(expression, System.currentTimeMillis());
         } catch (IllegalArgumentException e) {
-            source.sendFailure(Component.literal("[ItemGraph] Invalid lookup filter: " + e.getMessage()));
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("lookup.invalid_filter",
+                    "[ItemGraph] Invalid lookup filter: {0}", e.getMessage())));
+            return 0;
+        }
+        boolean requiresAudit = requiresAuditPermission(filters.eventTypes());
+        if (requiresAudit && !ItemGraphPermissions.canUse(source, ItemGraphPermissions.AUDIT)) {
+            source.sendFailure(Component.literal(
+                    ItemGraphLanguage.text("lookup.audit_required", "[ItemGraph] This lookup can include protected audit events and requires itemgraph.audit.")));
             return 0;
         }
         String levelId = player.level().dimension().location().toString();
@@ -913,9 +1056,9 @@ public final class ItemGraphCommands {
         AuditPageSession session = new AuditPageSession(
                 UUID.randomUUID(), null, null, filters.window(), GRIEFLOGGER_DEFAULT_LIMIT, levelId,
                 centerX, centerY, centerZ, filters.radiusBlocks(), null, filters,
-                filterDescription, System.currentTimeMillis());
+                filterDescription, ItemGraphPermissions.LOOKUP, requiresAudit, System.currentTimeMillis());
         rememberPageSession(source, session);
-        return dispatchAuditPage(source, "lookup filtered audit", session, 1, true);
+        return dispatchAuditPage(source, ItemGraphPermissions.LOOKUP, "lookup filtered audit", session, 1, true);
     }
 
     /** Handles mixed-case native event syntax routed through the greedy filter branch. */
@@ -958,7 +1101,10 @@ public final class ItemGraphCommands {
         String table = StringArgumentType.getString(ctx, "table");
         String sourceKey = StringArgumentType.getString(ctx, "sourceKey");
         int limit = QueryLimits.clampLimit(requestedLimit);
-        return QueryDispatcher.dispatch(source, "lookup provenance", conn -> {
+        List<String> permissions = isSensitiveHistoricalTable(table)
+                ? List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT)
+                : List.of(ItemGraphPermissions.LOOKUP);
+        return QueryDispatcher.dispatch(source, permissions, "lookup provenance", conn -> {
             List<UnifiedEvidenceDetail> evidence = UNIFIED_EVIDENCE_QUERIES.findHistoricalProvenance(
                     conn, sourceSha256, table, sourceKey, limit, 0);
             return QueryDispatcher.QueryOutput.found(
@@ -984,9 +1130,9 @@ public final class ItemGraphCommands {
                 null, null, null, null, null,
                 null,
                 "type=" + eventType + " window=" + window.describe(),
-                System.currentTimeMillis());
+                ItemGraphPermissions.LOOKUP, requiresAuditPermission(eventType), System.currentTimeMillis());
         rememberPageSession(ctx.getSource(), session);
-        return dispatchAuditPage(ctx.getSource(), "lookup audit", session, page,
+        return dispatchAuditPage(ctx.getSource(), ItemGraphPermissions.LOOKUP, "lookup audit", session, page,
                 ctx.getSource().getEntity() instanceof ServerPlayer);
     }
 
@@ -995,7 +1141,7 @@ public final class ItemGraphCommands {
         CommandSourceStack source = ctx.getSource();
         if (!(source.getEntity() instanceof ServerPlayer)) {
             source.sendFailure(Component.literal(
-                    "[ItemGraph] /ig page requires a player with an active lookup session."));
+                    ItemGraphLanguage.text("page.player_required", "[ItemGraph] /ig page requires a player with an active lookup session.")));
             return 0;
         }
         AuditPageSession session;
@@ -1006,20 +1152,20 @@ public final class ItemGraphCommands {
             try {
                 sessionId = UUID.fromString(sessionToken);
             } catch (IllegalArgumentException e) {
-                source.sendFailure(Component.literal("[ItemGraph] Invalid lookup page session."));
+                source.sendFailure(Component.literal(ItemGraphLanguage.text("page.invalid_session", "[ItemGraph] Invalid lookup page session.")));
                 return 0;
             }
             session = pageSession(source, sessionId);
         }
         if (session == null) {
             source.sendFailure(Component.literal(
-                    "[ItemGraph] No active lookup page session. Run /ig lookup first."));
+                    ItemGraphLanguage.text("page.no_session", "[ItemGraph] No active lookup page session. Run /ig lookup first.")));
             return 0;
         }
-        return dispatchAuditPage(source, "lookup page", session, page, true);
+        return dispatchAuditPage(source, ItemGraphPermissions.PAGE, "lookup page", session, page, true);
     }
 
-    private static int dispatchAuditPage(CommandSourceStack source, String label,
+    private static int dispatchAuditPage(CommandSourceStack source, String permissionNode, String label,
                                          AuditPageSession session, int page,
                                          boolean standaloneCommand) {
         int clampedLimit = QueryLimits.clampLimit(session.limit());
@@ -1029,20 +1175,34 @@ public final class ItemGraphCommands {
         String filter = session.filterDescription() + " page=" + effectivePage
                 + " limit=" + clampedLimit
                 + (effectivePage == requestedPage ? "" : " requestedPage=" + requestedPage + " offset=" + offset);
-        return QueryDispatcher.dispatch(source, label, conn -> {
+        List<String> requiredPermissions = new java.util.ArrayList<>();
+        if (ItemGraphPermissions.PAGE.equals(permissionNode)) {
+            requiredPermissions.addAll(pagePermissionsFor(session));
+        } else {
+            requiredPermissions.add(permissionNode);
+            if (session.requiresAuditPermission()) {
+                requiredPermissions.add(ItemGraphPermissions.AUDIT);
+            }
+        }
+        return QueryDispatcher.dispatch(source, List.copyOf(requiredPermissions), label, conn -> {
             List<String> lines;
             int returnedRows;
+            List<QueryDispatcher.LocationAction> locations = new java.util.ArrayList<>();
+            Map<Integer, QueryDispatcher.ChatHoverDetail> hovers = new java.util.HashMap<>();
+            List<String> locationPermissions = locationPermissionNodes(session, permissionNode);
             if (session.filters() != null) {
                 List<UnifiedEvidenceDetail> evidence = UNIFIED_EVIDENCE_QUERIES.findFiltered(
                         conn, session.filters(), session.levelId(),
                         session.centerX(), session.centerY(), session.centerZ(), clampedLimit, offset);
                 lines = QueryFormatter.formatUnifiedEvidence(evidence, filter);
                 returnedRows = evidence.size();
+                addUnifiedPresentation(evidence, locationPermissions, locations, hovers);
             } else if (session.exactPositions() != null && !session.exactPositions().isEmpty()) {
                 List<UnifiedEvidenceDetail> evidence = UNIFIED_EVIDENCE_QUERIES.findExact(
                         conn, session.levelId(), session.exactPositions(), clampedLimit, offset);
                 lines = QueryFormatter.formatUnifiedEvidence(evidence, filter);
                 returnedRows = evidence.size();
+                addUnifiedPresentation(evidence, locationPermissions, locations, hovers);
             } else {
                 List<AuditEventDetail> events = AUDIT_EVENT_QUERIES.find(
                                 conn, session.eventType(), session.playerName(),
@@ -1050,13 +1210,60 @@ public final class ItemGraphCommands {
                                 session.centerZ(), session.radius(), clampedLimit, offset);
                 lines = QueryFormatter.formatAuditEvents(events, filter);
                 returnedRows = events.size();
+                addAuditPresentation(events, locationPermissions, locations, hovers);
             }
             boolean hasNextPage = standaloneCommand
                     && canCheckNextAuditPage(effectivePage, clampedLimit, offset, returnedRows)
                     && hasNextAuditPage(conn, session, effectivePage, clampedLimit, offset);
-            return QueryDispatcher.QueryOutput.found(lines,
-                    auditPageActions(session, effectivePage, hasNextPage, standaloneCommand));
+            return QueryDispatcher.QueryOutput.found(lines, locations,
+                    auditPageActions(session, effectivePage, hasNextPage, standaloneCommand), hovers);
         });
+    }
+
+    private static void addAuditPresentation(List<AuditEventDetail> events, List<String> permissions,
+                                             List<QueryDispatcher.LocationAction> locations,
+                                             Map<Integer, QueryDispatcher.ChatHoverDetail> hovers) {
+        for (int i = 0; i < events.size(); i++) {
+            AuditEventDetail event = events.get(i);
+            String location = event.levelName() == null ? "dimension not recorded"
+                    : event.levelName() + " " + coordinateSummary(event.x(), event.y(), event.z());
+            hovers.put(i + 1, new QueryDispatcher.ChatHoverDetail("OBSERVED",
+                    "audit event #" + event.id(), "not recorded", event.eventType(),
+                    QueryFormatter.formatTime(event.timestampMs()), location, "destination not recorded"));
+            addLocation(event.levelName(), event.x(), event.y(), event.z(), permissions, locations);
+        }
+    }
+
+    private static void addUnifiedPresentation(List<UnifiedEvidenceDetail> evidence, List<String> permissions,
+                                               List<QueryDispatcher.LocationAction> locations,
+                                               Map<Integer, QueryDispatcher.ChatHoverDetail> hovers) {
+        for (int i = 0; i < evidence.size(); i++) {
+            UnifiedEvidenceDetail row = evidence.get(i);
+            String location = row.levelName() == null ? "dimension not recorded"
+                    : row.x() == null || row.y() == null || row.z() == null ? row.levelName()
+                    : row.levelName() + " " + coordinateSummary(row.x(), row.y(), row.z());
+            hovers.put(i + 1, new QueryDispatcher.ChatHoverDetail(row.evidenceClass(),
+                    row.source() + " " + row.evidenceId(), "not recorded", row.actionType(),
+                    QueryFormatter.formatTime(row.timestampMs()), location, "destination not recorded"));
+            if (row.x() != null && row.y() != null && row.z() != null) {
+                addLocation(row.levelName(), row.x(), row.y(), row.z(), permissions, locations);
+            }
+        }
+    }
+
+    private static void addLocation(String dimension, double x, double y, double z, List<String> permissions,
+                                    List<QueryDispatcher.LocationAction> locations) {
+        if (dimension == null || dimension.isBlank() || !Double.isFinite(x) || !Double.isFinite(y)
+                || !Double.isFinite(z)) return;
+        try {
+            locations.add(new QueryDispatcher.LocationAction(dimension, x, y, z, permissions));
+        } catch (IllegalArgumentException ignored) {
+            // Invalid typed coordinates are omitted; formatted query text remains available.
+        }
+    }
+
+    private static String coordinateSummary(double x, double y, double z) {
+        return "[" + x + ", " + y + ", " + z + "]";
     }
 
     static List<QueryDispatcher.QueryAction> auditPageActions(
@@ -1090,6 +1297,51 @@ public final class ItemGraphCommands {
         return !AUDIT_EVENT_QUERIES.find(conn, session.eventType(), session.playerName(),
                 session.window(), session.levelId(), session.centerX(), session.centerY(),
                 session.centerZ(), session.radius(), 1, nextOffset).isEmpty();
+    }
+
+    static boolean requiresAuditPermission(String eventType) {
+        if (eventType == null || eventType.isBlank() || "all".equalsIgnoreCase(eventType)) {
+            return true;
+        }
+        String normalized = eventType.toUpperCase(java.util.Locale.ROOT);
+        return AUDIT_ONLY_LOOKUP_TYPES.contains(normalized)
+                || normalized.startsWith("ADMIN_ITEM_COMMAND_")
+                || normalized.startsWith("CREATIVE_SLOT_")
+                || normalized.startsWith("CREATIVE_BLOCK_")
+                || normalized.startsWith("ADMIN_ITEM_")
+                || normalized.startsWith("CREATIVE_ITEM_");
+    }
+
+    static boolean requiresAuditPermission(List<String> eventTypes) {
+        return eventTypes == null || eventTypes.isEmpty()
+                || eventTypes.stream().anyMatch(ItemGraphCommands::requiresAuditPermission);
+    }
+
+    static List<String> lookupPermissionsForType(String eventType) {
+        return requiresAuditPermission(eventType)
+                ? List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT)
+                : List.of(ItemGraphPermissions.LOOKUP);
+    }
+
+    static List<String> pagePermissionsFor(AuditPageSession session) {
+        List<String> permissions = new java.util.ArrayList<>(List.of(
+                ItemGraphPermissions.PAGE, session.originatingPermission()));
+        if (session.requiresAuditPermission()) {
+            permissions.add(ItemGraphPermissions.AUDIT);
+        }
+        return List.copyOf(permissions);
+    }
+
+    static List<String> locationPermissionNodes(AuditPageSession session, String permissionNode) {
+        List<String> permissions = new java.util.ArrayList<>();
+        permissions.add(session.originatingPermission());
+        if (ItemGraphPermissions.PAGE.equals(permissionNode)) permissions.add(ItemGraphPermissions.PAGE);
+        if (session.requiresAuditPermission()) permissions.add(ItemGraphPermissions.AUDIT);
+        return List.copyOf(permissions);
+    }
+
+    private static boolean isSensitiveHistoricalTable(String table) {
+        return table != null && Set.of("chats", "commands").contains(table.toLowerCase(java.util.Locale.ROOT));
     }
 
     static void rememberPageSession(CommandSourceStack source, AuditPageSession session) {
@@ -1221,9 +1473,10 @@ public final class ItemGraphCommands {
                 + " window=" + window.describe();
         AuditPageSession session = new AuditPageSession(UUID.randomUUID(), eventType, playerName, window,
                 QueryLimits.clampLimit(limit), levelId, centerX, centerY, centerZ, radius,
-                null, null, filter, System.currentTimeMillis());
+                null, null, filter, ItemGraphPermissions.LOOKUP, requiresAuditPermission(eventType),
+                System.currentTimeMillis());
         rememberPageSession(ctx.getSource(), session);
-        return dispatchAuditPage(ctx.getSource(), "lookup audit", session, 1,
+        return dispatchAuditPage(ctx.getSource(), ItemGraphPermissions.LOOKUP, "lookup audit", session, 1,
                 ctx.getSource().getEntity() instanceof ServerPlayer);
     }
 
@@ -1232,27 +1485,25 @@ public final class ItemGraphCommands {
         String modVersion = runtimeInformation.modVersion();
         var sourceAdapter = IngestionService.getInstance().getAdapter();
         String glStatus = !sourceAdapter.isIntegrationEnabled()
-                ? "DISABLED (native-only; enable the GriefLogger integration in ItemGraph config to opt in)"
-                : sourceAdapter.isSupportedSchemaAvailable() ? "ENABLED (read-only source available)"
-                : "ENABLED (read-only source unavailable)";
+                ? ItemGraphLanguage.text("status.source_disabled", "DISABLED (native-only; enable the GriefLogger integration in ItemGraph config to opt in)")
+                : sourceAdapter.isSupportedSchemaAvailable()
+                    ? ItemGraphLanguage.text("status.source_available", "ENABLED (read-only source available)")
+                    : ItemGraphLanguage.text("status.source_unavailable", "ENABLED (read-only source unavailable)");
 
         DatabaseManager db = DatabaseManager.getInstance();
         boolean dbConnected = db.isInitialized();
         var dbSettings = db.getSettings();
         String backend = dbSettings == null ? "not configured" : dbSettings.backend().name().toLowerCase(java.util.Locale.ROOT);
-        source.sendSuccess(() -> Component.literal(
-                "[ItemGraph] version=" + modVersion +
-                " griefLogger=" + glStatus +
-                " db=" + (dbConnected ? "connected" : "NOT CONNECTED") +
-                " backend=" + backend +
-                " schemaVersion=" + db.getCurrentSchemaVersion() +
-                " maxPageSize=" + QueryLimits.getConfiguredMaxPageSize() +
-                " databaseConnectionTimeoutMs=" + (dbSettings == null
-                        ? "not configured" : dbSettings.connectionTimeoutMs()) +
-                " useIndexes=" + (dbSettings == null ? "not configured" : dbSettings.useIndexes())
-        ), false);
+        source.sendSuccess(() -> Component.literal(ItemGraphLanguage.text("status.summary",
+                "[ItemGraph] version={0} griefLogger={1} db={2} backend={3} schemaVersion={4} maxPageSize={5} databaseConnectionTimeoutMs={6} useIndexes={7}",
+                modVersion, glStatus, ItemGraphLanguage.text(dbConnected ? "status.connected" : "status.disconnected",
+                        dbConnected ? "connected" : "NOT CONNECTED"), backend, db.getCurrentSchemaVersion(),
+                QueryLimits.getConfiguredMaxPageSize(), dbSettings == null
+                        ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.connectionTimeoutMs(),
+                dbSettings == null ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.useIndexes())), false);
         if (!dbConnected) {
-            source.sendFailure(Component.literal("[ItemGraph] Database statistics unavailable; inspect the server log for connection details."));
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("status.db_stats_unavailable",
+                    "[ItemGraph] Database statistics unavailable; inspect the server log for connection details.")));
             return 0;
         }
 
@@ -1263,7 +1514,7 @@ public final class ItemGraphCommands {
         ItemEntityTracker entityTracker = ItemEntityTracker.getInstance();
         long capabilityQueueRejections = ContainerInteractionTracker.getInstance().getTotalCapabilityQueueRejections();
 
-        return QueryDispatcher.dispatch(source, "status", conn -> {
+        return QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "status", conn -> {
             long totalObservations;
             try (var stmt = conn.createStatement(); var rs = stmt.executeQuery("SELECT COUNT(*) FROM ig_observations")) {
                 rs.next();
@@ -1370,15 +1621,17 @@ public final class ItemGraphCommands {
         CommandSourceStack source = ctx.getSource();
         IngestionService ingestion = IngestionService.getInstance();
         if (!ingestion.getAdapter().isIntegrationEnabled()) {
-            source.sendFailure(Component.literal("[ItemGraph] GriefLogger source integration is disabled; enable it in ItemGraph config to use this migration command."));
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("ingest.integration_disabled",
+                    "[ItemGraph] GriefLogger source integration is disabled; enable it in ItemGraph config to use this migration command.")));
             return 0;
         }
         if (!ingestion.requestIngestionAsync()) {
-            source.sendFailure(Component.literal("[ItemGraph] Manual ingestion was not queued: the worker is stopped or a manual cycle is already queued."));
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("ingest.manual_not_queued",
+                    "[ItemGraph] Manual ingestion was not queued: the worker is stopped or a manual cycle is already queued.")));
             return 0;
         }
-        source.sendSuccess(() -> Component.literal(
-                "[ItemGraph] Manual ingestion and correlation queued on the background worker; check /ig status for the result."), false);
+        source.sendSuccess(() -> Component.literal(ItemGraphLanguage.text("ingest.manual_queued",
+                "[ItemGraph] Manual ingestion and correlation queued on the background worker; check /ig status for the result.")), false);
         return 1;
     }
 
@@ -1386,15 +1639,17 @@ public final class ItemGraphCommands {
         CommandSourceStack source = ctx.getSource();
         IngestionService ingestion = IngestionService.getInstance();
         if (!ingestion.getAdapter().isIntegrationEnabled()) {
-            source.sendFailure(Component.literal("[ItemGraph] GriefLogger source integration is disabled; enable it in ItemGraph config to use this migration command."));
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("ingest.integration_disabled",
+                    "[ItemGraph] GriefLogger source integration is disabled; enable it in ItemGraph config to use this migration command.")));
             return 0;
         }
         if (!ingestion.requestHistoricalImportAsync()) {
-            source.sendFailure(Component.literal("[ItemGraph] Historical GriefLogger import was not queued: the worker is stopped or an import is already queued."));
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("ingest.history_not_queued",
+                    "[ItemGraph] Historical GriefLogger import was not queued: the worker is stopped or an import is already queued.")));
             return 0;
         }
-        source.sendSuccess(() -> Component.literal(
-                "[ItemGraph] Read-only historical GriefLogger import queued on the background worker; check /ig status for completion."), false);
+        source.sendSuccess(() -> Component.literal(ItemGraphLanguage.text("ingest.history_queued",
+                "[ItemGraph] Read-only historical GriefLogger import queued on the background worker; check /ig status for completion.")), false);
         return 1;
     }
 }

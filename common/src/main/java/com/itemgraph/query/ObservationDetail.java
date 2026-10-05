@@ -37,7 +37,10 @@ public record ObservationDetail(
         Long timestampEndMs,
         String captureType,
         SourceGroup sourceGroup,
-        String dispositionReason
+        String dispositionReason,
+        String evidenceEventUuid,
+        String parentEventUuid,
+        String breakEventUuid
 ) {
 
     public record SourceGroup(
@@ -64,7 +67,8 @@ public record ObservationDetail(
             String itemEntityUuid
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint, actionType,
-                amount, correlatedAtMs, correlationStatus, itemEntityUuid, null, null, null, null);
+                amount, correlatedAtMs, correlationStatus, itemEntityUuid, null, null, null, null,
+                null, null, null);
     }
 
     public ObservationDetail(
@@ -86,7 +90,19 @@ public record ObservationDetail(
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
                 actionType, amount, correlatedAtMs, correlationStatus, itemEntityUuid,
-                timestampEndMs, captureType, sourceGroup, null);
+                timestampEndMs, captureType, sourceGroup, null, null, null, null);
+    }
+
+    public ObservationDetail(
+            long id, String sourceType, Long sourceEventId, long timestampMs,
+            NodeRef origin, NodeRef destination, FingerprintRef fingerprint,
+            String actionType, int amount, Long correlatedAtMs, String correlationStatus,
+            String itemEntityUuid, Long timestampEndMs, String captureType,
+            SourceGroup sourceGroup, String dispositionReason
+    ) {
+        this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
+                actionType, amount, correlatedAtMs, correlationStatus, itemEntityUuid,
+                timestampEndMs, captureType, sourceGroup, dispositionReason, null, null, null);
     }
 
     public ObservationDetail(
@@ -103,7 +119,8 @@ public record ObservationDetail(
             String correlationStatus
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
-                actionType, amount, correlatedAtMs, correlationStatus, null, null, null, null, null);
+                actionType, amount, correlatedAtMs, correlationStatus, null, null, null, null, null,
+                null, null, null);
     }
 
     public ObservationDetail(
@@ -119,7 +136,8 @@ public record ObservationDetail(
             Long correlatedAtMs
     ) {
         this(id, sourceType, sourceEventId, timestampMs, origin, destination, fingerprint,
-                actionType, amount, correlatedAtMs, null, null, null, null, null, null);
+                actionType, amount, correlatedAtMs, null, null, null, null, null, null,
+                null, null, null);
     }
 
     /** Retired pre-use quantity rows remain visible as unresolved evidence. */

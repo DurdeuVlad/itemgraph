@@ -685,7 +685,50 @@ ItemGraph JDBC connection.
   block-entity container (crafting grids and anvils) are not watched by the block
   container tracker; Ender Chest menus are handled by the player-owned tracker above.
 
-### Command-toggled in-world inspection (Issue 10)
+### Player-broken containers (#140)
+- Fabric takes the immutable slot snapshot in `PlayerBlockBreakEvents.BEFORE` and
+  persists it only in `AFTER`; `CANCELED` discards it. On NeoForge 1.21.1,
+  `BlockEvent.BreakEvent` is pre-mutation, so `AdminCreativeBlockResultMixin` wraps
+  `ServerPlayerGameMode.destroyBlock`, snapshots before the call, and requires both
+  a successful return and a changed block/block-entity state before recording. The
+  wrapper is a narrow mixin because NeoForge exposes no post-result player-break event.
+- `ContainerBreakCapture` copies at most 512 non-empty slot values on the server
+  thread: slot number, item registry ID, canonical component fingerprint, count,
+  player actor, dimension, container position, timestamp, and UUID event identity.
+  Its queued records contain immutable values only. Database writes remain on the
+  bounded worker.
+- Each slot persists as `REMOVE_ITEM` with `targetType=DESTROYED_CONTAINER`. The
+  observation routes the broken container to the per-dimension `UNKNOWN` sink;
+  the recorded player is actor evidence and is not treated as item recipient.
+  `CONTAINER_BREAK_COMPLETED` is the parent row; every slot raw payload carries its
+  `cause_event_id`. `submitEvidenceBatch` admits the parent, all slot rows, and—only
+  when the snapshot has item contents—the unresolved drop-link row together. An empty
+  snapshot has no drop-link row because no item entity could have resulted. The parent
+  and its slots are persisted in one database
+  transaction; a slot write failure rolls back the completion claim and every slot
+  already written in that transaction. The immutable group remains one retry and
+  shutdown-spool unit. Slot IDs are deterministic from parent event ID plus slot.
+- The completion payload contains a deterministic `break_event_id` that matches the
+  `ingest_event_uuid` of the loader's standard `BREAK_BLOCK` audit row. This makes
+  the container snapshot traceable to the exact block-break record on both loaders.
+- A break of one double-chest block entity snapshots only that half. The surviving
+  half remains its own inventory and is not counted as lost. For nonempty snapshots,
+  item-entity drops have
+  no defensible per-stack link to individual source slots at these callbacks, so the
+  parent records `drop_link_status=UNRESOLVED` and a separate
+  `CONTAINER_BREAK_UNRESOLVED` audit row carries the stable reason
+  `CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED`; no player or ground
+  transfer edge is fabricated. Both audit rows and all slot rows are admitted
+  together. Empty snapshots emit only the completion row with zero slots and quantity.
+  `CONTAINER_BREAK_UNRESOLVED` is taxonomy actor `UNKNOWN`; lookup reports
+  `(actor unavailable)` when no player identity was recorded. Oversized, missing-actor,
+  vanished-block-entity, unsupported-block-entity,
+  or failed snapshots become `CONTAINER_BREAK_UNRESOLVED` evidence with stable
+  reason codes. Non-inventory block entities are ignored; capability-backed
+  inventory adapters not implementing `Container` remain owned by #34 and do not
+  create false container-break incidents.
+
+### Command-toggled container inspection (Issue 10)
 
 - `/ig inspect` stores only per-player UUID state in `InspectionService`; it is cleared on
   logout and server stop and is not persisted.
