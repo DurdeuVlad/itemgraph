@@ -81,10 +81,8 @@ public final class EnvironmentalWorldEventConformanceFixture {
                 level.getGameRules().getRule(GameRules.RULE_DOFIRETICK)
                         .set(fireTickWasEnabled, level.getServer());
             }
-            WorldEventCapture.recordDirectBlockChange(level, fireFailedWriteTarget,
-                    level.getBlockState(fireFailedWriteTarget), "FIRE_BLOCK_CHANGE", "fire",
-                    "FireBlock.tick.setBlock", java.util.UUID.randomUUID().toString(),
-                    java.util.Map.of(), true, false, false);
+            WorldEventCapture.captureDirectBlockWrite(level, fireFailedWriteTarget,
+                    "FIRE_BLOCK_CHANGE", "fire", "FireBlock.tick.setBlock", true, () -> false);
 
             enderman = new FixtureEnderman(level);
             BlockPos endermanCenter = helper.absolutePos(new BlockPos(14, 5, 2));

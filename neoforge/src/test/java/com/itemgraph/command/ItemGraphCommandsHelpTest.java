@@ -449,7 +449,7 @@ class ItemGraphCommandsHelpTest {
 
         assertEquals(1, dispatcher.execute("itemgraph", source));
         String overview = String.join("\n", successes);
-        assertTrue(overview.contains("Trace: /ig trace item <query>"));
+        assertTrue(overview.contains("Tasks: /ig help journeys"));
         assertTrue(overview.contains("/ig help journeys"));
         assertTrue(overview.contains("/ig help commands"));
         assertTrue(overview.contains("/ig inspect on"));
@@ -457,7 +457,7 @@ class ItemGraphCommandsHelpTest {
         assertTrue(overview.contains("/ig explain <id>"));
         assertTrue(overview.contains("/ig help permissions"));
         assertTrue(overview.contains("audit: /ig audit"));
-        assertTrue(overview.contains("inferred edge"));
+        assertTrue(overview.contains("edge: /ig explain <id>"));
         assertTrue(successes.getFirst().contains("Start: /ig status"),
                 "bare help should begin with a readiness action before an investigation command");
         assertTrue(successes.size() <= 5, "first-use help must fit a normal chat view");
@@ -469,7 +469,7 @@ class ItemGraphCommandsHelpTest {
 
         successes.clear();
         assertEquals(1, dispatcher.execute("ig", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("Trace: /ig trace item <query>")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("Tasks: /ig help journeys")));
         assertTrue(successes.stream().anyMatch(line -> line.contains("/ig help commands")));
     }
 
@@ -667,10 +667,10 @@ class ItemGraphCommandsHelpTest {
 
     @Test
     void sharedHelpPermissionLineNamesTheRequiredRootNode() {
-        assertTrue(String.join("\n", CommandHelp.overviewLines()).contains("Access requires itemgraph.command"),
+        assertTrue(String.join("\n", CommandHelp.overviewLines()).contains("Access: itemgraph.command"),
                 "the primary /ig help screen must name the required root node");
         for (String topic : List.of("event", "explain", "trace", "gui")) {
-            assertTrue(String.join("\n", CommandHelp.topicLines(topic)).contains("Every command needs itemgraph.command"),
+            assertTrue(String.join("\n", CommandHelp.topicLines(topic)).contains("Required: itemgraph.command"),
                     "the /ig help " + topic + " permission recipe must include the root node");
         }
     }
@@ -690,7 +690,7 @@ class ItemGraphCommandsHelpTest {
         List<String> successes = captureSuccesses(source);
 
         assertEquals(1, dispatcher.execute("itemgraph help", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("Trace: /ig trace item <query>")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("Tasks: /ig help journeys")));
 
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help commands", source));
@@ -733,7 +733,7 @@ class ItemGraphCommandsHelpTest {
         assertEquals(1, dispatcher.execute("itemgraph help trace item", source));
         String itemHelp = String.join("\n", successes);
         assertTrue(itemHelp.contains("Syntax: /ig trace item <query> [limit] [sinceMinutes]"));
-        assertTrue(itemHelp.contains("Unset grants use level 2"));
+        assertTrue(itemHelp.contains("unset = level 2"));
         assertTrue(itemHelp.contains("asynchronous"));
         assertTrue(itemHelp.contains("default 20"));
         assertTrue(itemHelp.contains("Example:"));
@@ -747,7 +747,7 @@ class ItemGraphCommandsHelpTest {
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help inspect", source));
         String inspectHelp = String.join("\n", successes);
-        assertTrue(inspectHelp.contains("Unset grants use level 2"));
+        assertTrue(inspectHelp.contains("unset = level 2"));
         assertTrue(inspectHelp.contains("held items are not used"));
         assertTrue(inspectHelp.contains("Example: /ig inspect on"));
 
@@ -769,7 +769,7 @@ class ItemGraphCommandsHelpTest {
             assertEquals(1, dispatcher.execute("itemgraph help " + topic, source), topic);
             assertFalse(successes.isEmpty(), topic);
             String lines = String.join("\n", successes);
-            assertTrue(lines.contains("Unset grants use level 2"), topic);
+            assertTrue(lines.contains("unset = level 2"), topic);
             assertTrue(lines.contains("Example"), topic);
         }
         verify(source, never()).sendFailure(any());

@@ -113,7 +113,7 @@ class AuditEventQueryServiceTest {
         String formatted = String.join("\n", QueryFormatter.formatAuditEvents(List.of(event), "all"));
 
         assertTrue(formatted.contains("[UNRESOLVED] audit#7 WORLD_EFFECT_UNRESOLVED"));
-        assertTrue(formatted.contains("actor=(unknown actor)"));
+        assertTrue(formatted.contains("actor=(actor unknown)"));
         assertFalse(formatted.contains("actor=(unknown player)"));
     }
 

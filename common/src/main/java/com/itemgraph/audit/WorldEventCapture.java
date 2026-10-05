@@ -600,6 +600,27 @@ public final class WorldEventCapture {
         }
     }
 
+    /**
+     * Runs and records one wrapped boolean block-write callback. Keep the callback result
+     * and exception boundary in this shared helper so loader wrappers and deterministic
+     * conformance fixtures exercise the same false/throw handling.
+     */
+    public static boolean captureDirectBlockWrite(Level level, BlockPos pos, String eventType,
+                                                   String family, String boundary, boolean blockTypeOnly,
+                                                   java.util.function.BooleanSupplier write) {
+        BlockState before = safeSnapshotBlockState(level, pos);
+        Boolean result = null;
+        boolean returned = false;
+        try {
+            result = write.getAsBoolean();
+            returned = true;
+            return result;
+        } finally {
+            recordDirectBlockChange(level, pos, before, eventType, family, boundary,
+                    UUID.randomUUID().toString(), Map.of(), blockTypeOnly, result, !returned);
+        }
+    }
+
     /** Captures one fluid target around FlowingFluid.spreadTo. */
     public static void recordFluidSpread(LevelAccessor level, BlockPos pos, BlockState before,
                                          Direction direction, FluidState fluidState, boolean callbackThrew) {

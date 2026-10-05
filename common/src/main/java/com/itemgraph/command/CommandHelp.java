@@ -13,7 +13,7 @@ import java.util.Map;
 /** Maintained help text for the live /itemgraph command tree. */
 public final class CommandHelp {
 
-    private static final String PERMISSION_LINE = "[ItemGraph] Every command needs itemgraph.command; unset uses level 2. See /ig help permissions.";
+    private static final String PERMISSION_LINE = "[ItemGraph] Required: itemgraph.command; unset = level 2. /ig help permissions.";
 
     static final List<String> TOPIC_NAMES = List.of(
             "help", "commands", "permissions", "guide", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain", "journeys",
@@ -31,11 +31,11 @@ public final class CommandHelp {
 
     static List<String> overviewLines() {
         return List.of(
-                "[ItemGraph] Start: /ig status; audit: /ig audit; commands: /ig help commands.",
-                "[ItemGraph] Access requires itemgraph.command; details: /ig help permissions.",
-                "[ItemGraph] Tasks: /ig help journeys; trace item <query>; nearby: /ig help lookup near.",
-                "[ItemGraph] Inspect: /ig inspect on (click blocks/containers).",
-                "[ItemGraph] Evidence: /ig event <id>; inferred edge: /ig explain <id>.");
+                "[ItemGraph] Start: /ig status; audit: /ig audit.",
+                "[ItemGraph] Access: itemgraph.command; /ig help permissions.",
+                "[ItemGraph] Tasks: /ig help journeys; /ig help commands.",
+                "[ItemGraph] Inspect: /ig inspect on; click a block/container.",
+                "[ItemGraph] Evidence: /ig event <id>; edge: /ig explain <id>.");
     }
 
     /** Registers every static help sentence so catalog keys can be validated before database startup. */

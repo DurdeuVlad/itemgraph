@@ -56,16 +56,8 @@ public abstract class FireBlockMixin {
 
     private static boolean itemgraph$capture(Level level, BlockPos pos, String boundary,
                                                boolean typeOnly, java.util.function.BooleanSupplier write) {
-        BlockState before = WorldEventCapture.safeSnapshotBlockState(level, pos);
-        Boolean result = null;
-        boolean returned = false;
-        try {
-            result = write.getAsBoolean();
-            returned = true;
-            return result;
-        } finally {
-            itemgraph$record(level, pos, before, boundary, typeOnly, result, !returned);
-        }
+        return WorldEventCapture.captureDirectBlockWrite(level, pos, "FIRE_BLOCK_CHANGE", "fire",
+                boundary, typeOnly, write);
     }
 
     private static void itemgraph$captureVoid(Level level, BlockPos pos, String boundary, Runnable write) {
@@ -85,4 +77,5 @@ public abstract class FireBlockMixin {
         WorldEventCapture.recordDirectBlockChange(level, pos, before, "FIRE_BLOCK_CHANGE", "fire",
                 boundary, UUID.randomUUID().toString(), Map.of(), typeOnly, callbackResult, callbackThrew);
     }
+
 }
