@@ -103,15 +103,20 @@ public final class IncidentBundleService {
             double centerZ,
             int requestedLimit,
             RedactionProfile profile,
+            boolean levelFourAuthorizationRequired,
             Path exportDirectory,
             String filename,
             BooleanSupplier cancelled,
+            BooleanSupplier levelFourAuthorizationValid,
             BooleanSupplier commit,
             IntConsumer progress) throws SQLException, IOException {
         if (connection == null || filters == null || dimension == null || dimension.isBlank()
                 || profile == null || exportDirectory == null || filename == null
-                || cancelled == null || commit == null || progress == null) {
+                || cancelled == null || levelFourAuthorizationValid == null || commit == null || progress == null) {
             throw new IllegalArgumentException("connection, query, location, profile, and output are required");
+        }
+        if (profile == RedactionProfile.FULL && !levelFourAuthorizationRequired) {
+            throw new IllegalArgumentException("full exports must require level-four authorization");
         }
         int limit = Math.max(1, Math.min(requestedLimit, MAX_EVIDENCE_RECORDS));
         Path output = safeOutputPath(exportDirectory, filename);
@@ -251,6 +256,9 @@ public final class IncidentBundleService {
                     }
                     if (!commit.getAsBoolean()) {
                         throw new IOException("export was cancelled before the output commit");
+                    }
+                    if (levelFourAuthorizationRequired && !levelFourAuthorizationValid.getAsBoolean()) {
+                        throw new IOException("permission level 4 was revoked before the protected export commit");
                     }
                     publishNoReplace(temporary, output);
                     published = true;

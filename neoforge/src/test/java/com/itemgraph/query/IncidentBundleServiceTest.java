@@ -63,8 +63,8 @@ class IncidentBundleServiceTest extends QueryTestBase {
                 "action.drop_item,pickup_item user.PrivatePlayer include.diamond radius.100", now);
         Path exports = tempDir.resolve("world").resolve("itemgraph").resolve("exports");
         IncidentBundleService.export(conn, filters, "minecraft:overworld", 10, 64, 10, 100,
-                IncidentBundleService.RedactionProfile.REDACTED, exports, "redacted.json",
-                () -> false, () -> true, ignored -> {});
+                IncidentBundleService.RedactionProfile.REDACTED, false, exports, "redacted.json",
+                () -> false, () -> true, () -> true, ignored -> {});
 
         Path redactedPath = exports.resolve("redacted.json");
         String redactedText = Files.readString(redactedPath);
@@ -111,8 +111,8 @@ class IncidentBundleServiceTest extends QueryTestBase {
         assertTrue(IncidentBundleService.verify(exports, "redacted.json").valid());
 
         IncidentBundleService.export(conn, filters, "minecraft:overworld", 10, 64, 10, 100,
-                IncidentBundleService.RedactionProfile.FULL, exports, "full.json",
-                () -> false, () -> true, ignored -> {});
+                IncidentBundleService.RedactionProfile.FULL, true, exports, "full.json",
+                () -> false, () -> true, () -> true, ignored -> {});
         String fullText = Files.readString(exports.resolve("full.json"));
         assertTrue(fullText.contains("PrivatePlayer"));
         assertTrue(fullText.contains("Private Name"));
@@ -131,8 +131,8 @@ class IncidentBundleServiceTest extends QueryTestBase {
         linkEvidence(directEdge, drop);
         linkEvidence(directEdge, pickup);
         IncidentBundleService.export(conn, filters, "minecraft:overworld", 10, 64, 10, 100,
-                IncidentBundleService.RedactionProfile.REDACTED, exports, "direct.json",
-                () -> false, () -> true, ignored -> {});
+                IncidentBundleService.RedactionProfile.REDACTED, false, exports, "direct.json",
+                () -> false, () -> true, () -> true, ignored -> {});
         String directText = Files.readString(exports.resolve("direct.json"));
         assertFalse(directText.contains("private-entity-uuid"));
         JsonArray directRecords = JsonParser.parseString(directText).getAsJsonObject().getAsJsonArray("records");
@@ -149,10 +149,10 @@ class IncidentBundleServiceTest extends QueryTestBase {
 
         assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
                 "minecraft:overworld", 10, 64, 10, 100, IncidentBundleService.RedactionProfile.REDACTED,
-                exports, "redacted.json", () -> false, () -> true, ignored -> {}));
+                false, exports, "redacted.json", () -> false, () -> true, () -> true, ignored -> {}));
         assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
                 "minecraft:overworld", 10, 64, 10, 100, IncidentBundleService.RedactionProfile.REDACTED,
-                exports, "cancelled.json", () -> false, () -> false, ignored -> {}));
+                false, exports, "cancelled.json", () -> false, () -> true, () -> false, ignored -> {}));
         assertFalse(Files.exists(exports.resolve("cancelled.json")));
 
         Path incompleteOutput = exports.resolve("incomplete.json");
@@ -160,8 +160,58 @@ class IncidentBundleServiceTest extends QueryTestBase {
                 + java.util.UUID.randomUUID());
         assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
                 "minecraft:overworld", 10, 64, 10, 100,
-                IncidentBundleService.RedactionProfile.REDACTED, exports, "incomplete.json",
-                () -> false, () -> true, ignored -> {}));
+                IncidentBundleService.RedactionProfile.REDACTED, false, exports, "incomplete.json",
+                () -> false, () -> true, () -> true, ignored -> {}));
+    }
+
+    @Test
+    void protectedExportsRecheckLevelFourAtPublicationWhileOrdinaryRedactedExportRemainsAvailable() throws Exception {
+        long player = insertPlayerNode("PermissionRevokedPlayer");
+        long ground = insertGroundNode(10, 64, 10);
+        long fingerprint = insertFingerprint("minecraft:diamond", "permission-revoked-diamond");
+        insertObservation(now - 1_000, player, ground, fingerprint, "DROP_ITEM", 1);
+        AuditLookupFilters filters = AuditLookupFilters.parse("action.drop_item radius.100", now);
+        Path exports = tempDir.resolve("permission-recheck");
+        AtomicBoolean levelFourPermission = new AtomicBoolean(true);
+
+        assertThrows(IllegalArgumentException.class, () -> IncidentBundleService.export(conn, filters,
+                "minecraft:overworld", 10, 64, 10, 1,
+                IncidentBundleService.RedactionProfile.FULL, false, exports, "full-unprotected.json",
+                () -> false, levelFourPermission::get, () -> true, ignored -> {}));
+        assertFalse(Files.exists(exports.resolve("full-unprotected.json")),
+                "the service must reject FULL exports without an explicit level-four requirement");
+
+        assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
+                "minecraft:overworld", 10, 64, 10, 1,
+                IncidentBundleService.RedactionProfile.FULL, true, exports, "full-revoked.json",
+                () -> false, levelFourPermission::get, () -> {
+                    levelFourPermission.set(false);
+                    return true;
+                }, ignored -> {}));
+        assertFalse(Files.exists(exports.resolve("full-revoked.json")),
+                "a full export must not publish after level-4 permission is revoked during serialization");
+
+        // This branch does not yet contain PR #125's itemPredicates API. Exercise its
+        // service-boundary contract directly with the explicit protected-export flag.
+        AuditLookupFilters metadataFilters = filters;
+        AtomicBoolean metadataPermission = new AtomicBoolean(true);
+        assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, metadataFilters,
+                "minecraft:overworld", 10, 64, 10, 1,
+                IncidentBundleService.RedactionProfile.REDACTED, true, exports, "redacted-filter-revoked.json",
+                () -> false, metadataPermission::get, () -> {
+                    metadataPermission.set(false);
+                    return true;
+                }, ignored -> {}));
+        assertFalse(Files.exists(exports.resolve("redacted-filter-revoked.json")),
+                "a redacted metadata-filtered export must not publish after level-4 permission is revoked");
+
+        IncidentBundleService.export(conn, filters, "minecraft:overworld", 10, 64, 10, 1,
+                IncidentBundleService.RedactionProfile.REDACTED, false, exports, "redacted-after-revoke.json",
+                () -> false, levelFourPermission::get, () -> true, ignored -> {});
+        Path redacted = exports.resolve("redacted-after-revoke.json");
+        assertTrue(Files.exists(redacted), "ordinary redacted exports retain their permission-level-2 behavior");
+        assertTrue(IncidentBundleService.verify(exports, "redacted-after-revoke.json").valid());
+        assertFalse(Files.readString(redacted).contains("PermissionRevokedPlayer"));
     }
 
     @Test
@@ -268,8 +318,8 @@ class IncidentBundleServiceTest extends QueryTestBase {
         IncidentBundleService.export(conn,
                 AuditLookupFilters.parse("action.drop_item include.minecraft:diamond radius.100", now),
                 "minecraft:overworld", 10, 64, 10, 500,
-                IncidentBundleService.RedactionProfile.REDACTED, exports, "caps.json",
-                () -> false, () -> true, ignored -> {});
+                IncidentBundleService.RedactionProfile.REDACTED, false, exports, "caps.json",
+                () -> false, () -> true, () -> true, ignored -> {});
 
         JsonObject bundle = JsonParser.parseString(Files.readString(exports.resolve("caps.json")))
                 .getAsJsonObject();
@@ -294,8 +344,8 @@ class IncidentBundleServiceTest extends QueryTestBase {
         assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn,
                 AuditLookupFilters.parse("action.drop_item radius.100", now),
                 "minecraft:overworld", 10, 64, 10, 1,
-                IncidentBundleService.RedactionProfile.FULL, exports, "large.json",
-                () -> false, () -> true, ignored -> {}));
+                IncidentBundleService.RedactionProfile.FULL, true, exports, "large.json",
+                () -> false, () -> true, () -> true, ignored -> {}));
         assertFalse(Files.exists(exports.resolve("large.json")));
     }
 
@@ -311,15 +361,15 @@ class IncidentBundleServiceTest extends QueryTestBase {
         Files.writeString(blockingFile, "block directory creation");
         assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
                 "minecraft:overworld", 10, 64, 10, 1,
-                IncidentBundleService.RedactionProfile.REDACTED, blockingFile.resolve("exports"), "disk.json",
-                () -> false, () -> true, ignored -> {}));
+                IncidentBundleService.RedactionProfile.REDACTED, false, blockingFile.resolve("exports"), "disk.json",
+                () -> false, () -> true, () -> true, ignored -> {}));
 
         AtomicInteger cancellationChecks = new AtomicInteger();
         Path exports = tempDir.resolve("cancelled");
         assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
                 "minecraft:overworld", 10, 64, 10, 1,
-                IncidentBundleService.RedactionProfile.REDACTED, exports, "query-cancel.json",
-                () -> cancellationChecks.incrementAndGet() >= 2, () -> true, ignored -> {}));
+                IncidentBundleService.RedactionProfile.REDACTED, false, exports, "query-cancel.json",
+                () -> cancellationChecks.incrementAndGet() >= 2, () -> true, () -> true, ignored -> {}));
         assertFalse(Files.exists(exports.resolve("query-cancel.json")));
 
         for (int i = 0; i < 26; i++) {
@@ -328,8 +378,8 @@ class IncidentBundleServiceTest extends QueryTestBase {
         AtomicBoolean cancelDuringBuild = new AtomicBoolean();
         assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
                 "minecraft:overworld", 10, 64, 10, 100,
-                IncidentBundleService.RedactionProfile.REDACTED, exports, "build-cancel.json",
-                cancelDuringBuild::get, () -> true, completed -> {
+                IncidentBundleService.RedactionProfile.REDACTED, false, exports, "build-cancel.json",
+                cancelDuringBuild::get, () -> true, () -> true, completed -> {
                     if (completed == 25) {
                         cancelDuringBuild.set(true);
                     }
@@ -340,8 +390,8 @@ class IncidentBundleServiceTest extends QueryTestBase {
         try {
             assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, filters,
                     "minecraft:overworld", 10, 64, 10, 1,
-                    IncidentBundleService.RedactionProfile.REDACTED, exports, "shutdown-cancel.json",
-                    () -> false, () -> true, ignored -> {}));
+                    IncidentBundleService.RedactionProfile.REDACTED, false, exports, "shutdown-cancel.json",
+                    () -> false, () -> true, () -> true, ignored -> {}));
         } finally {
             Thread.interrupted();
         }
@@ -380,8 +430,8 @@ class IncidentBundleServiceTest extends QueryTestBase {
         try (var readConnection = java.sql.DriverManager.getConnection(
                 "jdbc:sqlite:" + tempDir.resolve("itemgraph.db"))) {
             IncidentBundleService.export(readConnection, filters, "minecraft:overworld", 10, 64, 10, 1,
-                    IncidentBundleService.RedactionProfile.REDACTED, exports, "same-name.json",
-                    () -> false, () -> true, ignored -> {
+                    IncidentBundleService.RedactionProfile.REDACTED, false, exports, "same-name.json",
+                    () -> false, () -> true, () -> true, ignored -> {
                         atPublish.countDown();
                         try {
                             if (!release.await(10, TimeUnit.SECONDS)) {

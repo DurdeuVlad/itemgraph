@@ -276,8 +276,8 @@ class MariaDbDialectIntegrationTest {
         IncidentBundleService.ExportResult result = IncidentBundleService.export(conn,
                 AuditLookupFilters.parse("action.drop_item include." + itemId + " radius.10", timestamp + 1),
                 "minecraft:overworld", 500000, 64, 500000, 10,
-                IncidentBundleService.RedactionProfile.REDACTED, exports, "network-backend.json",
-                () -> false, () -> true, ignored -> {});
+                IncidentBundleService.RedactionProfile.REDACTED, false, exports, "network-backend.json",
+                () -> false, () -> true, () -> true, ignored -> {});
 
         assertEquals(1, result.evidenceCount(), "the bounded export should include the isolated fixture row");
         assertTrue(IncidentBundleService.verify(exports, "network-backend.json").valid());

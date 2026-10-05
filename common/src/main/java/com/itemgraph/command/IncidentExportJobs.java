@@ -6,8 +6,13 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -25,6 +30,7 @@ final class IncidentExportJobs {
     private static final Logger LOGGER = LoggerFactory.getLogger(IncidentExportJobs.class);
     private static final int MAX_ACTIVE_JOBS = 4;
     static final long JOB_TIMEOUT_MS = 120_000L;
+    static final long PERMISSION_CHECK_TIMEOUT_MS = 2_000L;
     private static final AtomicInteger ACTIVE_JOBS = new AtomicInteger();
     private static final AtomicLong NEXT_ID = new AtomicLong();
     private static final ConcurrentHashMap<String, Job> JOBS = new ConcurrentHashMap<>();
@@ -52,8 +58,10 @@ final class IncidentExportJobs {
                         try {
                             return IncidentBundleService.export(
                                     connection, filters, dimension, position.x, position.y, position.z,
-                                    IncidentBundleService.MAX_EVIDENCE_RECORDS, profile, exportDirectory, filename,
-                                    () -> cancelled.getAsBoolean() || job.cancelled.get(), commit,
+                                    IncidentBundleService.MAX_EVIDENCE_RECORDS, profile,
+                                    profile == IncidentBundleService.RedactionProfile.FULL, exportDirectory, filename,
+                                    () -> cancelled.getAsBoolean() || job.cancelled.get(),
+                                    () -> hasLiveLevelFourPermission(job), commit,
                                     completed -> reportProgress(job, completed));
                         } catch (IOException failure) {
                             throw new SQLException("failed to write the incident bundle", failure);
@@ -120,6 +128,51 @@ final class IncidentExportJobs {
         Entity actor = source.getEntity();
         UUID actorId = actor instanceof ServerPlayer player ? player.getUUID() : null;
         return source.hasPermission(4) || actorId != null && actorId.equals(ownerId);
+    }
+
+    private static boolean hasLiveLevelFourPermission(Job job) {
+        UUID ownerId = job.ownerId;
+        if (ownerId == null) {
+            return false;
+        }
+        return checkOnServerThread(job.server::execute,
+                () -> Thread.currentThread() == job.server.getRunningThread(), () -> {
+            ServerPlayer onlinePlayer = job.server.getPlayerList().getPlayer(ownerId);
+            return onlinePlayer != null && onlinePlayer.hasPermissions(4);
+        }, PERMISSION_CHECK_TIMEOUT_MS);
+    }
+
+    static boolean checkOnServerThread(Executor serverExecutor,
+                                       java.util.function.BooleanSupplier isServerThread,
+                                       java.util.function.BooleanSupplier check, long timeoutMillis) {
+        if (serverExecutor == null || isServerThread == null || check == null || timeoutMillis < 1) {
+            return false;
+        }
+        CompletableFuture<Boolean> result = new CompletableFuture<>();
+        try {
+            serverExecutor.execute(() -> {
+                try {
+                    if (!isServerThread.getAsBoolean()) {
+                        result.complete(false);
+                        return;
+                    }
+                    result.complete(check.getAsBoolean());
+                } catch (RuntimeException failure) {
+                    result.completeExceptionally(failure);
+                }
+            });
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+        try {
+            return result.get(timeoutMillis, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException | TimeoutException unavailable) {
+            result.cancel(false);
+            return false;
+        }
     }
 
     private static void reportProgress(Job job, int completedRecords) {

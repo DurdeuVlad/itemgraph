@@ -15,7 +15,11 @@ The project follows a simple pre-1.0 development changelog model.
   manifest, final chain hash, strict UTF-8, duplicate JSON keys at every nesting level,
   and JSON depth up to 64. Jobs use the bounded query worker, reject filename
   collisions, and cap output at 4 MiB. Format and unkeyed-hash limitations are documented
-  in `docs/INCIDENT_BUNDLES.md`. M9 batch verification is pending; ItemGraph remains 0.3.2
+  in `docs/INCIDENT_BUNDLES.md`. Full exports and redacted exports with item-metadata
+  predicates recheck level-4 permission at the final publication gate, so revocation
+  before commit prevents the file from being published. The service exposes an explicit
+  level-four requirement flag for redacted metadata-filtered exports; the stacked #125
+  command integration must set it when `filters.itemPredicates()` is nonempty. M9 batch verification is pending; ItemGraph remains 0.3.2
   and no distributable JAR is built.
 
 - **Issue #36 cross-loader preview API fixture work:** the shared API now exposes exact
