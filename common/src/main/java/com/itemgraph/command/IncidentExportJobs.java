@@ -50,7 +50,8 @@ final class IncidentExportJobs {
         Vec3 position = source.getPosition();
         String dimension = source.getLevel().dimension().location().toString();
         String id = Long.toString(NEXT_ID.incrementAndGet(), 36).toUpperCase(Locale.ROOT);
-        Job job = new Job(id, source, server);
+        boolean requiresLevelFour = requiresLevelFourAuthorization(profile, filters);
+        Job job = new Job(id, source, server, requiresLevelFour);
         JOBS.put(id, job);
         try {
             QueryDispatcher.CancellableDataHandle<IncidentBundleService.ExportResult> handle =
@@ -59,7 +60,7 @@ final class IncidentExportJobs {
                             return IncidentBundleService.export(
                                     connection, filters, dimension, position.x, position.y, position.z,
                                     IncidentBundleService.MAX_EVIDENCE_RECORDS, profile,
-                                    profile == IncidentBundleService.RedactionProfile.FULL, exportDirectory, filename,
+                                    requiresLevelFour, exportDirectory, filename,
                                     () -> cancelled.getAsBoolean() || job.cancelled.get(),
                                     () -> hasLiveLevelFourPermission(job), commit,
                                     completed -> reportProgress(job, completed));
@@ -85,7 +86,7 @@ final class IncidentExportJobs {
         }
         MinecraftServer server = source.getServer();
         String id = Long.toString(NEXT_ID.incrementAndGet(), 36).toUpperCase(Locale.ROOT);
-        Job job = new Job(id, source, server);
+        Job job = new Job(id, source, server, false);
         JOBS.put(id, job);
         try {
             QueryDispatcher.CancellableDataHandle<IncidentBundleService.VerificationResult> handle =
@@ -130,16 +131,51 @@ final class IncidentExportJobs {
         return source.hasPermission(4) || actorId != null && actorId.equals(ownerId);
     }
 
+    static boolean requiresLevelFourAuthorization(IncidentBundleService.RedactionProfile profile,
+                                                   AuditLookupFilters filters) {
+        return profile == IncidentBundleService.RedactionProfile.FULL
+                || filters != null && !filters.itemPredicates().isEmpty();
+    }
+
     private static boolean hasLiveLevelFourPermission(Job job) {
         UUID ownerId = job.ownerId;
         if (ownerId == null) {
             return false;
         }
         return checkOnServerThread(job.server::execute,
-                () -> Thread.currentThread() == job.server.getRunningThread(), () -> {
-            ServerPlayer onlinePlayer = job.server.getPlayerList().getPlayer(ownerId);
-            return onlinePlayer != null && onlinePlayer.hasPermissions(4);
-        }, PERMISSION_CHECK_TIMEOUT_MS);
+                () -> Thread.currentThread() == job.server.getRunningThread(),
+                () -> hasLiveLevelFourPermissionOnServerThread(job), PERMISSION_CHECK_TIMEOUT_MS);
+    }
+
+    private static boolean hasLiveLevelFourPermissionOnServerThread(Job job) {
+        if (Thread.currentThread() != job.server.getRunningThread() || job.ownerId == null) {
+            return false;
+        }
+        ServerPlayer onlinePlayer = job.server.getPlayerList().getPlayer(job.ownerId);
+        return onlinePlayer != null && onlinePlayer.hasPermissions(4);
+    }
+
+    private static boolean canDeliverJobMessage(Job job) {
+        if (Thread.currentThread() != job.server.getRunningThread()
+                || !QueryDispatcher.canStillReport(job.source, job.server)) {
+            return false;
+        }
+        return hasRequiredPermission(job.requiresLevelFour, job.source.hasPermission(2),
+                job.requiresLevelFour && hasLiveLevelFourPermissionOnServerThread(job));
+    }
+
+    static boolean hasRequiredPermission(boolean requiresLevelFour, boolean levelTwoPermission,
+                                         boolean liveLevelFourPermission) {
+        return levelTwoPermission && (!requiresLevelFour || liveLevelFourPermission);
+    }
+
+    static void enqueueIfAuthorized(Executor serverExecutor, java.util.function.BooleanSupplier authorized,
+                                    Runnable delivery) {
+        serverExecutor.execute(() -> {
+            if (authorized.getAsBoolean()) {
+                delivery.run();
+            }
+        });
     }
 
     static boolean checkOnServerThread(Executor serverExecutor,
@@ -176,13 +212,10 @@ final class IncidentExportJobs {
     }
 
     private static void reportProgress(Job job, int completedRecords) {
-        job.server.execute(() -> {
-            if (!job.cancelled.get() && QueryDispatcher.canStillReport(job.source, job.server)
-                    && job.source.hasPermission(2)) {
-                job.source.sendSuccess(() -> Component.literal("[ItemGraph] Export job " + job.id
-                        + " processed " + completedRecords + " bounded bundle records."), false);
-            }
-        });
+        enqueueIfAuthorized(job.server::execute,
+                () -> !job.cancelled.get() && canDeliverJobMessage(job),
+                () -> job.source.sendSuccess(() -> Component.literal("[ItemGraph] Export job " + job.id
+                        + " processed " + completedRecords + " bounded bundle records."), false));
     }
 
     private static void completeExport(Job job, IncidentBundleService.ExportResult result, Throwable failure) {
@@ -238,13 +271,7 @@ final class IncidentExportJobs {
     private static void finish(Job job, Runnable delivery) {
         JOBS.remove(job.id);
         ACTIVE_JOBS.decrementAndGet();
-        job.server.execute(() -> {
-            if (Thread.currentThread() == job.server.getRunningThread()
-                    && QueryDispatcher.canStillReport(job.source, job.server)
-                    && job.source.hasPermission(2)) {
-                delivery.run();
-            }
-        });
+        enqueueIfAuthorized(job.server::execute, () -> canDeliverJobMessage(job), delivery);
     }
 
     private static final class Job {
@@ -252,14 +279,16 @@ final class IncidentExportJobs {
         private final CommandSourceStack source;
         private final MinecraftServer server;
         private final UUID ownerId;
+        private final boolean requiresLevelFour;
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private volatile QueryDispatcher.CancellableDataHandle<?> handle;
 
-        private Job(String id, CommandSourceStack source, MinecraftServer server) {
+        private Job(String id, CommandSourceStack source, MinecraftServer server, boolean requiresLevelFour) {
             this.id = id;
             this.source = source;
             this.server = server;
             this.ownerId = source.getEntity() instanceof ServerPlayer player ? player.getUUID() : null;
+            this.requiresLevelFour = requiresLevelFour;
         }
     }
 }

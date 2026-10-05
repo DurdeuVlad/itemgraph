@@ -43,7 +43,7 @@ class V20UnverifiedArmorStandInteractionEvidenceTest {
         long edgeId = insertInferredEdge(playerId, standId, fingerprintId);
         insertAllocation(edgeId, observationId);
 
-        assertEquals(21, MigrationRunner.runMigrations(connection),
+        assertEquals(22, MigrationRunner.runMigrations(connection),
                 "an existing v19 database should receive the quarantine migration");
         V20__UnverifiedArmorStandInteractionEvidence migration =
                 new V20__UnverifiedArmorStandInteractionEvidence();

@@ -464,6 +464,116 @@ class QueryDispatcherTest {
     }
 
     @Test
+    void testLivePlayerPermissionRevocationSuppressesQueryRowsAndPageActions(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("live-permission-revoked-query.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        CountDownLatch callbackQueued = new CountDownLatch(1);
+        AtomicReference<Runnable> queuedTask = new AtomicReference<>();
+        Thread serverThread = Thread.currentThread();
+
+        when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(player);
+        when(source.hasPermission(2)).thenReturn(true);
+        when(source.hasPermission(4)).thenReturn(true);
+        when(player.hasDisconnected()).thenReturn(false);
+        when(player.hasPermissions(4)).thenReturn(true);
+        when(server.getRunningThread()).thenReturn(serverThread);
+        when(server.isStopped()).thenReturn(false);
+        doAnswer(invocation -> {
+            queuedTask.set(invocation.getArgument(0));
+            callbackQueued.countDown();
+            return null;
+        }).when(server).execute(any(Runnable.class));
+
+        String denial = "[ItemGraph] Item metadata filters require permission level 4.";
+        assertEquals(1, QueryDispatcher.dispatch(source, "metadata lookup page", conn ->
+                        QueryOutput.found(List.of("sensitive metadata row"),
+                                List.of(new QueryAction("Next", "/ig page 3"))),
+                currentPlayer -> currentPlayer.hasPermissions(4), denial));
+        assertTrue(callbackQueued.await(5, TimeUnit.SECONDS));
+
+        // CommandSourceStack can retain the level from invocation; the player is the live authority.
+        when(player.hasPermissions(4)).thenReturn(false);
+        queuedTask.get().run();
+
+        verify(player).hasPermissions(4);
+        verify(source, never()).hasPermission(4);
+        verify(source, never()).sendSuccess(any(), anyBoolean());
+        ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+        verify(source).sendFailure(failure.capture());
+        assertEquals(denial, failure.getValue().getString());
+    }
+
+    @Test
+    void testDataQueryRechecksLivePermissionBeforeDeliveringSensitivePage(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("live-permission-revoked-data.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        CountDownLatch callbackQueued = new CountDownLatch(1);
+        AtomicReference<Runnable> queuedTask = new AtomicReference<>();
+        AtomicBoolean pageDelivered = new AtomicBoolean();
+        AtomicBoolean failureHandled = new AtomicBoolean();
+        Thread serverThread = Thread.currentThread();
+
+        when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(player);
+        when(source.hasPermission(2)).thenReturn(true);
+        when(player.hasDisconnected()).thenReturn(false);
+        when(player.hasPermissions(4)).thenReturn(true);
+        when(server.getRunningThread()).thenReturn(serverThread);
+        when(server.isStopped()).thenReturn(false);
+        doAnswer(invocation -> {
+            queuedTask.set(invocation.getArgument(0));
+            callbackQueued.countDown();
+            return null;
+        }).when(server).execute(any(Runnable.class));
+
+        String denial = "[ItemGraph] Permission changed before the flow page could be delivered.";
+        assertEquals(1, QueryDispatcher.dispatchData(source, "metadata flow page", conn -> "sensitive page",
+                (returnedSource, page) -> pageDelivered.set(true),
+                () -> failureHandled.set(true), currentPlayer -> currentPlayer.hasPermissions(4), denial));
+        assertTrue(callbackQueued.await(5, TimeUnit.SECONDS));
+
+        when(player.hasPermissions(4)).thenReturn(false);
+        queuedTask.get().run();
+
+        assertFalse(pageDelivered.get(), "the sensitive page consumer must not run after L4 is revoked");
+        assertTrue(failureHandled.get(), "the pending browser load must be released");
+        verify(player).hasPermissions(4);
+        ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+        verify(source).sendFailure(failure.capture());
+        assertEquals(denial, failure.getValue().getString());
+    }
+
+    @Test
+    void testMetadataQueryStillDeliversToLevelFourConsole(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("metadata-console-query.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(null);
+        when(source.hasPermission(4)).thenReturn(true);
+        when(server.getRunningThread()).thenReturn(Thread.currentThread());
+
+        AtomicReference<Integer> resultCode = new AtomicReference<>();
+        Thread caller = new Thread(() -> resultCode.set(QueryDispatcher.dispatch(source, "metadata console",
+                conn -> QueryOutput.found(List.of("console metadata result")),
+                player -> player.hasPermissions(4),
+                "[ItemGraph] Item metadata filters require permission level 4.")));
+        caller.start();
+        caller.join(5_000);
+
+        assertFalse(caller.isAlive(), "entityless worker callers must complete without waiting for server-thread delivery");
+        assertEquals(1, resultCode.get());
+        verify(source).hasPermission(4);
+        verify(source).sendSuccess(any(), eq(false));
+        verify(source, never()).sendFailure(any());
+    }
+
+    @Test
     void testCanStillReportServerStopped() {
         CommandSourceStack source = mock(CommandSourceStack.class);
         MinecraftServer server = mock(MinecraftServer.class);

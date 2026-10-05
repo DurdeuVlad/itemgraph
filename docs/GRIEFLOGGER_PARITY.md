@@ -207,9 +207,11 @@ are the operator-facing command contract. ItemGraph registers `/itemgraph` as
 the full root and redirects `/ig` to the same node; it does not register `/gl`
 or `/grieflogger`. Both roots use permission level 2. The direct lookup form
 accepts the six documented `name.value` filters and one-letter aliases, quoted
-comma-separated values, at most six filters (including ItemGraph's `state` filter), required radius, cubic distance,
-and AND semantics. The explicit `/ig lookup filters` spelling is an ItemGraph
-extension. The required-radius rule follows the published safety guidance even
+comma-separated values, required radius, cubic distance, and AND semantics.
+ItemGraph adds state, absolute-time, and exact metadata predicates under a
+12-token cap; metadata predicates require permission level 4. The explicit
+`/ig lookup filters` spelling and these additional predicates are ItemGraph
+extensions. The required-radius rule follows the published safety guidance even
 though pinned GriefLogger 26.2 `LookupCommand` accepts a no-radius query; that
 versioned source discrepancy is retained above rather than silently represented
 as exact parity.
@@ -409,12 +411,14 @@ checksummed historical database when an operator explicitly configures it.
 2. Run ItemGraph native-only with the GriefLogger JAR absent for a complete
    24-hour staging window. Verify the acceptance gates above and record the
    ItemGraph schema version and row-count report.
-3. Keep the immutable GriefLogger copy for 30 days after native-only cutover.
-   Store its checksum beside the backup and keep the original database read-only.
-4. After the 30-day retention window, keep the checksummed GriefLogger copy
-   under the operator's archive policy and remove only the GriefLogger JAR/config
-   after an operator approves the checksum and acceptance report. Leave
-   `grieflogger_database_path` unset for native-only operation.
+3. Keep ItemGraph raw evidence indefinitely. Store the GriefLogger source-copy
+   checksum beside that immutable backup; its archive and retention are governed
+   by the operator's policy, with no ItemGraph purge.
+4. Remove only the GriefLogger JAR/config after an operator approves the
+   checksum and acceptance report. Native-only operation uses the default
+   `grieflogger_integration_enabled=false` (NeoForge:
+   `general.grieflogger_integration_enabled=false`); the configured source path
+   is ignored and is not probed. This setting does not disable native capture.
 5. Rollback is bounded: restore the GriefLogger JAR and its immutable database
    copy, leave ItemGraph's database untouched, and re-run the staging checks
    before any production decision. The recorded rollback evidence is the source

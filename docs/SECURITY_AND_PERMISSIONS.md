@@ -115,7 +115,12 @@ Queries should have:
 - pagination
 - rate limits if necessary
 
-`/ig lookup` is an operator-only audit query. `CHAT_MESSAGE` and
+`/ig lookup` is an operator-only audit query. Item metadata predicates (`item`, `fingerprint`,
+`name`, `damage`, `trim`, `enchantment`, `lore`, and `component`) and exports using them
+require permission level 4. Component query values are bounded canonical JSON; queries do
+not return arbitrary component payloads. Saved-page continuations recheck level 4 before
+dispatching and again on the live player before delivering rows or paging actions, so a
+permission demotion during an async page query suppresses its result. `CHAT_MESSAGE` and
 `COMMAND_ATTEMPT` and `COMMAND_EXECUTED` rows can contain private conversation, command arguments, or
 credentials accidentally typed into chat, so they must remain restricted to the
 audit permission and must never be included in player-facing flow views.
@@ -128,12 +133,12 @@ source hashes. `/ig export full` requires permission level 4 and includes exact
 locations, identities, item metadata, and the stored inference explanation.
 Full exports and redacted exports with item-metadata predicates check level-4
 permission again immediately before publication; revoking that permission while
-the bounded job runs prevents the bundle from being published. The dispatcher
+the bounded job runs prevents the bundle from being published. The command sets
+the export service's `levelFourAuthorizationRequired` flag for FULL and
+metadata-filtered REDACTED exports. Progress and completion messages for those
+jobs also check the live level-4 permission on the server thread; after demotion,
+ItemGraph suppresses record counts and completion details. The dispatcher
 cancellation and commit gate remains required for both redacted and full exports.
-Callers must set the export service's `levelFourAuthorizationRequired` flag for
-both cases. When the item-predicate API is integrated, the command call site must
-pass `profile == FULL || !filters.itemPredicates().isEmpty()`; profile-only checks
-would leave metadata-filtered redacted exports authorized after demotion.
 Both paths are bounded to 100 observed rows, 100 linked inferred edges, four
 active jobs, and 4 MiB per bundle. Exports refuse filename collisions. Hashes
 make edits detectable against a separately trusted manifest/final hash; the
@@ -165,7 +170,7 @@ container's contents and does not relax any GUI permission checks.
 
 ## Preview API boundary
 
-`docs/API.md` implements a `com.itemgraph.api` `PREVIEW_2` Java boundary for installed
+`docs/API.md` implements a `com.itemgraph.api` `PREVIEW_3` Java boundary for installed
 server mods, not a player-facing permission grant. Trusted consumers may submit direct
 observations and read full flow results, but they remain responsible for checking the
 receiving player's permissions before displaying player UUIDs, coordinates, hidden
@@ -173,7 +178,7 @@ inventories, or custom metadata. `SourceHandle` is a final service-issued capabi
 to the server/service generation, so a caller cannot implement or reuse a forged handle.
 Registration validates that the claimed `modId` exists in `ModList` and logs the claim
 prominently; Java cannot cryptographically prove which loaded mod called the method, so the
-PREVIEW_2 trust boundary still requires consumers to pass their own ID. API persistence writes only raw
+PREVIEW_3 trust boundary still requires consumers to pass their own ID. API persistence writes only raw
 `EXTERNAL_API` observations and the source registry in ItemGraph's own database; it does
 not expose JDBC, schema objects, GriefLogger access, mutable Minecraft state, or
 caller-provided inferred edges/confidence.

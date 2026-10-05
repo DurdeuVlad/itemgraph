@@ -191,9 +191,9 @@ class IncidentBundleServiceTest extends QueryTestBase {
         assertFalse(Files.exists(exports.resolve("full-revoked.json")),
                 "a full export must not publish after level-4 permission is revoked during serialization");
 
-        // This branch does not yet contain PR #125's itemPredicates API. Exercise its
-        // service-boundary contract directly with the explicit protected-export flag.
-        AuditLookupFilters metadataFilters = filters;
+        AuditLookupFilters metadataFilters = AuditLookupFilters.parse(
+                "action.drop_item radius.100 item.minecraft:diamond", now);
+        assertFalse(metadataFilters.itemPredicates().isEmpty());
         AtomicBoolean metadataPermission = new AtomicBoolean(true);
         assertThrows(java.io.IOException.class, () -> IncidentBundleService.export(conn, metadataFilters,
                 "minecraft:overworld", 10, 64, 10, 1,

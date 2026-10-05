@@ -7,6 +7,19 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Issue #45 component-aware filters (implementation in progress):** filtered lookup parses
+  exact item ID, fingerprint hash, custom name, damage, armor trim, enchantment, lore,
+  persistent component JSON, and absolute UTC windows. ItemGraph migration v22 adds an
+  ItemGraph-owned deterministic persistent-component index; unsupported or incomplete
+  serialization stays explicitly unresolved. Metadata filter entry points require
+  permission level 4. The preview Java API advances to PREVIEW_3 with item metadata selectors
+  and absolute query windows. Local validation passed 614 unit tests and 8 required GameTests
+  on each loader. SQLite cursor parity passed locally; the equivalent MySQL/MariaDB fixture is
+  in CI, and measured #32 latency budgets remain pending. Metadata-filtered saved-page
+  continuations recheck permission level 4 before dispatch and against the live player again
+  before delivering asynchronous rows or paging actions.
+  No version bump or distributable JAR was created.
+
 - **Issue #37 bounded incident bundles:** added `/ig export`, level-4 `/ig export full`,
   `/ig export verify`, and owner/operator `/ig export cancel`. Bundles contain up to 100
   observed evidence rows and 100 linked inferred edges, preserve GriefLogger source and
@@ -17,10 +30,11 @@ The project follows a simple pre-1.0 development changelog model.
   collisions, and cap output at 4 MiB. Format and unkeyed-hash limitations are documented
   in `docs/INCIDENT_BUNDLES.md`. Full exports and redacted exports with item-metadata
   predicates recheck level-4 permission at the final publication gate, so revocation
-  before commit prevents the file from being published. The service exposes an explicit
-  level-four requirement flag for redacted metadata-filtered exports; the stacked #125
-  command integration must set it when `filters.itemPredicates()` is nonempty. M9 batch verification is pending; ItemGraph remains 0.3.2
-  and no distributable JAR is built.
+  before commit prevents the file from being published. The command integration sets
+  the level-four requirement flag for FULL and metadata-filtered REDACTED exports, and
+  rechecks live permission before sending progress or completion counts. Those protected
+  messages are suppressed after demotion. M9 batch verification is pending; ItemGraph
+  remains 0.3.2 and no distributable JAR is built.
 
 - **Issue #36 cross-loader preview API fixture work:** the shared API now exposes exact
   positive-version negotiation with explicit compatible/incompatible results. Independent

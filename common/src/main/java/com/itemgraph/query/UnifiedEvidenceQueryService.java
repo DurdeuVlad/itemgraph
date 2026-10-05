@@ -199,6 +199,7 @@ public final class UnifiedEvidenceQueryService {
                 centerX, centerY, centerZ, filters.radiusBlocks(), exactPositions);
         appendSubjectFilter(sql, args, "g.subject_id", filters.includeSubjects(), false);
         appendSubjectFilter(sql, args, "g.subject_id", filters.excludeSubjects(), true);
+        appendItemIdPredicates(sql, args, filters.itemPredicates(), "g.subject_id");
         // HEX gives SQLite and MySQL/MariaDB the same bytewise ordering even when
         // their default text collations differ for case, accents, or Unicode.
         sql.append(" ORDER BY g.timestamp_ms DESC, HEX(g.table_name), HEX(g.source_key) LIMIT ?");
@@ -288,6 +289,7 @@ public final class UnifiedEvidenceQueryService {
                 filters.radiusBlocks(), exactPositions);
         appendSubjectFilter(sql, args, "subject_id", filters.includeSubjects(), false);
         appendSubjectFilter(sql, args, "subject_id", filters.excludeSubjects(), true);
+        appendItemIdPredicates(sql, args, filters.itemPredicates(), "subject_id");
         sql.append(" ORDER BY timestamp_ms DESC, COALESCE(source_type, 'AUDIT') ASC, id DESC LIMIT ?");
         args.add(limit);
 
@@ -350,6 +352,7 @@ public final class UnifiedEvidenceQueryService {
                             WHEN dest.node_type = 'PLAYER' THEN dest.owner_uuid
                             ELSE COALESCE(origin.owner_uuid, dest.owner_uuid) END AS player_uuid,
                        f.id AS fingerprint_row_id, f.item_id, f.component_summary,
+                       f.component_index_state,
                        origin.custom_label AS origin_label,
                        dest.custom_label AS dest_label
                 FROM ig_observations o
@@ -386,6 +389,8 @@ public final class UnifiedEvidenceQueryService {
         }
         appendSubjectFilter(sql, args, "f.item_id", filters.includeSubjects(), false);
         appendSubjectFilter(sql, args, "f.item_id", filters.excludeSubjects(), true);
+        ItemMetadataSql.append(sql, args, filters.itemPredicates(),
+                "f.id", "f.item_id", "f.fingerprint_hash");
         sql.append(" ORDER BY o.timestamp_ms DESC, "
                 + "CASE WHEN UPPER(o.source_type) = 'GRIEFLOGGER' THEN 'GRIEFLOGGER' ELSE 'OBSERVATION' END ASC, "
                 + "o.id DESC LIMIT ?");
@@ -413,6 +418,13 @@ public final class UnifiedEvidenceQueryService {
                             || "UNKNOWN".equals(rs.getString("origin_type"))
                             || "UNKNOWN".equals(rs.getString("dest_type"));
                     String componentSummary = rs.getString("component_summary");
+                    String componentIndexState = rs.getString("component_index_state");
+                    boolean metadataFilterUnresolved = filters.requiresComponentIndex()
+                            && !"COMPLETE".equals(componentIndexState);
+                    if (metadataFilterUnresolved) {
+                        detail += " component_filter=UNRESOLVED index="
+                                + valueOr(componentIndexState, "LEGACY_UNKNOWN");
+                    }
                     boolean componentDecodeFailed = componentSummary != null
                             && componentSummary.contains("component_decode=UNRESOLVED");
                     boolean missingFingerprint = rs.getObject("fingerprint_row_id") == null;
@@ -422,6 +434,7 @@ public final class UnifiedEvidenceQueryService {
                             : componentDecodeFailed ? "COMPONENT_DECODE_FAILED"
                             : missingFingerprint ? "ITEM_FINGERPRINT_UNRESOLVED"
                             : missingEndpoint ? "UNKNOWN_ENDPOINT"
+                            : metadataFilterUnresolved ? "COMPONENT_FILTER_UNRESOLVED"
                             : "AMBIGUOUS".equals(groupState) ? "SOURCE_EQUIVALENCE_AMBIGUOUS" : null;
                     if ("OBSERVED".equals(evidenceClass) && "AMBIGUOUS".equals(groupState)) {
                         evidenceClass = "AMBIGUOUS";
@@ -464,7 +477,9 @@ public final class UnifiedEvidenceQueryService {
                        p.id AS player_node_id, p.node_type AS player_node_type,
                        p.level_id, p.x, p.y, p.z, p.custom_label AS player_name,
                        p.owner_uuid AS player_uuid,
-                       source_fp.item_id AS source_item, result_fp.item_id AS result_item
+                       source_fp.item_id AS source_item, result_fp.item_id AS result_item,
+                       source_fp.component_index_state AS source_component_index_state,
+                       result_fp.component_index_state AS result_component_index_state
                 FROM ig_item_transformations t
                 LEFT JOIN ig_nodes p ON p.id = t.player_node_id
                 LEFT JOIN ig_item_fingerprints source_fp ON source_fp.id = t.source_fingerprint_id
@@ -484,6 +499,9 @@ public final class UnifiedEvidenceQueryService {
                 centerX, centerY, centerZ, filters.radiusBlocks(), exactPositions);
         appendTransformationSubjectFilter(sql, args, filters.includeSubjects(), false);
         appendTransformationSubjectFilter(sql, args, filters.excludeSubjects(), true);
+        ItemMetadataSql.appendEither(sql, args, filters.itemPredicates(),
+                "source_fp.id", "source_fp.item_id", "source_fp.fingerprint_hash",
+                "result_fp.id", "result_fp.item_id", "result_fp.fingerprint_hash");
         sql.append(" ORDER BY t.timestamp_ms DESC, t.id DESC LIMIT ?");
         args.add(limit);
 
@@ -494,9 +512,13 @@ public final class UnifiedEvidenceQueryService {
                 while (rs.next()) {
                     String sourceItem = rs.getString("source_item");
                     String resultItem = rs.getString("result_item");
+                    boolean metadataFilterUnresolved = filters.requiresComponentIndex()
+                            && (!"COMPLETE".equals(rs.getString("source_component_index_state"))
+                            || !"COMPLETE".equals(rs.getString("result_component_index_state")));
                     String detail = valueOr(rs.getString("details"), "")
                             + " source=" + valueOr(sourceItem, "(missing)")
-                            + " result=" + valueOr(resultItem, "(missing)");
+                            + " result=" + valueOr(resultItem, "(missing)")
+                            + (metadataFilterUnresolved ? " component_filter=UNRESOLVED" : "");
                     boolean unresolved = rs.getObject("player_node_id") == null
                             || "UNKNOWN".equals(rs.getString("player_node_type"))
                             || sourceItem == null || resultItem == null;
@@ -510,7 +532,8 @@ public final class UnifiedEvidenceQueryService {
                             rs.getString("transformation_type"), rs.getInt("quantity"),
                             valueOr(sourceItem, "(missing)") + " -> " + valueOr(resultItem, "(missing)"), detail,
                             unresolved ? "UNRESOLVED" : "OBSERVED", null, null, null, null,
-                            !unresolved ? null : sourceItem == null || resultItem == null
+                            !unresolved ? (metadataFilterUnresolved ? "COMPONENT_FILTER_UNRESOLVED" : null)
+                                    : sourceItem == null || resultItem == null
                                     ? "ITEM_FINGERPRINT_UNRESOLVED" : "UNKNOWN_ENDPOINT", List.of(),
                             unresolved ? 0 : rs.getInt("quantity"), null, false));
                 }
@@ -535,7 +558,7 @@ public final class UnifiedEvidenceQueryService {
                        origin.owner_uuid AS origin_uuid,
                        destination.custom_label AS destination_label,
                        destination.owner_uuid AS destination_uuid,
-                       f.item_id
+                       f.item_id, f.component_index_state
                 FROM ig_inferred_edges e
                 LEFT JOIN ig_nodes origin ON origin.id = e.from_node_id
                 LEFT JOIN ig_nodes destination ON destination.id = e.to_node_id
@@ -558,6 +581,8 @@ public final class UnifiedEvidenceQueryService {
                 levelId, centerX, centerY, centerZ, filters.radiusBlocks(), exactPositions);
         appendSubjectFilter(sql, args, "f.item_id", filters.includeSubjects(), false);
         appendSubjectFilter(sql, args, "f.item_id", filters.excludeSubjects(), true);
+        ItemMetadataSql.append(sql, args, filters.itemPredicates(),
+                "f.id", "f.item_id", "f.fingerprint_hash");
         sql.append(" ORDER BY e.time_start DESC, e.id DESC LIMIT ?");
         args.add(limit);
 
@@ -570,7 +595,10 @@ public final class UnifiedEvidenceQueryService {
                     List<String> candidates = EdgeExplanation.parseCompetingCandidateIds(storedCandidates);
                     String explanation = rs.getString("explanation");
                     String detail = "confidence=" + QueryFormatter.formatConfidence(rs.getDouble("confidence"))
-                            + (explanation == null || explanation.isBlank() ? "" : " " + explanation);
+                            + (explanation == null || explanation.isBlank() ? "" : " " + explanation)
+                            + (filters.requiresComponentIndex()
+                            && !"COMPLETE".equals(rs.getString("component_index_state"))
+                                    ? " component_filter=UNRESOLVED" : "");
                     rows.add(new UnifiedEvidenceDetail(
                             "INFERRED", "edge#" + rs.getLong("id"), rs.getLong("time_start"),
                             rs.getString("origin_level"), nullableDouble(rs, "origin_x"),
@@ -580,7 +608,11 @@ public final class UnifiedEvidenceQueryService {
                             "GROUND_BRIDGE", rs.getInt("amount"), rs.getString("item_id"), detail,
                             "INFERRED", null, null, null, null,
                             storedCandidates == null ? "CORRELATION_CANDIDATES_UNAVAILABLE"
-                                    : candidates.isEmpty() ? null : "CORRELATION_COMPETING_CANDIDATES",
+                                    : candidates.isEmpty()
+                                    ? (filters.requiresComponentIndex()
+                                    && !"COMPLETE".equals(rs.getString("component_index_state"))
+                                            ? "COMPONENT_FILTER_UNRESOLVED" : null)
+                                    : "CORRELATION_COMPETING_CANDIDATES",
                             candidates, rs.getInt("amount"), null,
                             rs.getInt("competing_candidates_truncated") != 0));
                 }
@@ -610,6 +642,21 @@ public final class UnifiedEvidenceQueryService {
             }
         }
         sql.append(")");
+    }
+
+    private static void appendItemIdPredicates(StringBuilder sql, List<Object> args,
+                                               List<ItemMetadataPredicate> predicates,
+                                               String itemIdExpression) {
+        for (ItemMetadataPredicate predicate : predicates) {
+            if (predicate.kind() == ItemMetadataPredicate.Kind.ITEM_ID) {
+                sql.append(" AND ").append(itemIdExpression).append(" = ?");
+                args.add(predicate.value());
+            } else {
+                // Historical projections contain no fingerprint/component link. An exact
+                // metadata match cannot be reconstructed from their display text or payload.
+                sql.append(" AND 1 = 0");
+            }
+        }
     }
 
     private static List<UnifiedEvidenceDetail> withCandidateEvidence(Connection conn,

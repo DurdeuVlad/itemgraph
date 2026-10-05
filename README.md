@@ -4,9 +4,9 @@
 
 ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **Fabric and NeoForge 1.21.1**.
 
-Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time, while retaining a native audit ledger for non-item events. It does **not** assign a permanent UUID to every item. Instead, it combines raw evidence from native server hooks and optional existing logging systems such as GriefLogger, then builds an explainable temporal item-flow graph.
+Its purpose is to reconstruct plausible item-type and stack-quantity movement across players, supported vanilla containers, and ground/entity observations over time, while retaining a native audit ledger for non-item events. It does **not** assign a permanent UUID to every item. ItemGraph captures its own native raw evidence and builds an explainable temporal item-flow graph.
 
-**GriefLogger is optional.** The NeoForge and Fabric builds record native item-flow and supported audit events and can also read GriefLogger's SQLite database strictly read-only. Native parity coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
+**ItemGraph runs without GriefLogger.** The NeoForge and Fabric builds own their event capture, database, graph reconstruction, and queries. During migration, an optional read-only GriefLogger bridge can ingest supported item/container rows and run a separate explicit historical import. Neither path is required for native operation. Native replacement coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
 
 ItemGraph records vanilla hopper, dispenser, and dropper movement on both loaders.
 Other mods can opt into exact transfer evidence through the Fabric Transfer API or
@@ -14,7 +14,7 @@ NeoForge `IItemHandler` adapter documented in [the Java API guide](docs/API.md).
 Portable inventories must provide a stable opaque inventory ID. Arbitrary third-party
 inventory calls are not globally intercepted; the owning mod must integrate the adapter.
 
-Each loader has a standard build and a GriefLogger-compatible build. For GriefLogger
+Each loader has a standard build and a temporary GriefLogger-compatible coexistence build. The standard build runs without GriefLogger. For GriefLogger
 `1.2.10-1.21.1`, install the artifact ending in
 `-<loader>-grieflogger-compatible.jar`; it omits only ItemGraph's SQLite dependency,
 keeps the MariaDB Connector/J driver for ItemGraph-owned MySQL/MariaDB storage, and
@@ -26,17 +26,24 @@ is absent. The four release files are:
 - `itemgraph-<version>-neoforge.jar`
 - `itemgraph-<version>-neoforge-grieflogger-compatible.jar`
 
-The compatible variants are a migration bridge while the M8 parity gates remain
-open. ItemGraph will switch to the standard loader jar as the only supported
-artifact only after every M8 acceptance gate, the differential replay, the
-native-only 24-hour staging window, and the recorded rollback rehearsal in [the
-cutover plan](docs/GRIEFLOGGER_PARITY.md) are complete. That cutover retires the
-GriefLogger jar dependency; it does not change the read-only importer or delete
-the retained source database copy.
+The compatible variants are a temporary migration bridge while parity gates
+remain open. They let servers run both mods during migration despite their
+bundled SQLite class conflict. Once the parity acceptance gates and native-only
+cutover evidence in [the cutover plan](docs/GRIEFLOGGER_PARITY.md) are complete,
+the standard ItemGraph jar becomes the only supported artifact. The optional
+read-only source bridge is separate from native event capture; it can ingest
+supported source rows while configured, and the explicit historical import can
+copy additional legacy tables. Operators keep their original GriefLogger
+database under their own archive policy.
 
-On Fabric, configure `grieflogger_database_path` in `config/itemgraph.properties`
-to point at GriefLogger's database file. The database remains read-only from
-ItemGraph. ItemGraph-owned storage defaults to SQLite; set `database_backend=mysql_mariadb`
+To enable the optional read-only migration bridge and historical import,
+configure `grieflogger_database_path` in
+`config/itemgraph.properties` on Fabric or the corresponding NeoForge config.
+Both configs default this path to `database.db`; if that file is absent, the
+legacy importer is inactive and ItemGraph runs natively. Point it at a known
+missing file for native-only operation on a server where another `database.db`
+exists. The legacy database remains read-only from ItemGraph. ItemGraph-owned
+storage defaults to SQLite; set `database_backend=mysql_mariadb`
 plus `database_host`, `database_port`, `database_name`, `database_username`,
 `database_password`, `database_ssl_mode`, and `database_connection_timeout_ms` to
 use the shared MySQL/MariaDB storage contract. Optional non-unique lookup
@@ -69,7 +76,7 @@ available for forensic review and are excluded from current graph queries.
 - **Platforms:** Fabric, NeoForge
 - **Target Minecraft version:** 1.21.1
 - **Primary deployment model:** dedicated server
-- **Preview integration API:** `com.itemgraph.api` `PREVIEW_2` in the main JAR
+- **Preview integration API:** `com.itemgraph.api` `PREVIEW_3` in the main JAR
 - **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 - **Tagline:** *Trace item movement through time.*
 
@@ -131,14 +138,21 @@ GriefLogger / Minecraft / Mod hooks
        Query + explanation UI
 ```
 
-GriefLogger is treated as a read-only evidence source. ItemGraph maintains its own storage for supplemental observations and derived data. Confirmed cross-source copies preserve both raw rows but contribute one quantity capacity; uncertain matches remain ambiguous. Container GUI observations are session net deltas with explicit time bounds, not click history, and generic `IItemHandler` rows keep caller/cause identity UNKNOWN.
+ItemGraph owns native observations, its evidence ledger, and derived data.
+During migration, a configured GriefLogger database can be read as a legacy
+source: supported item/container rows are polled continuously, and the separate
+historical import is explicit. Imported rows retain provenance, confirmed
+cross-source copies contribute one quantity capacity, and uncertain matches
+remain ambiguous. Container GUI observations are session net deltas with
+explicit time bounds, not click history, and generic `IItemHandler` rows keep
+caller/cause identity UNKNOWN.
 
 ## MVP goals
 
 The first useful vertical slice should:
 
-1. Read relevant GriefLogger evidence without mutating it.
-2. Record only missing high-value inventory events where necessary.
+1. Capture native ItemGraph evidence without requiring another mod.
+2. Optionally import legacy GriefLogger history read-only during migration.
 3. Canonicalize an item fingerprint.
 4. Represent inventories as graph nodes.
 5. Represent raw observations separately from inferred movement.
@@ -165,9 +179,11 @@ Implemented and available (all require permission level 2):
 /ig event   <observationId>
 /ig explain <edgeId>
 /ig trace item <query> [limit] [sinceMinutes]
+/ig trace item-filtered <query> <metadata/time filters> (permission level 4)
 /ig trace player <playerName> [limit] [sinceMinutes]
 /ig trace container <x> <y> <z> [limit] [sinceMinutes]
 /ig gui item <query> [sinceMinutes]
+/ig gui item-filtered <query> <metadata/time filters> (permission level 4)
 /ig gui player <playerName> [sinceMinutes]
 /ig gui container <dimension> <x> <y> <z> [sinceMinutes]
 /ig inspect [on|off|status]
@@ -177,6 +193,7 @@ Implemented and available (all require permission level 2):
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
 - `/ig export`: writes a bounded, redacted incident bundle to `<world>/itemgraph/exports`; full identity/location data requires permission level 4. `/ig export verify` checks its SHA-256 manifest and chain, and `/ig export cancel` cancels an active job. See [incident bundle format and limits](docs/INCIDENT_BUNDLES.md).
 - `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows the chronological timeline, including transformations (`[TRANSFORMATION <type> <- <source>]`).
+- `/ig trace item-filtered` and `/ig gui item-filtered`: apply exact item metadata predicates and UTC or relative time bounds before candidate limits. Metadata filters require permission level 4. Incomplete component indexes are labeled as possible candidates, never confirmed matches.
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
 - `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.
 - `/ig gui`: opens the same item/player/container timelines in a vanilla six-row chest menu. Each page has at most 45 timeline entries; entries distinguish observed from inferred movement, and selecting one opens evidence details. Ambiguous item matches and duplicate player/container nodes require candidate selection rather than silently choosing a target. The menu is permission-level 2, uses no custom client screen or packet, and rejects inventory-movement actions.
@@ -196,7 +213,7 @@ Evidence and inference are labelled per line, never once at the top.
 
 ## Preview integration API
 
-Trusted server mods can use `com.itemgraph.api` `PREVIEW_2` to register their own source
+Trusted server mods can use `com.itemgraph.api` `PREVIEW_3` to register their own source
 identity, submit bounded raw observations, and run asynchronous item/player/container
 queries. The API is shipped in this JAR, uses a service-issued `SourceHandle`, and returns
 immutable DTOs plus opaque evidence URIs—not JDBC, schema IDs, mutable Minecraft state, or

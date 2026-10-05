@@ -188,7 +188,7 @@ EXPECTED_EXTENSION_ACTION_CONTRACT: dict[str, tuple[str, str, str]] = {
     "INTERACT_ENTITY_UNRESOLVED": ("extended", "observed", "none"),
 }
 REQUIRED_MILESTONE_ISSUES = {24, 25, 26, 27, 28, 29, 30, 31, 43, 54, 76}
-M8_MILESTONE_TITLE = "M8: Drop-in GriefLogger parity"
+M8_MILESTONE_NUMBER = 4
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -510,8 +510,8 @@ def validate_remote_milestones() -> None:
         require(isinstance(issue, dict), f"GitHub issue #{issue_number} response must be an object")
         milestone = issue.get("milestone") or {}
         require(
-            milestone.get("title") == M8_MILESTONE_TITLE,
-            f"GitHub issue #{issue_number} is not assigned to {M8_MILESTONE_TITLE!r}",
+            milestone.get("number") == M8_MILESTONE_NUMBER,
+            f"GitHub issue #{issue_number} is not assigned to M8 milestone #{M8_MILESTONE_NUMBER}",
         )
         require(
             "## Acceptance criteria" in issue.get("body", ""),

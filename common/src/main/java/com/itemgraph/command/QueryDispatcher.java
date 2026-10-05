@@ -34,6 +34,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
 /**
  * Runs a historical ItemGraph query off the server thread and delivers its output back
@@ -183,6 +184,20 @@ public final class QueryDispatcher {
      * @param label short name of the command, used only in log and error messages
      */
     public static int dispatch(CommandSourceStack source, String label, Query query) {
+        return dispatch(source, label, query, null, null);
+    }
+
+    /**
+     * Dispatches a query whose result requires a live player permission at delivery time.
+     * The predicate is evaluated on the server thread against the current {@link ServerPlayer},
+     * after the query finishes and before either result lines, errors, or actions are sent.
+     */
+    static int dispatch(CommandSourceStack source, String label, Query query,
+                         Predicate<ServerPlayer> livePlayerAuthorization,
+                         String authorizationDeniedMessage) {
+        if ((livePlayerAuthorization == null) != (authorizationDeniedMessage == null)) {
+            throw new IllegalArgumentException("live player authorization and denial message must be provided together");
+        }
         DatabaseManager db = DatabaseManager.getInstance();
         if (!db.isInitialized()) {
             String unavailable = "status".equals(label)
@@ -211,7 +226,8 @@ public final class QueryDispatcher {
                     "[ItemGraph] Query accepted; completed results will be written to the server log."), false);
             future.whenComplete((output, throwable) -> {
                 cancelTimeout(playerTimeout);
-                deliver(source, server, serverThread, label, output, throwable);
+                deliver(source, server, serverThread, label, output, throwable,
+                        livePlayerAuthorization, authorizationDeniedMessage);
             });
             return 1;
         }
@@ -221,6 +237,10 @@ public final class QueryDispatcher {
         if (server != null && Thread.currentThread() != serverThread && source.getEntity() == null) {
             try {
                 QueryOutput output = future.get(5, TimeUnit.SECONDS);
+                if (!isLivePlayerAuthorized(source, livePlayerAuthorization)) {
+                    source.sendFailure(Component.literal(authorizationDeniedMessage));
+                    return 0;
+                }
                 if (output.found()) {
                     output.lines().forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
                     sendActions(source, output.actions());
@@ -251,7 +271,8 @@ public final class QueryDispatcher {
 
         future.whenComplete((output, throwable) -> {
             cancelTimeout(playerTimeout);
-            deliver(source, server, serverThread, label, output, throwable);
+            deliver(source, server, serverThread, label, output, throwable,
+                    livePlayerAuthorization, authorizationDeniedMessage);
         });
 
         return 1;
@@ -370,6 +391,16 @@ public final class QueryDispatcher {
 
     static <T> int dispatchData(CommandSourceStack source, String label, DataQuery<T> query,
                                 BiConsumer<CommandSourceStack, T> consumer, Runnable failureConsumer) {
+        return dispatchData(source, label, query, consumer, failureConsumer, null, null);
+    }
+
+    static <T> int dispatchData(CommandSourceStack source, String label, DataQuery<T> query,
+                                BiConsumer<CommandSourceStack, T> consumer, Runnable failureConsumer,
+                                Predicate<ServerPlayer> livePlayerAuthorization,
+                                String authorizationDeniedMessage) {
+        if ((livePlayerAuthorization == null) != (authorizationDeniedMessage == null)) {
+            throw new IllegalArgumentException("live player authorization and denial message must be provided together");
+        }
         DatabaseManager db = DatabaseManager.getInstance();
         if (!db.isInitialized()) {
             source.sendFailure(Component.literal(QueryFormatter.queryFailed(
@@ -402,6 +433,13 @@ public final class QueryDispatcher {
             }
             if (!source.hasPermission(2)) {
                 source.sendFailure(Component.literal("[ItemGraph] Permission level 2 is required to view this flow."));
+                failureConsumer.run();
+                return;
+            }
+            if (livePlayerAuthorization != null
+                    && (!(source.getEntity() instanceof ServerPlayer player)
+                    || !livePlayerAuthorization.test(player))) {
+                source.sendFailure(Component.literal(authorizationDeniedMessage));
                 failureConsumer.run();
                 return;
             }
@@ -497,7 +535,9 @@ public final class QueryDispatcher {
     }
 
     private static void deliver(CommandSourceStack source, MinecraftServer server, Thread serverThread,
-                                String label, QueryOutput output, Throwable throwable) {
+                                String label, QueryOutput output, Throwable throwable,
+                                Predicate<ServerPlayer> livePlayerAuthorization,
+                                String authorizationDeniedMessage) {
         if (server == null) {
             LOGGER.warn("Dropping /ig {} result: the command source has no server.", label);
             return;
@@ -507,6 +547,10 @@ public final class QueryDispatcher {
         server.execute(() -> {
             if (Thread.currentThread() != serverThread || !canStillReport(source, server)
                     || !source.hasPermission(2)) {
+                return;
+            }
+            if (!isLivePlayerAuthorized(source, livePlayerAuthorization)) {
+                source.sendFailure(Component.literal(authorizationDeniedMessage));
                 return;
             }
             boolean entityless = source.getEntity() == null;
@@ -541,6 +585,20 @@ public final class QueryDispatcher {
             output.lines().forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
             sendActions(source, output.actions());
         });
+    }
+
+    private static boolean isLivePlayerAuthorized(CommandSourceStack source,
+                                                   Predicate<ServerPlayer> livePlayerAuthorization) {
+        if (livePlayerAuthorization == null) {
+            return true;
+        }
+        Entity entity = source.getEntity();
+        if (entity == null) {
+            // The live-player predicate is used by level-4 metadata commands. Preserve
+            // trusted console/RCON execution at the same permission boundary.
+            return source.hasPermission(4);
+        }
+        return entity instanceof ServerPlayer player && livePlayerAuthorization.test(player);
     }
 
     static String callerFailureMessage(String label, Throwable cause) {

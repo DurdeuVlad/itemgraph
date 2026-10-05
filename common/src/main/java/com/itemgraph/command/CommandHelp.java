@@ -15,8 +15,8 @@ final class CommandHelp {
             "help", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain",
             "lookup", "lookup player", "lookup filters", "export", "export verify", "export cancel",
             "page",
-            "trace", "trace item", "trace player", "trace container",
-            "gui", "gui item", "gui player", "gui container", "inspect");
+            "trace", "trace item", "trace item-filtered", "trace player", "trace container",
+            "gui", "gui item", "gui item-filtered", "gui player", "gui container", "inspect");
 
     private static final Map<String, List<String>> TOPICS = topics();
 
@@ -37,17 +37,19 @@ final class CommandHelp {
                 "[ItemGraph] /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes] — bound results to a location.",
                 "[ItemGraph] /ig lookup page <page> <eventType> [limit] [sinceMinutes] — continue a bounded audit result page.",
                 "[ItemGraph] /ig lookup player <playerName> <eventType> [limit] [sinceMinutes] — filter native audit events by player.",
-                "[ItemGraph] /ig lookup <filter1> [filter2] ... — published GriefLogger-compatible action/user/include/exclude/time/radius/state lookup (maximum six; radius required; default page size 10).",
-                "[ItemGraph] /ig lookup filters <filter1> [filter2] ... — explicit ItemGraph spelling for the same filtered lookup.",
+                "[ItemGraph] /ig lookup <filter1> [filter2] ... — action/user/include/exclude/time/radius/state and exact item-metadata lookup (maximum 12; radius required; default page size 10).",
+                "[ItemGraph] /ig lookup filters <filter1> [filter2] ... — explicit ItemGraph spelling for the same filtered lookup; item metadata filters require permission level 4.",
                 "[ItemGraph] /ig lookup provenance <sourceSha256> <table> <sourceKey> [limit] — exact read-only lookup of an imported GriefLogger row, including reference and identity tables.",
                 "[ItemGraph] /ig ingest now — queue one complete ingest and correlate cycle.",
                 "[ItemGraph] /ig ingest history — queue a bounded, read-only import of all present GriefLogger history tables.",
                 "[ItemGraph] /ig event <observationId> — show one raw observed evidence row.",
                 "[ItemGraph] /ig explain <edgeId> — show one inferred edge, confidence, and cited evidence.",
                 "[ItemGraph] /ig trace item <query> [limit] [sinceMinutes]",
+                "[ItemGraph] /ig trace item-filtered <query> <metadata/time filters> (permission level 4)",
                 "[ItemGraph] /ig trace player <playerName> [limit] [sinceMinutes]",
                 "[ItemGraph] /ig trace container <x> <y> <z> [limit] [sinceMinutes]",
                 "[ItemGraph] /ig gui item <query> [sinceMinutes]",
+                "[ItemGraph] /ig gui item-filtered <query> <metadata/time filters> (permission level 4)",
                 "[ItemGraph] /ig gui player <playerName> [sinceMinutes]",
                 "[ItemGraph] /ig gui container <dimension> <x> <y> <z> [sinceMinutes]",
                 "[ItemGraph] /ig inspect [on|off|status] — toggle in-world block, functional-block, and container inspection.",
@@ -123,9 +125,11 @@ final class CommandHelp {
                 "[ItemGraph] playerName is an exact stored player name; eventType uses the same values as /ig lookup.",
                 "[ItemGraph] Example: /ig lookup player Alex COMMAND_ATTEMPT 50 1440"));
         topics.put("lookup filters", List.of(
-                "[ItemGraph] Syntax: /ig lookup <filter1> [filter2] [filter3] [filter4] [filter5] [filter6]",
+                "[ItemGraph] Syntax: /ig lookup <name.value> ... (maximum 12 filters)",
                 "[ItemGraph] The explicit extension spelling /ig lookup filters <filter1> ... is also accepted.",
-                "[ItemGraph] Filters use name.value: action, user, include, exclude, time (m/h/d/y), radius, and state (observed, inferred, ambiguous, unresolved).",
+                "[ItemGraph] Filters: action, user, include, exclude, time (m/h/d/y), radius, state (observed, inferred, ambiguous, unresolved), after, before, between, item, fingerprint, name, damage, trim, enchantment, lore, and component.",
+                "[ItemGraph] Absolute time uses UTC ISO-8601 with exactly three fractional digits: after.<UTC>, before.<UTC>, or between.<startUTC>,<endUTC>. after and before combine; between is exclusive with them.",
+                "[ItemGraph] Metadata filters require permission level 4. component.<registry_id>=<JSON> matches a canonical persistent component value; unknown or incomplete component indexes remain labeled unresolved.",
                 "[ItemGraph] action values cover native audit, item-flow, and transformation evidence (join, quit, chat, command_attempt, place_block, break_block, drop_item, pickup_item, craft, smelt, anvil_rename, anvil_repair, and more).",
                 "[ItemGraph] radius is required, uses the issuing player's current dimension and position, and searches a cube clamped to 1..1024 blocks.",
                 "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and unified evidence results default to 10 rows (maximum 100) with source and evidence IDs.",
@@ -166,6 +170,11 @@ final class CommandHelp {
                 "[ItemGraph] query: registry ID, custom-name text, numeric fingerprint candidate, or quoted \"id:<fingerprintId>\".",
                 "[ItemGraph] limit: default 20, maximum 100. sinceMinutes: positive minutes; omitted means all history.",
                 "[ItemGraph] Ambiguous matches list candidates instead of choosing one. The query is read-only and asynchronous. Example: /ig trace item netherite_boots 20 120"));
+        topics.put("trace item filtered", List.of(
+                "[ItemGraph] Syntax: /ig trace item-filtered <query> <metadata/time filters>",
+                "[ItemGraph] Requires permission level 4. Accepts item, fingerprint, name, damage, trim, enchantment, lore, component, time, after, before, or between filters.",
+                "[ItemGraph] Incomplete component indexes stay labeled COMPONENT_FILTER_UNRESOLVED and are possible candidates only.",
+                "[ItemGraph] Example: /ig trace item-filtered diamond_sword damage.4 enchantment.minecraft:sharpness:5"));
         topics.put("trace player", List.of(
                 "[ItemGraph] Syntax: /ig trace player <playerName> [limit] [sinceMinutes]",
                 "[ItemGraph] playerName: exact stored player label; duplicate stored nodes are listed rather than silently selected.",
@@ -187,6 +196,11 @@ final class CommandHelp {
                 "[ItemGraph] Syntax: /ig gui item <query> [sinceMinutes]",
                 "[ItemGraph] Uses the same item resolver as /ig trace item and opens candidates or a read-only timeline in the vanilla browser; lookup is asynchronous.",
                 "[ItemGraph] Example: /ig gui item stone 120"));
+        topics.put("gui item filtered", List.of(
+                "[ItemGraph] Syntax: /ig gui item-filtered <query> <metadata/time filters>",
+                "[ItemGraph] Requires permission level 4. Supports item metadata filters plus time, after, before, and between.",
+                "[ItemGraph] Incomplete component indexes remain labeled COMPONENT_FILTER_UNRESOLVED and are only possible candidates.",
+                "[ItemGraph] Example: /ig gui item-filtered diamond_sword damage.4 enchantment.minecraft:sharpness:5"));
         topics.put("gui player", List.of(
                 "[ItemGraph] Syntax: /ig gui player <playerName> [sinceMinutes]",
                 "[ItemGraph] Uses the exact stored player-node resolver and opens candidates or a read-only timeline in the vanilla browser; lookup is asynchronous.",

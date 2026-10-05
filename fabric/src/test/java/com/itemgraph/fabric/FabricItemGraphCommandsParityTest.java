@@ -156,6 +156,13 @@ class FabricItemGraphCommandsParityTest {
         assertParsedCompletely(dispatcher.parse(
                 "ig lookup filters action.break_block radius.20", source),
                 "explicit ItemGraph filter syntax");
+        when(source.hasPermission(4)).thenReturn(true);
+        assertParsedCompletely(dispatcher.parse(
+                "itemgraph trace item-filtered diamond_sword damage.4 after.2026-10-02T12:34:56.789Z", source),
+                "filtered item trace syntax");
+        assertParsedCompletely(dispatcher.parse(
+                "ig gui item-filtered diamond_sword enchantment.minecraft:sharpness:5", source),
+                "filtered item browser syntax");
         assertParsedCompletely(dispatcher.parse("itemgraph page 2", source),
                 "standalone page syntax");
         assertParsedCompletely(dispatcher.parse("ig inspect on", source),
@@ -170,7 +177,8 @@ class FabricItemGraphCommandsParityTest {
         assertSuggestions(dispatcher, source, "itemgraph lookup ",
                 "all", "BREAK_BLOCK", "CHAT_MESSAGE", "INTERACT_ENTITY");
         assertSuggestions(dispatcher, source, "itemgraph lookup action.break_block ",
-                "user.", "include.", "exclude.", "time.", "radius.");
+                "user.", "include.", "exclude.", "time.", "radius.", "after.", "before.", "between.",
+                "item.", "fingerprint.", "damage.", "trim.", "enchantment.", "lore.", "component.");
         assertSuggestions(dispatcher, source, "ig inspect ", "on", "off", "status");
     }
 
@@ -298,11 +306,6 @@ class FabricItemGraphCommandsParityTest {
                 () -> AuditLookupFilters.parse("action.break_block", 10_000_000L),
                 "radius is required by the published lookup contract");
         assertThrows(IllegalArgumentException.class,
-                () -> AuditLookupFilters.parse(
-                        "action.break_block user.Alex time.1h include.stone exclude.dirt radius.50",
-                        10_000_000L),
-                "a lookup is limited to six filters");
-        assertThrows(IllegalArgumentException.class,
                 () -> AuditLookupFilters.parse("include.stone exclude.dirt radius.50", 10_000_000L),
                 "include and exclude are mutually exclusive");
     }
@@ -318,8 +321,10 @@ class FabricItemGraphCommandsParityTest {
                 new InvalidLookup("action.break_block a.join radius.10", "filter 'action' may be used once"),
                 new InvalidLookup("include.stone exclude.dirt radius.10",
                         "include and exclude filters cannot be combined"),
-                new InvalidLookup("action.break_block user.Alex include.stone time.1h radius.10 state.observed action.join",
-                        "at most 6 filters are allowed"));
+                new InvalidLookup("radius.10 component.example:a=1 component.example:b=1 component.example:c=1 "
+                        + "component.example:d=1 component.example:e=1 component.example:f=1 component.example:g=1 "
+                        + "component.example:h=1 component.example:i=1 component.example:j=1 component.example:k=1 "
+                        + "component.example:l=1", "at most 12 filters are allowed"));
 
         for (String root : List.of("ig", "itemgraph")) {
             for (String lookupPrefix : List.of(root + " lookup ", root + " lookup filters ")) {
@@ -364,9 +369,15 @@ class FabricItemGraphCommandsParityTest {
         assertTrue(suggestions(dispatcher, source, "itemgraph lookup include.stone ").stream()
                         .noneMatch(value -> value.startsWith("exclude.")),
                 "exclude must not be suggested after include");
+        List<String> remainingFilters = suggestions(dispatcher, source,
+                "itemgraph lookup action.join user.Alex include.stone time.1h radius.50 state.unresolved ");
+        assertTrue(remainingFilters.contains("item."),
+                "metadata filter names remain available after the original six filters");
         assertTrue(suggestions(dispatcher, source,
-                "itemgraph lookup action.join user.Alex include.stone time.1h radius.50 state.unresolved ").isEmpty(),
-                "all six applicable filter names have been used or conflict with another filter");
+                "itemgraph lookup action.join user.Alex include.stone time.1h radius.50 state.unresolved "
+                        + "item.minecraft:stone fingerprint." + "0".repeat(64) + " name.Relic damage.0 "
+                        + "trim.minecraft:quartz/minecraft:spire enchantment.minecraft:sharpness ").isEmpty(),
+                "the new twelve-filter maximum suppresses further suggestions");
     }
 
     private static CommandDispatcher<CommandSourceStack> dispatcher() {

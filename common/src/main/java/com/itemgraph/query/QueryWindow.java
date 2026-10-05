@@ -1,5 +1,7 @@
 package com.itemgraph.query;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Locale;
 
 /**
@@ -24,6 +26,9 @@ import java.util.Locale;
  * @param untilMs inclusive upper bound, or null for open-ended
  */
 public record QueryWindow(Long sinceMs, Long untilMs) {
+
+    private static final java.util.regex.Pattern UTC_MILLIS = java.util.regex.Pattern.compile(
+            "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z");
 
     private static final QueryWindow UNBOUNDED = new QueryWindow(null, null);
 
@@ -53,6 +58,56 @@ public record QueryWindow(Long sinceMs, Long untilMs) {
             sinceMs = nowMs - durationMs;
         }
         return new QueryWindow(sinceMs, nowMs);
+    }
+
+    /**
+     * Creates an open-ended range strictly after a UTC instant with millisecond precision.
+     * Stored event times are integer epoch milliseconds, so adding one millisecond converts
+     * the exclusive boundary into the inclusive range represented by this record.
+     */
+    public static QueryWindow after(String utcInstant) {
+        long boundary = parseUtcMillis(utcInstant);
+        final long inclusiveStart;
+        try {
+            inclusiveStart = Math.addExact(boundary, 1L);
+        } catch (ArithmeticException overflow) {
+            throw new IllegalArgumentException("after timestamp leaves an empty time range", overflow);
+        }
+        return new QueryWindow(inclusiveStart, null);
+    }
+
+    /** Creates an open-ended range strictly before a UTC instant with millisecond precision. */
+    public static QueryWindow before(String utcInstant) {
+        long boundary = parseUtcMillis(utcInstant);
+        final long inclusiveEnd;
+        try {
+            inclusiveEnd = Math.subtractExact(boundary, 1L);
+        } catch (ArithmeticException overflow) {
+            throw new IllegalArgumentException("before timestamp leaves an empty time range", overflow);
+        }
+        return new QueryWindow(null, inclusiveEnd);
+    }
+
+    /** Creates an inclusive range between two UTC instants with millisecond precision. */
+    public static QueryWindow between(String startUtcInstant, String endUtcInstant) {
+        long start = parseUtcMillis(startUtcInstant);
+        long end = parseUtcMillis(endUtcInstant);
+        if (start > end) {
+            throw new IllegalArgumentException("between start must not be after end");
+        }
+        return new QueryWindow(start, end);
+    }
+
+    private static long parseUtcMillis(String value) {
+        if (value == null || !UTC_MILLIS.matcher(value).matches()) {
+            throw new IllegalArgumentException(
+                    "timestamp must use ISO-8601 UTC with exactly three fractional digits, for example 2026-10-02T12:34:56.789Z");
+        }
+        try {
+            return Instant.parse(value).toEpochMilli();
+        } catch (DateTimeParseException | ArithmeticException invalid) {
+            throw new IllegalArgumentException("timestamp is not a valid UTC instant", invalid);
+        }
     }
 
     public boolean bounded() {
@@ -88,9 +143,22 @@ public record QueryWindow(Long sinceMs, Long untilMs) {
         }
         String from = sinceMs != null ? QueryFormatter.formatTime(sinceMs) : "beginning";
         String to = untilMs != null ? QueryFormatter.formatTime(untilMs) : "now";
-        String span = (sinceMs != null && untilMs != null)
-                ? String.format(Locale.ROOT, " (%s)", QueryFormatter.formatDuration(untilMs - sinceMs))
-                : "";
+        String span = "";
+        if (sinceMs != null && untilMs != null) {
+            long duration;
+            try {
+                duration = Math.subtractExact(untilMs, sinceMs);
+            } catch (ArithmeticException overflow) {
+                duration = Long.MAX_VALUE;
+            }
+            span = String.format(Locale.ROOT, " (%s)", QueryFormatter.formatDuration(duration));
+        }
         return from + " -> " + to + span;
+    }
+
+    /** Exact inclusive bounds suitable for query logs and reproducible API results. */
+    public String normalizedPredicate() {
+        return "window[since=" + (sinceMs == null ? "open" : sinceMs)
+                + ",until=" + (untilMs == null ? "open" : untilMs) + "]";
     }
 }

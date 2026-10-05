@@ -410,7 +410,7 @@ including accepted projectile-spawn evidence.
   `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` return
   bounded native audit evidence; `/ig lookup near` adds exact dimension and
   bounded radius filters.
-- `/ig lookup filters <filter1> ... <filter6>` implements the published
+- `/ig lookup filters <name.value> ...` supports up to 12 typed filters, including absolute UTC time and exact item metadata; metadata filters require permission level 4.
   GriefLogger `name.value` vocabulary for action, user, include, exclude, time,
   and required radius filters. `UnifiedEvidenceQueryService` merges native audit,
   item observations, transformations, and normalized historical `GRIEFLOGGER`

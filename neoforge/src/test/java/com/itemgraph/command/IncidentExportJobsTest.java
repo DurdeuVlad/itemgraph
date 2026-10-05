@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import org.junit.jupiter.api.Test;
+import com.itemgraph.query.AuditLookupFilters;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
@@ -8,12 +9,59 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class IncidentExportJobsTest {
+
+    @Test
+    void metadataFilteredRedactedExportsKeepLevelFourGateAfterQuery() {
+        AuditLookupFilters ordinary = AuditLookupFilters.parse("action.drop_item radius.100", 1_000L);
+        AuditLookupFilters metadata = AuditLookupFilters.parse(
+                "action.drop_item radius.100 item.minecraft:diamond", 1_000L);
+
+        assertFalse(IncidentExportJobs.requiresLevelFourAuthorization(
+                IncidentBundleService.RedactionProfile.REDACTED, ordinary));
+        assertTrue(IncidentExportJobs.requiresLevelFourAuthorization(
+                IncidentBundleService.RedactionProfile.REDACTED, metadata));
+        assertTrue(IncidentExportJobs.requiresLevelFourAuthorization(
+                IncidentBundleService.RedactionProfile.FULL, ordinary));
+    }
+
+    @Test
+    void protectedJobProgressAndCompletionRequireCurrentLevelFourPermission() {
+        LinkedBlockingQueue<Runnable> serverQueue = new LinkedBlockingQueue<>();
+        AtomicBoolean levelFourPermission = new AtomicBoolean(true);
+        AtomicInteger deliveredMessages = new AtomicInteger();
+        IncidentExportJobs.enqueueIfAuthorized(serverQueue::add,
+                () -> IncidentExportJobs.hasRequiredPermission(true, true, levelFourPermission.get()),
+                deliveredMessages::incrementAndGet);
+        IncidentExportJobs.enqueueIfAuthorized(serverQueue::add,
+                () -> IncidentExportJobs.hasRequiredPermission(true, true, levelFourPermission.get()),
+                deliveredMessages::incrementAndGet);
+
+        Runnable queuedProgress = serverQueue.poll();
+        Runnable queuedCompletion = serverQueue.poll();
+        assertTrue(queuedProgress != null && queuedCompletion != null,
+                "the server executor must queue both progress and completion notifications");
+        levelFourPermission.set(false);
+        queuedProgress.run();
+        queuedCompletion.run();
+        assertTrue(deliveredMessages.get() == 0,
+                "queued protected progress and completion counts must be suppressed after level-4 revocation");
+
+        IncidentExportJobs.enqueueIfAuthorized(serverQueue::add,
+                () -> IncidentExportJobs.hasRequiredPermission(false, true, false),
+                deliveredMessages::incrementAndGet);
+        serverQueue.remove().run();
+        assertTrue(deliveredMessages.get() == 1,
+                "ordinary redacted notifications retain the level-2 access path");
+        assertFalse(IncidentExportJobs.hasRequiredPermission(true, false, true),
+                "a live level-4 result cannot bypass the existing level-2 reportability gate");
+    }
 
     @Test
     void permissionCheckReadsCurrentAuthorizationOnServerExecutorAndFailsClosed() throws Exception {

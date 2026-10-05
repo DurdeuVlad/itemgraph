@@ -121,15 +121,15 @@ class ItemGraphCommandsHelpTest {
         assertEquals(Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect", "export"),
                 root.getChildren().stream().map(CommandNode::getName).collect(Collectors.toSet()));
         assertEquals(Set.of("now", "history"), childNames(root, "ingest"));
-        assertEquals(Set.of("item", "player", "container"), childNames(root, "trace"));
-        assertEquals(Set.of("item", "player", "container"), childNames(root, "gui"));
+        assertEquals(Set.of("item", "item-filtered", "player", "container"), childNames(root, "trace"));
+        assertEquals(Set.of("item", "item-filtered", "player", "container"), childNames(root, "gui"));
         assertEquals(Set.of("on", "off", "status"), childNames(root, "inspect"));
 
         for (String topLevel : Set.of("help", "status", "audit", "lookup", "ingest", "event", "explain", "page", "trace", "gui", "inspect")) {
             assertNotNull(CommandHelp.topicLines(topLevel), "missing help topic for /ig " + topLevel);
         }
-        for (String path : List.of("ingest now", "ingest history", "trace item", "trace player", "trace container",
-                "gui item", "gui player", "gui container")) {
+        for (String path : List.of("ingest now", "ingest history", "trace item", "trace item-filtered",
+                "trace player", "trace container", "gui item", "gui item-filtered", "gui player", "gui container")) {
             List<String> lines = CommandHelp.topicLines(path);
             assertNotNull(lines, "missing help topic for /ig " + path);
             assertTrue(String.join("\n", lines).contains("/ig " + path),
@@ -180,7 +180,7 @@ class ItemGraphCommandsHelpTest {
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help lookup filters", source));
         String filteredLookupHelp = String.join("\n", successes);
-        assertTrue(filteredLookupHelp.contains("Syntax: /ig lookup <filter1>"));
+        assertTrue(filteredLookupHelp.contains("Syntax: /ig lookup <name.value>"));
         assertTrue(filteredLookupHelp.contains("default to 10 rows"));
     }
 
@@ -269,6 +269,58 @@ class ItemGraphCommandsHelpTest {
                 "itemgraph page 2 00000000-0000-0000-0000-000000000001", source));
         verify(source).sendFailure(failure.capture());
         assertTrue(failure.getValue().getString().contains("No active lookup page session"));
+    }
+
+    @Test
+    void metadataFilteredPageRechecksPermissionAfterDemotionAndAllowsOrdinaryPaging() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        UUID metadataOwnerId = UUID.randomUUID();
+        ServerPlayer metadataPlayer = mock(ServerPlayer.class);
+        when(metadataPlayer.getUUID()).thenReturn(metadataOwnerId);
+        Level metadataLevel = mock(Level.class);
+        when(metadataPlayer.level()).thenReturn(metadataLevel);
+        when(metadataLevel.dimension()).thenReturn(Level.OVERWORLD);
+        CommandSourceStack metadataSource = sourceForPlayer(metadataPlayer);
+        when(metadataSource.hasPermission(4)).thenReturn(true);
+
+        assertEquals(0, dispatcher.execute(
+                "itemgraph lookup item.minecraft:diamond radius.20", metadataSource));
+        assertTrue(ItemGraphCommands.hasPageSessionOwner(metadataOwnerId),
+                "the level-4 metadata lookup must create a saved session before its query is dispatched");
+
+        org.mockito.Mockito.clearInvocations(metadataSource);
+        when(metadataSource.hasPermission(4)).thenReturn(false);
+        assertEquals(0, dispatcher.execute("itemgraph page 2", metadataSource));
+        ArgumentCaptor<Component> metadataFailure = ArgumentCaptor.forClass(Component.class);
+        verify(metadataSource).sendFailure(metadataFailure.capture());
+        assertEquals("[ItemGraph] Item metadata filters require permission level 4.",
+                metadataFailure.getValue().getString());
+        verify(metadataSource, never()).sendSuccess(any(), anyBoolean());
+        ItemGraphCommands.clearPageSession(metadataOwnerId);
+
+        UUID ordinaryOwnerId = UUID.randomUUID();
+        ServerPlayer ordinaryPlayer = mock(ServerPlayer.class);
+        when(ordinaryPlayer.getUUID()).thenReturn(ordinaryOwnerId);
+        Level ordinaryLevel = mock(Level.class);
+        when(ordinaryPlayer.level()).thenReturn(ordinaryLevel);
+        when(ordinaryLevel.dimension()).thenReturn(Level.OVERWORLD);
+        CommandSourceStack ordinarySource = sourceForPlayer(ordinaryPlayer);
+        when(ordinarySource.hasPermission(4)).thenReturn(false);
+        assertEquals(0, dispatcher.execute(
+                "itemgraph lookup action.break_block radius.20", ordinarySource));
+        assertTrue(ItemGraphCommands.hasPageSessionOwner(ordinaryOwnerId),
+                "a level-2 ordinary lookup must still create a saved session");
+
+        org.mockito.Mockito.clearInvocations(ordinarySource);
+        assertEquals(0, dispatcher.execute("itemgraph page 2", ordinarySource));
+        ArgumentCaptor<Component> ordinaryFailure = ArgumentCaptor.forClass(Component.class);
+        verify(ordinarySource).sendFailure(ordinaryFailure.capture());
+        assertFalse(ordinaryFailure.getValue().getString().contains("metadata filters require permission level 4"),
+                "ordinary non-metadata paging must continue to dispatch at level 2");
+        assertTrue(ordinaryFailure.getValue().getString().contains("database is not connected"),
+                "the uninitialized test database should be the only reason this ordinary page is rejected");
+        verify(ordinarySource, never()).sendSuccess(any(), anyBoolean());
+        ItemGraphCommands.clearPageSession(ordinaryOwnerId);
     }
 
     @Test
@@ -504,8 +556,10 @@ class ItemGraphCommandsHelpTest {
                 new InvalidLookup("action.break_block a.join radius.10", "filter 'action' may be used once"),
                 new InvalidLookup("include.stone exclude.dirt radius.10",
                         "include and exclude filters cannot be combined"),
-                new InvalidLookup("action.break_block user.Alex include.stone time.1h radius.10 state.observed action.join",
-                        "at most 6 filters are allowed"));
+                new InvalidLookup("radius.10 component.example:a=1 component.example:b=1 component.example:c=1 "
+                        + "component.example:d=1 component.example:e=1 component.example:f=1 component.example:g=1 "
+                        + "component.example:h=1 component.example:i=1 component.example:j=1 component.example:k=1 "
+                        + "component.example:l=1", "at most 12 filters are allowed"));
 
         for (String root : List.of("ig", "itemgraph")) {
             for (String lookupPrefix : List.of(root + " lookup ", root + " lookup filters ")) {
