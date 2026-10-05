@@ -328,7 +328,9 @@ class ItemGraphCommandsHelpTest {
                 "ig lookup PROJECTILE_SPAWN_ACCEPTED",
                 "ig lookup filters action.break_block radius.5",
                 "ig lookup near minecraft:overworld 0 64 0 5 KILL_ENTITY",
-                "ig lookup near minecraft:overworld 0 64 0 5 THROW_ITEM")) {
+                "ig lookup near minecraft:overworld 0 64 0 5 THROW_ITEM",
+                "ig lookup near minecraft:overworld 0 64 0 5 SHOOT_ITEM",
+                "ig lookup filters action.throw_item radius.5")) {
             CommandSourceStack source = source();
             assertEquals(0, dispatcher.execute(command, source), command);
             ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
