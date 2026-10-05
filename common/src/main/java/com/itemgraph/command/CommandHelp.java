@@ -142,7 +142,7 @@ public final class CommandHelp {
                 "[ItemGraph] Start: /ig lookup <filters...>; syntax: /ig help lookup filters.",
                 "[ItemGraph] Rows span audit, observation, transformation, and import evidence.",
                 "[ItemGraph] Classes: OBSERVED, INFERRED, UNRESOLVED, PROVENANCE_ONLY.",
-                "[ItemGraph] Narrow action: /ig lookup action.<value> time.1h.",
+                "[ItemGraph] Narrow action: /ig lookup action.<value> radius.50 time.1h.",
                 "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup.",
                 "[ItemGraph] Paging: itemgraph.command.page; protected: itemgraph.audit.",
                 "[ItemGraph] Radius is player-only; console uses /ig lookup near.",

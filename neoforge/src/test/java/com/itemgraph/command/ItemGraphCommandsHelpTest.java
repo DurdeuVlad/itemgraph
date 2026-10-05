@@ -98,8 +98,12 @@ class ItemGraphCommandsHelpTest {
                 "has no nearby scope", "Empty:", "coordinates, range");
         assertJourneyTopic("journeys filters", "/ig lookup <filters...>", "audit, observation",
                 "transformation, and import", "OBSERVED, INFERRED, UNRESOLVED, PROVENANCE_ONLY",
-                "action.<value>", "itemgraph.command.lookup", "itemgraph.audit",
+                "action.<value> radius.50 time.1h", "itemgraph.command.lookup", "itemgraph.audit",
                 "itemgraph.command.page", "Radius is player-only", "Empty:", "supported events");
+        AuditLookupFilters exampleFilters = AuditLookupFilters.parse(
+                "action.break_block radius.50 time.1h", 1_000L);
+        assertEquals(50.0, exampleFilters.radiusBlocks(),
+                "the advertised follow-up lookup must satisfy the required bounded radius filter");
     }
 
     private static void assertJourneyTopic(String topic, String... requiredText) {
