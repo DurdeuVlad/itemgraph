@@ -79,7 +79,7 @@ class ItemGraphStatusSecurityTest {
         ItemGraphCommands.register(dispatcher);
         assertEquals(0, dispatcher.execute("ig status", source));
 
-        assertEquals(1, successes.size());
+        assertTrue(successes.size() > 1, "runtime diagnostics must still print when database statistics are unavailable");
         String status = successes.get(0);
         assertTrue(status.contains("backend=sqlite"));
         assertTrue(status.contains("schemaVersion=0"));
@@ -88,6 +88,12 @@ class ItemGraphStatusSecurityTest {
         assertTrue(status.contains("useIndexes=true"));
         assertFalse(status.contains(privatePath.toString()));
         assertFalse(status.contains("lastError="));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("captureState=")),
+                "disconnected database output must retain the native capture state");
+        assertTrue(successes.stream().anyMatch(line -> line.contains("recoveryPendingRecords=")),
+                "disconnected database output must retain the recovery count state");
+        assertTrue(successes.stream().anyMatch(line -> line.contains("dropped=")),
+                "disconnected database output must retain dropped-record diagnostics");
         assertEquals(List.of("[ItemGraph] Database statistics unavailable; inspect the server log for connection details."), failures);
     }
 
@@ -116,7 +122,7 @@ class ItemGraphStatusSecurityTest {
             ItemGraphCommands.register(dispatcher);
             assertEquals(0, dispatcher.execute("ig status", source));
 
-            assertEquals(1, successes.size());
+            assertTrue(successes.size() > 1, "runtime diagnostics must remain available without a database connection");
             String status = successes.get(0);
             assertTrue(status.contains("backend=mysql_mariadb"));
             assertTrue(status.contains("schemaVersion=" + MigrationRunner.LATEST_VERSION));
@@ -127,6 +133,39 @@ class ItemGraphStatusSecurityTest {
             assertFalse(status.contains("sentinel-database"));
             assertFalse(status.contains("sentinel-user"));
             assertFalse(status.contains("sentinel-password"));
+            assertTrue(successes.stream().anyMatch(line -> line.contains("captureState=")));
+        }
+    }
+
+    @Test
+    void statusEmitsRuntimeDiagnosticsBeforeAsyncDatabaseStatistics() throws Exception {
+        com.itemgraph.ingest.IngestionService.getInstance();
+        DatabaseManager database = mock(DatabaseManager.class);
+        when(database.isInitialized()).thenReturn(true);
+        when(database.getSettings()).thenReturn(DatabaseSettings.sqlite(Path.of("unused-test-path"), true));
+        when(database.getCurrentSchemaVersion()).thenReturn(MigrationRunner.LATEST_VERSION);
+
+        try (var databaseManager = mockStatic(DatabaseManager.class)) {
+            databaseManager.when(DatabaseManager::getInstance).thenReturn(database);
+
+            CommandSourceStack source = mock(CommandSourceStack.class);
+            when(source.hasPermission(2)).thenReturn(true);
+            List<String> successes = new ArrayList<>();
+            doAnswer(invocation -> {
+                Supplier<Component> message = invocation.getArgument(0);
+                successes.add(message.get().getString());
+                return null;
+            }).when(source).sendSuccess(any(), anyBoolean());
+
+            CommandDispatcher<CommandSourceStack> dispatcher = new CommandDispatcher<>();
+            ItemGraphCommands.register(dispatcher);
+            assertEquals(1, dispatcher.execute("ig status", source),
+                    "the async database-statistics query is accepted after runtime status is printed");
+
+            assertTrue(successes.stream().anyMatch(line -> line.contains("captureState=")),
+                    "runtime state must be visible before an asynchronous stats query can fail");
+            assertTrue(successes.stream().anyMatch(line -> line.contains("recoveryPendingRecords=")));
+            assertTrue(successes.stream().anyMatch(line -> line.contains("heapUsedBytes=")));
         }
     }
 }

@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalInt;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
@@ -39,6 +40,22 @@ import java.util.regex.Pattern;
  * by a dedicated daemon thread.
  */
 public class InternalObservationService {
+    public enum CaptureState {
+        ACTIVE,
+        DISABLED_BY_CONFIG,
+        RECOVERY_LOADING,
+        RECOVERY_BLOCKED,
+        STOPPED
+    }
+
+    private enum RecoveryState {
+        NOT_STARTED,
+        NOT_REQUIRED,
+        LOADING,
+        RESTORED,
+        FAILED
+    }
+
     private static final Logger LOGGER = LoggerFactory.getLogger(InternalObservationService.class);
     private static final InternalObservationService INSTANCE = new InternalObservationService();
     private static final int QUEUE_CAPACITY = 10_000;
@@ -397,6 +414,7 @@ public class InternalObservationService {
     private volatile java.nio.file.Path evidenceSpoolPathOverride;
     private volatile WorkerShutdown.SpoolWriteHandle pendingSpoolWriter;
     private volatile boolean recoveryLoadFailed;
+    private volatile RecoveryState recoveryState = RecoveryState.NOT_STARTED;
     private final java.util.concurrent.atomic.AtomicBoolean restartRetryRequested = new java.util.concurrent.atomic.AtomicBoolean();
     private final java.util.concurrent.atomic.AtomicBoolean restartRetryScheduled = new java.util.concurrent.atomic.AtomicBoolean();
     // Pre-start submissions are retained for lifecycle callbacks; stop closes admission.
@@ -488,6 +506,26 @@ public class InternalObservationService {
         return captureEnabled;
     }
 
+    /** Reports capture admission and recovery state without asserting database health. */
+    public CaptureState getCaptureState() {
+        if (recoveryState == RecoveryState.FAILED) return CaptureState.RECOVERY_BLOCKED;
+        if (recoveryState == RecoveryState.LOADING) return CaptureState.RECOVERY_LOADING;
+        if (!captureEnabled) return CaptureState.DISABLED_BY_CONFIG;
+        if (!running.get() || !acceptingSubmissions) return CaptureState.STOPPED;
+        return CaptureState.ACTIVE;
+    }
+
+    /** Count of accepted records still tracked for recovery; unavailable before/during failed recovery loading. */
+    public OptionalInt getRecoveryPendingRecordCount() {
+        RecoveryState state = recoveryState;
+        if (state == RecoveryState.NOT_STARTED || state == RecoveryState.LOADING || state == RecoveryState.FAILED) {
+            return OptionalInt.empty();
+        }
+        synchronized (evidenceSpoolLock) {
+            return OptionalInt.of(recoveryEvents.size());
+        }
+    }
+
     public void start() {
         synchronized (submissionLifecycleLock) {
             if (running.get()) {
@@ -522,11 +560,13 @@ public class InternalObservationService {
         OperationalMetrics.getInstance().reset();
         if (java.nio.file.Files.exists(recoveryPath)
                 || java.nio.file.Files.exists(PendingEvidenceSpool.overflowPath(recoveryPath))) {
+            recoveryState = RecoveryState.LOADING;
             startWorker(recoveryPath);
         } else {
             // Normal starts have no recovery I/O to perform. Avoid creating a
             // startup race between the loader lifecycle and its worker.
             recoveryLoadFailed = false;
+            recoveryState = RecoveryState.NOT_REQUIRED;
             startWorker();
         }
     }
@@ -574,8 +614,10 @@ public class InternalObservationService {
                 try {
                     restorePendingEvidence(recoveryPath);
                     recoveryLoadFailed = false;
+                    recoveryState = RecoveryState.RESTORED;
                 } catch (java.io.IOException recoveryFailure) {
                     recoveryLoadFailed = true;
+                    recoveryState = RecoveryState.FAILED;
                     running.set(false);
                     LOGGER.error("Cannot flush ItemGraph evidence because pending recovery could not be loaded; original recovery file is preserved", recoveryFailure);
                     try {
@@ -1121,6 +1163,7 @@ public class InternalObservationService {
         synchronized (submissionLifecycleLock) {
             acceptingSubmissions = true;
             recoveryLoadFailed = false;
+            recoveryState = RecoveryState.NOT_STARTED;
             shutdownSpoolComplete.set(false);
             synchronized (queueMutationLock) {
                 queue.clear();

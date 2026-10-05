@@ -50,6 +50,104 @@ import static org.mockito.Mockito.*;
 class ItemGraphCommandsHelpTest {
 
     @Test
+    void statusHelpDistinguishesWorkerStartupFromDatabaseHealthAndCapture() {
+        String statusHelp = String.join(" ", CommandHelp.topicLines("status"));
+        assertTrue(statusHelp.contains("RUNNING means the worker started, not database health or capture success"));
+        assertTrue(statusHelp.contains("facts, not calibrated health thresholds"));
+        assertTrue(statusHelp.contains("units, reset windows, and recovery next steps"));
+    }
+
+    @Test
+    void commandOverviewFitsNarrowMinecraftChatAndRoutesByTask() {
+        List<String> overview = CommandHelp.overviewLines();
+        assertTrue(String.join(" ", overview).contains("/ig help journeys"));
+        assertTrue(overview.stream().allMatch(line -> line.length() <= 80),
+                "the first-time command overview should not wrap multiple times in narrow chat");
+    }
+
+    @Test
+    void journeyHelpDistinguishesRawEvidenceInferenceAndPlayerOnlyPaging() {
+        List<String> journeyLines = CommandHelp.topicLines("journeys");
+        String journeys = String.join("\n", journeyLines);
+        assertTrue(journeys.contains("/ig event <observationId>"));
+        assertTrue(journeys.contains("Admin/creative outcome UUIDs use /ig event event:<uuid>"));
+        assertFalse(journeys.contains("copy event:<uuid> from /ig trace"));
+        assertTrue(journeys.contains("/ig explain <edgeId>"));
+        assertTrue(journeys.contains("/ig help journeys near"));
+        assertTrue(journeys.contains("/ig help journeys filters"));
+        assertTrue(journeys.contains("Player paging: /ig page 2; console near returns one page."));
+        String longestLine = journeyLines.stream().max(java.util.Comparator.comparingInt(String::length)).orElse("");
+        assertTrue(longestLine.length() <= 80,
+                () -> "journey help line exceeds narrow Minecraft chat width (" + longestLine.length() + "): " + longestLine);
+        assertTrue(journeyLines.size() <= 12,
+                "journey help should fit a compact chat overview including its shared permission message");
+    }
+
+    @Test
+    void eachAdminJourneyNamesPermissionsEvidenceContinuationAndSafeEmptyChecks() {
+        assertJourneyTopic("journeys inspect", "/ig inspect on", "OBSERVED", "INFERRED",
+                "itemgraph.command.inspect", "itemgraph.audit", "itemgraph.gui",
+                "/ig lookup <eventType>", "Empty:", "dimension and time range");
+        assertJourneyTopic("journeys trace", "/ig trace item <query>", "OBS ID:",
+                "/ig event <observationId>", "INFERRED edge:", "/ig explain <edgeId>",
+                "itemgraph.trace", "itemgraph.audit", "itemgraph.event", "itemgraph.explain",
+                "Ambiguous matches", "Empty:", "event type is supported");
+        assertJourneyTopic("journeys near", "/ig lookup near", "OBSERVED audit rows",
+                "/ig lookup <eventType>", "itemgraph.command.lookup", "itemgraph.audit",
+                "/ig page 2", "itemgraph.command.page", "Console near returns one page",
+                "has no nearby scope", "Empty:", "coordinates, range");
+        assertJourneyTopic("journeys filters", "/ig lookup <filters...>", "audit, observation",
+                "transformation, and import", "OBSERVED, INFERRED, UNRESOLVED, PROVENANCE_ONLY",
+                "action.<value> radius.50 time.1h", "itemgraph.command.lookup", "itemgraph.audit",
+                "itemgraph.command.page", "Radius is player-only", "Empty:", "supported events");
+        AuditLookupFilters exampleFilters = AuditLookupFilters.parse(
+                "action.break_block radius.50 time.1h", 1_000L);
+        assertEquals(50.0, exampleFilters.radiusBlocks(),
+                "the advertised follow-up lookup must satisfy the required bounded radius filter");
+    }
+
+    private static void assertJourneyTopic(String topic, String... requiredText) {
+        List<String> lines = CommandHelp.topicLines(topic);
+        assertNotNull(lines, "missing help topic " + topic);
+        String content = String.join("\n", lines);
+        for (String required : requiredText) {
+            assertTrue(content.contains(required), () -> topic + " is missing: " + required);
+        }
+        String longestLine = lines.stream().max(java.util.Comparator.comparingInt(String::length)).orElse("");
+        assertTrue(longestLine.length() <= 80,
+                () -> topic + " has a line wider than 80 chars: " + longestLine);
+        assertTrue(lines.size() <= 12,
+                () -> topic + " exceeds 12 chat messages including shared permission guidance");
+    }
+
+    @Test
+    void ingestHelpExplainsNativeCaptureAndOptionalGriefLoggerSync() {
+        String ingestHelp = String.join(" ", CommandHelp.topicLines("ingest now"));
+        assertTrue(ingestHelp.contains("Optional GriefLogger source sync"));
+        assertTrue(ingestHelp.contains("Native event capture runs automatically when enabled"));
+        assertTrue(ingestHelp.contains("Enable the GriefLogger source integration in config"));
+    }
+
+    @Test
+    void featureCatalogueUsesDurableStatusesAndUuidEvidenceRoute() throws Exception {
+        Path root = Path.of("").toAbsolutePath();
+        while (root != null && !Files.exists(root.resolve("docs/ADMIN_QUICK_START.md"))) {
+            root = root.getParent();
+        }
+        assertNotNull(root);
+        String guide = Files.readString(root.resolve("docs/ADMIN_QUICK_START.md"));
+        int featureMap = guide.indexOf("## Feature map: currently available surfaces");
+        assertTrue(featureMap >= 0);
+        String catalogue = guide.substring(featureMap);
+        assertTrue(catalogue.contains("/ig help journeys"));
+        assertTrue(catalogue.contains("/ig event event:<uuid>"));
+        assertTrue(catalogue.contains("/ig goto <token>"));
+        assertTrue(catalogue.contains("internal and click-only"));
+        assertFalse(catalogue.contains("PR CI pending"));
+        assertFalse(catalogue.contains("local tests passed"));
+    }
+
+    @Test
     void everyTaskHelpSentenceResolvesThroughExplicitPerKeyEnglishFallback() {
         CommandHelp.initializeMessages();
         var english = CommandHelp.overviewLines();
@@ -63,7 +161,7 @@ class ItemGraphCommandsHelpTest {
         List<String> nl = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
         assertEquals(english.get(0), nl.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> nlFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("nl_nl");
-        assertEquals(125, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(174, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(nlFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (nlFallback.contains(english.get(i))) assertEquals(english.get(i), nl.get(i));
@@ -72,7 +170,7 @@ class ItemGraphCommandsHelpTest {
         List<String> zh = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
         assertEquals(english.get(0), zh.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> zhFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("zh_tw");
-        assertEquals(125, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(174, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(zhFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (zhFallback.contains(english.get(i))) assertEquals(english.get(i), zh.get(i));
@@ -217,27 +315,24 @@ class ItemGraphCommandsHelpTest {
         assertEquals(1, dispatcher.execute("itemgraph", source));
         String overview = String.join("\n", successes);
         assertTrue(overview.contains("Trace: /ig trace item <query>"));
-        assertTrue(overview.contains("/ig trace item <query>"));
-        assertTrue(overview.contains("/ig lookup near <dimension>"));
+        assertTrue(overview.contains("/ig help journeys"));
         assertTrue(overview.contains("/ig help commands"));
-        assertTrue(overview.contains("/ig trace player <name>"));
         assertTrue(overview.contains("/ig inspect on"));
         assertTrue(overview.contains("/ig event <id>"));
         assertTrue(overview.contains("/ig explain <id>"));
         assertTrue(overview.contains("/ig help permissions"));
         assertTrue(overview.contains("audit: /ig audit"));
-        assertTrue(overview.contains("Setup: /ig help guide"));
-        assertTrue(overview.contains("inference is not observation"));
+        assertTrue(overview.contains("inferred edge"));
         assertTrue(successes.size() <= 5, "first-use help must fit a normal chat view");
         assertFalse(overview.contains("/ig lookup page <page> <eventType>"),
                 "full syntax belongs in the exhaustive commands topic");
         assertParsedCompletely(dispatcher.parse(
                 "itemgraph lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 20 1440", source),
-                "in-game help's copyable nearby audit example");
+                "in-game help's documented nearby audit syntax");
 
         successes.clear();
         assertEquals(1, dispatcher.execute("ig", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("Trace: /ig trace item")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("Trace: /ig trace item <query>")));
         assertTrue(successes.stream().anyMatch(line -> line.contains("/ig help commands")));
     }
 
@@ -435,7 +530,7 @@ class ItemGraphCommandsHelpTest {
         assertEquals(1, dispatcher.execute("itemgraph help trace item", source));
         String itemHelp = String.join("\n", successes);
         assertTrue(itemHelp.contains("Syntax: /ig trace item <query> [limit] [sinceMinutes]"));
-        assertTrue(itemHelp.contains("Unset named permissions use vanilla permission level 2"));
+        assertTrue(itemHelp.contains("Unset grants use level 2"));
         assertTrue(itemHelp.contains("asynchronous"));
         assertTrue(itemHelp.contains("default 20"));
         assertTrue(itemHelp.contains("Example:"));
@@ -449,7 +544,7 @@ class ItemGraphCommandsHelpTest {
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help inspect", source));
         String inspectHelp = String.join("\n", successes);
-        assertTrue(inspectHelp.contains("Unset named permissions use vanilla permission level 2"));
+        assertTrue(inspectHelp.contains("Unset grants use level 2"));
         assertTrue(inspectHelp.contains("held items are not used"));
         assertTrue(inspectHelp.contains("Example: /ig inspect on"));
 
@@ -471,7 +566,7 @@ class ItemGraphCommandsHelpTest {
             assertEquals(1, dispatcher.execute("itemgraph help " + topic, source), topic);
             assertFalse(successes.isEmpty(), topic);
             String lines = String.join("\n", successes);
-            assertTrue(lines.contains("Unset named permissions use vanilla permission level 2"), topic);
+            assertTrue(lines.contains("Unset grants use level 2"), topic);
             assertTrue(lines.contains("Example"), topic);
         }
         verify(source, never()).sendFailure(any());
