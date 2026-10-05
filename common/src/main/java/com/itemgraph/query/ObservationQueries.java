@@ -30,6 +30,7 @@ final class ObservationQueries {
             SELECT o.id AS o_id,
                    o.source_type AS o_source_type,
                    o.source_event_id AS o_source_event_id,
+                   o.ingest_event_uuid AS o_ingest_event_uuid,
                    o.timestamp_ms AS o_timestamp_ms,
                    o.timestamp_end_ms AS o_timestamp_end_ms,
                    CASE
@@ -112,6 +113,8 @@ final class ObservationQueries {
         String captureType = rs.getString("o_capture_type");
         ContainerBreakEvidenceLinks.ObservationLinks containerBreakLinks =
                 ContainerBreakEvidenceLinks.observation(rs.getBytes("o_raw_data"));
+        AdminMutationEvidenceLinks.ObservationLinks adminMutationLinks = AdminMutationEvidenceLinks.observation(
+                rs.getBytes("o_raw_data"), rs.getString("o_action_type"));
         long rawGroupId = rs.getLong("o_source_group_id");
         Long groupId = rs.wasNull() ? null : rawGroupId;
         ObservationDetail.SourceGroup sourceGroup = null;
@@ -144,9 +147,13 @@ final class ObservationQueries {
                 captureType,
                 sourceGroup,
                 rs.getString("o_disposition_reason"),
-                containerBreakLinks == null ? null : containerBreakLinks.eventId(),
-                containerBreakLinks == null ? null : containerBreakLinks.parentEventId(),
-                containerBreakLinks == null ? null : containerBreakLinks.breakEventId()
+                containerBreakLinks != null ? containerBreakLinks.eventId()
+                        : adminMutationLinks == null ? null : adminMutationLinks.evidenceEventId(),
+                containerBreakLinks != null ? containerBreakLinks.parentEventId()
+                        : adminMutationLinks == null ? null : adminMutationLinks.mutationEventId(),
+                containerBreakLinks == null ? null : containerBreakLinks.breakEventId(),
+                adminMutationLinks == null ? null : adminMutationLinks.mutationEventId(),
+                adminMutationLinks == null ? null : adminMutationLinks.commandAttemptEventId()
         );
     }
 

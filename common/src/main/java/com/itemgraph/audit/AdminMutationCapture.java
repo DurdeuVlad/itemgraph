@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class AdminMutationCapture {
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(AdminMutationCapture.class);
     private static final int MAX_TARGETS = 128;
+    private static final int MAX_RELATED_ITEM_EVENT_IDS = 32;
     private static final AtomicLong UNPERSISTED_OUTCOME_DIAGNOSTICS = new AtomicLong();
     private static final AtomicLong CAPTURE_FAILURE_DIAGNOSTICS = new AtomicLong();
     private static final ThreadLocal<Deque<MutationScope>> SCOPES = new ThreadLocal<>();
@@ -101,7 +102,13 @@ public final class AdminMutationCapture {
         private final List<Endpoint> endpoints;
         private final List<AcceptedDrop> acceptedDrops = new ArrayList<>();
         private final List<JsonObject> giveOutputRejectionDetails = new ArrayList<>();
+        private final List<String> relatedObservationEventIds = new ArrayList<>();
+        private final List<String> relatedTransformationEventIds = new ArrayList<>();
+        private final List<String> relatedUnresolvedEventIds = new ArrayList<>();
         private int giveOutputRejectionOmitted;
+        private int relatedObservationEventIdsOmitted;
+        private int relatedTransformationEventIdsOmitted;
+        private int relatedUnresolvedEventIdsOmitted;
         private int rejectedEvidence;
         private String incompleteReason;
 
@@ -804,6 +811,7 @@ public final class AdminMutationCapture {
         // Creative placement does not consume the held stack; creative break does not drop it.
         // Record the exact player-inventory delta without manufacturing item flow.
         raw.addProperty("player_inventory_quantity_delta", 0);
+        raw.addProperty("item_flow_link_status", "NO_ITEM_EVIDENCE_RECORDED");
         raw.addProperty("staff_private", true);
         boolean accepted = InternalObservationService.getInstance().submitAuditEvent(new InternalObservationService.InternalAuditEvent(
                 System.currentTimeMillis(), eventType, player.getUUID().toString(),
@@ -907,21 +915,28 @@ public final class AdminMutationCapture {
         String sourceEventId = scope.parentEventId;
         if (endpoint.player() == null && "entity".equals(endpoint.kind())) {
             JsonObject details = eventJson(scope, "confirmed_unresolved_endpoint");
-            details.addProperty("target_entity", endpoint.entity().getUUID().toString());
-            details.addProperty("target_type", BuiltInRegistries.ENTITY_TYPE.getKey(endpoint.entity().getType()).toString());
+            String entityType = BuiltInRegistries.ENTITY_TYPE.getKey(endpoint.entity().getType()).toString();
+            details.addProperty("target_entity_uuid", endpoint.entity().getUUID().toString());
+            details.addProperty("target_entity_type", entityType);
+            details.addProperty("endpoint_kind", endpoint.kind());
             details.addProperty("slot", slot);
             addStack(details, "before", before);
             addStack(details, "after", after);
             String eventId = UUID.randomUUID().toString();
             details.addProperty("event_id", eventId);
+            details.addProperty("item_flow_link_status", "UNRESOLVED_EVIDENCE_RECORDED");
             boolean accepted = InternalObservationService.getInstance().submitAuditEvent(
                     new InternalObservationService.InternalAuditEvent(
                     System.currentTimeMillis(), "ADMIN_ITEM_COMMAND_UNRESOLVED",
                     scopeActorUuid(scope), scopeActorName(scope), endpoint.level(), endpoint.x(), endpoint.y(),
-                    endpoint.z(), details.get("target_type").getAsString(), "slot=" + slot + " endpoint=unresolved",
+                    endpoint.z(), entityType, "slot=" + slot + " endpoint=unresolved",
                     details.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
                     InternalObservationService.sourceEventIdForUuid(eventId), eventId, List.of()));
-            if (!accepted) scope.rejectedEvidence++;
+            if (!accepted) {
+                scope.rejectedEvidence++;
+            } else {
+                recordRelatedUnresolved(scope, eventId);
+            }
             return;
         }
         if (before != null && after != null && !before.item().fingerprintHash().equals(after.item().fingerprintHash())) {
@@ -932,19 +947,32 @@ public final class AdminMutationCapture {
                     ? Math.min(before.count(), after.count()) : 0;
             if (transformed > 0 && endpoint.player() != null) {
                 UUID event = UUID.randomUUID();
+                String transformationDetails = "cause=" + scope.operation + " slot=" + slot
+                        + " mutation_event_id=" + scope.parentEventId
+                        + " parent_event_id=" + sourceEventId
+                        + (scope.commandAttemptEventId == null ? ""
+                        : " command_attempt_event_id=" + scope.commandAttemptEventId);
+                if (endpoint.player() != null) {
+                    transformationDetails += " target_player_uuid=" + endpoint.player().getUUID()
+                            + " target_player_name=" + endpoint.player().getGameProfile().getName();
+                }
+                if (endpoint.entity() != null) {
+                    transformationDetails += " target_entity_uuid=" + endpoint.entity().getUUID()
+                            + " target_entity_type=" + BuiltInRegistries.ENTITY_TYPE.getKey(endpoint.entity().getType());
+                }
                 boolean accepted = InternalObservationService.getInstance().submitTransformation(
                         new InternalObservationService.InternalTransformation(System.currentTimeMillis(),
                                 "ADMIN_ITEM_TRANSFORM",
                                 scopeActorUuid(scope), scopeActorName(scope),
                                 endpoint.level(), endpoint.x(), endpoint.y(), endpoint.z(),
                                 before.item(), after.item(), transformed,
-                                "cause=" + scope.operation + " slot=" + slot
-                                        + " mutation_event_id=" + scope.parentEventId
-                                        + " parent_event_id=" + sourceEventId
-                                        + (scope.commandAttemptEventId == null ? ""
-                                        : " command_attempt_event_id=" + scope.commandAttemptEventId),
+                                transformationDetails,
                                 event.toString()));
-                if (!accepted) scope.rejectedEvidence++;
+                if (!accepted) {
+                    scope.rejectedEvidence++;
+                } else {
+                    recordRelatedTransformation(scope, event.toString());
+                }
             } else if (transformed > 0) {
                 recordUnresolvedTransformation(scope, endpoint, slot, before, after);
             }
@@ -969,8 +997,18 @@ public final class AdminMutationCapture {
         JsonObject details = eventJson(scope, "confirmed_unresolved_transformation");
         String eventId = UUID.randomUUID().toString();
         details.addProperty("event_id", eventId);
+        details.addProperty("item_flow_link_status", "UNRESOLVED_EVIDENCE_RECORDED");
         details.addProperty("endpoint_kind", endpoint.kind());
         details.addProperty("slot", slot);
+        if (endpoint.player() != null) {
+            details.addProperty("target_player_uuid", endpoint.player().getUUID().toString());
+            details.addProperty("target_player_name", endpoint.player().getGameProfile().getName());
+        }
+        if (endpoint.entity() != null) {
+            details.addProperty("target_entity_uuid", endpoint.entity().getUUID().toString());
+            details.addProperty("target_entity_type",
+                    BuiltInRegistries.ENTITY_TYPE.getKey(endpoint.entity().getType()).toString());
+        }
         addStack(details, "before", before);
         addStack(details, "after", after);
         boolean accepted = InternalObservationService.getInstance().submitAuditEvent(
@@ -980,7 +1018,11 @@ public final class AdminMutationCapture {
                 null, "outcome=confirmed_unresolved_transformation slot=" + slot,
                 details.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 InternalObservationService.sourceEventIdForUuid(eventId), eventId, List.of()));
-        if (!accepted) scope.rejectedEvidence++;
+        if (!accepted) {
+            scope.rejectedEvidence++;
+        } else {
+            recordRelatedUnresolved(scope, eventId);
+        }
     }
 
     private static void recordQuantity(MutationScope scope, Endpoint endpoint, String slot,
@@ -1025,7 +1067,11 @@ public final class AdminMutationCapture {
                 item.itemId(), raw.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), item,
                 amount, null, null, InternalObservationService.sourceEventIdForUuid(eventId.toString()),
                 eventId.toString()));
-        if (!accepted) scope.rejectedEvidence++;
+        if (!accepted) {
+            scope.rejectedEvidence++;
+        } else {
+            recordRelatedObservation(scope, eventId.toString());
+        }
     }
 
     private static void recordGroundCreation(MutationScope scope, ItemEntity entity, ItemStack stack,
@@ -1050,7 +1096,11 @@ public final class AdminMutationCapture {
                 raw.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 item, stack.getCount(), entity.getUUID().toString(), null,
                 InternalObservationService.sourceEventIdForUuid(eventId.toString()), eventId.toString()));
-        if (!accepted) scope.rejectedEvidence++;
+        if (!accepted) {
+            scope.rejectedEvidence++;
+        } else {
+            recordRelatedObservation(scope, eventId.toString());
+        }
     }
 
     private static Endpoint snapshotPlayer(ServerPlayer player) {
@@ -1205,6 +1255,9 @@ public final class AdminMutationCapture {
                 raw.addProperty("give_output_rejection_omitted_count", scope.giveOutputRejectionOmitted);
             }
         }
+        if (scope != null) {
+            addRelatedObservationIds(raw, scope);
+        }
         addCommandEntityIdentity(raw, source, scope);
         addExecutionContext(raw, scope);
         if (scope != null && scope.copySource != null) {
@@ -1226,12 +1279,13 @@ public final class AdminMutationCapture {
     }
 
     private static boolean recordPlayerEvent(ServerPlayer player, String eventType, String detail,
-                                             String eventId, String mutationEventId) {
+                                             String eventId, MutationScope scope) {
         if (player == null) return false;
         JsonObject raw = new JsonObject();
         raw.addProperty("event_id", eventId);
-        raw.addProperty("mutation_event_id", mutationEventId);
-        raw.addProperty("parent_event_id", mutationEventId);
+        raw.addProperty("mutation_event_id", scope.parentEventId);
+        raw.addProperty("parent_event_id", scope.parentEventId);
+        addRelatedObservationIds(raw, scope);
         raw.addProperty("evidence", eventType.toLowerCase(java.util.Locale.ROOT));
         raw.addProperty("detail", bounded(detail));
         raw.addProperty("has_operator_permission", player.createCommandSourceStack().hasPermission(2));
@@ -1257,7 +1311,7 @@ public final class AdminMutationCapture {
     private static boolean recordCreativeOutcome(MutationScope scope, String eventType, String detail) {
         String eventId = UUID.randomUUID().toString();
         String causeDetail = "cause=creative_inventory_packet cause_status=undifferentiated " + detail;
-        if (!recordPlayerEvent(scope.creativePlayer, eventType, causeDetail, eventId, scope.parentEventId)) {
+        if (!recordPlayerEvent(scope.creativePlayer, eventType, causeDetail, eventId, scope)) {
             reportUnpersistedOutcome(eventType, eventId);
             return false;
         }
@@ -1269,6 +1323,72 @@ public final class AdminMutationCapture {
         if (rejected == 1 || rejected % 1000 == 0) {
             LOGGER.warn("ItemGraph could not persist {} outcome event {} after audit queue rejection ({} outcomes rejected)",
                     eventType, eventId, rejected);
+        }
+    }
+
+    private static void recordRelatedObservation(MutationScope scope, String eventId) {
+        if (scope.relatedObservationEventIds.size() < MAX_RELATED_ITEM_EVENT_IDS) {
+            scope.relatedObservationEventIds.add(eventId);
+        } else {
+            scope.relatedObservationEventIdsOmitted++;
+        }
+    }
+
+    private static void recordRelatedTransformation(MutationScope scope, String eventId) {
+        if (scope.relatedTransformationEventIds.size() < MAX_RELATED_ITEM_EVENT_IDS) {
+            scope.relatedTransformationEventIds.add(eventId);
+        } else {
+            scope.relatedTransformationEventIdsOmitted++;
+        }
+    }
+
+    private static void recordRelatedUnresolved(MutationScope scope, String eventId) {
+        if (scope.relatedUnresolvedEventIds.size() < MAX_RELATED_ITEM_EVENT_IDS) {
+            scope.relatedUnresolvedEventIds.add(eventId);
+        } else {
+            scope.relatedUnresolvedEventIdsOmitted++;
+        }
+    }
+
+    private static void addRelatedObservationIds(JsonObject raw, MutationScope scope) {
+        if (scope.relatedObservationEventIds.isEmpty() && scope.relatedObservationEventIdsOmitted == 0
+                && scope.relatedTransformationEventIds.isEmpty()
+                && scope.relatedTransformationEventIdsOmitted == 0
+                && scope.relatedUnresolvedEventIds.isEmpty()
+                && scope.relatedUnresolvedEventIdsOmitted == 0) {
+            raw.addProperty("item_flow_link_status", "NO_ITEM_EVIDENCE_RECORDED");
+            return;
+        }
+        if (!scope.relatedObservationEventIds.isEmpty()) {
+            com.google.gson.JsonArray eventIds = new com.google.gson.JsonArray();
+            scope.relatedObservationEventIds.forEach(eventIds::add);
+            raw.add("related_observation_event_ids", eventIds);
+        }
+        if (!scope.relatedTransformationEventIds.isEmpty()) {
+            com.google.gson.JsonArray eventIds = new com.google.gson.JsonArray();
+            scope.relatedTransformationEventIds.forEach(eventIds::add);
+            raw.add("related_transformation_event_ids", eventIds);
+        }
+        if (!scope.relatedUnresolvedEventIds.isEmpty()) {
+            com.google.gson.JsonArray eventIds = new com.google.gson.JsonArray();
+            scope.relatedUnresolvedEventIds.forEach(eventIds::add);
+            raw.add("related_unresolved_event_ids", eventIds);
+        }
+        boolean partial = scope.relatedObservationEventIdsOmitted > 0
+                || scope.relatedTransformationEventIdsOmitted > 0
+                || scope.relatedUnresolvedEventIdsOmitted > 0;
+        boolean hasFlowEvidence = !scope.relatedObservationEventIds.isEmpty()
+                || !scope.relatedTransformationEventIds.isEmpty();
+        raw.addProperty("item_flow_link_status", partial ? "PARTIAL_LINK_LIST"
+                : hasFlowEvidence ? "LINKED" : "UNRESOLVED_EVIDENCE_RECORDED");
+        if (scope.relatedObservationEventIdsOmitted > 0) {
+            raw.addProperty("related_observation_event_ids_omitted", scope.relatedObservationEventIdsOmitted);
+        }
+        if (scope.relatedTransformationEventIdsOmitted > 0) {
+            raw.addProperty("related_transformation_event_ids_omitted", scope.relatedTransformationEventIdsOmitted);
+        }
+        if (scope.relatedUnresolvedEventIdsOmitted > 0) {
+            raw.addProperty("related_unresolved_event_ids_omitted", scope.relatedUnresolvedEventIdsOmitted);
         }
     }
 

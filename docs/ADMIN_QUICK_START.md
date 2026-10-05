@@ -60,7 +60,7 @@ For server setup and the exact database keys, see [Configuration](CONFIGURATION.
 | What item quantity changed through creative inventory? | `/ig lookup filters action.creative_item_create radius.32 time.24h` (repeat with `action.creative_item_remove`) | Creative item-flow observations within 32 blocks of the issuing player over 24 hours. This filter is player-only and requires the audit permission. |
 | What was recorded when a container was broken? | `/ig lookup near <dimension> <x> <y> <z> 16 CONTAINER_BREAK_COMPLETED 50 1440` (also check `CONTAINER_BREAK_UNRESOLVED`) | The parent break audit event. This event-type lookup requires `itemgraph.command.lookup`; it does not return the slot rows. An unresolved drop link may accompany a completed break. |
 | Which item stacks were recorded in the broken container? | `/ig trace container <x> <y> <z> 50 1440` | If the destroyed container node resolves, the trace shows its slot-removal observations. It requires `itemgraph.trace` and `itemgraph.audit`; no destination or recipient is established. |
-| What evidence supports one raw observation? | `/ig event <observationId>` | One stored observation and its metadata. |
+| What evidence supports one raw item event? | `/ig event <observationId>` or `/ig event event:<uuid>` | One stored observation, transformation, or unresolved audit record and its metadata. Admin/creative mutation rows also show copyable mutation, command-attempt, observation, transformation, and unresolved-event UUIDs. |
 | Why does ItemGraph connect these events? | `/ig explain <edgeId>` | One inferred edge, deterministic confidence, explanation, and supporting evidence IDs. |
 | Which imported legacy row is this? | `/ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]` | Exact imported GriefLogger provenance; provenance-only rows do not add item quantity. |
 | How do I browse without a custom client? | `/ig gui item`, `/ig gui player`, or `/ig gui container` | A read-only vanilla six-row menu with candidate selection, evidence detail, and paging. |
@@ -113,6 +113,7 @@ These executable examples are parsed against the registered `/ig` command tree b
 /ig trace container 120 64 -30 50 1440
 /ig trace item "minecraft:diamond" 20 1440
 /ig event 633
+/ig event event:123e4567-e89b-12d3-a456-426614174000
 /ig explain 8
 ```
 
@@ -126,6 +127,16 @@ successful `CONTAINER_BREAK_COMPLETED`: read its reason code. For example,
 `CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED` means the break and snapshot were
 recorded but the drops were not linked to a destination. An incomplete snapshot is
 reported by the separate `CONTAINER_SNAPSHOT_INCOMPLETE` reason code.
+
+For an admin or creative outcome, prefix a UUID from its related observation,
+transformation, or unresolved-event list with `event:` and open it with
+`/ig event event:<uuid>`. `item_flow_link_status=LINKED` means at least one item-flow
+observation or transformation was accepted for capture. `UNRESOLVED_EVIDENCE_RECORDED`
+means ItemGraph retained a before/after audit record but did not establish a traceable
+transformation. `PARTIAL_LINK_LIST` means one or more bounded lists omitted records;
+`NO_ITEM_EVIDENCE_RECORDED` means the command outcome has no linked item record. These
+links do not identify an actor when the source could not establish one, or turn attempts
+and failures into item movement.
 
 Compare separate staff command attempt, effect, failure, and unresolved rows. An
 `ADMIN_ITEM_COMMAND_EFFECT` row is the command outcome; `ADMIN_ITEM_CREATE` and

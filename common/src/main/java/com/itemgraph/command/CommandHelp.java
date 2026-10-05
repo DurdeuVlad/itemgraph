@@ -164,11 +164,11 @@ public final class CommandHelp {
                 "[ItemGraph] Tokens are bound to the requesting player, expire after two minutes, work once, and recheck the originating query permission.",
                 "[ItemGraph] Example: click a displayed [Go to ...] result link."));
         topics.put("event", List.of(
-                "[ItemGraph] Syntax: /ig event <observationId>",
+                "[ItemGraph] Syntax: /ig event <observationId> or /ig event event:<uuid>",
                 "[ItemGraph] Requires itemgraph.event and itemgraph.audit because raw item evidence may contain administrative or creative-inventory records.",
-                "[ItemGraph] observationId: positive long. Shows one raw OBSERVED row with source, endpoints, item, amount, timing, and correlation metadata.",
+                "[ItemGraph] Use a positive observation ID, or prefix a related observation, transformation, or unresolved-event UUID from an admin/creative outcome with event: to open that raw evidence.",
                 "[ItemGraph] Hover a result line for bounded item fingerprint, evidence class, event kind, UTC time, and endpoint details; click [Go to ...] to move only yourself to a recorded location. The link is one-use and expires after two minutes.",
-                "[ItemGraph] The query is read-only and asynchronous. Example: /ig event 633"));
+                "[ItemGraph] The query is read-only and asynchronous. Example: /ig event 633 or /ig event event:123e4567-e89b-12d3-a456-426614174000"));
         topics.put("explain", List.of(
                 "[ItemGraph] Syntax: /ig explain <edgeId>",
                 "[ItemGraph] Requires itemgraph.explain and itemgraph.audit because an inferred edge can cite protected observations.",

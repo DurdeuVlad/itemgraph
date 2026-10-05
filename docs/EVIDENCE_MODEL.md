@@ -30,6 +30,26 @@ Examples:
 
 Observed evidence should include the source and original source identifier whenever available.
 
+Administrative item commands (`/give`, `/clear`, `/item`) and creative inventory
+outcomes keep their command/packet outcome separate from item-flow observations.
+Only item observations or transformations accepted by ItemGraph's bounded ingest
+queue are listed on the related outcome; an attempt, failure, or zero-quantity
+creative block result does not create item quantity. Outcome payloads state
+`LINKED`, `UNRESOLVED_EVIDENCE_RECORDED`, `PARTIAL_LINK_LIST`, or
+`NO_ITEM_EVIDENCE_RECORDED`; each observation, transformation, and unresolved
+reference list is capped independently at 32 IDs, with an omitted count when
+truncated. `PARTIAL_LINK_LIST` means the displayed list is incomplete.
+
+Use `/ig event event:<uuid>` with a linked event UUID to open an admin/creative
+observation, transformation, or outcome audit row; `/ig event <observationId>`
+continues to accept a numeric observation ID. Attempts retain their mutation and
+command-attempt IDs, not selector expressions or command arguments. An unresolved
+outcome may show a safe before/after item ID and count summary plus the affected
+slot and player/entity endpoint. That summary does not prove a transfer or actor
+identity. Command actor and target player/entity remain separate fields. Staff
+item-command and creative evidence is protected by `itemgraph.audit` as described
+in [Security and permissions](SECURITY_AND_PERMISSIONS.md).
+
 For a successful player-caused container break, ItemGraph records the exact
 pre-break non-empty slot stacks as observed `REMOVE_ITEM` rows. The source is the
 container block entity at its dimension and coordinates. The player is retained
