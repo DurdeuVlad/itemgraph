@@ -42,6 +42,24 @@ the player has vanilla permission level 2. An unset node resolves to vanilla lev
 | `/ig ingest now` | `itemgraph.command` + `itemgraph.ingest` | Command execution |
 | `/ig ingest history` | `itemgraph.command` + `itemgraph.ingest` + `itemgraph.import` | Command execution |
 
+World/environment event types expose sensitive coordinates. Lookups for
+`EXPLOSION_BLOCK_CHANGE`, `PISTON_BLOCK_MOVE`, `PISTON_BLOCK_ATTEMPT`,
+`WORLD_EFFECT_ATTEMPT`, `FLUID_BLOCK_CHANGE`, `FIRE_BLOCK_CHANGE`,
+`ENDERMAN_BLOCK_MOVE`, `FALLING_BLOCK_CHANGE`, and `WORLD_EFFECT_UNRESOLVED` require
+`itemgraph.command.lookup` plus `itemgraph.audit`. Direct, filtered, and nearby queries
+carry that audit requirement into saved pages and one-use location actions.
+
+Entity lifecycle lookups for `KILL_ENTITY` and `PROJECTILE_SPAWN_ACCEPTED` also expose
+sensitive coordinates and require `itemgraph.command.lookup` plus `itemgraph.audit`.
+Their direct, filtered, nearby, saved-page, and one-use location paths retain the audit
+requirement.
+
+Unified transformation lookups for `CRAFT`, `SMELT`, `ANVIL_RENAME`, and
+`ANVIL_REPAIR` expose actor, item-fingerprint, and coordinate details. They require
+`itemgraph.command.lookup` plus `itemgraph.audit`; saved pages and one-use location
+actions retain that audit requirement. Item traces of those transformations require
+`itemgraph.trace` plus `itemgraph.audit`.
+
 The browser opened by right-clicking a container in inspection mode additionally
 requires `itemgraph.gui`; the inspection click itself requires `itemgraph.command.inspect`.
 Inspection mode is cleared when its named permission is revoked. Page sessions remain
@@ -135,13 +153,22 @@ Queries should have:
 - pagination
 - rate limits if necessary
 
-Lookup-only access covers the explicitly selected, non-sensitive event types.
+Lookup-only access covers explicitly selected, non-sensitive event types.
 `CHAT_MESSAGE`, `COMMAND_ATTEMPT`, and `COMMAND_EXECUTED` rows can contain private
 conversation, command arguments, or credentials accidentally typed into chat, so
 they require both `itemgraph.command.lookup` and `itemgraph.audit`. An `all` query
 or filter with no explicit event type can include these rows and therefore requires
 `itemgraph.audit` before the result query or next-page probe runs. The same policy
 applies to case aliases, player and near forms, and saved-page continuation.
+
+Every `EventTaxonomy` definition marked `SENSITIVE_LOCATION` requires
+`itemgraph.audit`, whether it is an audit event, item observation, or
+transformation. This includes block placement/breaking, container breaks, block
+and entity interactions, item-flow and automation actions, world causes, and
+transformation results. Direct, filtered, nearby, paged, async-delivery, and
+one-use location actions retain and recheck the same audit requirement. The
+permission predicate is derived from the taxonomy privacy class so new sensitive
+event IDs do not silently become lookup-visible.
 
 Issue #33 administrative item-command and creative-inventory records are also
 staff-private. `/give`, `/clear`, and `/item` attempt rows retain only the command

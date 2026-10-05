@@ -122,7 +122,9 @@ public final class WorldEventEvidence {
                 throw new IllegalArgumentException("world audit metadata exceeds " + MAX_METADATA_ENTRIES + " entries");
             }
             JsonObject values = new JsonObject();
-            new TreeMap<>(metadata).forEach((key, value) -> {
+            Map<String, String> orderedMetadata = new TreeMap<>(metadata);
+            addEntityProvenance(payload, orderedMetadata);
+            orderedMetadata.forEach((key, value) -> {
                 String safeKey = boundedRequired(key, "metadata key");
                 if (value != null) {
                     values.addProperty(safeKey, boundedRequired(value, "metadata value"));
@@ -148,6 +150,25 @@ public final class WorldEventEvidence {
                 sourceEventId,
                 rowId.toString(),
                 java.util.List.of());
+    }
+
+    private static void addEntityProvenance(JsonObject payload, Map<String, String> metadata) {
+        String actorKind = metadata.get("actor_kind");
+        if (actorKind != null) {
+            JsonObject actor = new JsonObject();
+            actor.addProperty("kind", boundedRequired(actorKind, "actor kind"));
+            putOptional(actor, "entity_uuid", metadata.get("actor_entity_uuid"));
+            putOptional(actor, "entity_type", metadata.get("actor_entity_type"));
+            payload.add("actor", actor);
+        }
+        String ownerStatus = metadata.get("owner_provenance_status");
+        if (ownerStatus != null) {
+            JsonObject owner = new JsonObject();
+            owner.addProperty("status", boundedRequired(ownerStatus, "owner provenance status"));
+            putOptional(owner, "entity_uuid", metadata.get("owner_entity_uuid"));
+            putOptional(owner, "entity_type", metadata.get("owner_entity_type"));
+            payload.add("owner_provenance", owner);
+        }
     }
 
     private static void putOptional(JsonObject target, String key, String value) {

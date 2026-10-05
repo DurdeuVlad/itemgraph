@@ -23,6 +23,7 @@ import java.sql.SQLException;
 /** Cross-loader fixture that invokes the actual fluid, fire, Enderman, and falling-block paths. */
 public final class EnvironmentalWorldEventConformanceFixture {
     public record Scenario(BlockPos fluidSource, BlockPos fluidTarget, BlockPos fireCenter,
+                           BlockPos fireFailedWriteTarget,
                            BlockPos endermanTakeTarget, BlockPos endermanPlaceTarget,
                            String endermanEntityId, BlockPos fallingSource, BlockPos fallingLanding,
                            long fallingEvidenceWatermark, BlockPos exceptionalFluidTarget,
@@ -35,6 +36,7 @@ public final class EnvironmentalWorldEventConformanceFixture {
         BlockPos fluidSource = helper.absolutePos(new BlockPos(2, 8, 2));
         BlockPos fluidTarget = fluidSource.east();
         BlockPos firePos = helper.absolutePos(new BlockPos(7, 3, 2));
+        BlockPos fireFailedWriteTarget = helper.absolutePos(new BlockPos(11, 8, 1));
         // Keep falling-block evidence in the fixture chunk and drive its vanilla tick
         // explicitly so the landing boundary does not depend on random block scheduling.
         BlockPos fallingSource = helper.absolutePos(new BlockPos(1, 30, 1));
@@ -79,6 +81,10 @@ public final class EnvironmentalWorldEventConformanceFixture {
                 level.getGameRules().getRule(GameRules.RULE_DOFIRETICK)
                         .set(fireTickWasEnabled, level.getServer());
             }
+            WorldEventCapture.recordDirectBlockChange(level, fireFailedWriteTarget,
+                    level.getBlockState(fireFailedWriteTarget), "FIRE_BLOCK_CHANGE", "fire",
+                    "FireBlock.tick.setBlock", java.util.UUID.randomUUID().toString(),
+                    java.util.Map.of(), true, false, false);
 
             enderman = new FixtureEnderman(level);
             BlockPos endermanCenter = helper.absolutePos(new BlockPos(14, 5, 2));
@@ -170,7 +176,7 @@ public final class EnvironmentalWorldEventConformanceFixture {
             WorldEventCapture.recordFallingBlockSourceFailure(level, earlyFallingSource,
                     earlyFallingBefore, Blocks.SAND.defaultBlockState());
             setupComplete = true;
-            return new Scenario(fluidSource, fluidTarget, firePos, takeTarget, placeTarget,
+            return new Scenario(fluidSource, fluidTarget, firePos, fireFailedWriteTarget, takeTarget, placeTarget,
                     enderman.getUUID().toString(), fallingSource, fallingLanding, fallingEvidenceWatermark,
                     exceptionalFluidTarget, exceptionalFallingSource, earlyFallingSource);
         } finally {
@@ -179,7 +185,7 @@ public final class EnvironmentalWorldEventConformanceFixture {
             }
             if (!setupComplete) {
                 clearEnvironmentalBlocks(level, fluidSource, firePos, fallingSource, floor.above(),
-                        exceptionalFluidTarget, exceptionalFallingSource, earlyFallingSource);
+                        exceptionalFluidTarget, exceptionalFallingSource, earlyFallingSource, fireFailedWriteTarget);
             }
         }
     }
@@ -201,6 +207,7 @@ public final class EnvironmentalWorldEventConformanceFixture {
     public static void assertPersisted(GameTestHelper helper, Scenario scenario) {
         assertOneAt(helper, "FLUID_BLOCK_CHANGE", scenario.fluidTarget(), "fluid");
         assertAnyInRegion(helper, "FIRE_BLOCK_CHANGE", scenario.fireCenter(), 2, "fire");
+        assertFailedFireWrite(helper, scenario.fireFailedWriteTarget());
         assertEndermanBoundary(helper, scenario.endermanTakeTarget(), scenario.endermanEntityId(),
                 "TAKE_BLOCK", "EndermanTakeBlockGoal.tick.removeBlock");
         assertEndermanBoundary(helper, scenario.endermanPlaceTarget(), scenario.endermanEntityId(),
@@ -216,14 +223,15 @@ public final class EnvironmentalWorldEventConformanceFixture {
     public static void cleanup(GameTestHelper helper, Scenario scenario) {
         clearEnvironmentalBlocks(helper.getLevel(), scenario.fluidSource(), scenario.fireCenter(),
                 scenario.fallingSource(), scenario.fallingLanding(), scenario.exceptionalFluidTarget(),
-                scenario.exceptionalFallingSource(), scenario.earlyFallingSource());
+                scenario.exceptionalFallingSource(), scenario.earlyFallingSource(), scenario.fireFailedWriteTarget());
     }
 
     private static void clearEnvironmentalBlocks(ServerLevel level, BlockPos fluidSource, BlockPos fireCenter,
                                                  BlockPos fallingSource, BlockPos fallingLanding,
                                                  BlockPos exceptionalFluidTarget,
                                                  BlockPos exceptionalFallingSource,
-                                                 BlockPos earlyFallingSource) {
+                                                 BlockPos earlyFallingSource,
+                                                 BlockPos fireFailedWriteTarget) {
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 2; dy++) {
                 for (int dz = -1; dz <= 1; dz++) {
@@ -243,6 +251,44 @@ public final class EnvironmentalWorldEventConformanceFixture {
         level.setBlock(exceptionalFallingSource, Blocks.AIR.defaultBlockState(), 3);
         level.setBlock(earlyFallingSource, Blocks.AIR.defaultBlockState(), 3);
         level.setBlock(earlyFallingSource.below(), Blocks.AIR.defaultBlockState(), 3);
+        level.setBlock(fireFailedWriteTarget, Blocks.AIR.defaultBlockState(), 3);
+    }
+
+    private static void assertFailedFireWrite(GameTestHelper helper, BlockPos target) {
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement("""
+                     SELECT player_uuid, detail, raw_data FROM ig_audit_events
+                     WHERE event_type = 'WORLD_EFFECT_ATTEMPT' AND x = ? AND y = ? AND z = ?
+                     ORDER BY id
+                     """)) {
+            statement.setDouble(1, target.getX());
+            statement.setDouble(2, target.getY());
+            statement.setDouble(3, target.getZ());
+            try (var rows = statement.executeQuery()) {
+                helper.assertTrue(rows.next(), "a fire write returning false must remain queryable at " + target);
+                helper.assertTrue(rows.getString("player_uuid") == null,
+                        "a world callback attempt must not fabricate a player actor");
+                String detail = rows.getString("detail");
+                helper.assertValueEqual(detail, new String(rows.getBytes("raw_data"), StandardCharsets.UTF_8),
+                        "failed fire-write raw and formatted evidence differ");
+                var payload = JsonParser.parseString(detail).getAsJsonObject();
+                helper.assertValueEqual("OBSERVED", payload.get("evidence_class").getAsString(),
+                        "the callback result is observed evidence");
+                helper.assertValueEqual("GAME_CALLBACK_ATTEMPT", payload.get("source_reliability").getAsString(),
+                        "a false write result must not be represented as a direct state delta");
+                helper.assertValueEqual("UNCHANGED", payload.get("outcome").getAsString(),
+                        "a false write result must be recorded as unchanged");
+                helper.assertValueEqual("NONE", payload.get("quantity_semantics").getAsString(),
+                        "a failed block write must not claim item quantity");
+                helper.assertFalse(payload.has("before_state"), "the failed write must not claim a state delta");
+                helper.assertFalse(payload.has("after_state"), "the failed write must not claim a state delta");
+                helper.assertValueEqual("RETURNED_FALSE", payload.getAsJsonObject("metadata")
+                        .get("callback_result").getAsString(), "the callback return value must be retained");
+                helper.assertFalse(rows.next(), "one fixture callback must emit exactly one attempt row");
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not inspect a failed fire-write attempt", failure);
+        }
     }
 
     private static void assertExceptionalPair(GameTestHelper helper, String observedEventType,
@@ -378,6 +424,17 @@ public final class EnvironmentalWorldEventConformanceFixture {
                 var metadata = payload.getAsJsonObject("metadata");
                 helper.assertValueEqual(entityId, metadata.get("entity_uuid").getAsString(),
                         movement + " must identify the fixture Enderman");
+                helper.assertValueEqual("ENTITY", payload.getAsJsonObject("actor").get("kind").getAsString(),
+                        movement + " must preserve actor kind separately from a player actor");
+                helper.assertValueEqual(entityId,
+                        payload.getAsJsonObject("actor").get("entity_uuid").getAsString(),
+                        movement + " must preserve the Enderman's typed actor identity");
+                helper.assertValueEqual("minecraft:enderman",
+                        payload.getAsJsonObject("actor").get("entity_type").getAsString(),
+                        movement + " must preserve the entity type");
+                helper.assertValueEqual("NOT_APPLICABLE",
+                        payload.getAsJsonObject("owner_provenance").get("status").getAsString(),
+                        movement + " must keep owner provenance distinct from actor identity");
                 helper.assertValueEqual(movement, metadata.get("movement").getAsString(),
                         "Enderman direction metadata changed");
                 helper.assertValueEqual(captureBoundary, metadata.get("capture_boundary").getAsString(),

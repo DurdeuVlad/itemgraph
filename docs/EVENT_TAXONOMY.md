@@ -19,7 +19,7 @@ an unknown taxonomy classification, not the `UNRESOLVED` evidence class.
 
 ## Versioning
 
-The taxonomy version is `2.1.0` (`EventTaxonomy.VERSION`) and is independent of
+The taxonomy version is `2.2.0` (`EventTaxonomy.VERSION`) and is independent of
 the ItemGraph mod version and GriefLogger registry version.
 
 - Increment the major taxonomy version when an existing ID is removed, renamed,
@@ -73,7 +73,7 @@ event coverage or full GriefLogger parity.
 | Block actions | `PLACE_BLOCK`, `BREAK_BLOCK`, `INTERACT_BLOCK`, `INTERACT_BLOCK_ATTEMPT` | `PLACE_BLOCK` uses NeoForge's cancellable `EntityPlaceEvent`; `BREAK_BLOCK` uses NeoForge's cancellable `BreakEvent`, documented as a player attempt. The shared taxonomy conservatively labels both as attempts across loaders. [NeoForge 1.21.1 `EntityPlaceEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.EntityPlaceEvent.html), [NeoForge 1.21.1 `BreakEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.BreakEvent.html). Both are player-attributed at a sensitive world location. |
 | Entity interaction | `INTERACT_ENTITY`, `INTERACT_ENTITY_COMPLETED`, `INTERACT_ENTITY_DENIED`, `INTERACT_ENTITY_UNRESOLVED` | Attempt, method/callback result, or explicit unresolved boundary; no quantity claim. |
 | Entity/projectile | `KILL_ENTITY`, `THROW_ITEM`, `SHOOT_ITEM`, `PROJECTILE_SPAWN_ACCEPTED` | Captured player/entity event boundary; projectile attempt and accepted spawn remain distinct. |
-| World/environment | `EXPLOSION_BLOCK_CHANGE`, `PISTON_BLOCK_MOVE`, `PISTON_BLOCK_ATTEMPT`, `FLUID_BLOCK_CHANGE`, `FIRE_BLOCK_CHANGE`, `ENDERMAN_BLOCK_MOVE`, `FALLING_BLOCK_CHANGE`, `WORLD_EFFECT_UNRESOLVED` | Confirmed explosion, piston, fluid, fire, Enderman, and falling-block changes use bounded before/after block-state deltas. `PISTON_BLOCK_ATTEMPT` records a trigger result with no observed state delta and uses `GAME_CALLBACK_ATTEMPT` reliability. Incomplete candidate coverage and queue rejection use unresolved rows. All use `quantity=NONE`. |
+| World/environment | `EXPLOSION_BLOCK_CHANGE`, `PISTON_BLOCK_MOVE`, `PISTON_BLOCK_ATTEMPT`, `WORLD_EFFECT_ATTEMPT`, `FLUID_BLOCK_CHANGE`, `FIRE_BLOCK_CHANGE`, `ENDERMAN_BLOCK_MOVE`, `FALLING_BLOCK_CHANGE`, `WORLD_EFFECT_UNRESOLVED` | Confirmed explosion, piston, fluid, fire, Enderman, and falling-block changes use bounded before/after block-state deltas. `PISTON_BLOCK_ATTEMPT` records a piston result with no observed state delta, while `WORLD_EFFECT_ATTEMPT` preserves a boolean world-write result that returned false. Both use `GAME_CALLBACK_ATTEMPT` reliability and make no state-delta claim. Incomplete callback results, candidate coverage, and queue rejection use unresolved rows. All use `quantity=NONE`. |
 
 The item-flow and transformation action IDs are cataloged on their own storage
 surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,

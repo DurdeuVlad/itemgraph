@@ -116,6 +116,28 @@ class FabricItemGraphCommandsParityTest {
     }
 
     @Test
+    void parserOnlyCommandCorpusParsesAgainstRegisteredCommandTreeOnFabric() throws Exception {
+        Path root = Path.of("").toAbsolutePath();
+        while (root != null && !Files.exists(root.resolve("docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt"))) {
+            root = root.getParent();
+        }
+        assertNotNull(root, "test process must be able to locate the parser-only command corpus");
+        List<String> examples = Files.readAllLines(root.resolve(
+                        "docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt")).stream()
+                .map(String::strip)
+                .filter(line -> line.startsWith("/ig "))
+                .map(line -> line.substring(1))
+                .toList();
+        assertFalse(examples.isEmpty(), "parser-only corpus must contain /ig syntax examples");
+
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        for (String example : examples) {
+            assertParsedCompletely(dispatcher.parse(example, source), "parser-only example /" + example);
+        }
+    }
+
+    @Test
     void lookupHelpUsesTheSharedAuditEventCatalogOnFabric() throws Exception {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();

@@ -25,6 +25,7 @@ public class DatabaseManager {
     private int currentSchemaVersion = 0;
     private String lastError = null;
     private boolean initialized = false;
+    private boolean startupInitializationPending;
 
     private DatabaseManager() {}
 
@@ -40,6 +41,27 @@ public class DatabaseManager {
         initialize(DatabaseSettings.sqlite(path));
     }
 
+    /**
+     * Stages ItemGraph-owned storage settings before a loader opens early capture
+     * admission. This records paths and dialect only; it performs no JDBC or
+     * filesystem work. {@link #initialize(DatabaseSettings)} remains responsible
+     * for opening the connection and applying migrations.
+     */
+    public synchronized void prepareSettings(DatabaseSettings requestedSettings) {
+        if (requestedSettings == null) {
+            throw new IllegalArgumentException("database settings must not be null");
+        }
+        if (initialized) {
+            throw new IllegalStateException("Cannot prepare ItemGraph database settings while the database is initialized");
+        }
+        this.settings = requestedSettings;
+        this.dialect = DatabaseDialect.fromSettings(requestedSettings);
+        this.databasePath = requestedSettings.sqlitePath();
+        this.currentSchemaVersion = 0;
+        this.lastError = null;
+        this.startupInitializationPending = true;
+    }
+
     /** Initializes ItemGraph-owned storage using the selected backend. */
     public synchronized void initialize(DatabaseSettings requestedSettings) {
         if (requestedSettings == null) {
@@ -51,6 +73,7 @@ public class DatabaseManager {
         this.databasePath = requestedSettings.sqlitePath();
         this.currentSchemaVersion = 0;
         this.lastError = null;
+        this.startupInitializationPending = true;
         try {
             Connection raw;
             if (requestedSettings.backend() == DatabaseSettings.Backend.SQLITE) {
@@ -105,6 +128,8 @@ public class DatabaseManager {
         } catch (IOException e) {
             this.lastError = "Database initialization error: " + e.getMessage();
             LOGGER.error("Failed to initialize ItemGraph {} database", requestedSettings.backend(), e);
+        } finally {
+            this.startupInitializationPending = false;
         }
     }
 
@@ -173,6 +198,9 @@ public class DatabaseManager {
 
     public synchronized Connection getConnection() throws SQLException {
         if (connection == null || connection.isClosed()) {
+            if (startupInitializationPending) {
+                throw new SQLException("ItemGraph database startup initialization is pending");
+            }
             if (settings != null) {
                 initialize(settings);
             } else {
@@ -290,6 +318,11 @@ public class DatabaseManager {
 
     public synchronized DatabaseSettings getSettings() {
         return settings;
+    }
+
+    /** True between early settings staging and completion of the first connection attempt. */
+    public synchronized boolean isStartupInitializationPending() {
+        return startupInitializationPending;
     }
 
     public synchronized DatabaseDialect getDialect() {

@@ -37,10 +37,12 @@ public abstract class FireBlockMixin {
     private void itemgraph$captureCaughtFire(BlockState state, Level level, BlockPos pos, Direction face,
                                               LivingEntity igniter, Operation<Void> original) {
         BlockState before = WorldEventCapture.safeSnapshotBlockState(level, pos);
+        boolean returned = false;
         try {
             original.call(state, level, pos, face, igniter);
+            returned = true;
         } finally {
-            itemgraph$record(level, pos, before, "FireBlock.checkBurnOut.onCaughtFire");
+            itemgraph$record(level, pos, before, "FireBlock.checkBurnOut.onCaughtFire", null, !returned);
         }
     }
 
@@ -61,15 +63,20 @@ public abstract class FireBlockMixin {
     private static boolean itemgraph$capture(Level level, BlockPos pos, String boundary,
                                                java.util.function.BooleanSupplier write) {
         BlockState before = WorldEventCapture.safeSnapshotBlockState(level, pos);
+        Boolean result = null;
+        boolean returned = false;
         try {
-            return write.getAsBoolean();
+            result = write.getAsBoolean();
+            returned = true;
+            return result;
         } finally {
-            itemgraph$record(level, pos, before, boundary);
+            itemgraph$record(level, pos, before, boundary, result, !returned);
         }
     }
 
-    private static void itemgraph$record(Level level, BlockPos pos, BlockState before, String boundary) {
+    private static void itemgraph$record(Level level, BlockPos pos, BlockState before, String boundary,
+                                         Boolean callbackResult, boolean callbackThrew) {
         WorldEventCapture.recordDirectBlockChange(level, pos, before, "FIRE_BLOCK_CHANGE", "fire",
-                boundary, UUID.randomUUID().toString(), Map.of(), true);
+                boundary, UUID.randomUUID().toString(), Map.of(), true, callbackResult, callbackThrew);
     }
 }

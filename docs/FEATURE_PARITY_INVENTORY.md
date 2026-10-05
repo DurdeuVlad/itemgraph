@@ -1,8 +1,8 @@
 # GriefLogger and ItemGraph Feature Inventory
 
-**Reviewed:** 2026-10-04
+**Reviewed:** 2026-10-05
 
-**ItemGraph snapshot:** `codex/issue24-live-client-evidence`, `cfb5c97cf695911f60296bbfbf8583f2fb0242ab`
+**ItemGraph snapshot:** `codex/issue55-world-causes-pr`, HEAD `79f917af20c52b01b962146d6e6d5eff24255768`, plus the uncommitted changes in this worktree at review time. #55 world/environment capture and pre-world-load admission are implemented in this worktree and remain under review; they are not yet merged or released. The focused startup-worker regression passed with staged recovery settings; live-server verification after the lifecycle change remains pending.
 
 **GriefLogger target:** published `1.2.10-1.21.1` Fabric and NeoForge artifacts, pinned in [`docs/grieflogger-fixtures/1.2.10-1.21.1.json`](grieflogger-fixtures/1.2.10-1.21.1.json)
 **GriefLogger source reviewed:** ref `26.2`, commit [`d315098b3f37317a5cddfbd75086f4f912f16a83`](https://github.com/DAQEM/GriefLogger/commit/d315098b3f37317a5cddfbd75086f4f912f16a83)
@@ -53,7 +53,7 @@ The official feature pages describe block actions, item usage, player sessions, 
 
 ## ItemGraph feature inventory
 
-This section was independently inventoried by a read-only subagent against the exact ItemGraph snapshot listed above and reconciled with the production source, current parity documents, test plan and open issues.
+This section was independently inventoried by a read-only reviewer against the ItemGraph worktree snapshot listed above and reconciled with the production source, current parity documents, test plan and open issues. The snapshot includes the current #55 implementation changes; do not treat unmerged worktree behavior as a released feature.
 
 ### Implemented capabilities
 
@@ -93,7 +93,7 @@ ItemGraph is **not yet complete parity**. The independent comparison found one u
 | Fine-grained named command permission nodes | [#137](https://github.com/DurdeuVlad/itemgraph/issues/137) | Implemented with per-surface nodes, explicit deny behavior, and rechecks; the 2026-10-05 local M8 batch passed; PR CI and issue acceptance remain open. |
 | Server-side offline localization | [#136](https://github.com/DurdeuVlad/itemgraph/issues/136) | Implemented for `en_us`, `nl_nl`, and `zh_tw`; 174 authored help/source phrases intentionally use tested English fallback; the 2026-10-05 local M8 batch passed; PR CI and issue acceptance remain open. |
 | Rich chat hover details and safe, dimension-aware location navigation | [#138](https://github.com/DurdeuVlad/itemgraph/issues/138) | Implemented with bounded evidence hover and permission-rechecked, player-only, one-use, expiring location actions; the 2026-10-05 local M8 batch passed; PR CI and issue acceptance remain open. |
-| Explosion, environmental, Enderman and moving-block cause evidence | [#35](https://github.com/DurdeuVlad/itemgraph/issues/35), [#55](https://github.com/DurdeuVlad/itemgraph/issues/55) | These event families remain planned or incomplete; do not assume general block-break capture covers them. |
+| Explosion, environmental, Enderman and moving-block cause evidence | [#35](https://github.com/DurdeuVlad/itemgraph/issues/35), [#55](https://github.com/DurdeuVlad/itemgraph/issues/55) | Implemented in the current #55 worktree on both loaders for explosion changes, piston moves/attempts, fluid/fire changes, Enderman take/place, and falling blocks. The PR is not merged or released. Events preserve attempts, observed changes, partial scans, and unresolved causes separately; they do not infer a nearby player or create item quantity. Do not assume general block-break capture covers these sources. |
 | Entity/projectile lifecycle and item-entity merge/removal/impact outcomes | [#56](https://github.com/DurdeuVlad/itemgraph/issues/56) | Entity interaction attempts are separate M8 work; broader lifecycle/impact evidence is not complete. |
 | Item-processing, trade, station and loot transformation coverage | [#57](https://github.com/DurdeuVlad/itemgraph/issues/57) | Craft/smelt/anvil are present; the broader planned families are not established as shipped. |
 | Exact modded inventory/automation endpoints | [#34](https://github.com/DurdeuVlad/itemgraph/issues/34) | Vanilla capability coverage does not establish arbitrary backpack, faction or third-party inventory adapters. |

@@ -1,6 +1,8 @@
 package com.itemgraph.query;
 
 import com.itemgraph.audit.EventTaxonomy;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -115,7 +117,35 @@ public final class QueryFormatter {
         if ("CONTAINER_BREAK_UNRESOLVED".equals(event.eventType())) {
             return "(actor unavailable)";
         }
-        return "(unknown player)";
+        String typedEntity = typedEntityActor(event.detail());
+        if (typedEntity != null) return typedEntity;
+        EventTaxonomy.ActorStatus actorStatus = EventTaxonomy.find(
+                        event.eventType(), EventTaxonomy.Surface.AUDIT_EVENT)
+                .map(EventTaxonomy.Definition::actor)
+                .orElse(EventTaxonomy.ActorStatus.UNKNOWN);
+        return switch (actorStatus) {
+            case WORLD -> "world/environment";
+            case ENTITY -> "(entity actor unavailable)";
+            case PLAYER -> "(player identity unavailable)";
+            case UNKNOWN -> "(actor unknown)";
+        };
+    }
+
+    private static String typedEntityActor(String detail) {
+        if (detail == null || detail.isBlank()) return null;
+        try {
+            JsonElement parsed = JsonParser.parseString(detail);
+            if (!parsed.isJsonObject() || !parsed.getAsJsonObject().has("actor")) return null;
+            var actor = parsed.getAsJsonObject().getAsJsonObject("actor");
+            if (actor == null || !actor.has("kind") || !"ENTITY".equals(actor.get("kind").getAsString())) {
+                return null;
+            }
+            String type = actor.has("entity_type") ? actor.get("entity_type").getAsString() : "unknown entity";
+            String uuid = actor.has("entity_uuid") ? actor.get("entity_uuid").getAsString() : null;
+            return uuid == null ? "entity:" + type : "entity:" + type + " id=" + uuid;
+        } catch (RuntimeException malformedDetail) {
+            return null;
+        }
     }
 
     /** Formats the cross-table GriefLogger-compatible lookup timeline. */

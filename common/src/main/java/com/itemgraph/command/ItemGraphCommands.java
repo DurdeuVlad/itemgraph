@@ -3,6 +3,7 @@ package com.itemgraph.command;
 import com.itemgraph.audit.AuditReport;
 import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.audit.AuditService;
+import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.correlation.CorrelationResult;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.ingest.IngestionResult;
@@ -82,7 +83,23 @@ public final class ItemGraphCommands {
             "craft_item", "break_item", "consume_item", "throw_item", "shoot_item",
             "add_item_ender", "remove_item_ender");
     private static final Set<String> AUDIT_ONLY_LOOKUP_TYPES = Set.of(
-            "CHAT_MESSAGE", "COMMAND_ATTEMPT", "COMMAND_EXECUTED");
+            "CHAT_MESSAGE", "COMMAND_ATTEMPT", "COMMAND_EXECUTED",
+            // Block and entity interaction rows expose protected world coordinates.
+            "PLACE_BLOCK", "BREAK_BLOCK", "CONTAINER_BREAK_COMPLETED", "CONTAINER_BREAK_UNRESOLVED",
+            "INTERACT_BLOCK", "INTERACT_BLOCK_ATTEMPT", "INTERACT_ENTITY",
+            "INTERACT_ENTITY_COMPLETED", "INTERACT_ENTITY_DENIED", "INTERACT_ENTITY_UNRESOLVED",
+            // Entity and accepted-projectile rows expose sensitive world positions.
+            "KILL_ENTITY", "PROJECTILE_SPAWN_ACCEPTED",
+            // Transformation results expose player, item fingerprints, and coordinates.
+            "CRAFT", "SMELT", "ANVIL_RENAME", "ANVIL_REPAIR",
+            // World-cause rows expose sensitive block positions, including unresolved coverage.
+            "EXPLOSION_BLOCK_CHANGE", "PISTON_BLOCK_MOVE", "PISTON_BLOCK_ATTEMPT",
+            "WORLD_EFFECT_ATTEMPT", "FLUID_BLOCK_CHANGE", "FIRE_BLOCK_CHANGE",
+            "ENDERMAN_BLOCK_MOVE", "FALLING_BLOCK_CHANGE", "WORLD_EFFECT_UNRESOLVED");
+    private static final Set<String> TAXONOMY_SENSITIVE_LOOKUP_TYPES = EventTaxonomy.definitions().stream()
+            .filter(definition -> definition.privacy() == EventTaxonomy.PrivacyClass.SENSITIVE_LOCATION)
+            .map(EventTaxonomy.Definition::id)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
     private static volatile RuntimeInformationPort runtimeInformation = new RuntimeInformationPort() {
         @Override public String modVersion() { return "unknown"; }
         @Override public boolean isModLoaded(String modId) { return false; }
@@ -111,8 +128,7 @@ public final class ItemGraphCommands {
                         String filterDescription, long createdAtMs) {
             this(sessionId, eventType, playerName, window, limit, levelId, centerX, centerY, centerZ, radius,
                     exactPositions, filters, filterDescription, ItemGraphPermissions.LOOKUP,
-                    eventType == null || "all".equalsIgnoreCase(eventType)
-                            || AUDIT_ONLY_LOOKUP_TYPES.contains(eventType.toUpperCase(java.util.Locale.ROOT)),
+                    ItemGraphCommands.requiresAuditPermission(eventType),
                     createdAtMs);
         }
     }
@@ -1332,6 +1348,7 @@ public final class ItemGraphCommands {
         }
         String normalized = eventType.toUpperCase(java.util.Locale.ROOT);
         return AUDIT_ONLY_LOOKUP_TYPES.contains(normalized)
+                || TAXONOMY_SENSITIVE_LOOKUP_TYPES.contains(normalized)
                 || normalized.startsWith("ADMIN_ITEM_COMMAND_")
                 || normalized.startsWith("CREATIVE_SLOT_")
                 || normalized.startsWith("CREATIVE_BLOCK_")
@@ -1521,6 +1538,15 @@ public final class ItemGraphCommands {
         boolean dbConnected = db.isInitialized();
         var dbSettings = db.getSettings();
         String backend = dbSettings == null ? "not configured" : dbSettings.backend().name().toLowerCase(java.util.Locale.ROOT);
+        IngestionService ingestion = IngestionService.getInstance();
+        IngestionResult lastResult = ingestion.getLastResult();
+        CorrelationResult lastCorrelation = ingestion.getCorrelationEngine().getLastResult();
+        InternalObservationService internalObs = InternalObservationService.getInstance();
+        ItemEntityTracker entityTracker = ItemEntityTracker.getInstance();
+        long capabilityQueueRejections = ContainerInteractionTracker.getInstance().getTotalCapabilityQueueRejections();
+        source.sendSuccess(() -> Component.literal(statusActionLine(internalObs.getCaptureState(), dbConnected,
+                internalObs.getTotalDropped(), lastResult != null && !lastResult.success(),
+                lastCorrelation != null && !lastCorrelation.success())), false);
         source.sendSuccess(() -> Component.literal(ItemGraphLanguage.text("status.summary",
                 "[ItemGraph] version={0} griefLogger={1} db={2} backend={3} schemaVersion={4} maxPageSize={5} databaseConnectionTimeoutMs={6} useIndexes={7}",
                 modVersion, glStatus, ItemGraphLanguage.text(dbConnected ? "status.connected" : "status.disconnected",
@@ -1528,13 +1554,6 @@ public final class ItemGraphCommands {
                 QueryLimits.getConfiguredMaxPageSize(), dbSettings == null
                         ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.connectionTimeoutMs(),
                 dbSettings == null ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.useIndexes())), false);
-
-        IngestionService ingestion = IngestionService.getInstance();
-        IngestionResult lastResult = ingestion.getLastResult();
-        CorrelationResult lastCorrelation = ingestion.getCorrelationEngine().getLastResult();
-        InternalObservationService internalObs = InternalObservationService.getInstance();
-        ItemEntityTracker entityTracker = ItemEntityTracker.getInstance();
-        long capabilityQueueRejections = ContainerInteractionTracker.getInstance().getTotalCapabilityQueueRejections();
         runtimeStatusLines(ingestion, lastResult, lastCorrelation, internalObs, entityTracker,
                 capabilityQueueRejections).forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
         if (!dbConnected) {
@@ -1587,6 +1606,41 @@ public final class ItemGraphCommands {
             statusLines.add("[ItemGraph] inference ledger: activeEdges=" + activeEdges + " supersededEdges=" + supersededEdges);
             return QueryDispatcher.QueryOutput.found(statusLines);
         });
+    }
+
+    static String statusActionLine(InternalObservationService.CaptureState captureState, boolean dbConnected,
+                                   long dropped, boolean ingestionFailed, boolean correlationFailed) {
+        String key;
+        String fallback;
+        if (captureState == InternalObservationService.CaptureState.RECOVERY_BLOCKED) {
+            key = "status.action.recovery_blocked";
+            fallback = "[ItemGraph] ACTION: Preserve pending-evidence recovery files and logs; follow the recovery guide.";
+        } else if (captureState == InternalObservationService.CaptureState.DISABLED_BY_CONFIG) {
+            key = "status.action.capture_disabled";
+            fallback = "[ItemGraph] ACTION: Native capture is off; enable it only if you intend to record new events.";
+        } else if (captureState == InternalObservationService.CaptureState.STOPPED) {
+            key = "status.action.capture_stopped";
+            fallback = "[ItemGraph] ACTION: Check startup errors and restore the capture worker before relying on new evidence.";
+        } else if (captureState == InternalObservationService.CaptureState.RECOVERY_LOADING) {
+            key = "status.action.recovery_loading";
+            fallback = "[ItemGraph] ACTION: Wait for recovery loading to finish before interpreting queue totals.";
+        } else if (!dbConnected) {
+            key = "status.action.database_disconnected";
+            fallback = "[ItemGraph] ACTION: Check database settings and logs; preserve database and recovery files.";
+        } else if (dropped > 0) {
+            key = "status.action.dropped";
+            fallback = "[ItemGraph] ACTION: Evidence was rejected or lost; preserve logs and investigate before trusting empty results.";
+        } else if (ingestionFailed) {
+            key = "status.action.ingestion_failed";
+            fallback = "[ItemGraph] ACTION: Review the failed source-ingestion cycle in logs; native capture has a separate status.";
+        } else if (correlationFailed) {
+            key = "status.action.correlation_failed";
+            fallback = "[ItemGraph] ACTION: Review the failed correlation pass; do not treat missing inferred paths as proof.";
+        } else {
+            key = "status.action.verify_coverage";
+            fallback = "[ItemGraph] ACTION: No stop condition is reported; confirm capture was active and the event type is supported before trusting an empty query.";
+        }
+        return ItemGraphLanguage.text(key, fallback);
     }
 
     static List<String> runtimeStatusLines(

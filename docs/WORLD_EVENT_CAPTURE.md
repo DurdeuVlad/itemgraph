@@ -143,12 +143,20 @@ uses bounded result-boundary mixins for those vanilla methods:
   `FireBlock.checkBurnOut`, and the direct `BlockState.onCaughtFire` call. It
   records only a changed block type, omitting fire-age property updates. Each
   evidence row names the exact write boundary and target position; no nearby
-  world scan is performed.
+  world scan is performed. When a boolean write returns `false` with no block-
+  type delta, ItemGraph persists `WORLD_EFFECT_ATTEMPT` with
+  `outcome=UNCHANGED` and `callback_result=RETURNED_FALSE`; it does not drop the
+  observed callback or mislabel it as a successful state change. A throw with
+  no confirmed block delta is retained as `WORLD_EFFECT_UNRESOLVED` with
+  `WORLD_EFFECT_PARTIAL`.
 * `EndermanTakeBlockGoal.tick` wraps its exact `Level.removeBlock` call and
   `EndermanLeaveBlockGoal.tick` wraps its exact `Level.setBlock` call. A row is
-  emitted only when that target's state changes. Metadata includes the Enderman
-  entity UUID, never a nearby player identity. The carried-block state is not
-  treated as item quantity or permanent item identity.
+  emitted only when that target's state changes. The payload records the Enderman
+  as a typed entity actor, including its entity UUID and registry type; its
+  `owner_provenance.status=NOT_APPLICABLE` remains distinct from actor identity.
+  The row never writes the entity UUID to player identity columns or attributes
+  a nearby player. The carried-block state is not treated as item quantity or
+  permanent item identity.
 * `FallingBlockEntity.fall` records its confirmed source removal after return.
   If it throws after removing the source and before returning an entity, ItemGraph
   records the direct source delta without an entity UUID and adds a linked
@@ -166,6 +174,53 @@ most one changed-state row; persistence remains on the existing asynchronous que
 families use `quantity=NONE`, sensitive-location privacy, and explicit cause
 metadata. A state delta is observed evidence; no delta is not promoted to a
 successful move. Dispenser and dropper inventory changes remain issue #34.
+
+## Entity-caused block placement boundary
+
+The pinned NeoForge `21.1.248` `BlockEvent.EntityPlaceEvent` is cancellable, but
+the pinned `EventHooks.onBlockPlace` call path supplies a `Player`; it does not
+provide a general mob/projectile placement event. It is also a pre-write event,
+so an uncanceled callback alone is not proof that a block state changed. Fabric
+API `0.116.12+1.21.1` has no general block-placement result callback. The
+NeoForge and Fabric callbacks therefore do not provide a cross-loader source for
+the requested owned/unowned entity placement cases.
+
+ItemGraph records the narrower authoritative cases it can prove: player
+placement through the player-specific audit path, and Enderman take/place at the
+exact `EndermanTakeBlockGoal.tick` / `EndermanLeaveBlockGoal.tick` write
+boundaries. Enderman rows use `ENDERMAN_BLOCK_MOVE`, a typed entity actor UUID
+and type, and a separate `owner_provenance_status=NOT_APPLICABLE`. A direct
+state change with no source reports no nearby player and does not resolve an
+owner by proximity. Projectile/owned-entity placement is unsupported unless a
+specific loader or mod API supplies both an authoritative write result and a
+typed actor/owner. `WORLD_EVENT_API_UNAVAILABLE` is the taxonomy reason for a
+missing event surface; ItemGraph cannot emit per-occurrence evidence for an
+event the loader never reports.
+
+This boundary follows the pinned loader/Minecraft sources: NeoForge
+`BlockEvent.EntityPlaceEvent`, `EventHooks.onBlockPlace`, and
+`CommonHooks.onBlockPlace`; Fabric's pinned interaction-event source; and the
+Minecraft 1.21.1 `EndermanLeaveBlockGoal.tick`, `Projectile.getOwner`, and
+`OwnableEntity.getOwner` APIs. `Projectile.getOwner` or `OwnableEntity.getOwner`
+can establish one direct owner only when a specific callback supplies that
+actor. ItemGraph does not recursively resolve owner chains or turn an entity
+owner into a player action without direct evidence.
+
+## Startup capture admission
+
+NeoForge stages database settings and opens the bounded
+`InternalObservationService` queue from `ServerAboutToStartEvent`, before world
+loading. Its synchronous database initialization remains in
+`ServerStartingEvent`; evidence queued while that setup runs is flushed by the
+worker on the configured server-tick cadence after the database is ready.
+Fabric stages the same settings and opens the queue in `SERVER_STARTING` before
+`DatabaseManager.initialize`, because that callback precedes world loading. Both
+paths apply capture settings and select the configured recovery-spool directory
+before opening admission. Database work stays off world-event callbacks. A
+targeted worker regression verifies that a startup audit event is accepted and
+becomes durable after database initialization. The isolated NeoForge startup
+reproduction logged a rejected fluid event before this lifecycle change; the
+live-server warning check remains pending a later permitted dev-server run.
 
 ## Cross-loader replay and conservation report
 

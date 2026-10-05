@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "2.1.0";
+    public static final String VERSION = "2.2.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -310,6 +310,8 @@ public final class EventTaxonomy {
                 ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 55);
         audit(entries, "PISTON_BLOCK_ATTEMPT", "world_environment", SourceReliability.GAME_CALLBACK_ATTEMPT,
                 ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "WORLD_EFFECT_ATTEMPT", "world_environment", SourceReliability.GAME_CALLBACK_ATTEMPT,
+                ActorStatus.WORLD, PrivacyClass.SENSITIVE_LOCATION, 55);
         audit(entries, "FLUID_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
                 ActorStatus.WORLD, PrivacyClass.SENSITIVE_LOCATION, 55);
         audit(entries, "FIRE_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,

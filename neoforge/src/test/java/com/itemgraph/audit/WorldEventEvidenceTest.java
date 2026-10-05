@@ -113,5 +113,38 @@ class WorldEventEvidenceTest {
         assertEquals("UNCHANGED", payload.get("outcome").getAsString());
         assertFalse(payload.has("before_state"));
         assertFalse(payload.has("after_state"));
+
+        InternalAuditEvent failedWorldWrite = WorldEventEvidence.create(
+                "WORLD_EFFECT_ATTEMPT", 2L, "minecraft:overworld", 1, 64, 1,
+                null, Outcome.UNCHANGED, null, "FireBlock.tick.setBlock", null, null,
+                null, null, null, Map.of("callback_result", "RETURNED_FALSE"));
+        var failedPayload = JsonParser.parseString(new String(failedWorldWrite.rawData(), StandardCharsets.UTF_8))
+                .getAsJsonObject();
+        assertEquals("OBSERVED", failedPayload.get("evidence_class").getAsString());
+        assertEquals("GAME_CALLBACK_ATTEMPT", failedPayload.get("source_reliability").getAsString());
+        assertEquals("UNCHANGED", failedPayload.get("outcome").getAsString());
+        assertEquals("NONE", failedPayload.get("quantity_semantics").getAsString());
+        assertFalse(failedPayload.has("before_state"));
+        assertFalse(failedPayload.has("after_state"));
+        assertEquals("RETURNED_FALSE", failedPayload.getAsJsonObject("metadata")
+                .get("callback_result").getAsString());
+
+        String actorId = UUID.randomUUID().toString();
+        InternalAuditEvent entityCause = WorldEventEvidence.create(
+                "ENDERMAN_BLOCK_MOVE", 3L, "minecraft:overworld", 1, 64, 1,
+                "minecraft:dirt", Outcome.CONFIRMED_CHANGE, null, "EndermanLeaveBlockGoal.tick.setBlock",
+                "minecraft:air", "minecraft:dirt", null, null, null,
+                Map.of("actor_kind", "ENTITY", "actor_entity_uuid", actorId,
+                        "actor_entity_type", "minecraft:enderman", "owner_provenance_status", "NOT_APPLICABLE"));
+        var entityPayload = JsonParser.parseString(new String(entityCause.rawData(), StandardCharsets.UTF_8))
+                .getAsJsonObject();
+        assertNull(entityCause.playerUuid(), "entity identity must not be stored as player identity");
+        assertEquals("ENTITY", entityPayload.getAsJsonObject("actor").get("kind").getAsString());
+        assertEquals(actorId, entityPayload.getAsJsonObject("actor").get("entity_uuid").getAsString());
+        assertEquals("minecraft:enderman", entityPayload.getAsJsonObject("actor").get("entity_type").getAsString());
+        assertEquals("NOT_APPLICABLE", entityPayload.getAsJsonObject("owner_provenance")
+                .get("status").getAsString());
+        assertFalse(entityPayload.getAsJsonObject("owner_provenance").has("entity_uuid"),
+                "owner provenance must remain a separate fact from the entity actor");
     }
 }

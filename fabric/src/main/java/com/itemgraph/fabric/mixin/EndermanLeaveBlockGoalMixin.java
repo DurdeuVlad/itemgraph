@@ -27,9 +27,12 @@ public abstract class EndermanLeaveBlockGoalMixin {
         try {
             return original.call(level, pos, state, flags);
         } finally {
+            Map<String, String> metadata = new java.util.TreeMap<>(
+                    WorldEventCapture.entityProvenanceMetadata(enderman, null, false));
+            metadata.put("entity_uuid", enderman.getUUID().toString());
+            metadata.put("movement", "PLACE_BLOCK");
             WorldEventCapture.recordDirectBlockChange(level, pos, before, "ENDERMAN_BLOCK_MOVE", "enderman",
-                    "EndermanLeaveBlockGoal.tick.setBlock", UUID.randomUUID().toString(),
-                    Map.of("entity_uuid", enderman.getUUID().toString(), "movement", "PLACE_BLOCK"), false);
+                    "EndermanLeaveBlockGoal.tick.setBlock", UUID.randomUUID().toString(), metadata, false);
         }
     }
 }

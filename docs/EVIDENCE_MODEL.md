@@ -404,9 +404,12 @@ CREATE TABLE IF NOT EXISTS ig_item_transformations (
 
 Implemented transformation types:
 
-- `ANVIL_RENAME`: captured via NeoForge `AnvilRepairEvent` when an item receives a custom name or repair.
-- `CRAFTING`: captured via `ItemCraftedEvent` linking input item components to crafted output products.
-- `SMELTING`: captured via `ItemSmeltedEvent`.
+- `ANVIL_RENAME` and `ANVIL_REPAIR`: captured from anvil result transitions.
+- `CRAFT`: captured via the crafting result transition and its recorded source/result fingerprints.
+- `SMELT`: captured via the smelting result transition and its recorded source/result fingerprints.
+
+These rows do not reconstruct every inventory input or the full recipe. They do not
+identify a processing station or trading partner.
 
 In query output, transformations are represented chronologically as:
 

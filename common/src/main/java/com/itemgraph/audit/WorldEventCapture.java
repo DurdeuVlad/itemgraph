@@ -492,11 +492,44 @@ public final class WorldEventCapture {
         metadata.put(prefix + "_uuid", entity.getUUID().toString());
     }
 
+    /** Returns separate, bounded actor and owner fields for a known non-player entity cause. */
+    public static Map<String, String> entityProvenanceMetadata(Entity actor, Entity owner,
+                                                               boolean ownershipApplies) {
+        if (actor == null) {
+            return Map.of("actor_kind", "UNKNOWN",
+                    "owner_provenance_status", ownershipApplies ? "UNAVAILABLE" : "NOT_APPLICABLE");
+        }
+        Map<String, String> metadata = new TreeMap<>();
+        metadata.put("actor_kind", "ENTITY");
+        metadata.put("actor_entity_uuid", actor.getUUID().toString());
+        metadata.put("actor_entity_type", BuiltInRegistries.ENTITY_TYPE.getKey(actor.getType()).toString());
+        if (!ownershipApplies) {
+            metadata.put("owner_provenance_status", "NOT_APPLICABLE");
+        } else if (owner == null) {
+            metadata.put("owner_provenance_status", "UNAVAILABLE");
+        } else {
+            metadata.put("owner_provenance_status", "RESOLVED");
+            metadata.put("owner_entity_uuid", owner.getUUID().toString());
+            metadata.put("owner_entity_type", BuiltInRegistries.ENTITY_TYPE.getKey(owner.getType()).toString());
+        }
+        return metadata;
+    }
+
     /** Records one direct, single-position state-write boundary without scanning nearby blocks. */
     public static void recordDirectBlockChange(LevelAccessor level, BlockPos pos, BlockState before,
                                                String eventType, String family, String cause,
                                                String causeEventId, Map<String, String> sourceMetadata,
                                                boolean blockTypeOnly) {
+        recordDirectBlockChange(level, pos, before, eventType, family, cause, causeEventId,
+                sourceMetadata, blockTypeOnly, null, false);
+    }
+
+    /** Records a direct state write and preserves a failed or exceptional callback with no state delta. */
+    public static void recordDirectBlockChange(LevelAccessor level, BlockPos pos, BlockState before,
+                                               String eventType, String family, String cause,
+                                               String causeEventId, Map<String, String> sourceMetadata,
+                                               boolean blockTypeOnly, Boolean callbackResult,
+                                               boolean callbackThrew) {
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
         }
@@ -515,6 +548,26 @@ public final class WorldEventCapture {
             BlockState after = serverLevel.getBlockState(pos);
             boolean changed = blockTypeOnly ? before.getBlock() != after.getBlock() : !before.equals(after);
             if (!changed) {
+                if (callbackThrew) {
+                    metadata.put("callback_exception_count", "1");
+                    metadata.put("callback_result", "THREW");
+                    if (!submitWorldEffectUnresolved(serverLevel, pos, family, "WORLD_EFFECT_PARTIAL", metadata)) {
+                        warnQueueRejectionOnce(family, pos);
+                    }
+                } else if (Boolean.FALSE.equals(callbackResult)) {
+                    metadata.put("callback_result", "RETURNED_FALSE");
+                    boolean accepted = InternalObservationService.getInstance().submitAuditEvent(
+                            WorldEventEvidence.create("WORLD_EFFECT_ATTEMPT", System.currentTimeMillis(),
+                                    serverLevel.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ(),
+                                    null, WorldEventEvidence.Outcome.UNCHANGED, null, cause,
+                                    null, null, null, null, null, metadata));
+                    if (!accepted) {
+                        metadata.put("queue_rejected_count", "1");
+                        if (!submitWorldEffectUnresolved(serverLevel, pos, family, "WORLD_EFFECT_PARTIAL", metadata)) {
+                            warnQueueRejectionOnce(family, pos);
+                        }
+                    }
+                }
                 return;
             }
             String subject = BuiltInRegistries.BLOCK.getKey(
@@ -526,6 +579,13 @@ public final class WorldEventCapture {
                             before.toString(), after.toString(), null, null, null, metadata));
             if (!accepted) {
                 metadata.put("queue_rejected_count", "1");
+                if (!submitWorldEffectUnresolved(serverLevel, pos, family, "WORLD_EFFECT_PARTIAL", metadata)) {
+                    warnQueueRejectionOnce(family, pos);
+                }
+            }
+            if (callbackThrew) {
+                metadata.put("callback_exception_count", "1");
+                metadata.put("callback_result", "THREW");
                 if (!submitWorldEffectUnresolved(serverLevel, pos, family, "WORLD_EFFECT_PARTIAL", metadata)) {
                     warnQueueRejectionOnce(family, pos);
                 }

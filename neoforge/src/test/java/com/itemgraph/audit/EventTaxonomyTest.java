@@ -50,7 +50,7 @@ class EventTaxonomyTest {
                     definition.neoForge().reasonCode() == null, definition.id() + " NeoForge support");
         }
         assertTrue(EventTaxonomy.VERSION.matches("\\d+\\.\\d+\\.\\d+"));
-        assertEquals("2.1.0", EventTaxonomy.VERSION,
+        assertEquals("2.2.0", EventTaxonomy.VERSION,
                 "taxonomy extension remains at the expected event-contract version");
 
         Set<String> reasons = new HashSet<>();
@@ -140,6 +140,16 @@ class EventTaxonomyTest {
         assertEquals(QuantitySemantics.NONE, pistonAttempt.quantity());
         assertEquals(LoaderStatus.IMPLEMENTED, pistonAttempt.fabric().status());
         assertEquals(LoaderStatus.IMPLEMENTED, pistonAttempt.neoForge().status());
+        EventTaxonomy.Definition worldAttempt = EventTaxonomy.find("WORLD_EFFECT_ATTEMPT", Surface.AUDIT_EVENT)
+                .orElseThrow();
+        assertEquals(55, worldAttempt.ownerIssue());
+        assertEquals(EvidenceClass.OBSERVED, worldAttempt.evidenceClass());
+        assertEquals(EventTaxonomy.SourceReliability.GAME_CALLBACK_ATTEMPT, worldAttempt.sourceReliability());
+        assertEquals(QuantitySemantics.NONE, worldAttempt.quantity());
+        assertEquals(EventTaxonomy.ActorStatus.WORLD, worldAttempt.actor());
+        assertEquals(EventTaxonomy.PrivacyClass.SENSITIVE_LOCATION, worldAttempt.privacy());
+        assertEquals(LoaderStatus.IMPLEMENTED, worldAttempt.fabric().status());
+        assertEquals(LoaderStatus.IMPLEMENTED, worldAttempt.neoForge().status());
         for (String id : java.util.List.of("FLUID_BLOCK_CHANGE", "FIRE_BLOCK_CHANGE",
                 "ENDERMAN_BLOCK_MOVE", "FALLING_BLOCK_CHANGE")) {
             EventTaxonomy.Definition definition = EventTaxonomy.find(id, Surface.AUDIT_EVENT).orElseThrow();
