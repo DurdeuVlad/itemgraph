@@ -184,6 +184,24 @@ class FlowBrowserMenuTest {
     }
 
     @Test
+    void pageCompanionKeepsContainerBreakCorrelationIdsOutOfEventKind() {
+        TraceHop removal = new TraceHop(TraceHop.Kind.OBSERVED, 31, null, null, 2,
+                1_700_000_004_000L, 1_700_000_004_000L, null,
+                "REMOVE_ITEM [evidence_event_id=evidence-uuid parent_event_id=parent-uuid break_event_id=break-uuid]",
+                new FingerprintRef(7, "minecraft:diamond", null, null), TraceHop.Source.OBSERVATION);
+        TracePage page = new TracePage("diamond", TracePage.Resolution.RESOLVED,
+                removal.item(), null, List.of(), List.of(), List.of(removal), QueryWindow.unbounded(),
+                9, null, false, null, false);
+
+        List<String> lines = FlowBrowserService.pageCompanionLines(page, 0);
+
+        assertTrue(lines.getFirst().contains("REMOVE_ITEM"), lines.getFirst());
+        assertFalse(String.join(" ", lines).contains("evidence_event_id"));
+        assertFalse(String.join(" ", lines).contains("parent-uuid"));
+        assertFalse(String.join(" ", lines).contains("break-uuid"));
+    }
+
+    @Test
     void pageCompanionKeepsAmbiguousTransformationAndUnresolvedStatesDistinct() {
         TraceHop ambiguous = new TraceHop(TraceHop.Kind.OBSERVED, 21, null, null, 1,
                 1_700_000_004_000L, 1_700_000_004_000L, null,
@@ -195,6 +213,11 @@ class FlowBrowserMenuTest {
                 TraceHop.Source.TRANSFORMATION);
         assertEquals("OBSERVED / AMBIGUOUS SOURCE GROUP", FlowBrowserService.companionEvidenceClass(ambiguous));
         assertEquals("OBSERVED / TRANSFORMATION", FlowBrowserService.companionEvidenceClass(transformation));
+        TracePage transformationPage = new TracePage("diamond", TracePage.Resolution.RESOLVED,
+                null, null, List.of(), List.of(), List.of(transformation), QueryWindow.unbounded(),
+                9, null, false, null, false);
+        assertTrue(FlowBrowserService.pageCompanionLines(transformationPage, 0).getFirst()
+                .contains("TRANSFORMATION CRAFTING"));
 
         TracePage ambiguousTarget = new TracePage("diamond", TracePage.Resolution.AMBIGUOUS, null, null,
                 List.of(new FingerprintRef(31, "minecraft:diamond", null, null)), List.of(), List.of(),
@@ -231,6 +254,7 @@ class FlowBrowserMenuTest {
         assertTrue(rows.get(0).contains("OBSERVED / AMBIGUOUS SOURCE GROUP"));
         assertTrue(rows.get(0).contains("no independent quantity capacity"));
         assertTrue(rows.get(1).contains("OBSERVED / TRANSFORMATION"));
-        assertTrue(rows.get(1).contains("CRAFTING -> minecraft:emerald"));
+        assertTrue(rows.get(1).contains("TRANSFORMATION CRAFTING"));
+        assertFalse(rows.get(1).contains("minecraft:emerald"), "the event-kind label stays concise");
     }
 }

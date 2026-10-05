@@ -99,6 +99,8 @@ records as at risk; the daemon may finish a late write only if the process stays
 alive and the filesystem returns. The callback does not wait indefinitely on
 JDBC, file I/O, or connection close.
 
+### Pending-evidence recovery
+
 On the next start, ItemGraph replays the recovery file on its evidence worker,
 not on the loader lifecycle callback. New evidence remains bounded in the
 normal queues while recovery runs; recovered records are placed ahead of those

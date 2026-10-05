@@ -116,8 +116,9 @@ To browse a particular container without guessing its dimension, use:
 The flow browser is a vanilla menu. It has no ItemGraph-specific item, screen, packet, or
 client installation requirement. Each page has at most nine rows. A numbered chat companion
 shows each row's observed/inferred class, safe item identity, event kind, and UTC time when
-available; row numbers match menu slots. Left-click a numbered timeline slot to open its
-details, then use the labeled Back control to return. On an ambiguous candidate page, select
+available. Match its number to the menu slot in reading order: left-to-right, then top-to-bottom.
+Left-click that slot to open its details, then use the labeled Back control to return. On an
+ambiguous candidate page, select
 a candidate slot to open that candidate's timeline. Missing identity and unresolved history
 have explicit labels. Hover text and icons provide supplemental detail. Its entries are
 read-only; attempts to move inventory items through the menu are rejected. For a supported
@@ -126,6 +127,10 @@ container,
 right-click open the same kind of container flow browser. For a valid double chest, either
 half opens the canonical anchor used when its contents are recorded. Run `/ig inspect off`
 when finished; mode also clears on logout and server stop.
+
+After you select a timeline row, the detail menu shows one paper icon per detail line.
+Hover an icon to read its full text; use the labeled next/previous controls when the
+details span more than one page, and Back to return to the timeline.
 
 For `/ig event`, `/ig explain`, `/ig trace`, and paged history results, hover a chat row for
 evidence class, safe item identity, canonical fingerprint hash when available, event kind,
@@ -168,6 +173,29 @@ or inventories without an adapter. Container GUI evidence is a net change over t
 open/close session, not a record of each click. The feature status and evidence boundary
 are listed in [Feature parity inventory](FEATURE_PARITY_INVENTORY.md).
 
+### Optional: import GriefLogger history
+
+Use this only when migrating a server with a supported GriefLogger database. Read the
+[GriefLogger integration guide](GRIEFLOGGER_INTEGRATION.md) first. In NeoForge, set
+`general.grieflogger_integration_enabled=true` and `general.grieflogger_database_path`;
+in Fabric, set `grieflogger_integration_enabled=true` and `grieflogger_database_path`.
+Use the source database path and the exact configuration file documented in
+[`Configuration`](CONFIGURATION.md), then restart. The GriefLogger database stays
+read-only; ItemGraph writes imported rows and reports only to its own database. Grant
+`itemgraph.command`, `itemgraph.ingest`, and `itemgraph.import` to the operator. Run
+`/ig ingest history` once to queue the historical import on the background worker, then
+run `/ig status` to check the latest import status and imported/opaque row counts. A
+`FAILED` or partial report means some rows were stored before the failure; it is not a
+complete import. Opaque or unresolved rows do not prove an item flow. Do not enable the
+bridge for normal standalone ItemGraph operation.
+
+### Optional: integrate another server mod
+
+The [ItemGraph API contract](API.md) describes the `PREVIEW_1` Java API for trusted
+NeoForge server mods; it is not an in-game command or a stable API guarantee. The
+[compiling consumer example](../examples/api-consumer) demonstrates registration,
+bounded observation submission, and asynchronous queries.
+
 ## 5. Common failures and safe next steps
 
 | Message or symptom | What it means | Safe next step |
@@ -176,6 +204,7 @@ are listed in [Feature parity inventory](FEATURE_PARITY_INVENTORY.md).
 | Query queue full | The bounded read-only query worker has no waiting slot. | Wait for current queries to finish, then retry with a narrower `sinceMinutes`, radius, or limit. |
 | No matching target/candidates | No stored row matched the supplied item/player/container identity. | Check spelling, item registry ID, dimension, coordinates, and capture start time. An empty result only covers the stored evidence. |
 | Database unavailable or `/ig audit` reports violations | Storage or evidence consistency needs operator attention. | Preserve the database and logs, stop interpreting missing results as proof, and follow the [security and permissions](SECURITY_AND_PERMISSIONS.md) and [configuration](CONFIGURATION.md) guidance. |
+| Startup reports a pending-evidence recovery error or capture stays disabled | `itemgraph-pending-evidence.json` is malformed, unsupported, or over 256 MiB; accepted new events may be preserved in `itemgraph-pending-evidence.json.overflow`. | Stop repeated restarts. Preserve the database, both recovery files if present, and `logs/latest.log`; the files are beside the SQLite database or in `./itemgraph/` with a network database. Do not edit the JSON or database. Send those files to the server owner/ItemGraph maintainer for recovery guidance. See [pending-evidence recovery](CONFIGURATION.md#pending-evidence-recovery). |
 | `/ig inspect` does not consume a click | The read-only query was not accepted. | Check `/ig inspect status`, permission, target and server logs; ordinary block/container interaction continues when inspection cannot open. |
 
 ## Optional: choose the server message language
@@ -215,12 +244,12 @@ listed boundary; `Planned` means there is no user-facing implementation to use y
 | Raw item-observation details | `/ig event <observationId>` | Shipped | `itemgraph.command` + `itemgraph.event` + `itemgraph.audit`; read-only. |
 | Inference explanation and evidence links | `/ig explain <edgeId>` | Shipped | `itemgraph.command` + `itemgraph.explain` + `itemgraph.audit`; confidence is deterministic. |
 | Item, player, and container chronology | `/ig trace item|player|container ...` | Shipped | `itemgraph.command` + `itemgraph.trace` + `itemgraph.audit`; async, read-only, capped at 100 hops. |
-| Vanilla menu flow browser | `/ig gui item|player|container ...` | Implemented; focused tests passed, refreshed row-label screenshot pending | `itemgraph.command` + `itemgraph.gui` + `itemgraph.audit`; player-only, read-only, up to nine entries/page (also capped by `query.max_page_size`) with numbered row labels, selectable details, and page controls. |
+| Vanilla menu flow browser | `/ig gui item|player|container ...` | Implemented; paired [menu](test-evidence/m8-flow-browser/page-1-menu.png), [row labels](test-evidence/m8-flow-browser/page-1-companion.png), and [detail](test-evidence/m8-flow-browser/observation-detail.png) screenshots | `itemgraph.command` + `itemgraph.gui` + `itemgraph.audit`; player-only, read-only, up to nine entries/page (also capped by `query.max_page_size`) with numbered row labels, selectable details, and page controls. |
 | In-world block history and container flow inspection | `/ig inspect [on|off|status]` | Shipped | `itemgraph.command` + `itemgraph.command.inspect`; protected audit evidence also requires `itemgraph.audit`. |
 | Normal ingest-and-correlate cycle | `/ig ingest now` | Shipped | `itemgraph.command` + `itemgraph.ingest`; queues background work. |
 | Optional historical GriefLogger import | `/ig ingest history` | Partial | `itemgraph.command` + `itemgraph.ingest` + `itemgraph.import`; read-only source import, configured only. |
 | Database, queue, and query bounds | `config/itemgraph*.toml`; [configuration reference](CONFIGURATION.md) | Shipped | Operator configuration; restart may be required. |
-| Third-party mod integration | `com.itemgraph.api` `PREVIEW_1`; [API example](../examples/api-consumer) | Preview | Trusted server-side mod code; source-scoped bounded observations and async queries. |
+| Third-party mod integration | [API contract](API.md) and [compiling example](../examples/api-consumer) | NeoForge server-mod API preview; not a player command | `com.itemgraph.api` `PREVIEW_1`; trusted server-side mod code; source-scoped bounded observations and async queries. |
 | Rich result hover and safe location actions | `/ig event`, `/ig explain`, `/ig trace`, paged lookups, `/ig help goto` | Implemented; local tests passed, PR CI pending | Hover shows bounded evidence details; click `[Go to ...]` for a private, one-use action that expires after two minutes and rechecks query permissions. `/ig goto <token>` is only the internal click action; do not type the token manually. |
 | Player-broken container contents | Native block-break evidence | Implemented; local tests passed, PR CI pending | Per-slot removal is recorded; destination stays `UNKNOWN` until an authoritative drop link exists. |
 

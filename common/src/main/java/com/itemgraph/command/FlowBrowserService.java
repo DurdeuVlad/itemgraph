@@ -293,10 +293,9 @@ public final class FlowBrowserService {
             for (int i = 0; i < Math.min(page.pageSize(), page.hops().size()); i++) {
                 TraceHop hop = page.hops().get(i);
                 String evidence = companionEvidenceClass(hop);
-                String eventKind = hop.source() == TraceHop.Source.TRANSFORMATION
-                        ? safeSummary(hop.detail(), 48) : isAmbiguousSourceGroup(hop)
-                            ? "ambiguous source group; no independent quantity capacity"
-                            : safeSummary(hop.detail(), 48);
+                String eventKind = isAmbiguousSourceGroup(hop)
+                        ? "ambiguous source group; no independent quantity capacity"
+                        : companionEventKind(hop);
                 String interval = hop.endMs() > hop.timestampMs()
                         ? QueryFormatter.formatTime(hop.timestampMs()) + " to " + QueryFormatter.formatTime(hop.endMs())
                         : QueryFormatter.formatTime(hop.timestampMs());
@@ -305,6 +304,26 @@ public final class FlowBrowserService {
             }
         }
         return List.copyOf(lines);
+    }
+
+    private static String companionEventKind(TraceHop hop) {
+        if (hop.source() == TraceHop.Source.TRANSFORMATION) {
+            String detail = hop.detail() == null ? "" : hop.detail();
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("^\\[TRANSFORMATION ([A-Z0-9_]+)(?:\\s|\\])")
+                    .matcher(detail);
+            return matcher.find() ? "TRANSFORMATION " + matcher.group(1) : "TRANSFORMATION";
+        }
+        if (hop.kind() == TraceHop.Kind.INFERRED) {
+            return safeSummary(hop.detail(), 48);
+        }
+        String detail = hop.detail() == null ? "" : hop.detail().trim();
+        int metadata = detail.indexOf(" [");
+        int corroboration = detail.indexOf(" corroborates observation#");
+        int end = metadata < 0 ? detail.length() : metadata;
+        if (corroboration >= 0) end = Math.min(end, corroboration);
+        String eventKind = detail.substring(0, end).trim();
+        return eventKind.isEmpty() ? "event kind unavailable" : safeSummary(eventKind, 48);
     }
 
     static String companionEvidenceClass(TraceHop hop) {

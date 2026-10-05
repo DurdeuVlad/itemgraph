@@ -135,6 +135,23 @@ for limit in ("explosion", "Enderman", "moving blocks", "zero-net", "backpacks")
         fail(f"admin quick start omits the concrete evidence coverage limit {limit!r}")
 if not re.search(r"not a\s+calibrated probability", quick_start, re.I):
     fail("admin quick start must explain that deterministic confidence is not probability")
+gui_claims = [line for line in readme.splitlines() if "/ig gui" in line]
+if not gui_claims or any(node not in " ".join(gui_claims) for node in permission_nodes):
+    fail("README /ig gui guidance must name command, GUI, and audit permissions together")
+for required in ("general.grieflogger_integration_enabled=true",
+                "grieflogger_integration_enabled=true", "grieflogger_database_path",
+                "`/ig ingest history`", "`/ig status`",
+                "GriefLogger database stays", "ItemGraph writes imported rows"):
+    if required not in quick_start:
+        fail(f"admin quick start is missing a safe historical-import step: {required}")
+for required in ("itemgraph-pending-evidence.json", "itemgraph-pending-evidence.json.overflow",
+                "logs/latest.log", "beside the SQLite database", "Do not edit the JSON"):
+    if required not in quick_start:
+        fail(f"admin quick start is missing pending-evidence recovery guidance: {required}")
+for required in ("[API contract](API.md)", "[compiling example](../examples/api-consumer)",
+                "NeoForge server-mod API preview; not a player command"):
+    if required not in quick_start:
+        fail(f"admin quick start is missing preview API discovery context: {required}")
 
 architecture_routes = (
     r"right.?click.{0,240}Container.{0,240}FlowBrowserService\.openContainer",
@@ -182,4 +199,4 @@ if (
 ):
     fail("admin permission docs must state exact named-node checks, explicit deny, and the level-2 fallback")
 
-print("admin UX docs: command topics, inspection routes, and current permissions are aligned")
+print("admin UX docs: command topics, permission contracts, import/recovery steps, API boundary, and inspection routes are aligned")

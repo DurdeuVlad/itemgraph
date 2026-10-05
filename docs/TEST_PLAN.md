@@ -1506,11 +1506,9 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
   UTC labels, and preservation of resolver candidate ten on its own nine-row page.
 - The M8 milestone-end loader batch and both loader GameTest suites passed on 2026-10-05; see
   “M8 milestone batch, 2026-10-05” above. The earlier M11 connected-client replay documented
-  above covers the older menu path, not this new chat companion; this batch did not capture a
-  refreshed normal-scale screenshot of the new row labels. The available
-  `docs/test-evidence/m11-admin-first-ux/` screenshots predate this change and do not prove its
-  visible row labels; #146 remains open for that acceptance evidence. The operator's explicit
-  decision to skip live clicks for #26 remains in effect.
+  above covers the older menu path, not this new chat companion. A refreshed 2026-10-05
+  connected-client capture for #146 is recorded below; its PR CI/review remain pending. The
+  operator's explicit decision to skip live clicks for #26 remains in effect.
 ## M8 issue #140: contents of player-broken containers
 
 Both loader GameTest suites run `ContainerBreakConformanceFixture` through the
@@ -1593,13 +1591,41 @@ at once in open chat. MC Pilot reported a 427×240 logical viewport at device sc
 factor 2 (854×480 effective). Screenshot: [help overview in open chat](test-evidence/m12-admin-first-ux/help-overview-open-chat.png).
 The QA client had every Minecraft sound category, including music, at `0.0` and
 its MC Pilot `mute` flag enabled. The isolated server, world, and database were
-under the temporary QA directory; the loopback server and client were stopped
-after capture. No production service, GriefLogger jar/database, external listing,
-version bump, or distributable ItemGraph jar was used.
+under the temporary QA directory; the loopback server was stopped after capture
+and the client disconnected. No production service, GriefLogger jar/database,
+external listing, version bump, or distributable ItemGraph jar was used.
 
-This proves #149's root-help layout and the M12 documentation/help contracts; it
-does not prove the separate #146 numbered menu companion labels. #146 remains
-open pending its dedicated screenshot, and the explicit skip of #26 live clicks
-is unchanged. M12 issue acceptance and merge remain tied to PR review/merge and
-the unresolved M8 evidence above.
+This proves #149's root-help layout and the M12 documentation/help contracts. A
+separate connected-client capture for #146 is recorded below. The explicit skip
+of #26 live clicks is unchanged. M12 issue acceptance and merge remain tied to
+PR review/merge and the unresolved M8 evidence above.
+
+## M8 issue #146: flow-browser numbered companion replay — 2026-10-05
+
+The fresh temporary NeoForge 21.1.248 / Minecraft 1.21.1 server ran ItemGraph
+0.3.2 as its only gameplay mod on `127.0.0.1:25575`; GriefLogger integration was
+disabled. MC Pilot client `itemgraph-qa-1.21.1-neoforge` used the existing muted
+profile. In the disposable world, `/give @s minecraft:diamond 3` and a second
+`/give @s minecraft:diamond 2` produced two `ADMIN_ITEM_CREATE` observations.
+Two drops produced `DROP_ITEM` observations for the same canonical diamond
+fingerprint. `/ig gui item "id:1"` opened `ItemGraph: item #1` with four matching
+rows. Its numbered companion showed `OBSERVED`, safe `minecraft:diamond`
+identity, each `ADMIN_ITEM_CREATE` or `DROP_ITEM` kind, and UTC time.
+
+Evidence is paired: [menu page with four matching rows](test-evidence/m8-flow-browser/page-1-menu.png)
+and [the page's four numbered chat companion lines](test-evidence/m8-flow-browser/page-1-companion.png).
+The MC Pilot viewport was 427×240 logical pixels at device scale factor 2
+(854×480 effective, default GUI scale). Selecting slot 1 opened `Observation #1`;
+MC Pilot's post-resynchronization state showed the row slot and cursor empty. The
+checked-in detail screenshot proves the detail page opened; it does not show the
+transient cursor state. No raw component payload, unrelated player, or remote
+inventory was present in the companion. The no-client-mod vanilla menu remained
+read-only after the click.
+
+This supplements `FlowBrowserMenuTest`'s cross-loader observed, inferred,
+ambiguous-source-group, transformation, missing-fingerprint, unresolved-state,
+page-boundary, and item-movement rejection assertions. The isolated server,
+world, and database were in the temporary QA directory; the server was stopped
+after capture and the client disconnected. No production server or GriefLogger jar/database was used. PR CI and
+independent review of the attached screenshot remain pending before #146 closes.
 

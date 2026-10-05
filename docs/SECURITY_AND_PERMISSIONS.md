@@ -170,7 +170,11 @@ matches through counts, candidate pages, or error distinctions. The `/ig gui` br
 `itemgraph.command` and `itemgraph.gui`. `FlowBrowserMenu` rechecks both named permissions while open
 and on every click, and the menu never delegates an item-movement action to
 `ChestMenu`; it handles only page navigation, flow selection, detail display, and close.
-All page/detail SQL runs through the read-only `QueryDispatcher` connection.
+All page/detail SQL runs through the read-only `QueryDispatcher` connection. Its
+numbered chat companion contains only rows from that authorized query and labels each
+with evidence class, a safe item identity or explicit fallback, event kind, and UTC
+time where available; the number maps to the corresponding menu slot. It does not
+expose raw NBT/component payloads, unrelated players, or hidden inventories.
 
 `/ig inspect` requires both `itemgraph.command` and `itemgraph.command.inspect`.
 `InspectionListener` rechecks permission on every supported-container click, and permission

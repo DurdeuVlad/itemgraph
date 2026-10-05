@@ -166,7 +166,9 @@ for navigation and detail pagination. Since vanilla chest menus show item labels
 hovered, opening a page also sends a numbered chat companion with one concise description
 per row. The row number is the one-based menu slot, so admins can scan meaning without
 hovering and use the matching slot to open details. Icons and hover text add detail but are
-not the only row labels. Item queries use the same fingerprint resolver as `/ig trace item`, player
+not the only row labels. The detail view shows one paper icon per field; hover an icon to read
+its full text, use the labeled page controls for additional fields, and select Back to return.
+Item queries use the same fingerprint resolver as `/ig trace item`, player
 queries use the same player-node lookup as `/ig trace player`, and container queries match
 the explicit dimension and coordinates through the same container-node lookup as the trace
 service. Ambiguous item, player-node, or container-node matches open a candidate-selection
