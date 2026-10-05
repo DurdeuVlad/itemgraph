@@ -118,10 +118,10 @@ requires `itemgraph.audit` in addition to the command's own node.
 
 | Moderator role | Additional exact nodes | Verify safely |
 | --- | --- | --- |
-| Ordinary event lookup | `itemgraph.command.lookup` | In-game, run `/ig lookup BREAK_BLOCK 10 60` in a test world. Protected chat, command, admin-item, and creative events also require `itemgraph.audit`. |
+| Ordinary event lookup | `itemgraph.command.lookup` | Every command also needs `itemgraph.command`. Chat/command, staff/admin/creative, and sensitive-location events (including block/container and entity/projectile events) also need `itemgraph.audit`. In a test world, verify `/ig lookup PLAYER_JOIN 10 60` succeeds and a moderator without audit permission cannot query `KILL_ENTITY`. |
 | Flow investigation | `itemgraph.trace`, `itemgraph.event`, `itemgraph.explain`, `itemgraph.audit`; add `itemgraph.command.lookup` and `itemgraph.command.page` to continue a saved lookup | Run `/ig trace item "minecraft:stone" 10 60`; open an observation with `/ig event <observationId>` or an inferred edge with `/ig explain <edgeId>`. |
 | Block inspector | `itemgraph.command.inspect`; add `itemgraph.audit` for block-history results | Run `/ig inspect status`, then `/ig inspect on` in a test world. Block-history clicks need audit permission. |
-| Container flow browser | `itemgraph.command.inspect`, `itemgraph.gui`, `itemgraph.audit` | In a test world, run `/ig inspect on` and right-click a supported container. The browser is read-only. |
+| Container flow browser | `itemgraph.command.inspect`, `itemgraph.gui`, `itemgraph.audit` | A player must run `/ig inspect on` and right-click a supported container; the GUI is player-only and read-only. |
 | Optional GriefLogger history import | `itemgraph.ingest`, `itemgraph.import` | On an isolated test server with a copy of the source database and ItemGraph data, run `/ig ingest history`; this queues a real import, not a permission-only check. There is no read-only import dry run. |
 
 NeoForge resolves named grants through its PermissionAPI provider. Fabric bundles
@@ -141,10 +141,10 @@ parent inheritance.
 | What item flow touched this container? | `/ig trace container <x> <y> <z> [limit] [sinceMinutes]` | A trace for container nodes at those coordinates. Use `/ig gui container` when dimension disambiguation or visual paging is useful. |
 | What blocks, commands, or interactions were recorded nearby? | `/ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]` | Native observed audit events in a bounded cube. |
 | What craft or smelt result was taken? | `/ig lookup CRAFT_OUTPUT_UNRESOLVED 50 1440` or `SMELT_OUTPUT_UNRESOLVED` | Requires `itemgraph.command` + `itemgraph.command.lookup` + `itemgraph.audit`. Shows the observed result item, output count, fingerprint, event ID, and `TRANSFORMATION_INPUTS_NOT_OBSERVED`; it does not prove the recipe or create a trace edge. `/ig event event:<evidence-uuid>` opens its detail. Legacy `CRAFT`/`SMELT` rows are unresolved and excluded from trace lineage. Anvil rename/repair remains a separate transition; trades, enchanting, brewing, smithing, grindstone, and loot are not covered. |
-| What did a staff item command attempt or change? | `/ig lookup near <dimension> <x> <y> <z> 32 ADMIN_ITEM_COMMAND_EFFECT 50 1440` (repeat with `ADMIN_ITEM_COMMAND_ATTEMPT`, `ADMIN_ITEM_COMMAND_FAILURE`, or `ADMIN_ITEM_COMMAND_UNRESOLVED`) | Staff-private event outcomes near the coordinates. The command record keeps the root and outcome, not selector expressions or command arguments. To inspect an item's fingerprint flow separately, run `/ig trace item "<item-id>" 50 1440`; this is not scoped to that command or actor, and a console command actor can remain `UNKNOWN`. If the item query lists several fingerprints, choose the matching fingerprint ID and run `/ig trace item "id:<fingerprint-id>" 50 1440`. |
+| What did a staff item command attempt or change? | `/ig lookup near <dimension> <x> <y> <z> 32 ADMIN_ITEM_COMMAND_EFFECT 50 1440` (repeat with `ADMIN_ITEM_COMMAND_ATTEMPT`, `ADMIN_ITEM_COMMAND_FAILURE`, or `ADMIN_ITEM_COMMAND_UNRESOLVED`) | Staff-private event outcomes near the coordinates. The command record keeps the root and outcome, not selector expressions or command arguments. To inspect an item's fingerprint flow separately, run `/ig trace item "<item-id>" 50 1440`; this needs `itemgraph.trace` + `itemgraph.audit` and does not associate the item with a specific command or actor. A console command actor can remain `UNKNOWN`. If the item query lists several fingerprints, choose the matching fingerprint ID and run `/ig trace item "id:<fingerprint-id>" 50 1440`; this follows one fingerprint and does not combine component variants. |
 | What creative inventory or block action was recorded? | `/ig lookup near <dimension> <x> <y> <z> 32 CREATIVE_SLOT_EFFECT 50 1440` or `/ig lookup near <dimension> <x> <y> <z> 32 CREATIVE_BLOCK_RESULT 50 1440` | Staff-private action outcomes. Use `CREATIVE_SLOT_ATTEMPT`, `CREATIVE_BLOCK_ATTEMPT`, or `CREATIVE_BLOCK_UNRESOLVED` to check other outcomes. These records do not themselves prove a quantity change. |
 | What item quantity changed through creative inventory? | `/ig lookup filters action.creative_item_create radius.32 time.24h` (repeat with `action.creative_item_remove`) | Creative item-flow observations within 32 blocks of the issuing player over 24 hours. This filter is player-only and requires the audit permission. |
-| What was recorded when a container was broken? | `/ig lookup near <dimension> <x> <y> <z> 16 CONTAINER_BREAK_COMPLETED 50 1440` (also check `CONTAINER_BREAK_UNRESOLVED`) | The parent break audit event. This event-type lookup requires `itemgraph.command.lookup`; it does not return the slot rows. An unresolved drop link may accompany a completed break. |
+| What was recorded when a container was broken? | `/ig lookup near <dimension> <x> <y> <z> 16 CONTAINER_BREAK_COMPLETED 50 1440` (also check `CONTAINER_BREAK_UNRESOLVED`) | The parent break audit event. This event-type lookup requires `itemgraph.command.lookup`; it does not return the slot rows. `CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED` means the break/snapshot exists but no drop destination was established. `CONTAINER_SNAPSHOT_INCOMPLETE` means the snapshot itself is incomplete. |
 | Which item stacks were recorded in the broken container? | `/ig trace container <x> <y> <z> 50 1440` | If the destroyed container node resolves, the trace shows its slot-removal observations. It requires `itemgraph.trace` and `itemgraph.audit`; no destination or recipient is established. |
 | What evidence supports one raw item event? | `/ig event <observationId>` or `/ig event event:<uuid>` | One stored observation, transformation, or unresolved audit record and its metadata. Admin/creative mutation rows also show copyable mutation, command-attempt, observation, transformation, and unresolved-event UUIDs. |
 | Why does ItemGraph connect these events? | `/ig explain <edgeId>` | One inferred edge, deterministic confidence, explanation, and supporting evidence IDs. |
@@ -203,94 +203,37 @@ assume a backpack, pipe, or arbitrary modded inventory is covered; see
 [GriefLogger integration](GRIEFLOGGER_INTEGRATION.md) and
 [automated-container architecture](ARCHITECTURE.md#automated-container-transfers-issue-4).
 
-## 4. Follow one concrete incident
+## 4. Run a first read-only investigation
 
-Replace the sample coordinates and IDs with the values from your server:
+Use a test world or a known event in a time range you control. These commands only read
+ItemGraph data:
 
-These executable examples are parsed against the registered `/ig` command tree by
-`ItemGraphCommandsHelpTest.documentedQuickStartExamplesParseAgainstRegisteredCommandTree`.
-
-<!-- executable-command-examples:start -->
+<!-- guide-command-examples:start -->
 ```text
-/ig help journeys
-/ig lookup BREAK_BLOCK 10 60
-/ig trace item "minecraft:stone" 10 60
-/ig inspect status
-/ig inspect on
-/ig ingest history
-/ig event event:00000000-0000-0000-0000-000000000000
-/ig page 2
-/ig gui container minecraft:overworld 120 64 -30
-/ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 50 1440
-/ig lookup near minecraft:overworld 120 64 -30 32 ADMIN_ITEM_COMMAND_EFFECT 50 1440
-/ig trace item "minecraft:diamond" 50 1440
-/ig trace item "id:123" 50 1440
-/ig lookup near minecraft:overworld 120 64 -30 32 CREATIVE_SLOT_EFFECT 50 1440
-/ig lookup near minecraft:overworld 120 64 -30 32 CREATIVE_BLOCK_RESULT 50 1440
-/ig lookup filters action.creative_item_create radius.32 time.24h
-/ig lookup filters action.creative_item_remove radius.32 time.24h
-/ig lookup near minecraft:overworld 120 64 -30 16 CONTAINER_BREAK_COMPLETED 50 1440
-/ig lookup near minecraft:overworld 120 64 -30 16 CONTAINER_BREAK_UNRESOLVED 50 1440
-/ig trace container 120 64 -30 50 1440
-/ig trace item "minecraft:diamond" 20 1440
-/ig lookup action.break_block include.diamond_ore time.1h radius.50
-/ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 20 60
-/ig event 633
-/ig event event:123e4567-e89b-12d3-a456-426614174000
-/ig explain 8
+/ig status
+/ig lookup BREAK_BLOCK 20 60
+/ig trace item "minecraft:stone" 20 60
 ```
+<!-- guide-command-examples:end -->
 
-The first command looks for recorded block-break events within 32 blocks and the last 24
-hours. The second checks staff item-command effects in that area; the next two check
-creative-slot and creative-block outcomes. The following filters find creative item-flow
-creation and removal within 32 blocks of the issuing player, so run them in-game at the
-relevant location. The next two commands query the parent break event and unresolved drop
-link near the container's recorded position. `CONTAINER_BREAK_UNRESOLVED` can accompany a
-successful `CONTAINER_BREAK_COMPLETED`: read its reason code. For example,
-`CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED` means the break and snapshot were
-recorded but the drops were not linked to a destination. An incomplete snapshot is
-reported by the separate `CONTAINER_SNAPSHOT_INCOMPLETE` reason code.
+1. Check `/ig status` first. Confirm `captureState=ACTIVE` and database connectivity;
+   if status reports a problem, follow the safe next action in section 1 before relying
+   on an empty result.
+2. `/ig lookup BREAK_BLOCK 20 60` searches the last hour for recorded block-break audit
+   events. Replace the event type, limit, and time window to match your question.
+3. `/ig trace item "minecraft:stone" 20 60` shows item-flow observations and any
+   separately inferred links for that item type. Copy an observation ID to
+   `/ig event <observationId>` or an inferred edge ID to `/ig explain <edgeId>`.
+   Do not use an audit row number or subject UUID as an observation ID.
 
-For an admin or creative outcome, prefix a UUID from its related observation,
-transformation, or unresolved-event list with `event:` and open it with
-`/ig event event:<uuid>`. `item_flow_link_status=LINKED` means at least one item-flow
-observation or transformation was accepted for capture. `UNRESOLVED_EVIDENCE_RECORDED`
-means ItemGraph retained a before/after audit record but did not establish a traceable
-transformation. `PARTIAL_LINK_LIST` means one or more bounded lists omitted records;
-`NO_ITEM_EVIDENCE_RECORDED` means the command outcome has no linked item record. These
-links do not identify an actor when the source could not establish one, or turn attempts
-and failures into item movement.
+An empty result only means no stored row matched. Check capture start time, event support,
+target, dimension, time range, and permissions. A parser-only command corpus used by both
+loader tests is at `docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt`; it is
+test input, **not a workflow or a list of commands to paste into a live server**. Importing
+history and enabling in-world inspection are separate, intentional actions described above;
+neither is part of this read-only first investigation.
 
-Compare separate staff command attempt, effect, failure, and unresolved rows. An
-`ADMIN_ITEM_COMMAND_EFFECT` row is the command outcome; `ADMIN_ITEM_CREATE` and
-`ADMIN_ITEM_REMOVE` are the separate quantity-flow observations. Run
-`/ig trace item "<item-id>" 50 1440` for a time-ordered flow by item ID. If that query
-returns multiple component fingerprints, select the matching candidate ID and rerun it as
-`/ig trace item "id:<fingerprint-id>" 50 1440`. This follows one fingerprint and does not
-combine component variants. The trace can include admin observations, but it does not
-associate them with a specific command or actor; console command records may have actor
-`UNKNOWN`. Creative action audit rows use `CREATIVE_SLOT_*` and
-`CREATIVE_BLOCK_*`; the separate `CREATIVE_ITEM_CREATE` and `CREATIVE_ITEM_REMOVE` action
-filters find their item quantity observations.
-
-`/ig lookup near` returns the container-break parent event, not its per-slot observations.
-Use `/ig trace container` to inspect those observations if the destroyed container node
-still resolves. They preserve item metadata and source slot but do not establish a drop
-entity, recipient, or destination. Staff item-command and creative action event rows require
-`itemgraph.command.lookup` plus `itemgraph.audit`; the container-break event lookup requires
-`itemgraph.command.lookup`. Creative item-flow filters require `itemgraph.command.lookup`
-and `itemgraph.audit`. `/ig trace container` requires `itemgraph.trace` and
-`itemgraph.audit`. The final trace example follows matching item evidence, capped at 20
-rows. Use an observation ID from output with `/ig event`; use an inferred edge ID with
-`/ig explain`. Matching item type alone does not prove that two stacks are the same
-physical object.
-
-To browse a particular container without guessing its dimension, use:
-
-```text
-/ig gui container minecraft:overworld 120 64 -30
-```
-<!-- executable-command-examples:end -->
+## 5. Read a flow-browser result
 
 The flow browser is a vanilla menu. It has no ItemGraph-specific item, screen, packet, or
 client installation requirement. Each page has at most nine rows. A numbered chat companion
@@ -318,7 +261,7 @@ UTC time, and recorded endpoints. Click `[Go to ...]` only when you want to move
 player to a recorded spatial endpoint; the link expires after two minutes, works once, and
 requires the same query permissions when clicked. Console results remain plain text.
 
-## 5. Read the result correctly
+## 6. Read the evidence correctly
 
 - **OBSERVED** means a specific event or inventory delta was recorded.
 - **INFERRED** means ItemGraph linked observations under its deterministic temporal,
@@ -346,14 +289,25 @@ A confidence value is a deterministic score from documented evidence factors, no
 calibrated probability that the history is true. Use `/ig explain <edgeId>` to see the
 factors, candidate counts, and supporting observations behind a link.
 
+Unified lookup rows have source-prefixed IDs. For `observation#42`, pass only `42` to
+`/ig event 42`. An `audit#42` row is already inline evidence; transformation and imported
+IDs are source references, not `/ig event` arguments. Read their row detail or narrow and
+rerun the lookup. For an imported GriefLogger row, `/ig lookup provenance` requires its
+source SHA-256, table, and exact source key; use only values supplied by the import record.
+An unresolved row may not contain an event UUID, so use `/ig event event:<uuid>` only when
+that exact supported UUID is printed. `/ig explain <edgeId>` requires
+`itemgraph.explain` plus `itemgraph.audit`; item trace follow-ups require
+`itemgraph.trace` plus `itemgraph.audit`.
+
 ### Coverage limits to check before trusting an empty result
 
 An empty query means no matching row exists in the evidence ItemGraph has stored for that
 query. It does not establish that nothing happened. Check the capture start time, event
 type, permissions, dimension, and target first. Current known limits include explosion
-and other environmental causes, Enderman causes, moving blocks, zero-net container
-sessions where items are taken and returned before close, and arbitrary modded backpacks
-or inventories without an adapter. Container GUI evidence is a net change over the
+and other environmental causes, Enderman causes, moving blocks, entity/projectile lifecycle
+and impact outcomes, item-entity merge/removal, zero-net container sessions where items
+are taken and returned before close, and arbitrary modded backpacks or inventories without
+an adapter. Container GUI evidence is a net change over the
 open/close session, not a record of each click. The feature status and evidence boundary
 are listed in [Feature parity inventory](FEATURE_PARITY_INVENTORY.md).
 
@@ -380,7 +334,7 @@ NeoForge server mods; it is not an in-game command or a stable API guarantee. Th
 [compiling consumer example](../examples/api-consumer) demonstrates registration,
 bounded observation submission, and asynchronous queries.
 
-## 6. Common failures and safe next steps
+## 7. Common failures and safe next steps
 
 | Message or symptom | What it means | Safe next step |
 | --- | --- | --- |
@@ -425,7 +379,7 @@ listed boundary; `Planned` means there is no user-facing implementation to use y
 | Native audit events for one stored player name | `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; protected event types also require `itemgraph.audit`; exact stored-name match. |
 | Admin item-command outcomes | `/ig help lookup admin`; `/ig lookup ADMIN_ITEM_COMMAND_EFFECT 50 1440` | Shipped | `itemgraph.command` + `itemgraph.command.lookup` + `itemgraph.audit`; the help topic names attempt/failure/unresolved alternatives. Records do not expose command arguments or selector values; item flow must be queried separately. |
 | Creative inventory/block outcomes | `/ig lookup near <dimension> <x> <y> <z> 32 CREATIVE_SLOT_EFFECT 50 1440`; quantity: `/ig lookup filters action.creative_item_create radius.32 time.24h` | Shipped | Audit lookup requires `itemgraph.command.lookup` + `itemgraph.audit`; quantity filters are player-only. Outcome records do not by themselves prove a quantity change. |
-| Entity, death-drop, throw, and projectile-spawn audit | `/ig help lookup lifecycle`; `/ig lookup KILL_ENTITY 50 1440` | Partial | `itemgraph.command` + `itemgraph.command.lookup` + `itemgraph.audit`; query `THROW_ITEM`, `SHOOT_ITEM`, or `PROJECTILE_SPAWN_ACCEPTED` for those events. Throw/shoot are attempts and accepted spawn is separate from impact; death-drop flow does not identify the killer or cause. Full lifecycle is tracked by #56. |
+| Entity, death-drop, throw, and projectile-spawn evidence | `/ig help lookup lifecycle`; `/ig lookup KILL_ENTITY 50 1440` | Partial | `itemgraph.command` + `itemgraph.command.lookup`; `KILL_ENTITY` and `PROJECTILE_SPAWN_ACCEPTED` also require `itemgraph.audit`. `THROW_ITEM`/`SHOOT_ITEM` are attempts. Death-drop trace requires `itemgraph.trace` + `itemgraph.audit` and does not identify the killer/cause. Accepted spawn is not impact. No entity-removal, impact, or item-entity merge/despawn query is shipped; #56 tracks that work. |
 | Craft, smelt, and anvil transformations | `/ig help lookup transformations`; `/ig lookup filters action.craft radius.32 time.24h` | Partial | `itemgraph.command` + `itemgraph.command.lookup` + `itemgraph.audit`; player-only radius filter. Repeat with `action.smelt`, `action.anvil_rename`, or `action.anvil_repair`. Recorded inputs/results do not establish full recipe, station, or trade partner; other stations are tracked by #57. |
 | Broken-container slot-removal observations | `/ig lookup near <dimension> <x> <y> <z> 16 CONTAINER_BREAK_COMPLETED`; then `/ig trace container <x> <y> <z> 50 1440` | Partial | Lookup: `itemgraph.command.lookup` + `itemgraph.audit`; trace: `itemgraph.trace` + `itemgraph.audit`. Also query `CONTAINER_BREAK_UNRESOLVED`. Slot removals can identify source container but destination/recipient stays `UNKNOWN`. |
 | Continue the issuing player's saved lookup | `/ig page <page> [session]` | Shipped | `itemgraph.command` + `itemgraph.command.page` + the originating lookup permission; protected sessions retain `itemgraph.audit`; private 30-minute session. |

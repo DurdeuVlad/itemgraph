@@ -1442,9 +1442,20 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
   non-container inspection tests continue to cover block-history behavior.
 - `ItemGraphCommandsHelpTest.helpListsEveryRegisteredCommandPath` (the registered-path
   assertion in the current suite) checks `lookup near`, `lookup page`, `lookup player`,
-  `lookup filters`, and `lookup provenance` help topics. The quick-start's executable
-  commands are parsed against the registered Brigadier tree by
-  `documentedQuickStartExamplesParseAgainstRegisteredCommandTree`.
+  `lookup filters`, and `lookup provenance` help topics. Both loader suites parse the
+  short read-only quick-start commands and the shared
+  `docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt` against their registered
+  Brigadier trees. The broad corpus is syntax-only test input: parsing does not execute
+  commands or verify permissions, stored IDs, capture state, query results, or safety.
+- `ItemGraphCommandsHelpTest.lookupOnlyGrantCannotReachSensitiveEventAliasesOrSavedPages`
+  attempts direct, coordinate, and filtered queries for sensitive location/lifecycle data
+  without `itemgraph.audit`, then checks protected pages retain the audit grant.
+  `sensitiveLookupAliasesAndBroadFiltersRetainAuditPermissionAcrossPages` verifies audit
+  event privacy comes from the `AUDIT_EVENT` taxonomy surface while unified filters also
+  include sensitive observation/transformation surfaces (`THROW_ITEM` is the regression
+  case). Fabric runs the same direct/near/filter denial cases through its shared command
+  registration. The help tests check the source-prefixed observation-ID route and exact
+  lookup, GUI, page, trace, and explain grants.
 - Before issue #145 expanded M11, the #142/#143 implementation had a grouped baseline.
   The final milestone-end batch, after all three issues were implemented, ran:
   `./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`.

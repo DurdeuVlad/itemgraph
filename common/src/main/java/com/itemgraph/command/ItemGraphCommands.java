@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import com.itemgraph.audit.AuditReport;
+import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.audit.AuditService;
 import com.itemgraph.correlation.CorrelationResult;
@@ -1331,17 +1332,39 @@ public final class ItemGraphCommands {
             return true;
         }
         String normalized = eventType.toUpperCase(java.util.Locale.ROOT);
-        return AUDIT_ONLY_LOOKUP_TYPES.contains(normalized)
+        if (AUDIT_ONLY_LOOKUP_TYPES.contains(normalized)
                 || normalized.startsWith("ADMIN_ITEM_COMMAND_")
                 || normalized.startsWith("CREATIVE_SLOT_")
                 || normalized.startsWith("CREATIVE_BLOCK_")
                 || normalized.startsWith("ADMIN_ITEM_")
-                || normalized.startsWith("CREATIVE_ITEM_");
+                || normalized.startsWith("CREATIVE_ITEM_")) {
+            return true;
+        }
+        EventTaxonomy.Definition definition = EventTaxonomy.find(normalized,
+                EventTaxonomy.Surface.AUDIT_EVENT).orElse(null);
+        return definition != null && requiresAuditPrivacy(definition);
     }
 
     static boolean requiresAuditPermission(List<String> eventTypes) {
         return eventTypes == null || eventTypes.isEmpty()
-                || eventTypes.stream().anyMatch(ItemGraphCommands::requiresAuditPermission);
+                || eventTypes.stream().anyMatch(eventType -> requiresAuditPermission(eventType)
+                        || hasSensitiveUnifiedEvidence(eventType));
+    }
+
+    private static boolean hasSensitiveUnifiedEvidence(String eventType) {
+        if (eventType == null || eventType.isBlank()) return true;
+        String normalized = eventType.toUpperCase(java.util.Locale.ROOT);
+        for (EventTaxonomy.Surface surface : List.of(
+                EventTaxonomy.Surface.ITEM_OBSERVATION, EventTaxonomy.Surface.TRANSFORMATION)) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(normalized, surface).orElse(null);
+            if (definition != null && requiresAuditPrivacy(definition)) return true;
+        }
+        return false;
+    }
+
+    private static boolean requiresAuditPrivacy(EventTaxonomy.Definition definition) {
+        return definition.privacy() == EventTaxonomy.PrivacyClass.SENSITIVE_LOCATION
+                || definition.privacy() == EventTaxonomy.PrivacyClass.STAFF_ACTIVITY;
     }
 
     static List<String> lookupPermissionsForType(String eventType) {
