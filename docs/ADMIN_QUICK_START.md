@@ -335,7 +335,7 @@ An empty query means no matching row exists in the evidence ItemGraph has stored
 query. It does not establish that nothing happened. Check the capture start time, event
 type, permissions, dimension, and target first. The world/environment capture added in
 the #55 work is still in review and is not in a released JAR; released builds may miss
-explosion, environmental, Enderman, and moving-block causes. Remaining known limits
+explosion, environmental, Enderman, and moving blocks caused by pistons or falling blocks. Remaining known limits
 include arbitrary modded entity-caused placement (no shared authoritative result API
 exists in the pinned loaders), zero-net container sessions where items are taken and
 returned before close, and arbitrary modded backpacks or inventories without an adapter.
