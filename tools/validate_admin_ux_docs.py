@@ -123,6 +123,33 @@ if ("explicit permission-provider denial" not in readme
 if ("Run `/ig help permissions` for the exact access nodes" not in readme
         or "`/ig help permissions` explains access nodes" not in listing):
     fail("README and CurseForge must point admins to the help topic that documents permission nodes")
+
+for required in ("ADMIN_ITEM_COMMAND_EFFECT", "ADMIN_ITEM_COMMAND_ATTEMPT",
+                "ADMIN_ITEM_COMMAND_FAILURE", "ADMIN_ITEM_COMMAND_UNRESOLVED",
+                "CREATIVE_SLOT_EFFECT", "CREATIVE_BLOCK_RESULT",
+                '/ig trace item "<item-id>" 50 1440',
+                '/ig trace item "id:<fingerprint-id>" 50 1440',
+                "action.creative_item_create", "action.creative_item_remove",
+                "CREATIVE_ITEM_CREATE", "CREATIVE_ITEM_REMOVE",
+                "CONTAINER_BREAK_COMPLETED", "CONTAINER_BREAK_UNRESOLVED",
+                "CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED",
+                "CONTAINER_SNAPSHOT_INCOMPLETE", "itemgraph.command.lookup",
+                "itemgraph.trace", "itemgraph.audit",
+                "no destination or recipient is established"):
+    if required not in quick_start:
+        fail(f"admin quick start is missing the moderator workflow detail {required!r}")
+if "itemgraph.command.trace" in quick_start:
+    fail("admin quick start names a trace permission node that does not exist")
+if (not re.search(r"does not\s+associate them with a specific command or actor", quick_start)
+        or "choose the matching fingerprint ID" not in quick_start
+        or not re.search(r"does not\s+combine component variants", quick_start)):
+    fail("admin quick start must state staff trace attribution and fingerprint-selection limits")
+for obsolete in ("The whole tree requires permission level 2",
+                 "Permission level 2 is rechecked for menu validity",
+                 "requires permission level 2 on both command and click"):
+    if obsolete in query_model:
+        fail(f"query model contains permission guidance that contradicts the live nodes: {obsolete!r}")
+
 if not re.search(r"NeoForge.{0,80}primary", listing, re.I | re.S) or "Fabric" not in listing:
     fail("CurseForge listing loader support must agree with the primary/supported loader contract")
 if re.search(r"Zero Server Lag|zero lag", listing, re.I):

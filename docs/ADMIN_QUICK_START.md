@@ -55,6 +55,11 @@ For server setup and the exact database keys, see [Configuration](CONFIGURATION.
 | What item movement involved this player? | `/ig trace player <playerName> [limit] [sinceMinutes]` | Item movements through player inventory endpoints. Duplicate player nodes are shown as candidates. |
 | What item flow touched this container? | `/ig trace container <x> <y> <z> [limit] [sinceMinutes]` | A trace for container nodes at those coordinates. Use `/ig gui container` when dimension disambiguation or visual paging is useful. |
 | What blocks, commands, or interactions were recorded nearby? | `/ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]` | Native observed audit events in a bounded cube. |
+| What did a staff item command attempt or change? | `/ig lookup near <dimension> <x> <y> <z> 32 ADMIN_ITEM_COMMAND_EFFECT 50 1440` (repeat with `ADMIN_ITEM_COMMAND_ATTEMPT`, `ADMIN_ITEM_COMMAND_FAILURE`, or `ADMIN_ITEM_COMMAND_UNRESOLVED`) | Staff-private event outcomes near the coordinates. The command record keeps the root and outcome, not selector expressions or command arguments. To inspect an item's fingerprint flow separately, run `/ig trace item "<item-id>" 50 1440`; this is not scoped to that command or actor, and a console command actor can remain `UNKNOWN`. If the item query lists several fingerprints, choose the matching fingerprint ID and run `/ig trace item "id:<fingerprint-id>" 50 1440`. |
+| What creative inventory or block action was recorded? | `/ig lookup near <dimension> <x> <y> <z> 32 CREATIVE_SLOT_EFFECT 50 1440` or `/ig lookup near <dimension> <x> <y> <z> 32 CREATIVE_BLOCK_RESULT 50 1440` | Staff-private action outcomes. Use `CREATIVE_SLOT_ATTEMPT`, `CREATIVE_BLOCK_ATTEMPT`, or `CREATIVE_BLOCK_UNRESOLVED` to check other outcomes. These records do not themselves prove a quantity change. |
+| What item quantity changed through creative inventory? | `/ig lookup filters action.creative_item_create radius.32 time.24h` (repeat with `action.creative_item_remove`) | Creative item-flow observations within 32 blocks of the issuing player over 24 hours. This filter is player-only and requires the audit permission. |
+| What was recorded when a container was broken? | `/ig lookup near <dimension> <x> <y> <z> 16 CONTAINER_BREAK_COMPLETED 50 1440` (also check `CONTAINER_BREAK_UNRESOLVED`) | The parent break audit event. This event-type lookup requires `itemgraph.command.lookup`; it does not return the slot rows. An unresolved drop link may accompany a completed break. |
+| Which item stacks were recorded in the broken container? | `/ig trace container <x> <y> <z> 50 1440` | If the destroyed container node resolves, the trace shows its slot-removal observations. It requires `itemgraph.trace` and `itemgraph.audit`; no destination or recipient is established. |
 | What evidence supports one raw observation? | `/ig event <observationId>` | One stored observation and its metadata. |
 | Why does ItemGraph connect these events? | `/ig explain <edgeId>` | One inferred edge, deterministic confidence, explanation, and supporting evidence IDs. |
 | Which imported legacy row is this? | `/ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]` | Exact imported GriefLogger provenance; provenance-only rows do not add item quantity. |
@@ -96,15 +101,55 @@ These executable examples are parsed against the registered `/ig` command tree b
 <!-- executable-command-examples:start -->
 ```text
 /ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 50 1440
+/ig lookup near minecraft:overworld 120 64 -30 32 ADMIN_ITEM_COMMAND_EFFECT 50 1440
+/ig trace item "minecraft:diamond" 50 1440
+/ig trace item "id:123" 50 1440
+/ig lookup near minecraft:overworld 120 64 -30 32 CREATIVE_SLOT_EFFECT 50 1440
+/ig lookup near minecraft:overworld 120 64 -30 32 CREATIVE_BLOCK_RESULT 50 1440
+/ig lookup filters action.creative_item_create radius.32 time.24h
+/ig lookup filters action.creative_item_remove radius.32 time.24h
+/ig lookup near minecraft:overworld 120 64 -30 16 CONTAINER_BREAK_COMPLETED 50 1440
+/ig lookup near minecraft:overworld 120 64 -30 16 CONTAINER_BREAK_UNRESOLVED 50 1440
+/ig trace container 120 64 -30 50 1440
 /ig trace item "minecraft:diamond" 20 1440
 /ig event 633
 /ig explain 8
 ```
 
 The first command looks for recorded block-break events within 32 blocks and the last 24
-hours. The trace follows the matching item evidence, capped at 20 rows. Use an observation
-ID from output with `/ig event`; use an inferred edge ID with `/ig explain`. Do not treat
-matching item type alone as proof that two stacks are the same physical object.
+hours. The second checks staff item-command effects in that area; the next two check
+creative-slot and creative-block outcomes. The following filters find creative item-flow
+creation and removal within 32 blocks of the issuing player, so run them in-game at the
+relevant location. The next two commands query the parent break event and unresolved drop
+link near the container's recorded position. `CONTAINER_BREAK_UNRESOLVED` can accompany a
+successful `CONTAINER_BREAK_COMPLETED`: read its reason code. For example,
+`CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED` means the break and snapshot were
+recorded but the drops were not linked to a destination. An incomplete snapshot is
+reported by the separate `CONTAINER_SNAPSHOT_INCOMPLETE` reason code.
+
+Compare separate staff command attempt, effect, failure, and unresolved rows. An
+`ADMIN_ITEM_COMMAND_EFFECT` row is the command outcome; `ADMIN_ITEM_CREATE` and
+`ADMIN_ITEM_REMOVE` are the separate quantity-flow observations. Run
+`/ig trace item "<item-id>" 50 1440` for a time-ordered flow by item ID. If that query
+returns multiple component fingerprints, select the matching candidate ID and rerun it as
+`/ig trace item "id:<fingerprint-id>" 50 1440`. This follows one fingerprint and does not
+combine component variants. The trace can include admin observations, but it does not
+associate them with a specific command or actor; console command records may have actor
+`UNKNOWN`. Creative action audit rows use `CREATIVE_SLOT_*` and
+`CREATIVE_BLOCK_*`; the separate `CREATIVE_ITEM_CREATE` and `CREATIVE_ITEM_REMOVE` action
+filters find their item quantity observations.
+
+`/ig lookup near` returns the container-break parent event, not its per-slot observations.
+Use `/ig trace container` to inspect those observations if the destroyed container node
+still resolves. They preserve item metadata and source slot but do not establish a drop
+entity, recipient, or destination. Staff item-command and creative action event rows require
+`itemgraph.command.lookup` plus `itemgraph.audit`; the container-break event lookup requires
+`itemgraph.command.lookup`. Creative item-flow filters require `itemgraph.command.lookup`
+and `itemgraph.audit`. `/ig trace container` requires `itemgraph.trace` and
+`itemgraph.audit`. The final trace example follows matching item evidence, capped at 20
+rows. Use an observation ID from output with `/ig event`; use an inferred edge ID with
+`/ig explain`. Matching item type alone does not prove that two stacks are the same
+physical object.
 
 To browse a particular container without guessing its dimension, use:
 
@@ -151,6 +196,10 @@ requires the same query permissions when clicked. Console results remain plain t
 - **UNKNOWN** endpoints are deliberately unknown. For example, a container break can
   prove which stacks were present without proving which player or ground entity received
   each stack.
+- Staff item-command and creative-inventory events are protected evidence. A moderator
+  needs the lookup node and `itemgraph.audit`; the output may report an `UNKNOWN` command
+  actor. Do not infer identity or a quantity change from an attempt, failure, or unresolved
+  row.
 
 Movement is time ordered. Later evidence cannot explain an earlier event. Unless there is
 evidence for creation, transformation, or destruction, an inference must conserve item
