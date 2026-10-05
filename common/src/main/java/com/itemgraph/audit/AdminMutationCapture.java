@@ -1257,6 +1257,8 @@ public final class AdminMutationCapture {
         }
         if (scope != null) {
             addRelatedObservationIds(raw, scope);
+        } else if ("ADMIN_ITEM_COMMAND_FAILURE".equals(eventType)) {
+            raw.addProperty("item_flow_link_status", "NO_ITEM_EVIDENCE_RECORDED");
         }
         addCommandEntityIdentity(raw, source, scope);
         addExecutionContext(raw, scope);
