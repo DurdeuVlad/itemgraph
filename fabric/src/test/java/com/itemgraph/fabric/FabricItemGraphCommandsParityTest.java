@@ -28,6 +28,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -83,6 +85,33 @@ class FabricItemGraphCommandsParityTest {
             assertEquals(0, encoded.readableBytes(), "the entire packet payload must decode");
         } finally {
             encoded.release();
+        }
+    }
+
+    @Test
+    void documentedQuickStartExamplesParseAgainstRegisteredCommandTreeOnFabric() throws Exception {
+        Path root = Path.of("").toAbsolutePath();
+        while (root != null && !Files.exists(root.resolve("docs/ADMIN_QUICK_START.md"))) {
+            root = root.getParent();
+        }
+        assertNotNull(root, "test process must be able to locate repository documentation");
+        String guide = Files.readString(root.resolve("docs/ADMIN_QUICK_START.md"));
+        String startMarker = "<!-- executable-command-examples:start -->";
+        String endMarker = "<!-- executable-command-examples:end -->";
+        int start = guide.indexOf(startMarker);
+        int end = guide.indexOf(endMarker);
+        assertTrue(start >= 0 && end > start, "quick-start command example markers must be paired");
+
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        List<String> examples = guide.substring(start + startMarker.length(), end).lines()
+                .map(String::strip)
+                .filter(line -> line.startsWith("/ig "))
+                .map(line -> line.substring(1))
+                .toList();
+        assertFalse(examples.isEmpty(), "quick start must contain executable /ig examples");
+        for (String example : examples) {
+            assertParsedCompletely(dispatcher.parse(example, source), "quick-start example /" + example);
         }
     }
 

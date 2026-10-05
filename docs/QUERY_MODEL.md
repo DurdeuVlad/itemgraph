@@ -57,9 +57,11 @@ Everything below this heading and above "Not yet implemented" is live.
 under either name. Bare `/itemgraph` and bare `/ig` show a short task-first command
 overview. `/ig help commands` lists command paths grouped by investigation task, and
 `/ig help <topic>` shows one detailed topic; an unknown topic fails with the valid topic
-list. The whole tree requires permission level 2 — the query subcommands
-inherit the same gate as the operational ones rather than relaxing it, because a trace
-names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
+list. The root requires `itemgraph.command`; each command checks its named leaf permission
+and, for protected evidence, `itemgraph.audit` as listed in
+`docs/SECURITY_AND_PERMISSIONS.md`. When a permission provider has no explicit decision,
+ItemGraph falls back to vanilla permission level 2. An explicit provider denial blocks
+the command even for an operator.
 
 ### Arguments
 
@@ -185,8 +187,9 @@ transformation detail; selecting an inferred edge opens `/ig explain`-equivalent
 the stored explanation and evidence IDs. Session intervals, UNKNOWN endpoints,
 and source-group ambiguity are preserved. Navigation, selection, and close are the only
 accepted menu actions: server-side handling rejects pickup, placement, shift-click, drag,
-throw, swap, clone, and pickup-all paths. Permission level 2 is rechecked for menu validity
-and each action.
+throw, swap, clone, and pickup-all paths. `itemgraph.command`, `itemgraph.gui`, and
+`itemgraph.audit` are rechecked for menu validity and each action; an unset node falls
+back to vanilla permission level 2, while an explicit provider denial blocks access.
 
 Pages use keyset pagination, not offsets. The stable total-order cursor is
 `(timestamp_ms, provenance kind, row id, source kind)`; each database source fetches at most
@@ -275,9 +278,11 @@ query queue rejects the request, vanilla interaction remains intact. Left-clicki
 continues to open that block's exact-position paginated audit-history view in chat.
 Right-clicking a non-container block opens block history too: supported functional blocks
 select the clicked block; ordinary blocks select the block on the clicked face. If that
-query is rejected, vanilla interaction remains intact. The mode is per player UUID, requires
-permission level 2 on both command and click, and clears on logout and server stop. Opening
-ItemGraph's menu is not recorded as a container-transfer observation.
+query is rejected, vanilla interaction remains intact. The mode is per player UUID,
+requires `itemgraph.command` and `itemgraph.command.inspect` on command and click, and
+clears on logout and server stop. An unset node falls back to vanilla permission level 2;
+an explicit provider denial blocks access. Opening ItemGraph's menu is not recorded as a
+container-transfer observation.
 
 ### View an observation
 
