@@ -533,6 +533,9 @@ class InternalObservationServiceTest {
             Thread.sleep(10);
         }
         assertFalse(admissionField.getBoolean(service), "malformed recovery must close intake after asynchronous validation");
+        assertEquals(InternalObservationService.CaptureState.RECOVERY_BLOCKED, service.getCaptureState());
+        assertTrue(service.getRecoveryPendingRecordCount().isEmpty(),
+                "a malformed recovery file must not be reported as zero pending records");
         assertFalse(service.submitAuditEvent(new InternalAuditEvent(
                 3456L, "CHAT_MESSAGE", PLAYER_UUID, "Alex", "minecraft:overworld",
                 1, 2, 3, null, "must-not-be-accepted-while-recovery-is-blocked", null)));
@@ -677,6 +680,29 @@ class InternalObservationServiceTest {
                     "a producer blocked behind the failed recovery gate must be counted as rejected");
         }
         service.stop();
+    }
+
+    @Test
+    void captureStatusSeparatesConfiguredDisabledFromRunningWorker() throws Exception {
+        assertEquals(InternalObservationService.CaptureState.STOPPED, service.getCaptureState());
+        assertTrue(service.getRecoveryPendingRecordCount().isEmpty(),
+                "recovery count is unknown until the startup recovery check completes");
+
+        service.start();
+        long startDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getCaptureState() != InternalObservationService.CaptureState.ACTIVE
+                && System.nanoTime() < startDeadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(InternalObservationService.CaptureState.ACTIVE, service.getCaptureState());
+        assertEquals(0, service.getRecoveryPendingRecordCount().orElseThrow());
+
+        service.stop();
+        assertEquals(InternalObservationService.CaptureState.STOPPED, service.getCaptureState());
+
+        service.configureOperations(250, 1, 100, 30_000, false);
+        service.start();
+        assertEquals(InternalObservationService.CaptureState.DISABLED_BY_CONFIG, service.getCaptureState());
     }
 
     @Test

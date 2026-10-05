@@ -64,7 +64,7 @@ player-scoped; permissions do not relax the existing session-token ownership che
 There is no required LuckPerms or other permission-manager dependency. Keep default
 access at level 2 when the provider is absent. Do not assign permissions by wildcard
 unless the installed provider's documented policy explicitly expands that wildcard.
-See `/ig help permissions` and the [admin quick start](ADMIN_QUICK_START.md).
+See `/ig help permissions` and the [copyable role recipes in the admin quick start](ADMIN_QUICK_START.md#2-grant-a-moderator-the-exact-permissions-they-need).
 
 ## Player-facing mode
 

@@ -49,6 +49,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
@@ -1527,11 +1528,6 @@ public final class ItemGraphCommands {
                 QueryLimits.getConfiguredMaxPageSize(), dbSettings == null
                         ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.connectionTimeoutMs(),
                 dbSettings == null ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.useIndexes())), false);
-        if (!dbConnected) {
-            source.sendFailure(Component.literal(ItemGraphLanguage.text("status.db_stats_unavailable",
-                    "[ItemGraph] Database statistics unavailable; inspect the server log for connection details.")));
-            return 0;
-        }
 
         IngestionService ingestion = IngestionService.getInstance();
         IngestionResult lastResult = ingestion.getLastResult();
@@ -1539,6 +1535,13 @@ public final class ItemGraphCommands {
         InternalObservationService internalObs = InternalObservationService.getInstance();
         ItemEntityTracker entityTracker = ItemEntityTracker.getInstance();
         long capabilityQueueRejections = ContainerInteractionTracker.getInstance().getTotalCapabilityQueueRejections();
+        runtimeStatusLines(ingestion, lastResult, lastCorrelation, internalObs, entityTracker,
+                capabilityQueueRejections).forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
+        if (!dbConnected) {
+            source.sendFailure(Component.literal(ItemGraphLanguage.text("status.db_stats_unavailable",
+                    "[ItemGraph] Database statistics unavailable; inspect the server log for connection details.")));
+            return 0;
+        }
 
         return QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "status", conn -> {
             long totalObservations;
@@ -1551,7 +1554,6 @@ public final class ItemGraphCommands {
                 rs.next();
                 totalAuditEvents = rs.getLong(1);
             }
-            OperationalMetrics.Snapshot metrics = OperationalMetrics.getInstance().snapshot();
             long activeEdges = 0;
             long supersededEdges = 0;
             try (var stmt = conn.createStatement();
@@ -1576,23 +1578,37 @@ public final class ItemGraphCommands {
                         + " rows, " + rs.getLong("rows_opaque") + " opaque)"
                         : "never run";
             }
-            return QueryDispatcher.QueryOutput.found(List.of(
+            List<String> statusLines = new ArrayList<>(3);
+            statusLines.add("[ItemGraph] ingestion: running=" + ingestion.isRunning()
+                            + " totalObservations=" + totalObservations
+                            + " nativeAuditEvents=" + totalAuditEvents
+                            + " checkpoints=" + checkpoints
+                            + " historicalImport=" + historicalImport);
+            statusLines.add("[ItemGraph] inference ledger: activeEdges=" + activeEdges + " supersededEdges=" + supersededEdges);
+            return QueryDispatcher.QueryOutput.found(statusLines);
+        });
+    }
+
+    static List<String> runtimeStatusLines(
+            IngestionService ingestion,
+            IngestionResult lastResult,
+            CorrelationResult lastCorrelation,
+            InternalObservationService internalObs,
+            ItemEntityTracker entityTracker,
+            long capabilityQueueRejections) {
+        OperationalMetrics.Snapshot metrics = OperationalMetrics.getInstance().snapshot();
+        return List.of(
                     "[ItemGraph] correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s"
                             + " lastPass=" + (lastCorrelation == null ? "never run yet"
                             : (lastCorrelation.success() ? "OK" : "ERROR")
                             + " (" + lastCorrelation.observationsFinalised() + " evaluated, "
                             + lastCorrelation.edgesCreated() + " bridges inferred, " + lastCorrelation.deferred()
                             + " deferred, " + lastCorrelation.durationMs() + "ms)"),
-                    "[ItemGraph] ingestion: running=" + ingestion.isRunning()
-                            + " totalObservations=" + totalObservations
-                            + " nativeAuditEvents=" + totalAuditEvents
-                            + " checkpoints=" + checkpoints
-                            + " historicalImport=" + historicalImport
+                    "[ItemGraph] ingestion worker: running=" + ingestion.isRunning()
                             + " lastCycle=" + (lastResult == null ? "never run yet"
                             : (lastResult.success() ? "OK" : "ERROR")
                             + " (" + lastResult.itemsIngested() + " items, " + lastResult.containersIngested()
                             + " containers, " + lastResult.durationMs() + "ms)"),
-                    "[ItemGraph] inference ledger: activeEdges=" + activeEdges + " supersededEdges=" + supersededEdges,
                     "[ItemGraph] internal queue: size=" + internalObs.getQueueSize()
                             + " capacityPerQueue=10000"
                             + " idlePollMs=" + internalObs.getQueuePollIntervalMs()
@@ -1602,6 +1618,9 @@ public final class ItemGraphCommands {
                             + " networkHeartbeats=" + internalObs.getTotalDatabaseHeartbeats()
                             + " networkHeartbeatFailures=" + internalObs.getTotalDatabaseHeartbeatFailures()
                             + " captureEnabled=" + internalObs.isCaptureEnabled()
+                            + " captureState=" + internalObs.getCaptureState()
+                            + " recoveryPendingRecords=" + internalObs.getRecoveryPendingRecordCount()
+                                    .stream().mapToObj(Integer::toString).findFirst().orElse("unknown")
                             + " enqueued=" + internalObs.getTotalEnqueued()
                             + " persisted=" + internalObs.getTotalPersisted()
                             + " dropped=" + internalObs.getTotalDropped()
@@ -1634,8 +1653,7 @@ public final class ItemGraphCommands {
                             + " drops=" + entityTracker.getDropCount()
                             + " pickups=" + entityTracker.getPickupCount()
                             + " continuityMatches=" + entityTracker.getContinuityMatchCount()
-            ));
-        });
+        );
     }
 
     private static String latencyP95(OperationalMetrics.LatencySnapshot snapshot) {
