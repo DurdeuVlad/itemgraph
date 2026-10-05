@@ -133,12 +133,12 @@ source hashes. `/ig export full` requires permission level 4 and includes exact
 locations, identities, item metadata, and the stored inference explanation.
 Full exports and redacted exports with item-metadata predicates check level-4
 permission again immediately before publication; revoking that permission while
-the bounded job runs prevents the bundle from being published. The dispatcher
+the bounded job runs prevents the bundle from being published. The command sets
+the export service's `levelFourAuthorizationRequired` flag for FULL and
+metadata-filtered REDACTED exports. Progress and completion messages for those
+jobs also check the live level-4 permission on the server thread; after demotion,
+ItemGraph suppresses record counts and completion details. The dispatcher
 cancellation and commit gate remains required for both redacted and full exports.
-Callers must set the export service's `levelFourAuthorizationRequired` flag for
-both cases. When the item-predicate API is integrated, the command call site must
-pass `profile == FULL || !filters.itemPredicates().isEmpty()`; profile-only checks
-would leave metadata-filtered redacted exports authorized after demotion.
 Both paths are bounded to 100 observed rows, 100 linked inferred edges, four
 active jobs, and 4 MiB per bundle. Exports refuse filename collisions. Hashes
 make edits detectable against a separately trusted manifest/final hash; the

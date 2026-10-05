@@ -30,10 +30,11 @@ The project follows a simple pre-1.0 development changelog model.
   collisions, and cap output at 4 MiB. Format and unkeyed-hash limitations are documented
   in `docs/INCIDENT_BUNDLES.md`. Full exports and redacted exports with item-metadata
   predicates recheck level-4 permission at the final publication gate, so revocation
-  before commit prevents the file from being published. The service exposes an explicit
-  level-four requirement flag for redacted metadata-filtered exports; the stacked #125
-  command integration must set it when `filters.itemPredicates()` is nonempty. M9 batch verification is pending; ItemGraph remains 0.3.2
-  and no distributable JAR is built.
+  before commit prevents the file from being published. The command integration sets
+  the level-four requirement flag for FULL and metadata-filtered REDACTED exports, and
+  rechecks live permission before sending progress or completion counts. Those protected
+  messages are suppressed after demotion. M9 batch verification is pending; ItemGraph
+  remains 0.3.2 and no distributable JAR is built.
 
 - **Issue #36 cross-loader preview API fixture work:** the shared API now exposes exact
   positive-version negotiation with explicit compatible/incompatible results. Independent
