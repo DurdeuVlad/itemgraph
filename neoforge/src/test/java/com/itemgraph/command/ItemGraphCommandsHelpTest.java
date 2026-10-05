@@ -639,6 +639,34 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
+    void permissionHelpGivesNovicesExactRoleBundles() {
+        List<String> lines = CommandHelp.topicLines("permissions");
+        String help = String.join("\n", lines);
+        assertTrue(help.contains("All commands need itemgraph.command; status/help need only it"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.command.lookup"));
+        assertTrue(help.contains("Protected lookup adds itemgraph.audit"));
+        assertTrue(help.contains("For provenance chats/commands, add itemgraph.audit to lookup"));
+        assertTrue(help.contains("Other provenance tables: itemgraph.command.lookup only"));
+        assertTrue(help.contains("/ig audit: itemgraph.command + itemgraph.audit"));
+        assertTrue(help.contains("itemgraph.command.page"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.trace + itemgraph.audit"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.event + itemgraph.audit"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.explain + itemgraph.audit"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.command.inspect"));
+        assertTrue(help.contains("Block history in Inspect also needs itemgraph.audit"));
+        assertTrue(help.contains("GUI in Inspect: add itemgraph.gui + itemgraph.audit"));
+        assertTrue(help.contains("Direct GUI: itemgraph.command + itemgraph.gui + itemgraph.audit"));
+        assertTrue(help.contains("/ig ingest now: itemgraph.command + itemgraph.ingest"));
+        assertTrue(help.contains("Import: itemgraph.command + itemgraph.ingest + itemgraph.import"));
+        assertTrue(help.contains("Explicit false denies; unset nodes use level 2"));
+        assertTrue(help.contains("Matrix/provider behavior: docs/SECURITY_AND_PERMISSIONS.md"));
+        assertTrue(help.contains("Dotted nodes do not inherit"));
+        assertTrue(lines.size() <= 20, "permissions topic including shared guidance must fit 20 chat messages");
+        String longest = lines.stream().max(java.util.Comparator.comparingInt(String::length)).orElse("");
+        assertTrue(longest.length() <= 80, () -> "permissions topic line exceeds 80 chars: " + longest);
+    }
+
+    @Test
     void helpTopicReturnsSyntaxDefaultsPermissionAndExample() throws Exception {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();
