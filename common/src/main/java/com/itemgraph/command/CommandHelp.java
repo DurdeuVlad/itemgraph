@@ -91,14 +91,25 @@ public final class CommandHelp {
                 "[ItemGraph] Setup, config, and API are docs, not commands. See docs/ADMIN_QUICK_START.md. /ig = /itemgraph.",
                 "[ItemGraph] Example: /ig trace item diamond"));
         topics.put("permissions", List.of(
-                "[ItemGraph] Grant a lookup-only moderator both itemgraph.command and itemgraph.command.lookup.",
-                "[ItemGraph] Add itemgraph.command.page for /ig page and lookup-page buttons; it is an independent node.",
-                "[ItemGraph] Nodes do not inherit from dotted parents. Explicit deny overrides operator level; an unset node falls back to vanilla level 2.",
-                "[ItemGraph] Other nodes: itemgraph.command.inspect, itemgraph.trace, itemgraph.event, itemgraph.explain, itemgraph.audit, itemgraph.gui, itemgraph.ingest, itemgraph.import.",
-                "[ItemGraph] Protected evidence can appear in event, explain, trace, and GUI results; those surfaces require their node plus itemgraph.audit.",
-                "[ItemGraph] NeoForge uses its PermissionAPI handler. Fabric bundles fabric-permissions-api 0.3.1; a compatible provider mod is needed to configure grants.",
-                "[ItemGraph] Full command-to-node matrix: docs/SECURITY_AND_PERMISSIONS.md",
-                "[ItemGraph] Example: grant itemgraph.command and itemgraph.command.lookup to a level-1 moderator."));
+                "[ItemGraph] All commands need itemgraph.command; status/help need only it.",
+                "[ItemGraph] Example lookup: itemgraph.command + itemgraph.command.lookup.",
+                "[ItemGraph] Protected lookup adds itemgraph.audit.",
+                "[ItemGraph] For provenance chats/commands, add itemgraph.audit to lookup.",
+                "[ItemGraph] Other provenance tables: itemgraph.command.lookup only.",
+                "[ItemGraph] /ig audit: itemgraph.command + itemgraph.audit.",
+                "[ItemGraph] Saved pages: add itemgraph.command.page to lookup grants.",
+                "[ItemGraph] Trace: itemgraph.command + itemgraph.trace + itemgraph.audit.",
+                "[ItemGraph] Event detail: itemgraph.command + itemgraph.event + itemgraph.audit.",
+                "[ItemGraph] Explain: itemgraph.command + itemgraph.explain + itemgraph.audit.",
+                "[ItemGraph] Inspect on/off: itemgraph.command + itemgraph.command.inspect.",
+                "[ItemGraph] Block history in Inspect also needs itemgraph.audit.",
+                "[ItemGraph] GUI in Inspect: add itemgraph.gui + itemgraph.audit.",
+                "[ItemGraph] Direct GUI: itemgraph.command + itemgraph.gui + itemgraph.audit.",
+                "[ItemGraph] /ig ingest now: itemgraph.command + itemgraph.ingest.",
+                "[ItemGraph] Import: itemgraph.command + itemgraph.ingest + itemgraph.import.",
+                "[ItemGraph] Explicit false denies; unset nodes use level 2.",
+                "[ItemGraph] Dotted nodes do not inherit; grant each named permission.",
+                "[ItemGraph] Matrix/provider behavior: docs/SECURITY_AND_PERMISSIONS.md."));
         topics.put("journeys", List.of(
                 "[ItemGraph] Inspect: /ig help journeys inspect; trace: /ig help journeys trace.",
                 "[ItemGraph] Nearby: /ig help journeys near; filtered: /ig help journeys filters.",

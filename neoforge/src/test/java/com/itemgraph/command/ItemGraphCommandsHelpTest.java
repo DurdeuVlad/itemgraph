@@ -161,7 +161,7 @@ class ItemGraphCommandsHelpTest {
         List<String> nl = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
         assertEquals(english.get(0), nl.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> nlFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("nl_nl");
-        assertEquals(185, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(196, nlFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(nlFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (nlFallback.contains(english.get(i))) assertEquals(english.get(i), nl.get(i));
@@ -170,7 +170,7 @@ class ItemGraphCommandsHelpTest {
         List<String> zh = english.stream().map(com.itemgraph.i18n.ItemGraphLanguage::sourceText).toList();
         assertEquals(english.get(0), zh.get(0), "The new task route must be inventoried as English fallback until translated");
         Set<String> zhFallback = com.itemgraph.i18n.ItemGraphLanguage.sourceFallbackInventory("zh_tw");
-        assertEquals(185, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
+        assertEquals(196, zhFallback.size(), "Every untranslated source sentence stays explicit in the fallback inventory");
         assertTrue(zhFallback.contains("[ItemGraph] "), "The chat action prefix is an inventoried English fallback");
         for (int i = 0; i < english.size(); i++) {
             if (zhFallback.contains(english.get(i))) assertEquals(english.get(i), zh.get(i));
@@ -521,6 +521,34 @@ class ItemGraphCommandsHelpTest {
         assertTrue(help.contains("itemgraph.audit"));
         assertTrue(help.contains("Legacy CRAFT/SMELT is unresolved"));
         assertTrue(help.contains("trade, enchanting, brewing, smithing"));
+    }
+
+    @Test
+    void permissionHelpGivesNovicesExactRoleBundles() {
+        List<String> lines = CommandHelp.topicLines("permissions");
+        String help = String.join("\n", lines);
+        assertTrue(help.contains("All commands need itemgraph.command; status/help need only it"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.command.lookup"));
+        assertTrue(help.contains("Protected lookup adds itemgraph.audit"));
+        assertTrue(help.contains("For provenance chats/commands, add itemgraph.audit to lookup"));
+        assertTrue(help.contains("Other provenance tables: itemgraph.command.lookup only"));
+        assertTrue(help.contains("/ig audit: itemgraph.command + itemgraph.audit"));
+        assertTrue(help.contains("itemgraph.command.page"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.trace + itemgraph.audit"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.event + itemgraph.audit"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.explain + itemgraph.audit"));
+        assertTrue(help.contains("itemgraph.command + itemgraph.command.inspect"));
+        assertTrue(help.contains("Block history in Inspect also needs itemgraph.audit"));
+        assertTrue(help.contains("GUI in Inspect: add itemgraph.gui + itemgraph.audit"));
+        assertTrue(help.contains("Direct GUI: itemgraph.command + itemgraph.gui + itemgraph.audit"));
+        assertTrue(help.contains("/ig ingest now: itemgraph.command + itemgraph.ingest"));
+        assertTrue(help.contains("Import: itemgraph.command + itemgraph.ingest + itemgraph.import"));
+        assertTrue(help.contains("Explicit false denies; unset nodes use level 2"));
+        assertTrue(help.contains("Matrix/provider behavior: docs/SECURITY_AND_PERMISSIONS.md"));
+        assertTrue(help.contains("Dotted nodes do not inherit"));
+        assertTrue(lines.size() <= 20, "permissions topic including shared guidance must fit 20 chat messages");
+        String longest = lines.stream().max(java.util.Comparator.comparingInt(String::length)).orElse("");
+        assertTrue(longest.length() <= 80, () -> "permissions topic line exceeds 80 chars: " + longest);
     }
 
     @Test
