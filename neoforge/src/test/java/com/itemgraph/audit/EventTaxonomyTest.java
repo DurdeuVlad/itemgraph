@@ -3,6 +3,7 @@ package com.itemgraph.audit;
 import com.itemgraph.audit.EventTaxonomy.ActorStatus;
 import com.itemgraph.audit.EventTaxonomy.EvidenceClass;
 import com.itemgraph.audit.EventTaxonomy.LoaderStatus;
+import com.itemgraph.audit.EventTaxonomy.PrivacyClass;
 import com.itemgraph.audit.EventTaxonomy.QuantitySemantics;
 import com.itemgraph.audit.EventTaxonomy.Surface;
 import org.junit.jupiter.api.Test;
@@ -50,8 +51,8 @@ class EventTaxonomyTest {
                     definition.neoForge().reasonCode() == null, definition.id() + " NeoForge support");
         }
         assertTrue(EventTaxonomy.VERSION.matches("\\d+\\.\\d+\\.\\d+"));
-        assertEquals("3.0.0", EventTaxonomy.VERSION,
-                "removing unverified transformation lineage changes the event contract");
+        assertEquals("4.0.0", EventTaxonomy.VERSION,
+                "privacy-contract changes must increment the taxonomy major version");
 
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
@@ -113,6 +114,14 @@ class EventTaxonomyTest {
         }));
         assertEquals(LoaderStatus.HISTORICAL_ONLY,
                 EventTaxonomy.find("COMMAND_EXECUTED", Surface.AUDIT_EVENT).orElseThrow().fabric().status());
+    }
+
+    @Test
+    void projectileAuditRowsWithExactLocationsAreSensitive() {
+        for (String eventType : List.of("THROW_ITEM", "SHOOT_ITEM", "PROJECTILE_SPAWN_ACCEPTED")) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(eventType, Surface.AUDIT_EVENT).orElseThrow();
+            assertEquals(PrivacyClass.SENSITIVE_LOCATION, definition.privacy(), eventType);
+        }
     }
 
     @Test

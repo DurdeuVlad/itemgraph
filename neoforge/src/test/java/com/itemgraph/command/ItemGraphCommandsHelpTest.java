@@ -149,8 +149,8 @@ class ItemGraphCommandsHelpTest {
                 "do not expose command arguments", "Trace follow-up needs itemgraph.trace + itemgraph.audit",
                 "/ig trace item \"id:<fingerprintId>\"");
         assertJourneyTopic("lookup lifecycle", "KILL_ENTITY", "PROJECTILE_SPAWN_ACCEPTED", "THROW_ITEM",
-                "Syntax: /ig lookup <eventType>", "itemgraph.command + itemgraph.command.lookup",
-                "KILL_ENTITY and PROJECTILE_SPAWN_ACCEPTED also need", "itemgraph.audit; throw/shoot attempts do not",
+                "Syntax: /ig lookup <eventType>", "itemgraph.command + itemgraph.command.lookup +",
+                "itemgraph.audit; results include exact locations",
                 "Throw/shoot are attempts", "Death-drop trace needs itemgraph.trace + itemgraph.audit",
                 "does not identify the killer");
         assertJourneyTopic("lookup transformations", "action.craft", "action.smelt", "action.anvil_rename",
@@ -263,12 +263,13 @@ class ItemGraphCommandsHelpTest {
                 ItemGraphCommands.lookupPermissionsForType("command_executed"));
         assertEquals(List.of(ItemGraphPermissions.LOOKUP),
                 ItemGraphCommands.lookupPermissionsForType("PLAYER_JOIN"));
-        for (String sensitive : List.of("BREAK_BLOCK", "KILL_ENTITY", "PROJECTILE_SPAWN_ACCEPTED")) {
+        for (String sensitive : List.of("BREAK_BLOCK", "KILL_ENTITY", "THROW_ITEM", "SHOOT_ITEM",
+                "PROJECTILE_SPAWN_ACCEPTED")) {
             assertEquals(List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT),
                     ItemGraphCommands.lookupPermissionsForType(sensitive), sensitive);
             assertTrue(ItemGraphCommands.requiresAuditPermission(List.of(sensitive)), sensitive);
         }
-        for (String publicEvent : List.of("THROW_ITEM", "SHOOT_ITEM", "PLAYER_JOIN")) {
+        for (String publicEvent : List.of("PLAYER_JOIN")) {
             assertEquals(List.of(ItemGraphPermissions.LOOKUP),
                     ItemGraphCommands.lookupPermissionsForType(publicEvent), publicEvent);
         }
@@ -297,6 +298,15 @@ class ItemGraphCommandsHelpTest {
                 System.currentTimeMillis());
         assertEquals(List.of(ItemGraphPermissions.PAGE, ItemGraphPermissions.LOOKUP,
                         ItemGraphPermissions.AUDIT), ItemGraphCommands.pagePermissionsFor(lifecycleSession));
+
+        ItemGraphCommands.AuditPageSession projectileSession = new ItemGraphCommands.AuditPageSession(
+                java.util.UUID.randomUUID(), "THROW_ITEM", null,
+                com.itemgraph.query.QueryWindow.unbounded(), 20, null,
+                null, null, null, null, null, null, "projectile attempt lookup",
+                ItemGraphPermissions.LOOKUP, ItemGraphCommands.requiresAuditPermission("THROW_ITEM"),
+                System.currentTimeMillis());
+        assertEquals(List.of(ItemGraphPermissions.PAGE, ItemGraphPermissions.LOOKUP,
+                        ItemGraphPermissions.AUDIT), ItemGraphCommands.pagePermissionsFor(projectileSession));
     }
 
     @Test
@@ -313,9 +323,12 @@ class ItemGraphCommandsHelpTest {
                 "ig lookup action.command_attempt radius.5",
                 "ig lookup BREAK_BLOCK",
                 "ig lookup KILL_ENTITY",
+                "ig lookup THROW_ITEM",
+                "ig lookup SHOOT_ITEM",
                 "ig lookup PROJECTILE_SPAWN_ACCEPTED",
                 "ig lookup filters action.break_block radius.5",
-                "ig lookup near minecraft:overworld 0 64 0 5 KILL_ENTITY")) {
+                "ig lookup near minecraft:overworld 0 64 0 5 KILL_ENTITY",
+                "ig lookup near minecraft:overworld 0 64 0 5 THROW_ITEM")) {
             CommandSourceStack source = source();
             assertEquals(0, dispatcher.execute(command, source), command);
             ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
