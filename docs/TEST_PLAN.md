@@ -519,8 +519,9 @@ schema-v2 redacted sidecar for every compatibility-registry action. It records
 the exact-release writer disposition, ItemGraph implementation classification,
 profile source table, and count found in the selected replay. The sidecar
 explicitly separates a feature absent from a replay from an action that the
-verified release has no writer for; unobserved actions remain open under #31.
-It also emits unresolved rows for open issues #136, #137, #138, and #140, plus
+verified release has no writer for; unobserved actions were tracked under #31
+(closed 2026-10-05). It also emits unresolved rows for issues #136, #137,
+#138, and #140 (all closed 2026-10-05), plus
 five durability categories. Exact 1.2.10-1.21.1 fixture facts remain separate
 from pinned 26.2 source-only research: the fixture confirms the REMOVE_ITEM
 BreakContainerEvent writer class for both loaders but not its timing details;
@@ -1303,7 +1304,7 @@ player interaction, queue saturation, conservation, or live supersession matrix.
 
 The implementation follows the observed GriefLogger cleanup behavior at the presentation boundary while keeping evidence immutable: GriefLogger removes old interaction rows after an interactable block/door break; ItemGraph records `BLOCK_REMOVED_AT_TARGET` links in its own schema V19 tables and retains the native row, imported projection, and immutable provenance. Source reference: [`RemoveBlockInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveBlockInteractionsEvent.java) and [`RemoveDoorInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveDoorInteractionsEvent.java).
 
-**Visible-client matrix status:** skipped by the maintainer. No connected-client clicks were run for ordinary/function blocks, single/double chests, doors, empty/missing history, block removal, door removal, repeated clicks, or query-queue saturation. Issue #26 is closed, but this client evidence remains unverified; its closure is not proof that the matrix ran. Automated adapter/query tests and the dedicated-server startup/migration smoke above remain the available evidence. No production or staging instance is involved.
+**Visible-client matrix status:** skipped under the maintainer's instruction at the time (later superseded by authorized local MCPilot testing; see issue #153). No connected-client clicks were run for ordinary/function blocks, single/double chests, doors, empty/missing history, block removal, door removal, repeated clicks, or query-queue saturation. Issue #26 is closed, but this client evidence remains unverified; its closure is not proof that the matrix ran. Automated adapter/query tests and the dedicated-server startup/migration smoke above remain the available evidence. No production or staging instance is involved.
 
 ## M8 issue #75: entity interaction outcomes
 
@@ -1528,8 +1529,10 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
 - The M8 milestone-end loader batch and both loader GameTest suites passed on 2026-10-05; see
   “M8 milestone batch, 2026-10-05” above. The earlier M11 connected-client replay documented
   above covers the older menu path, not this new chat companion. A refreshed 2026-10-05
-  connected-client capture for #146 is recorded below; its PR CI/review remain pending. The
-  operator's explicit decision to skip live clicks for #26 remains in effect.
+  connected-client capture for #146 is recorded below; #146 closed on
+  2026-10-05 after PR CI and review. The operator's earlier decision to skip
+  live clicks for #26 was later superseded by authorized local MCPilot testing
+  (see #153).
 ## M8 issue #140: contents of player-broken containers
 
 Both loader GameTest suites run `ContainerBreakConformanceFixture` through the
@@ -1647,6 +1650,6 @@ This supplements `FlowBrowserMenuTest`'s cross-loader observed, inferred,
 ambiguous-source-group, transformation, missing-fingerprint, unresolved-state,
 page-boundary, and item-movement rejection assertions. The isolated server,
 world, and database were in the temporary QA directory; the server was stopped
-after capture and the client disconnected. No production server or GriefLogger jar/database was used. PR CI and
-independent review of the attached screenshot remain pending before #146 closes.
+after capture and the client disconnected. No production server or GriefLogger jar/database was used. #146 closed
+on 2026-10-05 after PR CI and review of the attached screenshots.
 

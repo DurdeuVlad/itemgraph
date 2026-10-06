@@ -195,7 +195,9 @@ addition/removal rows; ItemGraph uses its own container session deltas and keeps
 that implementation separate from the external API's semantics. This fixture
 proves only these four ItemGraph persistence paths. It does not verify the
 remaining exact-release writers, connected clients, or differential replay
-against GriefLogger; those gates remain open under #27 and #31.
+against GriefLogger; those gates were tracked under #27 and #31, both now
+closed with bounded native-only evidence. No live GriefLogger differential
+replay is claimed.
 
 `CHAT` and `COMMAND` remain source features backed by their own tables, not
 members of these three action enums, so they have no enum ID. The complete
@@ -413,7 +415,7 @@ transfers, while `inventoryLookup` normalizes transfers to addition/removal on
 the player's inventory and retains source/action IDs. ItemGraph keeps its
 current interval-based net-delta model and makes no claim that CoreProtect's
 behavior or code is part of the GriefLogger contract.
-| MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite or MySQL/MariaDB | Same migration/query contract; CI runs disposable MariaDB 10.11 and MySQL 8.0 services | Implemented in the shared JDBC dialect layer; issue #29 remains open until hosted CI proves clean setup, upgrade, restart, and read-only paths |
+| MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite or MySQL/MariaDB | Same migration/query contract; CI runs disposable MariaDB 10.11 and MySQL 8.0 services | Implemented in the shared JDBC dialect layer; issue #29 is closed after hosted CI proved clean setup, upgrade, restart, and read-only paths |
 
 ## Data boundary
 
@@ -836,7 +838,8 @@ and fixture hashes before writing the artifact.
   rejected block-history queries also keep the gameplay action canceled, and
   repeated left-click hold/abort packets are ignored. A valid double chest or
   door now expands to both physical positions in one ordered exact lookup; the
-  container flow-browser node merge remains open in [issue #26](https://github.com/DurdeuVlad/itemgraph/issues/26).
+  container flow-browser node merge was tracked under [issue #26](https://github.com/DurdeuVlad/itemgraph/issues/26)
+  (closed 2026-09-30).
 - **2026-09-29, Fabric container sessions:** server menu initialization and close
   hooks now reuse the shared interval tracker for block containers and double chests;
   an orderly server stop flushes active session deltas before ItemGraph closes its
@@ -884,9 +887,10 @@ and fixture hashes before writing the artifact.
    the delivered native lookup/filter contract is tracked in [#25](https://github.com/DurdeuVlad/itemgraph/issues/25). Generic rows retained by the historical ledger are not returned by this query until the normalized projection in [#28](https://github.com/DurdeuVlad/itemgraph/issues/28) is complete.
 4. The existing item-flow tests remain green and the GriefLogger database is not
    opened by the native-only path.
-5. M8 is not complete while [#24](https://github.com/DurdeuVlad/itemgraph/issues/24)
-   or [#31](https://github.com/DurdeuVlad/itemgraph/issues/31) still has an
-   unresolved acceptance criterion.
+5. M8 closure required [#24](https://github.com/DurdeuVlad/itemgraph/issues/24)
+   and [#31](https://github.com/DurdeuVlad/itemgraph/issues/31) to have no
+   unresolved acceptance criterion; both are closed and milestone #4 is closed
+   as of 2026-10-06.
 
 References: [GriefLogger feature overview](https://daqem.com/projects/grieflogger),
 [item usage](https://daqem.com/projects/grieflogger/wiki/player-actions/item-usage),
@@ -1014,4 +1018,6 @@ adds no dependency on the GriefLogger runtime and does not copy its code. Focuse
 are the validation boundary for this change. The complete NeoForge and Fabric unit/GameTest
 batch passed on 2026-10-05; exact results are recorded in `docs/TEST_PLAN.md` under
 “M8 milestone batch, 2026-10-05”. Locale resolution is implemented under #136 and included in
-that batch. Refreshed normal-scale UI evidence for the new chat companion remains open under #146.
+that batch. Refreshed normal-scale UI evidence for the new chat companion was
+tracked under #146 (closed 2026-10-05); the paired captures are in
+`docs/test-evidence/m8-flow-browser/`.
