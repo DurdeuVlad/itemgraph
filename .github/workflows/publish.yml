@@ -51,8 +51,21 @@ jobs:
             exit 1
           fi
 
+          case "${VERSION}" in
+            *alpha*) VERSION_TYPE=alpha ;;
+            *beta*|*rc*) VERSION_TYPE=beta ;;
+            *) VERSION_TYPE=release ;;
+          esac
+          if [[ "${VERSION_TYPE}" == "release" ]]; then
+            GITHUB_VERSION_TYPE=release
+          else
+            GITHUB_VERSION_TYPE=prerelease
+          fi
+
           echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "version_type=${VERSION_TYPE}" >> "${GITHUB_OUTPUT}"
+          echo "github_version_type=${GITHUB_VERSION_TYPE}" >> "${GITHUB_OUTPUT}"
 
       - name: Test and build all loader artifacts
         run: ./gradlew clean build
@@ -124,7 +137,7 @@ jobs:
             build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
           github-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric and NeoForge 1.21.1)
           github-version: ${{ steps.version_data.outputs.version }}
-          github-version-type: release
+          github-version-type: ${{ steps.version_data.outputs.github_version_type }}
           github-changelog-file: release-notes.md
 
       - name: Publish Fabric standard build
@@ -137,7 +150,7 @@ jobs:
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1)
           curseforge-version: ${{ steps.version_data.outputs.version }}
-          version-type: release
+          version-type: ${{ steps.version_data.outputs.version_type }}
           changelog-file: release-notes.md
           game-versions: |
             1.21.1
@@ -159,7 +172,7 @@ jobs:
           modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
           modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1)
           modrinth-version: '${{ steps.version_data.outputs.version }}+fabric'
-          version-type: release
+          version-type: ${{ steps.version_data.outputs.version_type }}
           changelog-file: release-notes.md
           game-versions: |
             1.21.1
@@ -181,7 +194,7 @@ jobs:
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
           curseforge-version: ${{ steps.version_data.outputs.version }}
-          version-type: release
+          version-type: ${{ steps.version_data.outputs.version_type }}
           changelog-file: release-notes.md
           game-versions: |
             1.21.1
@@ -203,7 +216,7 @@ jobs:
           modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
           modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
           modrinth-version: '${{ steps.version_data.outputs.version }}+fabric-gl'
-          version-type: release
+          version-type: ${{ steps.version_data.outputs.version_type }}
           changelog-file: release-notes.md
           game-versions: |
             1.21.1
@@ -225,7 +238,7 @@ jobs:
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
           curseforge-version: ${{ steps.version_data.outputs.version }}
-          version-type: release
+          version-type: ${{ steps.version_data.outputs.version_type }}
           changelog-file: release-notes.md
           game-versions: |
             1.21.1
@@ -247,7 +260,7 @@ jobs:
           modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
           modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1)
           modrinth-version: '${{ steps.version_data.outputs.version }}+neoforge'
-          version-type: release
+          version-type: ${{ steps.version_data.outputs.version_type }}
           changelog-file: release-notes.md
           game-versions: |
             1.21.1
@@ -269,7 +282,7 @@ jobs:
           curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
           curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
           curseforge-version: ${{ steps.version_data.outputs.version }}
-          version-type: release
+          version-type: ${{ steps.version_data.outputs.version_type }}
           changelog-file: release-notes.md
           game-versions: |
             1.21.1
@@ -291,7 +304,7 @@ jobs:
           modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
           modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
           modrinth-version: '${{ steps.version_data.outputs.version }}+neoforge-gl'
-          version-type: release
+          version-type: ${{ steps.version_data.outputs.version_type }}
           changelog-file: release-notes.md
           game-versions: |
             1.21.1
