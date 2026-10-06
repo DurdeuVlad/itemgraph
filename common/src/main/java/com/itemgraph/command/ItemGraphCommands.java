@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import com.itemgraph.audit.AuditReport;
+import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.audit.AuditService;
 import com.itemgraph.correlation.CorrelationResult;
@@ -1331,17 +1332,39 @@ public final class ItemGraphCommands {
             return true;
         }
         String normalized = eventType.toUpperCase(java.util.Locale.ROOT);
-        return AUDIT_ONLY_LOOKUP_TYPES.contains(normalized)
+        if (AUDIT_ONLY_LOOKUP_TYPES.contains(normalized)
                 || normalized.startsWith("ADMIN_ITEM_COMMAND_")
                 || normalized.startsWith("CREATIVE_SLOT_")
                 || normalized.startsWith("CREATIVE_BLOCK_")
                 || normalized.startsWith("ADMIN_ITEM_")
-                || normalized.startsWith("CREATIVE_ITEM_");
+                || normalized.startsWith("CREATIVE_ITEM_")) {
+            return true;
+        }
+        EventTaxonomy.Definition definition = EventTaxonomy.find(normalized,
+                EventTaxonomy.Surface.AUDIT_EVENT).orElse(null);
+        return definition != null && requiresAuditPrivacy(definition);
     }
 
     static boolean requiresAuditPermission(List<String> eventTypes) {
         return eventTypes == null || eventTypes.isEmpty()
-                || eventTypes.stream().anyMatch(ItemGraphCommands::requiresAuditPermission);
+                || eventTypes.stream().anyMatch(eventType -> requiresAuditPermission(eventType)
+                        || hasSensitiveUnifiedEvidence(eventType));
+    }
+
+    private static boolean hasSensitiveUnifiedEvidence(String eventType) {
+        if (eventType == null || eventType.isBlank()) return true;
+        String normalized = eventType.toUpperCase(java.util.Locale.ROOT);
+        for (EventTaxonomy.Surface surface : List.of(
+                EventTaxonomy.Surface.ITEM_OBSERVATION, EventTaxonomy.Surface.TRANSFORMATION)) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(normalized, surface).orElse(null);
+            if (definition != null && requiresAuditPrivacy(definition)) return true;
+        }
+        return false;
+    }
+
+    private static boolean requiresAuditPrivacy(EventTaxonomy.Definition definition) {
+        return definition.privacy() == EventTaxonomy.PrivacyClass.SENSITIVE_LOCATION
+                || definition.privacy() == EventTaxonomy.PrivacyClass.STAFF_ACTIVITY;
     }
 
     static List<String> lookupPermissionsForType(String eventType) {
@@ -1521,6 +1544,14 @@ public final class ItemGraphCommands {
         boolean dbConnected = db.isInitialized();
         var dbSettings = db.getSettings();
         String backend = dbSettings == null ? "not configured" : dbSettings.backend().name().toLowerCase(java.util.Locale.ROOT);
+        IngestionService ingestion = IngestionService.getInstance();
+        IngestionResult lastResult = ingestion.getLastResult();
+        CorrelationResult lastCorrelation = ingestion.getCorrelationEngine().getLastResult();
+        InternalObservationService internalObs = InternalObservationService.getInstance();
+        ItemEntityTracker entityTracker = ItemEntityTracker.getInstance();
+        long capabilityQueueRejections = ContainerInteractionTracker.getInstance().getTotalCapabilityQueueRejections();
+        source.sendSuccess(() -> Component.literal(statusActionLine(dbConnected,
+                internalObs.getCaptureState(), internalObs.getTotalDropped())), false);
         source.sendSuccess(() -> Component.literal(ItemGraphLanguage.text("status.summary",
                 "[ItemGraph] version={0} griefLogger={1} db={2} backend={3} schemaVersion={4} maxPageSize={5} databaseConnectionTimeoutMs={6} useIndexes={7}",
                 modVersion, glStatus, ItemGraphLanguage.text(dbConnected ? "status.connected" : "status.disconnected",
@@ -1529,12 +1560,6 @@ public final class ItemGraphCommands {
                         ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.connectionTimeoutMs(),
                 dbSettings == null ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.useIndexes())), false);
 
-        IngestionService ingestion = IngestionService.getInstance();
-        IngestionResult lastResult = ingestion.getLastResult();
-        CorrelationResult lastCorrelation = ingestion.getCorrelationEngine().getLastResult();
-        InternalObservationService internalObs = InternalObservationService.getInstance();
-        ItemEntityTracker entityTracker = ItemEntityTracker.getInstance();
-        long capabilityQueueRejections = ContainerInteractionTracker.getInstance().getTotalCapabilityQueueRejections();
         runtimeStatusLines(ingestion, lastResult, lastCorrelation, internalObs, entityTracker,
                 capabilityQueueRejections).forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
         if (!dbConnected) {
@@ -1589,6 +1614,37 @@ public final class ItemGraphCommands {
         });
     }
 
+    static String statusActionLine(boolean dbConnected,
+                                   InternalObservationService.CaptureState captureState,
+                                   long droppedRecords) {
+        if (!dbConnected) {
+            return ItemGraphLanguage.text("status.action.db_disconnected",
+                    "[ItemGraph] ACTION: DB disconnected. Check config/logs; preserve DB files.");
+        }
+        if (captureState == InternalObservationService.CaptureState.RECOVERY_BLOCKED) {
+            return ItemGraphLanguage.text("status.action.recovery_blocked",
+                    "[ItemGraph] ACTION: Recovery blocked. Preserve recovery files; inspect logs.");
+        }
+        if (captureState == InternalObservationService.CaptureState.RECOVERY_LOADING) {
+            return ItemGraphLanguage.text("status.action.recovery_loading",
+                    "[ItemGraph] ACTION: Recovery loading. Wait before reading queue totals.");
+        }
+        if (captureState == InternalObservationService.CaptureState.STOPPED) {
+            return ItemGraphLanguage.text("status.action.capture_stopped",
+                    "[ItemGraph] ACTION: Capture stopped. Check logs before trusting new evidence.");
+        }
+        if (captureState == InternalObservationService.CaptureState.DISABLED_BY_CONFIG) {
+            return ItemGraphLanguage.text("status.action.capture_disabled",
+                    "[ItemGraph] ACTION: Capture disabled by config; results use stored evidence.");
+        }
+        if (droppedRecords > 0) {
+            return ItemGraphLanguage.text("status.action.dropped_records",
+                    "[ItemGraph] ACTION: Records dropped; check logs; results may be incomplete.");
+        }
+        return ItemGraphLanguage.text("status.action.no_stop_reported",
+                "[ItemGraph] ACTION: No reported DB/capture stop; coverage is not proven.");
+    }
+
     static List<String> runtimeStatusLines(
             IngestionService ingestion,
             IngestionResult lastResult,
@@ -1598,18 +1654,18 @@ public final class ItemGraphCommands {
             long capabilityQueueRejections) {
         OperationalMetrics.Snapshot metrics = OperationalMetrics.getInstance().snapshot();
         return List.of(
-                    "[ItemGraph] correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s"
+                    "[ItemGraph] DIAGNOSTIC correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s"
                             + " lastPass=" + (lastCorrelation == null ? "never run yet"
                             : (lastCorrelation.success() ? "OK" : "ERROR")
                             + " (" + lastCorrelation.observationsFinalised() + " evaluated, "
                             + lastCorrelation.edgesCreated() + " bridges inferred, " + lastCorrelation.deferred()
                             + " deferred, " + lastCorrelation.durationMs() + "ms)"),
-                    "[ItemGraph] ingestion worker: running=" + ingestion.isRunning()
+                    "[ItemGraph] DIAGNOSTIC ingestion worker: running=" + ingestion.isRunning()
                             + " lastCycle=" + (lastResult == null ? "never run yet"
                             : (lastResult.success() ? "OK" : "ERROR")
                             + " (" + lastResult.itemsIngested() + " items, " + lastResult.containersIngested()
                             + " containers, " + lastResult.durationMs() + "ms)"),
-                    "[ItemGraph] internal queue: size=" + internalObs.getQueueSize()
+                    "[ItemGraph] DIAGNOSTIC capture/queue: size=" + internalObs.getQueueSize()
                             + " capacityPerQueue=10000"
                             + " idlePollMs=" + internalObs.getQueuePollIntervalMs()
                             + " flushEveryTicks=" + internalObs.getQueueFrequencyTicks()
@@ -1627,7 +1683,7 @@ public final class ItemGraphCommands {
                             + " capabilityQueueRejections=" + capabilityQueueRejections
                             + " transformations=" + internalObs.getTotalTransformations()
                             + " auditEvents=" + internalObs.getTotalAuditEvents(),
-                    "[ItemGraph] performance: enqueueCount=" + metrics.enqueue().count()
+                    "[ItemGraph] DIAGNOSTIC performance counters: enqueueCount=" + metrics.enqueue().count()
                             + " enqueueP95=" + latencyP95(metrics.enqueue())
                             + " enqueueFailed=" + metrics.enqueue().failed()
                             + " persistBatches=" + metrics.persistenceCommit().count()
@@ -1649,7 +1705,7 @@ public final class ItemGraphCommands {
                             + " decodeCacheHits=" + metrics.decodeCacheHits()
                             + " heapUsedBytes=" + metrics.heapUsedBytes()
                             + " heapMaxBytes=" + metrics.heapMaxBytes(),
-                    "[ItemGraph] entity tracking: active=" + entityTracker.getActiveEntityCount()
+                    "[ItemGraph] DIAGNOSTIC entity tracking: active=" + entityTracker.getActiveEntityCount()
                             + " drops=" + entityTracker.getDropCount()
                             + " pickups=" + entityTracker.getPickupCount()
                             + " continuityMatches=" + entityTracker.getContinuityMatchCount()

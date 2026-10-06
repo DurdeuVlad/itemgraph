@@ -195,7 +195,7 @@ public final class FlowBrowserService {
                 for (int i = 0; i < count; i++) {
                     int candidateIndex = start + i;
                     FingerprintRef candidate = page.candidates().get(candidateIndex);
-                    items.set(i, fingerprintItem(candidate));
+                    items.set(i, withMenuSlotLabel(fingerprintItem(candidate), i + 1));
                     actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.FINGERPRINT_CANDIDATE, candidateIndex));
                 }
             } else {
@@ -204,7 +204,7 @@ public final class FlowBrowserService {
                 for (int i = 0; i < count; i++) {
                     int candidateIndex = start + i;
                     NodeRef candidate = page.nodeCandidates().get(candidateIndex);
-                    items.set(i, nodeCandidateItem(candidate));
+                    items.set(i, withMenuSlotLabel(nodeCandidateItem(candidate), i + 1));
                     actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.NODE_CANDIDATE, candidateIndex));
                 }
             }
@@ -213,7 +213,7 @@ public final class FlowBrowserService {
                     page.targetDescription(), t("browser.no_movement_lore", "No observed or inferred movement was recorded in this time window."))));
         } else {
             for (int i = 0; i < Math.min(page.pageSize(), page.hops().size()); i++) {
-                items.set(i, hopItem(page.hops().get(i)));
+                items.set(i, withMenuSlotLabel(hopItem(page.hops().get(i)), i + 1));
                 actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.ENTRY, i));
             }
         }
@@ -265,7 +265,7 @@ public final class FlowBrowserService {
 
     static List<String> pageCompanionLines(TracePage page, int pageIndex, int candidatePageIndex) {
         List<String> lines = new ArrayList<>();
-        String pagePrefix = t("browser.page_prefix", "[ItemGraph] Flow browser {0} {1} —",
+        String pagePrefix = t("browser.page_prefix", "[ItemGraph] {0} {1}:",
                 page.resolution() == TracePage.Resolution.AMBIGUOUS
                         ? t("browser.candidate_page", "candidate page") : t("browser.page", "page"), pageIndex + 1) + " ";
         if (page.resolution() == TracePage.Resolution.AMBIGUOUS) {
@@ -273,15 +273,25 @@ public final class FlowBrowserService {
                 int start = candidatePageIndex * page.pageSize();
                 for (int i = start; i < Math.min(start + page.pageSize(), page.candidates().size()); i++) {
                     FingerprintRef candidate = page.candidates().get(i);
-                    lines.add((i == start ? pagePrefix : "[ItemGraph] ") + t("browser.ambiguous_candidate",
-                            "{0}. AMBIGUOUS candidate — {1}", i - start + 1, safeIdentity(candidate)));
+                    String prefix = i == start ? pagePrefix : "[ItemGraph] ";
+                    int ordinal = i - start + 1;
+                    String label = t("browser.ambiguous_candidate", "{0}. AMBIGUOUS candidate — {1}", ordinal, "");
+                    int identityLimit = Math.max(1, 80 - prefix.length() - label.length());
+                    lines.add(prefix + t("browser.ambiguous_candidate", "{0}. AMBIGUOUS candidate — {1}",
+                            ordinal, safeSummary(safeIdentity(candidate), identityLimit)));
                 }
             } else {
                 int start = candidatePageIndex * page.pageSize();
                 for (int i = start; i < Math.min(start + page.pageSize(), page.nodeCandidates().size()); i++) {
                     NodeRef candidate = page.nodeCandidates().get(i);
-                    lines.add((i == start ? pagePrefix : "[ItemGraph] ") + t("browser.ambiguous_node_candidate",
-                            "{0}. AMBIGUOUS node candidate — {1}", i - start + 1, candidate.describeShort()));
+                    String prefix = i == start ? pagePrefix : "[ItemGraph] ";
+                    int ordinal = i - start + 1;
+                    String label = t("browser.ambiguous_node_candidate",
+                            "{0}. AMBIGUOUS node candidate — {1}", ordinal, "");
+                    int descriptionLimit = Math.max(1, 80 - prefix.length() - label.length());
+                    lines.add(prefix + t("browser.ambiguous_node_candidate",
+                            "{0}. AMBIGUOUS node candidate — {1}", ordinal,
+                            safeSummary(candidate.describeShort(), descriptionLimit)));
                 }
             }
             if (lines.isEmpty()) lines.add(pagePrefix + t("browser.ambiguous_empty", "AMBIGUOUS — no candidate details were recorded."));
@@ -293,37 +303,13 @@ public final class FlowBrowserService {
             for (int i = 0; i < Math.min(page.pageSize(), page.hops().size()); i++) {
                 TraceHop hop = page.hops().get(i);
                 String evidence = companionEvidenceClass(hop);
-                String eventKind = isAmbiguousSourceGroup(hop)
-                        ? "ambiguous source group; no independent quantity capacity"
-                        : companionEventKind(hop);
-                String interval = hop.endMs() > hop.timestampMs()
-                        ? QueryFormatter.formatTime(hop.timestampMs()) + " to " + QueryFormatter.formatTime(hop.endMs())
-                        : QueryFormatter.formatTime(hop.timestampMs());
-                lines.add((i == 0 ? pagePrefix : "[ItemGraph] ") + t("browser.row",
-                        "{0}. {1} — {2} — {3} — {4}", i + 1, evidence, safeIdentity(hop.item()), eventKind, interval));
+                String rowPrefix = "[ItemGraph] " + (i + 1) + ". " + evidence + " — ";
+                int identityLimit = Math.max(1, Math.min(40, 80 - rowPrefix.length()));
+                lines.add("[ItemGraph] " + t("browser.row", "{0}. {1} — {2}",
+                        i + 1, evidence, safeSummary(safeIdentity(hop.item()), identityLimit)));
             }
         }
         return List.copyOf(lines);
-    }
-
-    private static String companionEventKind(TraceHop hop) {
-        if (hop.source() == TraceHop.Source.TRANSFORMATION) {
-            String detail = hop.detail() == null ? "" : hop.detail();
-            java.util.regex.Matcher matcher = java.util.regex.Pattern
-                    .compile("^\\[TRANSFORMATION ([A-Z0-9_]+)(?:\\s|\\])")
-                    .matcher(detail);
-            return matcher.find() ? "TRANSFORMATION " + matcher.group(1) : "TRANSFORMATION";
-        }
-        if (hop.kind() == TraceHop.Kind.INFERRED) {
-            return safeSummary(hop.detail(), 48);
-        }
-        String detail = hop.detail() == null ? "" : hop.detail().trim();
-        int metadata = detail.indexOf(" [");
-        int corroboration = detail.indexOf(" corroborates observation#");
-        int end = metadata < 0 ? detail.length() : metadata;
-        if (corroboration >= 0) end = Math.min(end, corroboration);
-        String eventKind = detail.substring(0, end).trim();
-        return eventKind.isEmpty() ? "event kind unavailable" : safeSummary(eventKind, 48);
     }
 
     static String companionEvidenceClass(TraceHop hop) {
@@ -566,8 +552,15 @@ public final class FlowBrowserService {
             lore.add(t("browser.related_fingerprint", "Related fingerprint: {0}", hop.item().describeFull()));
         }
         lore.add(t("browser.details", "Details: {0}", hop.detail()));
-        ItemStack icon = transformation ? new ItemStack(Items.PAPER) : icon(hop.item());
+        ItemStack icon = icon(hop.item());
         return display(icon, title, lore);
+    }
+
+    static ItemStack withMenuSlotLabel(ItemStack stack, int oneBasedSlot) {
+        String name = stack.get(DataComponents.CUSTOM_NAME).getString();
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal(t("browser.menu_slot",
+                "Slot {0}: {1}", oneBasedSlot, name)));
+        return stack;
     }
 
     private static ItemStack fingerprintItem(FingerprintRef fingerprint) {

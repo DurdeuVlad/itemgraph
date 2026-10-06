@@ -144,8 +144,30 @@ class FlowBrowserMenuTest {
         ItemStack transformationItem = FlowBrowserService.hopItem(transformation);
         assertTrue(transformationItem.get(DataComponents.CUSTOM_NAME).getString()
                 .startsWith("[OBSERVED] TRANSFORMATION #13"));
+        assertEquals(Items.EMERALD, transformationItem.getItem(),
+                "known transformation outputs should use their item icon instead of generic paper");
         assertTrue(transformationItem.get(DataComponents.LORE).lines().stream()
                 .anyMatch(line -> line.getString().contains("Related fingerprint: minecraft:emerald")));
+    }
+
+    @Test
+    void selectableEntryHoverNamesMatchCompanionNumbersAndMenuSlots() {
+        String previousLocale = com.itemgraph.i18n.ItemGraphLanguage.getLocale();
+        try {
+            com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
+            ItemStack secondSlot = FlowBrowserService.withMenuSlotLabel(
+                    FlowBrowserService.hopItem(new TraceHop(TraceHop.Kind.OBSERVED, 11, null, null, 1,
+                            1_000L, 1_000L, null, "DROP_ITEM",
+                            new FingerprintRef(7, "minecraft:diamond", null, null))), 2);
+            assertEquals("Slot 2: [OBSERVED] 1x minecraft:diamond",
+                    secondSlot.get(DataComponents.CUSTOM_NAME).getString());
+            assertFalse(com.itemgraph.i18n.ItemGraphLanguage.keyFallbackInventory("nl_nl")
+                    .contains("browser.menu_slot"), "Dutch needs a translated slot label");
+            assertFalse(com.itemgraph.i18n.ItemGraphLanguage.keyFallbackInventory("zh_tw")
+                    .contains("browser.menu_slot"), "Traditional Chinese needs a translated slot label");
+        } finally {
+            com.itemgraph.i18n.ItemGraphLanguage.setLocale(previousLocale);
+        }
     }
 
     @Test
@@ -176,15 +198,22 @@ class FlowBrowserMenuTest {
         List<String> lines = FlowBrowserService.pageCompanionLines(page, 1);
 
         assertEquals(3, lines.size());
-        assertTrue(lines.get(0).contains("page 2 — 1. OBSERVED") && lines.get(0).contains("DROP_ITEM"));
+        assertTrue(lines.get(0).contains("1. OBSERVED"));
         assertTrue(lines.get(0).contains("Named stack (minecraft:diamond)"));
-        assertTrue(lines.get(1).contains("2. INFERRED conf=0.9000") && lines.get(1).contains("ground bridge"));
+        assertTrue(lines.get(1).contains("2. INFERRED conf=0.9000"));
         assertTrue(lines.get(2).contains("3. OBSERVED") && lines.get(2).contains("item identity unavailable"));
+        assertTrue(lines.stream().allMatch(line -> line.length() <= 80),
+                "persistent chat rows should stay concise; hover details carry the full record");
+        ItemStack observedHover = FlowBrowserService.hopItem(observed);
+        assertTrue(observedHover.get(DataComponents.LORE).lines().stream()
+                .anyMatch(line -> line.getString().contains("Time: 2023-11-14 22:13:20 UTC")));
+        assertTrue(observedHover.get(DataComponents.LORE).lines().stream()
+                .anyMatch(line -> line.getString().contains("Details: DROP_ITEM")));
         assertFalse(String.join(" ", lines).contains("private-hash"));
     }
 
     @Test
-    void pageCompanionKeepsContainerBreakCorrelationIdsOutOfEventKind() {
+    void pageCompanionKeepsContainerBreakCorrelationDetailsOnHover() {
         TraceHop removal = new TraceHop(TraceHop.Kind.OBSERVED, 31, null, null, 2,
                 1_700_000_004_000L, 1_700_000_004_000L, null,
                 "REMOVE_ITEM [evidence_event_id=evidence-uuid parent_event_id=parent-uuid break_event_id=break-uuid]",
@@ -195,7 +224,10 @@ class FlowBrowserMenuTest {
 
         List<String> lines = FlowBrowserService.pageCompanionLines(page, 0);
 
-        assertTrue(lines.getFirst().contains("REMOVE_ITEM"), lines.getFirst());
+        assertTrue(lines.getFirst().contains("OBSERVED"), lines.getFirst());
+        assertTrue(lines.getFirst().contains("minecraft:diamond"), lines.getFirst());
+        assertTrue(FlowBrowserService.hopItem(removal).get(DataComponents.LORE).lines().stream()
+                .anyMatch(line -> line.getString().contains("Details: REMOVE_ITEM")));
         assertFalse(String.join(" ", lines).contains("evidence_event_id"));
         assertFalse(String.join(" ", lines).contains("parent-uuid"));
         assertFalse(String.join(" ", lines).contains("break-uuid"));
@@ -206,7 +238,8 @@ class FlowBrowserMenuTest {
         TraceHop ambiguous = new TraceHop(TraceHop.Kind.OBSERVED, 21, null, null, 1,
                 1_700_000_004_000L, 1_700_000_004_000L, null,
                 "DROP_ITEM [source group ambiguous #4; no independent quantity capacity; candidate match]",
-                null, TraceHop.Source.OBSERVATION);
+                new FingerprintRef(21, "moddeditems:very_long_named_stack_with_special_metadata", null, null),
+                TraceHop.Source.OBSERVATION);
         TraceHop transformation = new TraceHop(TraceHop.Kind.OBSERVED, 22, null, null, 1,
                 1_700_000_005_000L, 1_700_000_005_000L, null,
                 "[TRANSFORMATION CRAFTING -> minecraft:emerald] (1 item)", null,
@@ -217,7 +250,10 @@ class FlowBrowserMenuTest {
                 null, null, List.of(), List.of(), List.of(transformation), QueryWindow.unbounded(),
                 9, null, false, null, false);
         assertTrue(FlowBrowserService.pageCompanionLines(transformationPage, 0).getFirst()
-                .contains("TRANSFORMATION CRAFTING"));
+                .contains("OBSERVED / TRANSFORMATION"));
+        assertTrue(FlowBrowserService.hopItem(transformation).get(DataComponents.LORE).lines().stream()
+                .anyMatch(line -> line.getString().contains("TRANSFORMATION CRAFTING")),
+                "the hover detail retains transformation evidence after the chat row is shortened");
 
         TracePage ambiguousTarget = new TracePage("diamond", TracePage.Resolution.AMBIGUOUS, null, null,
                 List.of(new FingerprintRef(31, "minecraft:diamond", null, null)), List.of(), List.of(),
@@ -239,11 +275,17 @@ class FlowBrowserMenuTest {
                 .mapToObj(id -> new FingerprintRef(id, "minecraft:diamond", "candidate " + id, "hash" + id))
                 .toList();
         TracePage candidatePage = new TracePage("diamond", TracePage.Resolution.AMBIGUOUS, null, null,
-                tenCandidates, List.of(), List.of(), QueryWindow.unbounded(), 9,
+                tenCandidates.stream().map(candidate -> new FingerprintRef(candidate.id(), candidate.itemId(),
+                        candidate.id() == 10 ? "candidate 10"
+                                : "A long custom item name that would wrap the candidate row",
+                        candidate.fingerprintHash())).toList(),
+                List.of(), List.of(), QueryWindow.unbounded(), 9,
                 null, false, null, false);
         List<String> firstCandidatePage = FlowBrowserService.pageCompanionLines(candidatePage, 0, 0);
         List<String> secondCandidatePage = FlowBrowserService.pageCompanionLines(candidatePage, 1, 1);
         assertEquals(9, firstCandidatePage.size(), "all first-page candidate labels fit the nine-row companion");
+        assertTrue(firstCandidatePage.stream().allMatch(line -> line.length() <= 80));
+        assertTrue(secondCandidatePage.stream().allMatch(line -> line.length() <= 80));
         assertTrue(secondCandidatePage.get(0).contains("1. AMBIGUOUS candidate"));
         assertTrue(secondCandidatePage.get(0).contains("candidate 10"), "candidate ten stays reachable on page two");
 
@@ -252,9 +294,10 @@ class FlowBrowserMenuTest {
                 9, null, false, null, false);
         List<String> rows = FlowBrowserService.pageCompanionLines(classifiedRows, 0);
         assertTrue(rows.get(0).contains("OBSERVED / AMBIGUOUS SOURCE GROUP"));
-        assertTrue(rows.get(0).contains("no independent quantity capacity"));
         assertTrue(rows.get(1).contains("OBSERVED / TRANSFORMATION"));
-        assertTrue(rows.get(1).contains("TRANSFORMATION CRAFTING"));
-        assertFalse(rows.get(1).contains("minecraft:emerald"), "the event-kind label stays concise");
+        assertTrue(FlowBrowserService.hopItem(ambiguous).get(DataComponents.LORE).lines().stream()
+                .anyMatch(line -> line.getString().contains("no independent quantity capacity")),
+                "the ambiguity explanation remains available on hover");
+        assertTrue(rows.stream().allMatch(line -> line.length() <= 80));
     }
 }

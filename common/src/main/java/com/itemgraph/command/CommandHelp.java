@@ -13,14 +13,14 @@ import java.util.Map;
 /** Maintained help text for the live /itemgraph command tree. */
 public final class CommandHelp {
 
-    private static final String PERMISSION_LINE = "[ItemGraph] Unset grants use level 2; details: /ig help permissions.";
+    private static final String PERMISSION_LINE = "[ItemGraph] Every /ig command needs itemgraph.command; Unset grants use level 2.";
 
     static final List<String> TOPIC_NAMES = List.of(
             "help", "commands", "permissions", "guide", "status", "audit", "ingest", "ingest now", "ingest history", "event", "explain", "journeys",
             "journeys inspect", "journeys trace", "journeys near", "journeys filters",
             "goto",
             "lookup", "lookup near", "lookup page", "lookup player", "lookup filters", "lookup provenance",
-            "lookup transformations",
+            "lookup admin", "lookup lifecycle", "lookup transformations",
             "page",
             "trace", "trace item", "trace player", "trace container",
             "gui", "gui item", "gui player", "gui container", "inspect");
@@ -35,7 +35,7 @@ public final class CommandHelp {
                 "[ItemGraph] Nearby: /ig help lookup near; tasks: /ig help journeys.",
                 "[ItemGraph] Inspect: /ig inspect on (click blocks/containers).",
                 "[ItemGraph] Evidence: /ig event <id>; inferred edge: /ig explain <id>.",
-                "[ItemGraph] Status: /ig status; audit: /ig audit; access: /ig help permissions.");
+                "[ItemGraph] Required: itemgraph.command; permissions: /ig help permissions.");
     }
 
     /** Registers every static help sentence so catalog keys can be validated before database startup. */
@@ -78,27 +78,35 @@ public final class CommandHelp {
                 "[ItemGraph] Start with an admin question; use /ig help commands to find a command or /ig help <topic> for exact syntax.",
                 "[ItemGraph] Example: /ig help trace item"));
         topics.put("commands", List.of(
-                "[ItemGraph] Use /ig help <topic> for exact syntax and examples; groups below list topics.",
-                "[ItemGraph] ITEM FLOW — /ig trace item; /ig gui item.",
-                "[ItemGraph] PLAYER/CONTAINER — /ig trace player; /ig trace container; /ig gui player; /ig gui container.",
-                "[ItemGraph] AUDIT — /ig lookup <eventType>; /ig lookup near; /ig lookup player; /ig lookup page.",
-                "[ItemGraph] TRANSFORM — /ig help lookup transformations.",
-                "[ItemGraph] FILTER/PROVENANCE — /ig lookup <filters...>; /ig lookup filters; /ig lookup provenance.",
-                "[ItemGraph] DETAIL — /ig event <observationId>; /ig explain <edgeId>; /ig page <page>.",
-                "[ItemGraph] INSPECTION — /ig inspect [on|off|status]; /ig goto <token> is click-only.",
-                "[ItemGraph] HEALTH/INGEST — /ig status; /ig audit; /ig ingest now; /ig ingest history (optional import).",
-                "[ItemGraph] TOPICS — guide, journeys, permissions, status, audit, ingest, event, explain, page, inspect, lookup, trace, gui.",
-                "[ItemGraph] Setup, config, and API are docs, not commands. See docs/ADMIN_QUICK_START.md. /ig = /itemgraph.",
-                "[ItemGraph] Example: /ig trace item diamond"));
+                "[ItemGraph] ITEM: /ig trace item diamond; /ig help trace item.",
+                "[ItemGraph] GUI: /ig gui item stone; /ig help gui; /ig gui container.",
+                "[ItemGraph] PLAYER: /ig trace player <playerName>; /ig help trace player.",
+                "[ItemGraph] CONTAINER: /ig trace container; /ig help trace container.",
+                "[ItemGraph] AUDIT: /ig lookup near; /ig help lookup; /ig inspect.",
+                "[ItemGraph] EVIDENCE: /ig event <observationId>; /ig explain <edgeId>.",
+                "[ItemGraph] PAGES: /ig page <page>; /ig goto <token> is click-only.",
+                "[ItemGraph] OPS: /ig status; /ig audit; /ig ingest history; /ig ingest now.",
+                "[ItemGraph] Example: /ig help trace item; /ig help <topic>; /ig help guide."));
         topics.put("permissions", List.of(
-                "[ItemGraph] Grant a lookup-only moderator both itemgraph.command and itemgraph.command.lookup.",
-                "[ItemGraph] Add itemgraph.command.page for /ig page and lookup-page buttons; it is an independent node.",
-                "[ItemGraph] Nodes do not inherit from dotted parents. Explicit deny overrides operator level; an unset node falls back to vanilla level 2.",
-                "[ItemGraph] Other nodes: itemgraph.command.inspect, itemgraph.trace, itemgraph.event, itemgraph.explain, itemgraph.audit, itemgraph.gui, itemgraph.ingest, itemgraph.import.",
-                "[ItemGraph] Protected evidence can appear in event, explain, trace, and GUI results; those surfaces require their node plus itemgraph.audit.",
-                "[ItemGraph] NeoForge uses its PermissionAPI handler. Fabric bundles fabric-permissions-api 0.3.1; a compatible provider mod is needed to configure grants.",
-                "[ItemGraph] Full command-to-node matrix: docs/SECURITY_AND_PERMISSIONS.md",
-                "[ItemGraph] Example: grant itemgraph.command and itemgraph.command.lookup to a level-1 moderator."));
+                "[ItemGraph] All commands need itemgraph.command; status/help need only it.",
+                "[ItemGraph] Example lookup: itemgraph.command + itemgraph.command.lookup.",
+                "[ItemGraph] Protected lookup adds itemgraph.audit.",
+                "[ItemGraph] For provenance chats/commands, add itemgraph.audit to lookup.",
+                "[ItemGraph] Other provenance tables: itemgraph.command.lookup only.",
+                "[ItemGraph] /ig audit: itemgraph.command + itemgraph.audit.",
+                "[ItemGraph] Saved pages: add itemgraph.command.page to lookup grants.",
+                "[ItemGraph] Trace: itemgraph.command + itemgraph.trace + itemgraph.audit.",
+                "[ItemGraph] Event detail: itemgraph.command + itemgraph.event + itemgraph.audit.",
+                "[ItemGraph] Explain: itemgraph.command + itemgraph.explain + itemgraph.audit.",
+                "[ItemGraph] Inspect on/off: itemgraph.command + itemgraph.command.inspect.",
+                "[ItemGraph] Block history in Inspect also needs itemgraph.audit.",
+                "[ItemGraph] GUI in Inspect: add itemgraph.gui + itemgraph.audit.",
+                "[ItemGraph] Direct GUI: itemgraph.command + itemgraph.gui + itemgraph.audit.",
+                "[ItemGraph] /ig ingest now: itemgraph.command + itemgraph.ingest.",
+                "[ItemGraph] Import: itemgraph.command + itemgraph.ingest + itemgraph.import.",
+                "[ItemGraph] Explicit false denies; unset nodes use level 2.",
+                "[ItemGraph] Dotted nodes do not inherit; grant each named permission.",
+                "[ItemGraph] Matrix/provider behavior: docs/SECURITY_AND_PERMISSIONS.md."));
         topics.put("journeys", List.of(
                 "[ItemGraph] Inspect: /ig help journeys inspect; trace: /ig help journeys trace.",
                 "[ItemGraph] Nearby: /ig help journeys near; filtered: /ig help journeys filters.",
@@ -111,13 +119,15 @@ public final class CommandHelp {
                 "[ItemGraph] Example: /ig help journeys"));
         topics.put("journeys inspect", List.of(
                 "[ItemGraph] Start: /ig inspect on; left-click blocks or right-click containers.",
-                "[ItemGraph] History is OBSERVED; copy event type: /ig lookup <eventType>.",
+                "[ItemGraph] History is raw audit events; some rows are UNRESOLVED.",
+                "[ItemGraph] Copy an event type to query: /ig lookup <eventType>.",
                 "[ItemGraph] Container rows label OBSERVED or INFERRED evidence.",
                 "[ItemGraph] OBS ID: /ig event <observationId>; edge: /ig explain <edgeId>.",
                 "[ItemGraph] Perm: itemgraph.command + itemgraph.command.inspect.",
                 "[ItemGraph] History needs itemgraph.audit; containers also need itemgraph.gui.",
                 "[ItemGraph] Empty: check capture time, supported event, target, and grants.",
                 "[ItemGraph] Also check dimension and time range; empty is not proof of no event.",
+                "[ItemGraph] Finish: /ig inspect off; logout/server stop also clears it.",
                 "[ItemGraph] Example: /ig help journeys inspect"));
         topics.put("journeys trace", List.of(
                 "[ItemGraph] Start: /ig trace item <query> follows an item or item type.",
@@ -126,36 +136,42 @@ public final class CommandHelp {
                 "[ItemGraph] Perm: itemgraph.command + itemgraph.trace + itemgraph.audit.",
                 "[ItemGraph] Detail adds itemgraph.event or itemgraph.explain, respectively.",
                 "[ItemGraph] Ambiguous matches are candidates; choose the matching fingerprint.",
+                "[ItemGraph] Filter one: /ig trace item \"id:<fingerprintId>\".",
                 "[ItemGraph] Empty: check capture, item or target, time window, and grants.",
                 "[ItemGraph] Also confirm that the event type is supported; empty is not proof.",
                 "[ItemGraph] Example: /ig help journeys trace"));
         topics.put("journeys near", List.of(
-                "[ItemGraph] Start: /ig lookup near; exact syntax: /ig help lookup near.",
-                "[ItemGraph] OBSERVED audit rows; copy type to /ig lookup <eventType>.",
-                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup.",
-                "[ItemGraph] Protected event families also need itemgraph.audit.",
-                "[ItemGraph] Player pages: /ig page 2; add itemgraph.command.page.",
-                "[ItemGraph] Console near returns one page and saves no coordinates.",
-                "[ItemGraph] /ig lookup page <page> <eventType> has no nearby scope.",
-                "[ItemGraph] Empty: check capture, event type, coordinates, range, and grants.",
-                "[ItemGraph] Empty means no stored match; it does not prove no event occurred.",
+                "[ItemGraph] Start: /ig lookup near; syntax: /ig help lookup near.",
+                "[ItemGraph] Raw audit rows; some can be UNRESOLVED.",
+                "[ItemGraph] Type: /ig lookup <eventType>.",
+                "[ItemGraph] Grant: itemgraph.command.lookup.",
+                "[ItemGraph] Protected rows also need itemgraph.audit.",
+                "[ItemGraph] Pages: /ig page 2 + itemgraph.command.page.",
+                "[ItemGraph] Console near is one page; it saves no coordinates.",
+                "[ItemGraph] /ig lookup page is not nearby-scoped.",
+                "[ItemGraph] Empty? Check capture, type, coordinates, radius, and grants.",
+                "[ItemGraph] No match does not prove no event occurred.",
                 "[ItemGraph] Example: /ig help journeys near"));
         topics.put("journeys filters", List.of(
-                "[ItemGraph] Start: /ig lookup <filters...>; syntax: /ig help lookup filters.",
-                "[ItemGraph] Rows span audit, observation, transformation, and import evidence.",
-                "[ItemGraph] Classes: OBSERVED, INFERRED, UNRESOLVED, PROVENANCE_ONLY.",
-                "[ItemGraph] Narrow action: /ig lookup action.<value> radius.50 time.1h.",
-                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup.",
-                "[ItemGraph] Paging: itemgraph.command.page; protected: itemgraph.audit.",
-                "[ItemGraph] Radius is player-only; console uses /ig lookup near.",
-                "[ItemGraph] Empty: check capture time, filter values, target, and grants.",
-                "[ItemGraph] Also check supported events and time range; empty is not proof.",
-                "[ItemGraph] Example: /ig help journeys filters"));
+                "[ItemGraph] Start: /ig lookup <filters...>; see /ig help lookup filters.",
+                "[ItemGraph] OBSERVED: observation#N -> /ig event N; others stay inline.",
+                "[ItemGraph] Detail: itemgraph.event + itemgraph.audit.",
+                "[ItemGraph] INFERRED: proposal; see /ig help journeys trace.",
+                "[ItemGraph] AMBIGUOUS: choose a candidate; see /ig help journeys trace.",
+                "[ItemGraph] UNRESOLVED: event:<uuid> only if the row prints it.",
+                "[ItemGraph] PROVENANCE_ONLY: imported history, not movement.",
+                "[ItemGraph] Lookup: itemgraph.command.lookup; protected: itemgraph.audit.",
+                "[ItemGraph] GUI: player + itemgraph.gui + itemgraph.audit.",
+                "[ItemGraph] Pages: itemgraph.command.page + original lookup grants.",
+                "[ItemGraph] Radius needs player; console uses /ig lookup near; empty ≠ proof."));
         topics.put("guide", List.of(
                 "[ItemGraph] Admin quick start: https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md",
                 "[ItemGraph] Example: open the guide before configuring access or running the first capture check."));
         topics.put("status", List.of(
                 "[ItemGraph] Syntax: /ig status",
+                "[ItemGraph] ACTION reports DB/capture state and a safe next step when known.",
+                "[ItemGraph] No reported stop still does not prove event coverage.",
+                "[ItemGraph] DIAGNOSTIC counters follow; they do not form a health score.",
                 "[ItemGraph] RUNNING means the worker started, not database health or capture success. Check captureState, database, dropped, lastCycle, and lastPass.",
                 "[ItemGraph] Status shows facts, not calibrated health thresholds. See the admin quick start for units, reset windows, and recovery next steps.",
                 "[ItemGraph] Example: /ig status"));
@@ -174,6 +190,8 @@ public final class CommandHelp {
                 "[ItemGraph] Results are native OBSERVED evidence from ig_audit_events; limit defaults to 20 and is capped at 100.",
                 "[ItemGraph] /ig lookup near clamps radius to 1..1024 blocks and requires an exact dimension id.",
                 "[ItemGraph] Pages are 1-based; offsets are capped at 10,000 rows.",
+                "[ItemGraph] Focused help: /ig help lookup admin; /ig help lookup lifecycle.",
+                "[ItemGraph] Transformations: /ig help lookup transformations.",
                 "[ItemGraph] Example: /ig lookup BREAK_BLOCK 50 120");
         topics.put("lookup", lookup);
         topics.put("lookup near", List.of(
@@ -181,18 +199,39 @@ public final class CommandHelp {
                 "[ItemGraph] dimension: exact resource location; x/y/z: block coordinates; radius is clamped to 1..1024 blocks.",
                 "[ItemGraph] Results are native OBSERVED audit events in the selected cube. The read-only query runs asynchronously.",
                 "[ItemGraph] Example: /ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 50 1440"));
+        topics.put("lookup admin", List.of(
+                "[ItemGraph] Query ADMIN_ITEM_COMMAND_EFFECT; use near for coordinates.",
+                "[ItemGraph] Other outcomes: ADMIN_ITEM_COMMAND_ATTEMPT,",
+                "[ItemGraph] ADMIN_ITEM_COMMAND_FAILURE, ADMIN_ITEM_COMMAND_UNRESOLVED.",
+                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup +",
+                "[ItemGraph] itemgraph.audit.",
+                "[ItemGraph] Records do not expose command arguments. Near syntax:",
+                "[ItemGraph] /ig help lookup near.",
+                "[ItemGraph] Trace follow-up needs itemgraph.trace + itemgraph.audit.",
+                "[ItemGraph] Follow an item separately with /ig trace item \"id:<fingerprintId>\".",
+                "[ItemGraph] Example: /ig lookup ADMIN_ITEM_COMMAND_EFFECT 50 1440"));
+        topics.put("lookup lifecycle", List.of(
+                "[ItemGraph] Query KILL_ENTITY, THROW_ITEM, SHOOT_ITEM, or",
+                "[ItemGraph] PROJECTILE_SPAWN_ACCEPTED.",
+                "[ItemGraph] Syntax: /ig lookup <eventType> [limit] [sinceMinutes].",
+                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup +",
+                "[ItemGraph] itemgraph.audit; results include exact locations.",
+                "[ItemGraph] Throw/shoot are attempts; accepted spawn does not prove impact.",
+                "[ItemGraph] Death-drop trace needs itemgraph.trace + itemgraph.audit.",
+                "[ItemGraph] A death-drop trace does not identify the killer or cause.",
+                "[ItemGraph] Example: /ig lookup THROW_ITEM 50 1440"));
         topics.put("lookup transformations", List.of(
-                "[ItemGraph] Craft/smelt: CRAFT_OUTPUT_UNRESOLVED / SMELT_OUTPUT_UNRESOLVED.",
+                "[ItemGraph] Craft/smelt output only; input is unknown; no lineage edge.",
+                "[ItemGraph] Types: CRAFT_OUTPUT_UNRESOLVED, SMELT_OUTPUT_UNRESOLVED.",
                 "[ItemGraph] Example: /ig lookup CRAFT_OUTPUT_UNRESOLVED 50 1440",
-                "[ItemGraph] Open detail: /ig event event:<evidence-uuid>.",
-                "[ItemGraph] Output is observed; input is unknown; no lineage edge.",
-                "[ItemGraph] Perm: itemgraph.command + itemgraph.command.lookup.",
-                "[ItemGraph] Protected results also need itemgraph.audit.",
-                "[ItemGraph] Anvil rename/repair: /ig trace item <item-id>.",
-                "[ItemGraph] Trace perms: itemgraph.command + itemgraph.trace + itemgraph.audit.",
-                "[ItemGraph] Legacy CRAFT/SMELT is unresolved, not trace lineage.",
-                "[ItemGraph] Not covered: trade, enchanting, brewing, smithing.",
-                "[ItemGraph] Not covered: grindstone and loot generation."));
+                "[ItemGraph] Detail: /ig event event:<evidence-uuid>.",
+                "[ItemGraph] Filters: action.craft, action.smelt, action.anvil_rename/repair.",
+                "[ItemGraph] Rename/repair: /ig trace item <item-id>; /ig help journeys trace.",
+                "[ItemGraph] Lookup: itemgraph.command + itemgraph.command.lookup +",
+                "[ItemGraph] itemgraph.audit.",
+                "[ItemGraph] Trace follow-up needs itemgraph.trace + itemgraph.audit.",
+                "[ItemGraph] Legacy CRAFT/SMELT is unresolved; trades are not captured yet:",
+                "[ItemGraph] enchanting, brewing, smithing, grindstone, and loot."));
         topics.put("lookup page", List.of(
                 "[ItemGraph] Syntax: /ig lookup page <page> <eventType> [limit] [sinceMinutes]",
                 "[ItemGraph] page is 1-based; limit defaults to 20 and is capped at 100; sinceMinutes is omitted for all history.",
@@ -203,14 +242,17 @@ public final class CommandHelp {
                 "[ItemGraph] playerName is an exact stored player name; eventType uses the same values as /ig lookup.",
                 "[ItemGraph] Example: /ig lookup player Alex COMMAND_ATTEMPT 50 1440"));
         topics.put("lookup filters", List.of(
-                "[ItemGraph] Syntax: /ig lookup <filter1> [filter2] [filter3] [filter4] [filter5]",
-                "[ItemGraph] The explicit extension spelling /ig lookup filters <filter1> ... is also accepted.",
-                "[ItemGraph] Filters use name.value: action, user, include, exclude, time (m/h/d/y), and radius.",
-                "[ItemGraph] action values cover native audit, item-flow, and transformation evidence (join, quit, chat, command_attempt, place_block, break_block, drop_item, pickup_item, craft, smelt, anvil_rename, anvil_repair, and more).",
-                "[ItemGraph] Player-only: radius uses the issuing player's current dimension and position, in a cube clamped to 1..1024 blocks.",
-                "[ItemGraph] From console, use /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes].",
-                "[ItemGraph] include and exclude cannot be combined; values may be comma-separated and unified evidence results default to 10 rows (maximum 100) with source and evidence IDs.",
-                "[ItemGraph] Example: /ig lookup action.break_block include.diamond_ore time.1h radius.50"));
+                "[ItemGraph] Start: /ig lookup <filters...>; grant itemgraph.command.lookup.",
+                "[ItemGraph] Filters: action, user, include, exclude, time, radius; see guide.",
+                "[ItemGraph] Alias: /ig lookup filters.",
+                "[ItemGraph] Player-only: radius uses your position/dimension; max 1024.",
+                "[ItemGraph] From console: /ig lookup near; syntax: /ig help lookup near.",
+                "[ItemGraph] Include/exclude are exclusive; values may be comma-separated.",
+                "[ItemGraph] Results: 10 default, 100 max; source and evidence IDs included.",
+                "[ItemGraph] observation#N -> /ig event N; other source IDs stay inline.",
+                "[ItemGraph] Event detail: itemgraph.event + itemgraph.audit.",
+                "[ItemGraph] Protected: itemgraph.audit. Pages: itemgraph.command.page.",
+                "[ItemGraph] Provenance: /ig help lookup provenance."));
         topics.put("lookup provenance", List.of(
                 "[ItemGraph] Syntax: /ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]",
                 "[ItemGraph] Opens one exact imported GriefLogger row from ItemGraph's read-only ledger, including reference and identity tables.",

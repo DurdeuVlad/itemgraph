@@ -141,7 +141,6 @@ for required in ("ADMIN_ITEM_COMMAND_EFFECT", "ADMIN_ITEM_COMMAND_ATTEMPT",
                 '/ig trace item "<item-id>" 50 1440',
                 '/ig trace item "id:<fingerprint-id>" 50 1440',
                 "action.creative_item_create", "action.creative_item_remove",
-                "CREATIVE_ITEM_CREATE", "CREATIVE_ITEM_REMOVE",
                 "CONTAINER_BREAK_COMPLETED", "CONTAINER_BREAK_UNRESOLVED",
                 "CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED",
                 "CONTAINER_SNAPSHOT_INCOMPLETE", "itemgraph.command.lookup",
@@ -151,10 +150,15 @@ for required in ("ADMIN_ITEM_COMMAND_EFFECT", "ADMIN_ITEM_COMMAND_ATTEMPT",
         fail(f"admin quick start is missing the moderator workflow detail {required!r}")
 if "itemgraph.command.trace" in quick_start:
     fail("admin quick start names a trace permission node that does not exist")
-if (not re.search(r"does not\s+associate them with a specific command or actor", quick_start)
+if (not re.search(r"does not\s+associate (?:them|the item) with a specific command or actor", quick_start)
         or "choose the matching fingerprint ID" not in quick_start
         or not re.search(r"does not\s+combine component variants", quick_start)):
     fail("admin quick start must state staff trace attribution and fingerprint-selection limits")
+for required in ("For `observation#42`, pass only `42` to", "`audit#42` row is already inline evidence",
+                "transformation and imported", "source SHA-256, table, and exact source key",
+                "`itemgraph.explain` plus `itemgraph.audit`", "`itemgraph.trace` plus `itemgraph.audit`"):
+    if required not in quick_start:
+        fail(f"admin quick start is missing source-ID or follow-up grant guidance {required!r}")
 for obsolete in ("The whole tree requires permission level 2",
                  "Permission level 2 is rechecked for menu validity",
                  "requires permission level 2 on both command and click"):
@@ -202,11 +206,27 @@ for pattern in architecture_routes:
     if not re.search(pattern, architecture, re.I | re.S):
         fail(f"docs/ARCHITECTURE.md omits or contradicts inspection behavior: {pattern}")
 
-example_test = read("neoforge/src/test/java/com/itemgraph/command/ItemGraphCommandsHelpTest.java")
-if ("executable-command-examples:start" not in quick_start
-        or "executable-command-examples:end" not in quick_start
-        or "documentedQuickStartExamplesParseAgainstRegisteredCommandTree" not in example_test):
-    fail("quick-start executable examples must be parsed against the registered command tree")
+parser_corpus_path = "docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt"
+parser_corpus = read(parser_corpus_path)
+example_tests = (
+    "neoforge/src/test/java/com/itemgraph/command/ItemGraphCommandsHelpTest.java",
+    "fabric/src/test/java/com/itemgraph/fabric/FabricItemGraphCommandsParityTest.java",
+)
+for relative in example_tests:
+    example_test = read(relative)
+    if ("guide-command-examples:start" not in quick_start
+            or "guide-command-examples:end" not in quick_start
+            or parser_corpus_path not in example_test
+            or "documentedGuideAndParserCorpusCommandsParseAgainstRegisteredCommandTree" not in example_test):
+        fail(f"{relative} must parse the short guide route and the shared parser-only corpus")
+if not parser_corpus.startswith("# PARSER-ONLY TEST INPUT — NEVER paste or execute"):
+    fail("the command corpus must say it is syntax-only and must not be pasted or executed")
+walkthrough = re.search(r"## 4\. Run a first read-only investigation(.*?)## 5\.", quick_start, re.S)
+if not walkthrough:
+    fail("quick start must have a bounded first-investigation walkthrough")
+for stateful in ("/ig inspect on", "/ig ingest history", "00000000-0000-0000-0000-000000000000"):
+    if stateful in walkthrough.group(1):
+        fail(f"first read-only walkthrough contains unrelated or stateful command: {stateful}")
 
 for relative in (
     "neoforge/src/main/java/com/itemgraph/command/InspectionListener.java",

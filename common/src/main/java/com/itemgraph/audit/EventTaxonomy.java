@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "3.0.0";
+    public static final String VERSION = "4.0.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -303,9 +303,9 @@ public final class EventTaxonomy {
         audit(entries, "KILL_ENTITY", "entity_lifecycle", SourceReliability.AUTHORITATIVE_GAME_RESULT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "THROW_ITEM", "projectile", SourceReliability.GAME_CALLBACK_ATTEMPT,
-                ActorStatus.PLAYER, PrivacyClass.PLAYER_ACTIVITY, 27);
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "SHOOT_ITEM", "projectile", SourceReliability.GAME_CALLBACK_ATTEMPT,
-                ActorStatus.PLAYER, PrivacyClass.PLAYER_ACTIVITY, 27);
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "PROJECTILE_SPAWN_ACCEPTED", "projectile", SourceReliability.AUTHORITATIVE_GAME_RESULT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
 

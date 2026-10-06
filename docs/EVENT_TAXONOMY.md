@@ -19,7 +19,7 @@ an unknown taxonomy classification, not the `UNRESOLVED` evidence class.
 
 ## Versioning
 
-The taxonomy version is `3.0.0` (`EventTaxonomy.VERSION`) and is independent of
+The taxonomy version is `4.0.0` (`EventTaxonomy.VERSION`) and is independent of
 the ItemGraph mod version and GriefLogger registry version.
 
 - Increment the major taxonomy version when an existing ID is removed, renamed,
@@ -72,7 +72,7 @@ event coverage or full GriefLogger parity.
 | Chat and commands | `CHAT_MESSAGE`, `COMMAND_ATTEMPT`, `COMMAND_EXECUTED` | Callback attempt or execution receipt; player activity may contain private text. |
 | Block actions | `PLACE_BLOCK`, `BREAK_BLOCK`, `INTERACT_BLOCK`, `INTERACT_BLOCK_ATTEMPT` | `PLACE_BLOCK` uses NeoForge's cancellable `EntityPlaceEvent`; `BREAK_BLOCK` uses NeoForge's cancellable `BreakEvent`, documented as a player attempt. The shared taxonomy conservatively labels both as attempts across loaders. [NeoForge 1.21.1 `EntityPlaceEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.EntityPlaceEvent.html), [NeoForge 1.21.1 `BreakEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.BreakEvent.html). Both are player-attributed at a sensitive world location. |
 | Entity interaction | `INTERACT_ENTITY`, `INTERACT_ENTITY_COMPLETED`, `INTERACT_ENTITY_DENIED`, `INTERACT_ENTITY_UNRESOLVED` | Attempt, method/callback result, or explicit unresolved boundary; no quantity claim. |
-| Entity/projectile | `KILL_ENTITY`, `THROW_ITEM`, `SHOOT_ITEM`, `PROJECTILE_SPAWN_ACCEPTED` | Captured player/entity event boundary; projectile attempt and accepted spawn remain distinct. |
+| Entity/projectile | `KILL_ENTITY`, `THROW_ITEM`, `SHOOT_ITEM`, `PROJECTILE_SPAWN_ACCEPTED` | Captured player/entity event boundary; projectile attempt and accepted spawn remain distinct. Every current row includes exact world coordinates and uses `SENSITIVE_LOCATION`, so audit lookup, filtering, and saved pages require `itemgraph.audit`. |
 | Item processing | `CRAFT_OUTPUT_UNRESOLVED`, `SMELT_OUTPUT_UNRESOLVED` | A player took a craft/smelt result; output fingerprint/count and event metadata are observed, but input stacks are not. `UNRESOLVED`, `TRANSFORMATION_INPUTS_NOT_OBSERVED`, `quantity=UNKNOWN`; no lineage edge. |
 
 The item-flow and transformation action IDs are cataloged on their own storage
