@@ -52,6 +52,7 @@ class ItemEntityEventListenerTest {
 
     @BeforeEach
     void setUp() {
+        com.itemgraph.ingest.InternalObservationService.getInstance().clear();
         mockTracker = mock(ItemEntityTracker.class);
         listener = new ItemEntityEventListener(mockTracker);
     }
@@ -81,6 +82,8 @@ class ItemEntityEventListenerTest {
         when(entity.getX()).thenReturn(x);
         when(entity.getY()).thenReturn(y);
         when(entity.getZ()).thenReturn(z);
+        when(entity.onGround()).thenReturn(true);
+        when(entity.getDeltaMovement()).thenReturn(net.minecraft.world.phys.Vec3.ZERO);
         return entity;
     }
 
@@ -151,6 +154,87 @@ class ItemEntityEventListenerTest {
         assertEquals("DROP_CANCELLED", observation.actionType());
         assertEquals("UNKNOWN", observation.targetType());
         assertNull(observation.itemEntityUuid());
+    }
+
+    @Test
+    void airborneDropWaitsForSettleBeforeRecordingGroundMovement() {
+        UUID playerUuid = UUID.randomUUID();
+        UUID itemUuid = UUID.randomUUID();
+        Player player = createMockPlayer(playerUuid);
+        ItemEntity entity = createMockItemEntity(itemUuid, new ItemStack(Items.DIAMOND, 5), 15, 65, -20);
+        when(entity.onGround()).thenReturn(false);
+        when(entity.getDeltaMovement()).thenReturn(new net.minecraft.world.phys.Vec3(0, -0.4, 0));
+        when(entity.isAddedToLevel()).thenReturn(true);
+        ItemTossEvent event = mock(ItemTossEvent.class);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getEntity()).thenReturn(entity);
+
+        listener.onItemToss(event);
+        listener.onServerTick(mock(ServerTickEvent.Post.class));
+
+        verifyNoInteractions(mockTracker);
+        assertTrue(pendingObservations().isEmpty(),
+                "a still-falling drop has no 'item lying in the world' endpoint yet");
+
+        when(entity.onGround()).thenReturn(true);
+        when(entity.getY()).thenReturn(64.0);
+        listener.onServerTick(mock(ServerTickEvent.Post.class));
+
+        verify(mockTracker).recordDrop(
+                eq(itemUuid),
+                eq(playerUuid),
+                eq("minecraft:overworld"),
+                eq(15), eq(64), eq(-20),
+                eq("minecraft:diamond"), eq(5), anyLong());
+    }
+
+    @Test
+    void addedThenRemovedDropEmitsConfirmedAtLastPosition() {
+        UUID playerUuid = UUID.randomUUID();
+        UUID itemUuid = UUID.randomUUID();
+        Player player = createMockPlayer(playerUuid);
+        ItemEntity entity = createMockItemEntity(itemUuid, new ItemStack(Items.DIAMOND, 5), 15, 65, -20);
+        when(entity.isAddedToLevel()).thenReturn(true);
+        when(entity.onGround()).thenReturn(false);
+        when(entity.getDeltaMovement()).thenReturn(new net.minecraft.world.phys.Vec3(0, -0.4, 0));
+        ItemTossEvent event = mock(ItemTossEvent.class);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getEntity()).thenReturn(entity);
+
+        listener.onItemToss(event);
+        listener.onServerTick(mock(ServerTickEvent.Post.class));
+        verifyNoInteractions(mockTracker);
+
+        when(entity.isRemoved()).thenReturn(true);
+        when(entity.getY()).thenReturn(64.0);
+        listener.onServerTick(mock(ServerTickEvent.Post.class));
+
+        verify(mockTracker).recordDrop(
+                eq(itemUuid), eq(playerUuid), eq("minecraft:overworld"),
+                eq(15), eq(64), eq(-20), eq("minecraft:diamond"), eq(5), anyLong());
+        InternalObservationService.InternalObservation observation = pendingObservations().poll();
+        assertNotNull(observation);
+        assertEquals("DROP_ITEM", observation.actionType());
+        assertEquals("GROUND", observation.targetType());
+    }
+
+    @Test
+    void removedBeforeAddStaysUnresolved() {
+        Player player = createMockPlayer(UUID.randomUUID());
+        ItemEntity entity = createMockItemEntity(UUID.randomUUID(), new ItemStack(Items.DIAMOND, 5), 15, 64, -20);
+        when(entity.isAddedToLevel()).thenReturn(false);
+        when(entity.isRemoved()).thenReturn(true);
+        ItemTossEvent event = mock(ItemTossEvent.class);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getEntity()).thenReturn(entity);
+
+        listener.onItemToss(event);
+        listener.onServerTick(mock(ServerTickEvent.Post.class));
+
+        InternalObservationService.InternalObservation observation = pendingObservations().poll();
+        assertNotNull(observation);
+        assertEquals("DROP_UNRESOLVED", observation.actionType());
+        verifyNoInteractions(mockTracker);
     }
 
     @Test
