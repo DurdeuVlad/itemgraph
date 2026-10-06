@@ -27,7 +27,8 @@ JDBC 3.47.2.0 and MySQL Connector/J 8.4.0, and carry required common mixins.
 The fixture digest is
 `d8181c2af8ba8eccb289bf0e6678be2d3a75ada4e0d51c0d459ba257afaf0853`.
 It records the runtime-target mismatch as unresolved under #54 and the
-remaining native-only release-contract coverage as unresolved under #31. The
+remaining native-only release-contract coverage as unresolved under #31 (the
+fixture records audit-time state; both issues are now closed). The
 operator requires ItemGraph-only local tests; no GriefLogger runtime or
 database is part of that proof.
 

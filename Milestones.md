@@ -139,18 +139,22 @@ Milestones describe outcomes and proof, not a list of implementation chores.
 
 ## M8: Standalone GriefLogger replacement parity
 
-- Status: in progress; GitHub milestone
-  https://github.com/DurdeuVlad/itemgraph/milestone/4.
+- Status: complete; GitHub milestone
+  https://github.com/DurdeuVlad/itemgraph/milestone/4 is closed with 20 closed and
+  0 open issues as of 2026-10-06. All remaining slices — #31 (native-only
+  release-contract report), #136 (offline localization), #137 (named permission
+  nodes), #138 (rich history hover/location actions), #140 (player-broken container
+  contents), and #146 (scannable flow-browser rows) — are delivered and closed.
+  M8 closure is bounded native-only proof; it is not a live GriefLogger
+  differential replay or a deployment soak. Deployment soak, rollback, and
+  compatible-artifact retirement remain separate M10 operator/release gates.
 - Outcome: ItemGraph is a standalone replacement for the documented and exact-release
   GriefLogger 1.2.10-1.21.1 feature profile. Native capture, storage, reconstruction,
   and queries work without the GriefLogger JAR or database; the legacy read-only
   importer is optional and disabled by default. M8 parity is proved through
   exact-release/source research, ItemGraph-only isolated local loader tests, connected
   MC Pilot client replays, and cross-loader CI reports. No GriefLogger runtime,
-  production access, or release publication is required or claimed. Remaining M8
-  issues are #31 and the named-permission, localization, rich-history, and
-  container-break parity slices #136–#138 and #140. Deployment soak, rollback, and
-  compatible-artifact retirement are separate M10 operator/release gates.
+  production access, or release publication is required or claimed.
 - Delivered: V13 native audit ledger and bounded `/ig lookup` for NeoForge, shared
   Fabric capture for its supported audit events, asynchronous persistence, action/player/
   time/radius lookup, item-flow and transformation capture, read-only container
@@ -180,18 +184,21 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   MC Pilot replays now provide connected, instrumented client command, paging, and
   inspector evidence on both loaders; they are not unmodified vanilla-client tests.
   PR #139 closed #24 after adding connected MC Pilot evidence and the feature inventory.
-  The native-only release-contract and invariant report remains open under #31.
-  Issues #27, #30, #75, and #76 are closed. Issues #136–#138 and #140 own the
-  remaining user-facing and container-break parity gaps.
+  Issue #31 closed with the bounded native-only release-contract and invariant
+  report; that report is not a live GriefLogger differential replay or a
+  deployment soak. Issues #27, #30, #75, and #76 are closed, as are #136–#138
+  and #140 (offline localization, named permission nodes, rich history
+  hover/location actions, and player-broken container contents).
   Issue #30 was reopened because its queue-cadence evidence was incomplete, then
   closed after PR #108 added both-loader cadence coverage and the
   maintainer-selected local load evidence. PR #93 merged the `m8.8.0` registry and
   exact `1.2.10-1.21.1` action-writer matrix for all 18 source actions; the
   current registry and runtime matrix in `docs/GRIEFLOGGER_PARITY.md` record the
   exact current boundary.
-  Issue #26 is closed, but its visible-client click matrix remains unverified
-  because the maintainer explicitly asked to skip live clicks; do not count that
-  client evidence as observed in #24 or #31.
+  Issue #26 is closed; its visible-client click matrix remains unverified. Live
+  clicks were skipped under the maintainer's instruction at the time, later
+  superseded by authorized local MCPilot testing (tracked under #153). Do not
+  count that click-matrix evidence as observed in #24 or #31.
 - Issue #30 completion: PR #95 merged the config-application ordering fix and added
   MySQL plus MariaDB worker-heartbeat CI coverage. A local loopback-only runtime
   matrix on NeoForge 21.1.248 and Fabric Loader 0.16.9 confirmed representative
@@ -258,7 +265,9 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   quantity conservation, privacy, bounded queues, and asynchronous database work.
 - Dependencies: M8 compatibility profile and native proof precede the M9 extensions;
   #32–#37, #44, #45, and #55–#58 own the implementation slices. Issue #35 is the
-  event-taxonomy tracker for #55, #56, and #57.
+  event-taxonomy tracker for #55, #56, and #57. Issue #33 closed through merged
+  PR #122; #162 closed through merged PR #163 and made craft/smelt rows
+  output-only unresolved evidence.
 - Acceptance evidence: reproducible benchmark output, cross-loader fixtures, malformed and
   opaque evidence cases, export verification, and read-only auditor review.
 - Execution order: complete #32's measurement contract before using its results in #58;
@@ -275,7 +284,8 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   is part of M9 verification.
 - Current evidence: PR #119 merged as `22b892e` and repairs the Fabric durability GameTest;
   PR #120's previous head passed CI with nine validated report scenarios. Head `7c93be1`
-  added six one-second idle reports; its 15-report CI run 37132314252 is still in progress.
+  added six one-second idle reports; its 15-report CI run 37132314252 was later
+  cancelled (verified 2026-10-06).
   The local validator now passes 38 tests, and local NeoForge compile/unit tests plus Fabric
   main, unit-test, and GameTest compilation succeed. The updated correlation workload adds
   500 malformed component-payload repetitions with one decode-cache insertion and 499 hits;
@@ -287,7 +297,9 @@ Milestones describe outcomes and proof, not a list of implementation chores.
   CI/local measurements are regression evidence, not production budgets.
   Numeric thresholds stay unset until measured in authorized staging.
 - Batch research checkpoint (2026-10-02): existing GitHub milestone #5 remains the M9
-  boundary; its 12 open issues are #32–#37, #44–#45, and #55–#58. The pinned
+  boundary. (Updated 2026-10-06: the 12 open issues are now #32, #34–#37, #44–#45,
+  #55–#58, and #153 — #33 closed and #153 joined the milestone; the earlier
+  enumeration that included #33 is superseded.) The pinned
   `1.2.10-1.21.1` GriefLogger profile and prior M9 comparison found no additional
   feature gap outside those tracked issues. CoreProtect separates command, inventory,
   item, container, and block lookups into distinct action families; ItemGraph therefore
