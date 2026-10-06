@@ -53,7 +53,7 @@ final class FlowBrowserMenu extends ChestMenu {
     @Override
     public void clicked(int slotId, int button, ClickType clickType, Player player) {
         if (!(player instanceof ServerPlayer serverPlayer)
-                || !serverPlayer.createCommandSourceStack().hasPermission(2)) {
+                || !ItemGraphPermissions.canUseAll(serverPlayer.createCommandSourceStack(), ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT)) {
             if (player instanceof ServerPlayer serverPlayer) {
                 serverPlayer.closeContainer();
             }
@@ -91,6 +91,6 @@ final class FlowBrowserMenu extends ChestMenu {
     @Override
     public boolean stillValid(Player player) {
         return player instanceof ServerPlayer serverPlayer
-                && serverPlayer.createCommandSourceStack().hasPermission(2);
+                && ItemGraphPermissions.canUseAll(serverPlayer.createCommandSourceStack(), ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT);
     }
 }

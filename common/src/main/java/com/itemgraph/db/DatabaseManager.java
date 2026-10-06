@@ -16,6 +16,7 @@ import java.sql.Statement;
 public class DatabaseManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(DatabaseManager.class);
     private static final DatabaseManager INSTANCE = new DatabaseManager();
+    private static final long CONNECTION_CLOSE_WAIT_MS = 1_000L;
 
     private Connection connection;
     private Path databasePath;
@@ -304,18 +305,39 @@ public class DatabaseManager {
     }
 
     public synchronized void close() {
-        if (connection != null) {
+        Connection closing = connection;
+        connection = null;
+        initialized = false;
+        if (closing == null) {
+            return;
+        }
+
+        Thread closer = new Thread(() -> {
             try {
-                if (!connection.isClosed()) {
-                    connection.close();
+                if (!closing.isClosed()) {
+                    closing.close();
                     LOGGER.info("ItemGraph database connection closed.");
                 }
-            } catch (SQLException e) {
-                LOGGER.error("Error closing ItemGraph database connection", e);
-            } finally {
-                connection = null;
-                initialized = false;
+            } catch (SQLException failure) {
+                LOGGER.error("Error closing ItemGraph database connection (SQL state {})",
+                        failure.getSQLState());
             }
+        }, "ItemGraph-Database-Close");
+        closer.setDaemon(true);
+        closer.start();
+        boolean interrupted = false;
+        try {
+            closer.join(CONNECTION_CLOSE_WAIT_MS);
+        } catch (InterruptedException stopInterrupted) {
+            interrupted = true;
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (closer.isAlive()) {
+            LOGGER.error("ItemGraph JDBC connection close exceeded {} ms; server shutdown will continue while the daemon close worker finishes",
+                    CONNECTION_CLOSE_WAIT_MS);
         }
     }
 }

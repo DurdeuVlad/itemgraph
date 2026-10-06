@@ -67,6 +67,21 @@ public final class BlockInspectionTargets {
     }
 
     /**
+     * Resolve the history target used by a right-click inspector. Known
+     * functional blocks and Container-backed modded blocks use the clicked
+     * block; ordinary blocks use the adjacent block on the clicked face.
+     */
+    public static BlockPos resolveRightClickTarget(Level level, BlockPos clicked, Direction face) {
+        if (clicked == null) {
+            return null;
+        }
+        if (level == null || face == null || isInspectableRightClickTarget(level, clicked)) {
+            return clicked.immutable();
+        }
+        return clicked.relative(face).immutable();
+    }
+
+    /**
      * Matches the exact vanilla functional-block predicate used by the pinned
      * GriefLogger release. Modded {@link Container} implementations remain
      * inspectable through {@link #isInspectableRightClickTarget(Level, BlockPos)},

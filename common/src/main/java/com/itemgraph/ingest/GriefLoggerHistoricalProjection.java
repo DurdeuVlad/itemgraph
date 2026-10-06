@@ -96,25 +96,34 @@ final class GriefLoggerHistoricalProjection {
         Double z = decimal(values, "z");
         UserIdentity identity = refs.user(userId, timestamp);
         String levelName = refs.level(levelId);
-        Integer actionId = integer(values, "action", "action_id");
-        String action = action(table, actionId);
-        String subject = subject(table, actionId, number(values, "type", "type_id"), refs);
-        int quantity = intValue(values, "amount", "quantity", "count");
+        Object sourceActionId = GriefLoggerHistoricalImporter.sourceActionId(values);
+        Long actionId = GriefLoggerHistoricalImporter.parseActionId(sourceActionId);
+        boolean invalidActionId = sourceActionId != null && actionId == null;
+        String action = invalidActionId ? "HISTORICAL_UNRESOLVED" : action(table, actionId);
+        boolean actionUnresolved = invalidActionId || action.startsWith("UNKNOWN_ACTION_")
+                || "HISTORICAL_UNRESOLVED".equals(action);
+        // Raw IDs, amounts, and component bytes remain in the immutable source
+        // ledger. Without a recognized action, the lookup projection cannot
+        // assign quantity or item identity semantics to those source fields.
+        String subject = actionUnresolved
+                ? null : subject(table, actionId, number(values, "type", "type_id"), refs);
+        int quantity = actionUnresolved ? 0 : intValue(values, "amount", "quantity", "count");
         String unresolved = row.unresolvedReason();
         if (timestamp == null) unresolved = appendReason(unresolved, "missing_timestamp");
+        if (invalidActionId) unresolved = appendReason(unresolved, "invalid_action_id:" + sourceActionId);
         if (table.equals("items") || table.equals("containers") || table.equals("blocks")) {
             if (levelName == null || x == null || y == null || z == null) {
                 unresolved = appendReason(unresolved, "incomplete_location");
             }
         }
-        if (actionId == null && (table.equals("items") || table.equals("containers")
+        if (sourceActionId == null && (table.equals("items") || table.equals("containers")
                 || table.equals("blocks") || table.equals("sessions"))) {
             unresolved = appendReason(unresolved, "missing_action_id");
         }
-        if (action.startsWith("UNKNOWN_ACTION_") || "HISTORICAL_UNRESOLVED".equals(action)) {
+        if (action.startsWith("UNKNOWN_ACTION_")) {
             unresolved = appendReason(unresolved, "unknown_action_id:" + actionId);
         }
-        if (subject == null && (table.equals("items") || table.equals("containers")
+        if (!actionUnresolved && subject == null && (table.equals("items") || table.equals("containers")
                 || table.equals("blocks"))) {
             unresolved = appendReason(unresolved, "unresolved_subject_reference");
         }
@@ -126,33 +135,34 @@ final class GriefLoggerHistoricalProjection {
                 unresolved == null ? "OBSERVED" : "UNRESOLVED", unresolved);
     }
 
-    private static String action(String table, Integer actionId) {
+    private static String action(String table, Long actionId) {
         if (table.equals("items") || table.equals("containers")) {
-            return actionId == null ? "HISTORICAL_UNRESOLVED" : ItemActionMapping.getActionName(actionId);
+            if (actionId == null) return "HISTORICAL_UNRESOLVED";
+            return actionId >= 0 && actionId <= 10
+                    ? ItemActionMapping.getActionName(Math.toIntExact(actionId))
+                    : "UNKNOWN_ACTION_" + actionId;
         }
         if (table.equals("blocks")) {
-            return switch (actionId == null ? -1 : actionId) {
-                case 0 -> "BREAK_BLOCK";
-                case 1 -> "PLACE_BLOCK";
-                case 2 -> "INTERACT_BLOCK_ATTEMPT";
-                case 3 -> "KILL_ENTITY";
-                case 4 -> "INTERACT_ENTITY";
-                default -> actionId == null ? "HISTORICAL_UNRESOLVED" : "UNKNOWN_ACTION_" + actionId;
-            };
+            if (actionId == null) return "HISTORICAL_UNRESOLVED";
+            if (actionId == 0) return "BREAK_BLOCK";
+            if (actionId == 1) return "PLACE_BLOCK";
+            if (actionId == 2) return "INTERACT_BLOCK_ATTEMPT";
+            if (actionId == 3) return "KILL_ENTITY";
+            if (actionId == 4) return "INTERACT_ENTITY";
+            return "UNKNOWN_ACTION_" + actionId;
         }
         if (table.equals("sessions")) {
-            return switch (actionId == null ? -1 : actionId) {
-                case 0 -> "PLAYER_JOIN";
-                case 1 -> "PLAYER_QUIT";
-                default -> actionId == null ? "HISTORICAL_UNRESOLVED" : "UNKNOWN_ACTION_" + actionId;
-            };
+            if (actionId == null) return "HISTORICAL_UNRESOLVED";
+            if (actionId == 0) return "PLAYER_JOIN";
+            if (actionId == 1) return "PLAYER_QUIT";
+            return "UNKNOWN_ACTION_" + actionId;
         }
         if (table.equals("chats")) return "CHAT_MESSAGE";
         if (table.equals("commands")) return "COMMAND_ATTEMPT";
         return "HISTORICAL_UNRESOLVED";
     }
 
-    private static String subject(String table, Integer actionId, Long typeId, SourceReferences refs) {
+    private static String subject(String table, Long actionId, Long typeId, SourceReferences refs) {
         if (typeId == null) return null;
         if (table.equals("blocks") && (actionId != null && (actionId == 3 || actionId == 4))) {
             return refs.entity(typeId);
@@ -164,7 +174,7 @@ final class GriefLoggerHistoricalProjection {
     }
 
     private static String detail(String table, Row row, Map<String, Object> values,
-                                 Integer actionId, Long levelId, Long userId, Long typeId,
+                                 Long actionId, Long levelId, Long userId, Long typeId,
                                  String unresolved) {
         StringBuilder detail = new StringBuilder("source=GRIEFLOGGER table=")
                 .append(table).append(" key=").append(row.sourceKey());
@@ -270,11 +280,6 @@ final class GriefLoggerHistoricalProjection {
         } catch (NumberFormatException ignored) {
             return null;
         }
-    }
-
-    private static Integer integer(Map<String, Object> values, String... names) {
-        Long value = number(values, names);
-        return value == null ? null : Math.toIntExact(value);
     }
 
     private static int intValue(Map<String, Object> values, String... names) {

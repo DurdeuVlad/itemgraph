@@ -33,6 +33,7 @@ Everything below this heading and above "Not yet implemented" is live.
 /ig status
 /ig audit
 /ig ingest now
+/ig ingest history
 /ig event   <observationId>
 /ig explain <edgeId>
 /ig trace item <query> [limit] [sinceMinutes]
@@ -45,22 +46,28 @@ Everything below this heading and above "Not yet implemented" is live.
 /ig lookup <eventType> [limit] [sinceMinutes]
 /ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]
 /ig lookup player <playerName> <eventType> [limit] [sinceMinutes]
+/ig lookup page <page> <eventType> [limit] [sinceMinutes]
+/ig lookup action.<value> [user.<value>] [include.<value>] [exclude.<value>] [time.<value>] radius.<value>
 /ig lookup filters <filter1> [filter2] [filter3] [filter4] [filter5]
+/ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]
 /ig page <page> [session]
 ```
 
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
-under either name. Bare `/itemgraph` and bare `/ig` show the command overview. `/ig help
-[topic]` lists the same live tree or one detailed topic; an unknown topic fails with the
-valid topic list. The whole tree requires permission level 2 — the query subcommands
-inherit the same gate as the operational ones rather than relaxing it, because a trace
-names players, containers and coordinates (`docs/SECURITY_AND_PERMISSIONS.md`).
+under either name. Bare `/itemgraph` and bare `/ig` show a short task-first command
+overview. `/ig help commands` is a compact task hub pointing to detailed topics, and
+`/ig help <topic>` shows exact routes and one detailed topic; an unknown topic fails with the valid topic
+list. The root requires `itemgraph.command`; each command checks its named leaf permission
+and, for protected evidence, `itemgraph.audit` as listed in
+`docs/SECURITY_AND_PERMISSIONS.md`. When a permission provider has no explicit decision,
+ItemGraph falls back to vanilla permission level 2. An explicit provider denial blocks
+the command even for an operator.
 
 ### Arguments
 
 | Argument | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `topic` | string | overview | one live help topic; `help`, `status`, `audit`, `ingest`, `ingest now`, `event`, `explain`, `trace`, `trace item`, `trace player`, `trace container`, `gui`, `gui item`, `gui player`, `gui container`, or `inspect` |
+| `topic` | string | overview | one live help topic; use `/ig help commands` to choose a task family, then `/ig help <topic>` for exact paths and syntax |
 | `observationId` | long ≥ 1 | — | `ig_observations.id` |
 | `edgeId` | long ≥ 1 | — | `ig_inferred_edges.id` |
 | `query` | string | — | registry ID, custom-name text, numeric fingerprint candidate, or quoted `"id:<fingerprintId>"`; suggests registered item IDs |
@@ -90,13 +97,18 @@ narrows a noisy fingerprint; it is not what makes the query safe.
 
 ### In-game help and completion
 
-`/ig help` and bare `/ig` enumerate every registered top-level command and leaf command.
-Topic help states syntax, level-2 permission, defaults, asynchronous/read-only behavior,
+`/ig help commands` routes users to detailed topic help; the feature map in
+[`ADMIN_QUICK_START.md`](ADMIN_QUICK_START.md) enumerates shipped command and feature
+surfaces. Bare `/ig` is deliberately task-first. Topic help states syntax, level-2
+permission, defaults, asynchronous/read-only behavior,
 observed-versus-inferred semantics, and at least one valid example. Brigadier suggestions
 cover command literals, live help topics, online player names for player arguments,
 registered item IDs for item queries, and loaded dimension IDs for `/ig gui container`.
 The test suite cross-checks the registered command tree against `CommandHelp`, so adding a
 command without help fails `ItemGraphCommandsHelpTest`.
+
+New operators can follow the [admin quick start](ADMIN_QUICK_START.md) for task-based
+recipes, feature status, safe first-use steps, and plain-language evidence definitions.
 
 ### Execution model
 
@@ -116,13 +128,15 @@ results synchronously within the five-second buffer timeout. Player queries have
 SQLite cancellation deadline as well: the progress handler interrupts a selective scan so
 the single query worker cannot be monopolized by one lookup.
 
-`/ig inspect` changes only per-player volatile state and returns immediately. Left-click
-and right-click requests use the bounded query worker and open the same exact-position
-timeline. Container clicks include item observations whose source or destination endpoint
-is the inspected cell; double chests and doors query both validated physical positions in
-one globally paginated result. The inspector excludes rows with a schema V19 supersession
-link, while ordinary lookup shows those immutable rows with the replacement break ID and
-reason. A rejected query does not consume the gameplay click.
+`/ig inspect` changes only per-player volatile state and returns immediately. A left-click
+uses the bounded query worker for an exact-position audit-history page. Right-clicking a
+block entity implementing `Container` opens the vanilla flow browser and queries the
+container item-flow timeline. Either half of a valid double chest resolves to the same
+canonical anchor used by container capture. Other right-clicks open the audit-history view:
+supported functional blocks select the clicked block, and ordinary blocks select the
+adjacent block on the clicked face. A rejected query does not consume the gameplay click.
+The inspector excludes rows with a schema V19 supersession link, while ordinary lookup
+shows those immutable rows with the replacement break ID and reason.
 
 ### Unified filtered lookup
 
@@ -147,34 +161,57 @@ opened or modified by this path.
 /ig gui container <dimension> <x> <y> <z> [sinceMinutes]
 ```
 
-These player-only, permission-level-2 commands open a vanilla `MenuType.GENERIC_9x6`
+These player-only GUI-permission commands open a vanilla `MenuType.GENERIC_9x6`
 through `SimpleMenuProvider`; there is no custom `MenuType`, client screen, packet, or
-ItemGraph item. The first 45 slots hold flow entries and the sixth row is reserved for
-navigation. Item queries use the same fingerprint resolver as `/ig trace item`, player
+ItemGraph item. Each timeline page contains at most nine entries; the sixth row is reserved
+for navigation and detail pagination. Since vanilla chest menus show item labels only when
+hovered, opening a page also sends a numbered chat companion with one concise description
+per row. The row number is the one-based menu slot, so admins can scan meaning without
+hovering and use the matching slot to open details. Icons and hover text add detail but are
+not the only row labels. The detail view shows one paper icon per field; hover an icon to read
+its full text, use the labeled page controls for additional fields, and select Back to return.
+Item queries use the same fingerprint resolver as `/ig trace item`, player
 queries use the same player-node lookup as `/ig trace player`, and container queries match
 the explicit dimension and coordinates through the same container-node lookup as the trace
 service. Ambiguous item, player-node, or container-node matches open a candidate-selection
-view rather than choosing a target silently. Candidate lists are capped at 10 matches. A
+view rather than choosing a target silently. Candidate lists are capped at 10 matches and
+paginate separately from nine-entry timeline pages. A
 resolved target with no rows shows an explicit empty state.
 
-Each entry names its provenance in text: `[OBSERVED]` or `[INFERRED conf=X.XXXX]`. Selecting
+Each numbered companion row names its evidence class and shortened safe item identity (or an
+unavailable fallback): `OBSERVED` or `INFERRED conf=X.XXXX`. Candidate pages are marked
+`AMBIGUOUS`; missing targets or empty histories are marked `UNRESOLVED`. The menu slot hover
+contains amount, event kind, exact UTC time, endpoints, evidence ID, and detail text.
+No raw NBT or component payload is shown. Selecting
 an observation opens its raw event detail; selecting a transformation opens its stored
 transformation detail; selecting an inferred edge opens `/ig explain`-equivalent detail with
 the stored explanation and evidence IDs. Session intervals, UNKNOWN endpoints,
 and source-group ambiguity are preserved. Navigation, selection, and close are the only
 accepted menu actions: server-side handling rejects pickup, placement, shift-click, drag,
-throw, swap, clone, and pickup-all paths. Permission level 2 is rechecked for menu validity
-and each action.
+throw, swap, clone, and pickup-all paths. `itemgraph.command`, `itemgraph.gui`, and
+`itemgraph.audit` are rechecked for menu validity and each action; an unset node falls
+back to vanilla permission level 2, while an explicit provider denial blocks access.
 
 Pages use keyset pagination, not offsets. The stable total-order cursor is
 `(timestamp_ms, provenance kind, row id, source kind)`; each database source fetches at most
-46 rows for a 45-entry page, merges them by the same ordering, and keeps the `QueryWindow`
+10 rows for a nine-entry page, merges them by the same ordering, and keeps the `QueryWindow`
 resolved when the GUI was opened. This prevents ties at page boundaries from skipping or
 repeating observations, edges, or transformations. Next pages query after the last entry;
 previous pages query before the first entry in reverse order and reverse the bounded result for
 display, so navigation does not retain an unbounded list of prior cursors or use offsets. The
 SQL and formatting use the existing `QueryDispatcher` read-only worker; menu creation and state changes happen on the server
 thread. The vanilla menu path follows the NeoForge 1.21.1 [`ChestMenu`](https://lexxie.dev/neoforge/1.21.1/net/minecraft/world/inventory/ChestMenu.html), [`SimpleMenuProvider`](https://lexxie.dev/neoforge/1.21.1/net/minecraft/world/SimpleMenuProvider.html), and [`AbstractContainerMenu`](https://lexxie.dev/neoforge/1.21.1/net/minecraft/world/inventory/AbstractContainerMenu.html) APIs. The cursor follows keyset-pagination guidance to include all tie-breakers from the stable order in the cursor predicate ([GitLab keyset pagination](https://docs.gitlab.com/development/database/keyset_pagination/)). Each page uses a new read-only connection rather than a long-lived SQLite snapshot; ingestion or correlation can change later pages while the GUI is open. Keyset correctness is guaranteed across page boundaries for an unchanged result set, not as a multi-page snapshot. Reopen the GUI to refresh the timeline.
+
+### Structured chat details and location actions
+
+The visible `QueryFormatter` lines for `/ig event`, `/ig explain`, `/ig trace`, and paged
+history lookups remain unchanged. Player chat rows may carry a bounded hover payload with
+evidence class, safe item identity, canonical fingerprint hash when present, event kind,
+exact UTC timestamp, and recorded endpoints. Raw NBT and component serialization are never
+included. Console output stays plain text. Recorded spatial endpoints may add a `[Go to ...]`
+action that works only for the requesting player through a short-lived, one-use token; the
+token stores the exact permission nodes for the originating query and checks them again on
+click. The target dimension must currently be loaded, and all target coordinates must be finite.
 
 ### Not-found handling
 
@@ -237,12 +274,16 @@ off`, and `/ig inspect status` are deterministic forms.
 
 While active, a server-side right-click on a block whose block entity implements `Container`
 opens that exact dimension/position in the read-only browser. After the browser query is
-accepted, the `RightClickBlock` event is cancelled with `InteractionResult.SUCCESS` at
-`HIGHEST` priority, so the normal container screen and held-item use path do not run. If the
-bounded query queue rejects the request, the vanilla interaction remains intact. Unsupported
-blocks retain vanilla behavior. The mode is per player UUID, requires permission level 2 on
-both command and click, and clears on logout and server stop. Opening ItemGraph's menu is
-not recorded as a container-transfer observation.
+accepted, the normal container screen and held-item use path do not run. If the bounded
+query queue rejects the request, vanilla interaction remains intact. Left-clicking any block
+continues to open that block's exact-position paginated audit-history view in chat.
+Right-clicking a non-container block opens block history too: supported functional blocks
+select the clicked block; ordinary blocks select the block on the clicked face. If that
+query is rejected, vanilla interaction remains intact. The mode is per player UUID,
+requires `itemgraph.command` and `itemgraph.command.inspect` on command and click, and
+clears on logout and server stop. An unset node falls back to vanilla permission level 2;
+an explicit provider denial blocks access. Opening ItemGraph's menu is not recorded as a
+container-transfer observation.
 
 ### View an observation
 
@@ -416,7 +457,7 @@ Implemented:
 - a separate 50-row cap on the `/ig explain` evidence listing, with its own truncation line
 - textual cross-references: every hop names `observation#<id>`, `transformation#<id>`, or
   `edge#<id>`; `/ig event <id>` is for observations and `/ig explain <id>` is for edges
-- GUI paging: `/ig gui` returns at most 45 entries per page using the composite keyset cursor
+- GUI paging: `/ig gui` returns at most nine entries per page using the composite keyset cursor
   described above; equal timestamps are ordered by provenance, row ID, and source table
 - audit lookup paging: `/ig lookup page` adds permission-checked Previous/Next chat actions
   that rerun the same bounded event-type and time-window filters

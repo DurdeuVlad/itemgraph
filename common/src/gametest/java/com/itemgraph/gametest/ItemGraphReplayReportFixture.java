@@ -2,8 +2,11 @@ package com.itemgraph.gametest;
 
 import com.itemgraph.audit.AuditReport;
 import com.itemgraph.audit.AuditService;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.itemgraph.db.DatabaseDialect;
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 
@@ -22,23 +25,52 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Exports the durable movement and allowlisted audit rows from the shared loader replay fixture. */
+/** Exports redacted movement, transformation, and allowlisted audit rows from the shared loader replay fixture. */
 public final class ItemGraphReplayReportFixture {
-    private static final String SCENARIO_ID = "item-movement-projectile-entity-audit-replay";
+    private static final String SCENARIO_ID = "item-movement-projectile-block-entity-audit-replay";
     private static final Set<String> EXPECTED_OBSERVATION_ACTIONS = Set.of(
-            "ADD_ITEM", "REMOVE_ITEM", "DROP_ITEM", "PICKUP_ITEM", "THROW_ITEM", "SHOOT_ITEM");
+            "ADD_ITEM", "REMOVE_ITEM", "DROP_ITEM", "PICKUP_ITEM", "THROW_ITEM", "SHOOT_ITEM",
+            "CONSUME_ITEM", "BREAK_ITEM");
     private static final Map<String, ExpectedEvent> EXPECTED_OBSERVATION_EVENTS = Map.of(
             "ADD_ITEM", new ExpectedEvent("minecraft:dirt", 2),
             "REMOVE_ITEM", new ExpectedEvent("minecraft:cobblestone", 3),
             "DROP_ITEM", new ExpectedEvent("minecraft:diamond", 4),
             "PICKUP_ITEM", new ExpectedEvent("minecraft:diamond", 4),
             "THROW_ITEM", new ExpectedEvent("minecraft:snowball", 1),
-            "SHOOT_ITEM", new ExpectedEvent("minecraft:arrow", 1));
-    private static final Map<String, Integer> EXPECTED_AUDIT_ACTION_COUNTS = Map.of(
-            "BREAK_BLOCK", 1,
-            "INTERACT_ENTITY", 3,
-            "INTERACT_ENTITY_COMPLETED", 2,
-            "INTERACT_ENTITY_UNRESOLVED", 1);
+            "SHOOT_ITEM", new ExpectedEvent("minecraft:arrow", 1),
+            "CONSUME_ITEM", new ExpectedEvent("minecraft:apple", 1),
+            "BREAK_ITEM", new ExpectedEvent("minecraft:wooden_sword", 1));
+    private static final Map<String, Integer> EXPECTED_TRANSFORMATION_ACTION_COUNTS = Map.of();
+    private static final Map<String, Integer> EXPECTED_AUDIT_ACTION_COUNTS = Map.ofEntries(
+            Map.entry("PLAYER_JOIN", 3),
+            Map.entry("PLAYER_QUIT", 1),
+            Map.entry("CHAT_MESSAGE", 1),
+            Map.entry("COMMAND_ATTEMPT", 1),
+            Map.entry("BREAK_BLOCK", 1),
+            Map.entry("PLACE_BLOCK", 1),
+            Map.entry("INTERACT_BLOCK_ATTEMPT", 1),
+            Map.entry("KILL_ENTITY", 1),
+            Map.entry("INTERACT_ENTITY", 3),
+            Map.entry("INTERACT_ENTITY_COMPLETED", 2),
+            Map.entry("INTERACT_ENTITY_UNRESOLVED", 1),
+            Map.entry("CRAFT_OUTPUT_UNRESOLVED", 1));
+    private static final Map<String, Integer> EXPECTED_AUDIT_SUBJECT_COUNTS = Map.of(
+            "minecraft:water", 1,
+            "minecraft:diamond_block", 1,
+            "minecraft:chest", 1,
+            "minecraft:cow", 2,
+            "minecraft:armor_stand", 5,
+            "minecraft:book", 1);
+    private static final Map<ExpectedActionSubject, Integer> EXPECTED_AUDIT_ACTION_SUBJECT_COUNTS = Map.of(
+            new ExpectedActionSubject("BREAK_BLOCK", "minecraft:water"), 1,
+            new ExpectedActionSubject("PLACE_BLOCK", "minecraft:diamond_block"), 1,
+            new ExpectedActionSubject("INTERACT_BLOCK_ATTEMPT", "minecraft:chest"), 1,
+            new ExpectedActionSubject("KILL_ENTITY", "minecraft:cow"), 1,
+            new ExpectedActionSubject("INTERACT_ENTITY", "minecraft:cow"), 1,
+            new ExpectedActionSubject("INTERACT_ENTITY", "minecraft:armor_stand"), 2,
+            new ExpectedActionSubject("INTERACT_ENTITY_COMPLETED", "minecraft:armor_stand"), 2,
+            new ExpectedActionSubject("INTERACT_ENTITY_UNRESOLVED", "minecraft:armor_stand"), 1,
+            new ExpectedActionSubject("CRAFT_OUTPUT_UNRESOLVED", "minecraft:book"), 1);
 
     private ItemGraphReplayReportFixture() { }
 
@@ -48,8 +80,10 @@ public final class ItemGraphReplayReportFixture {
      * GameTest assertion has passed.
      */
     public static void writeIfRequested(GameTestHelper helper, String loader, long priorObservationId,
-                                        long priorAuditId, Map<String, String> actorAliases,
-                                        BlockPos successfulWaterPickupPos) {
+                                        long priorAuditId, long priorTransformationId,
+                                        Map<String, String> actorAliases,
+                                        BlockPos successfulWaterPickupPos,
+                                        Map<String, BlockPos> expectedAuditPositions) {
         String configuredDirectory = System.getenv("ITEMGRAPH_DIFFERENTIAL_REPORT_DIR");
         if (configuredDirectory == null || configuredDirectory.isBlank()) {
             return;
@@ -61,7 +95,7 @@ public final class ItemGraphReplayReportFixture {
         List<ReplayEvent> observationEvents = readObservationEvents(priorObservationId, actorAliases);
         helper.assertValueEqual(EXPECTED_OBSERVATION_ACTIONS,
                 observationEvents.stream().map(ReplayEvent::action).collect(Collectors.toSet()),
-                "native report must contain the six expected durable replay observations");
+                "native report must contain every expected durable item-flow observation");
         helper.assertValueEqual(EXPECTED_OBSERVATION_EVENTS.size(), observationEvents.size(),
                 "native report must not omit or duplicate a replay observation");
         List<ReplayEvent> auditEvents = readAuditEvents(priorAuditId, actorAliases, successfulWaterPickupPos);
@@ -69,20 +103,49 @@ public final class ItemGraphReplayReportFixture {
                 ReplayEvent::action, Collectors.summingInt(ignored -> 1)));
         helper.assertValueEqual(EXPECTED_AUDIT_ACTION_COUNTS, actualAuditActionCounts,
                 "native report must include every expected durable audit event exactly once");
-        List<ReplayEvent> events = new ArrayList<>(observationEvents.size() + auditEvents.size());
+        List<ReplayEvent> transformationEvents = readTransformationEvents(priorTransformationId, actorAliases);
+        Map<String, Integer> actualTransformationActionCounts = transformationEvents.stream()
+                .collect(Collectors.groupingBy(ReplayEvent::action, Collectors.summingInt(ignored -> 1)));
+        helper.assertValueEqual(EXPECTED_TRANSFORMATION_ACTION_COUNTS, actualTransformationActionCounts,
+                "native report must include each expected durable transformation exactly once");
+        Map<String, Integer> actualAuditSubjectCounts = auditEvents.stream()
+                .filter(event -> event.subjectId() != null).collect(Collectors.groupingBy(
+                ReplayEvent::subjectId, Collectors.summingInt(ignored -> 1)));
+        helper.assertValueEqual(EXPECTED_AUDIT_SUBJECT_COUNTS, actualAuditSubjectCounts,
+                "native report must retain each expected namespaced block or entity subject exactly");
+        Map<ExpectedActionSubject, Integer> actualActionSubjectCounts = auditEvents.stream()
+                .filter(event -> event.subjectId() != null).collect(
+                Collectors.groupingBy(event -> new ExpectedActionSubject(event.action(), event.subjectId()),
+                        Collectors.summingInt(ignored -> 1)));
+        helper.assertValueEqual(EXPECTED_AUDIT_ACTION_SUBJECT_COUNTS, actualActionSubjectCounts,
+                "native report must retain every audit action with its expected namespaced subject");
+        List<ReplayEvent> events = new ArrayList<>(observationEvents.size() + auditEvents.size()
+                + transformationEvents.size());
         events.addAll(observationEvents);
         events.addAll(auditEvents);
+        events.addAll(transformationEvents);
         events.sort(Comparator.comparingLong(ReplayEvent::occurredAtMs)
                 .thenComparing(ReplayEvent::sourceTable)
                 .thenComparingLong(ReplayEvent::rowId));
         AuditReport audit = readWholeGraphAudit();
         helper.assertValueEqual(true, audit.healthy(),
                 "native report requires a healthy whole-database quantity and integrity audit");
+        InternalObservationService ingestion = InternalObservationService.getInstance();
+        long droppedSinceServiceStart = ingestion.getTotalDropped();
 
         BlockPos origin = helper.absolutePos(BlockPos.ZERO);
+        for (ReplayEvent event : auditEvents) {
+            BlockPos expectedPosition = expectedAuditPositions.get(event.action());
+            if (expectedPosition != null) {
+                helper.assertValueEqual(new BlockPos(expectedPosition.getX() - origin.getX(),
+                                expectedPosition.getY() - origin.getY(), expectedPosition.getZ() - origin.getZ()),
+                        new BlockPos(event.x() - origin.getX(), event.y() - origin.getY(), event.z() - origin.getZ()),
+                        "native audit event position differs from its expected replay target: " + event.action());
+            }
+        }
         // Keep persisted row order when events from one source share a millisecond timestamp.
         StringBuilder json = new StringBuilder(2048);
-        json.append("{\n  \"raw_schema_version\": 3,\n  \"loader\": ").append(quote(loader))
+        json.append("{\n  \"raw_schema_version\": 5,\n  \"loader\": ").append(quote(loader))
                 .append(",\n  \"scenario_id\": ").append(quote(SCENARIO_ID))
                 .append(",\n  \"seed\": 0,\n  \"events\": [\n");
         Map<String, Integer> actionOccurrences = new HashMap<>();
@@ -123,8 +186,19 @@ public final class ItemGraphReplayReportFixture {
                     .append(event.unresolvedReason() == null ? "null" : quote(event.unresolvedReason()))
                     .append("}");
         }
-        json.append("\n  ],\n  \"invariants\": ").append(auditJson(audit)).append("\n}\n");
+        json.append("\n  ],\n  \"invariants\": ").append(auditJson(audit, ingestion, droppedSinceServiceStart))
+                .append("\n}\n");
         writeAtomically(Path.of(configuredDirectory).resolve("itemgraph-" + loader + ".raw.json"), json.toString());
+    }
+
+    public static long transformationWatermark() {
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.createStatement();
+             var rows = statement.executeQuery("SELECT COALESCE(MAX(id), 0) FROM ig_item_transformations")) {
+            return rows.next() ? rows.getLong(1) : 0L;
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not read the ItemGraph transformation watermark", failure);
+        }
     }
 
     private static AuditReport readWholeGraphAudit() {
@@ -145,7 +219,8 @@ public final class ItemGraphReplayReportFixture {
         }
     }
 
-    private static String auditJson(AuditReport report) {
+    private static String auditJson(AuditReport report, InternalObservationService ingestion,
+                                    long droppedSinceServiceStart) {
         return "{\"healthy\":" + report.healthy()
                 + ",\"total_observations\":" + report.totalObservations()
                 + ",\"total_edges\":" + report.totalEdges()
@@ -157,7 +232,12 @@ public final class ItemGraphReplayReportFixture {
                 + ",\"non_positive_quantities\":" + report.nonPositiveQuantities()
                 + ",\"orphaned_allocations\":" + report.orphanedAllocations()
                 + ",\"invalid_edge_nodes\":" + report.invalidEdgeNodes()
-                + ",\"status_mismatches\":" + report.statusMismatches() + "}";
+                + ",\"status_mismatches\":" + report.statusMismatches()
+                + ",\"queue_health\":{\"observation_waiting_depth\":" + ingestion.getObservationQueueSize()
+                + ",\"transformation_waiting_depth\":" + ingestion.getTransformationQueueSize()
+                + ",\"audit_waiting_depth\":" + ingestion.getAuditEventQueueSize()
+                + ",\"queue_capacity_each\":" + ingestion.getQueueCapacity()
+                + ",\"dropped_since_service_start\":" + droppedSinceServiceStart + "}}";
     }
 
     private static List<ReplayEvent> readObservationEvents(long priorObservationId,
@@ -175,7 +255,8 @@ public final class ItemGraphReplayReportFixture {
                 JOIN ig_nodes source ON source.id = o.node_id
                 JOIN ig_nodes target ON target.id = o.target_node_id
                 WHERE o.id > ? AND o.source_type = 'ITEMGRAPH_INTERNAL'
-                  AND o.action_type IN ('ADD_ITEM', 'REMOVE_ITEM', 'DROP_ITEM', 'PICKUP_ITEM', 'THROW_ITEM', 'SHOOT_ITEM')
+                  AND o.action_type IN ('ADD_ITEM', 'REMOVE_ITEM', 'DROP_ITEM', 'PICKUP_ITEM', 'THROW_ITEM',
+                                        'SHOOT_ITEM', 'CONSUME_ITEM', 'BREAK_ITEM')
                   AND (source.owner_uuid IN (%s) OR target.owner_uuid IN (%s))
                 ORDER BY o.timestamp_ms, o.id
                 """.formatted(String.join(",", java.util.Collections.nCopies(actorAliases.size(), "?")),
@@ -220,15 +301,61 @@ public final class ItemGraphReplayReportFixture {
         }
     }
 
+    private static List<ReplayEvent> readTransformationEvents(long priorTransformationId,
+                                                              Map<String, String> actorAliases) {
+        String sql = """
+                SELECT transformation.id, transformation.timestamp_ms, transformation.transformation_type,
+                       transformation.quantity, result.item_id, player.owner_uuid, player.level_id,
+                       player.x, player.y, player.z
+                FROM ig_item_transformations transformation
+                JOIN ig_nodes player ON player.id = transformation.player_node_id
+                JOIN ig_item_fingerprints result ON result.id = transformation.result_fingerprint_id
+                WHERE transformation.id > ?
+                  AND transformation.transformation_type IN ('ANVIL_RENAME', 'ANVIL_REPAIR')
+                  AND player.owner_uuid IN (%s)
+                ORDER BY transformation.timestamp_ms, transformation.id
+                """.formatted(String.join(",", java.util.Collections.nCopies(actorAliases.size(), "?")));
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, priorTransformationId);
+            int parameter = 2;
+            for (String uuid : actorAliases.keySet()) statement.setString(parameter++, uuid);
+            try (var rows = statement.executeQuery()) {
+                List<ReplayEvent> result = new ArrayList<>();
+                while (rows.next()) {
+                    String action = rows.getString("transformation_type");
+                    String actorRef = actorAliases.get(rows.getString("owner_uuid"));
+                    String dimension = rows.getString("level_id");
+                    Number xValue = (Number) rows.getObject("x");
+                    Number yValue = (Number) rows.getObject("y");
+                    Number zValue = (Number) rows.getObject("z");
+                    if (actorRef == null || dimension == null || xValue == null || yValue == null || zValue == null) {
+                        throw new IllegalStateException("replay transformation lacks a mapped actor or location: " + action);
+                    }
+                    result.add(new ReplayEvent(rows.getLong("id"), rows.getLong("timestamp_ms"), action,
+                            "observed", rows.getInt("quantity"), rows.getString("item_id"), null, dimension,
+                            (int) Math.floor(xValue.doubleValue()), (int) Math.floor(yValue.doubleValue()),
+                            (int) Math.floor(zValue.doubleValue()), actorRef, "ig_item_transformations", action,
+                            "items", null));
+                }
+                return result;
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not read native replay transformation evidence", failure);
+        }
+    }
+
     private static List<ReplayEvent> readAuditEvents(long priorAuditId, Map<String, String> actorAliases,
                                                     BlockPos successfulWaterPickupPos) {
         String sql = """
-                SELECT id, event_type, timestamp_ms, player_uuid, level_id, x, y, z, subject_id
+                SELECT id, event_type, timestamp_ms, player_uuid, level_id, x, y, z, subject_id, raw_data
                 FROM ig_audit_events
                 WHERE id > ? AND source_type = 'ITEMGRAPH_INTERNAL'
                   AND player_uuid IN (%s)
-                  AND event_type IN ('BREAK_BLOCK', 'INTERACT_ENTITY', 'INTERACT_ENTITY_COMPLETED',
-                                     'INTERACT_ENTITY_UNRESOLVED')
+                AND event_type IN ('PLAYER_JOIN', 'PLAYER_QUIT', 'CHAT_MESSAGE', 'COMMAND_ATTEMPT',
+                                     'BREAK_BLOCK', 'PLACE_BLOCK', 'INTERACT_BLOCK_ATTEMPT', 'KILL_ENTITY',
+                                     'INTERACT_ENTITY', 'INTERACT_ENTITY_COMPLETED',
+                                     'INTERACT_ENTITY_UNRESOLVED', 'CRAFT_OUTPUT_UNRESOLVED')
                   -- Exclude the direct-call guard probe with a synthetic lava-bucket result.
                   AND (event_type <> 'BREAK_BLOCK' OR
                        (subject_id = 'minecraft:water' AND x = ? AND y = ? AND z = ?))
@@ -256,11 +383,34 @@ public final class ItemGraphReplayReportFixture {
                     }
                     String unresolvedReason = "INTERACT_ENTITY_UNRESOLVED".equals(action)
                             ? "ENTITY_INTERACTION_METHOD_PASSED" : null;
+                    Integer quantity = null;
+                    String itemId = null;
+                    String evidenceClass = "observed";
+                    String compatibilityTable;
+                    if ("CRAFT_OUTPUT_UNRESOLVED".equals(action)) {
+                        JsonObject raw = JsonParser.parseString(rows.getString("raw_data")).getAsJsonObject();
+                        JsonObject output = raw.getAsJsonObject("observed_output");
+                        if (output == null || !output.has("item_id") || !output.has("quantity")) {
+                            throw new IllegalStateException("craft replay event has no observed output stack");
+                        }
+                        itemId = output.get("item_id").getAsString();
+                        quantity = output.get("quantity").getAsInt();
+                        evidenceClass = "unresolved";
+                        unresolvedReason = "TRANSFORMATION_INPUTS_NOT_OBSERVED";
+                        compatibilityTable = "items";
+                    } else {
+                        compatibilityTable = switch (action) {
+                            case "PLAYER_JOIN", "PLAYER_QUIT" -> "sessions";
+                            case "CHAT_MESSAGE" -> "chats";
+                            case "COMMAND_ATTEMPT" -> "commands";
+                            default -> "blocks";
+                        };
+                    }
                     result.add(new ReplayEvent(rows.getLong("id"), rows.getLong("timestamp_ms"), action,
-                            "observed", null, null, rows.getString("subject_id"), dimension,
+                            evidenceClass, quantity, itemId, rows.getString("subject_id"), dimension,
                             (int) Math.floor(xValue.doubleValue()), (int) Math.floor(yValue.doubleValue()),
                             (int) Math.floor(zValue.doubleValue()), actorRef, "ig_audit_events", action,
-                            "blocks", unresolvedReason));
+                            compatibilityTable, unresolvedReason));
                 }
                 return result;
             }
@@ -315,6 +465,8 @@ public final class ItemGraphReplayReportFixture {
     }
 
     private record ExpectedEvent(String itemId, int amount) { }
+
+    private record ExpectedActionSubject(String action, String subjectId) { }
 
     private record ReplayEvent(long rowId, long occurredAtMs, String action, String evidenceClass, Integer amount,
                                String itemId, String subjectId, String dimension, int x, int y, int z,

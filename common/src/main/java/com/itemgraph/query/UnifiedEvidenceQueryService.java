@@ -241,7 +241,7 @@ public final class UnifiedEvidenceQueryService {
                                                    boolean activeInspectorHistory) throws SQLException {
         StringBuilder sql = new StringBuilder("""
                 SELECT a.id, a.event_type, a.timestamp_ms, a.player_uuid, a.player_name,
-                       a.level_id, a.x, a.y, a.z, a.subject_id, a.detail, a.source_type,
+                       a.level_id, a.x, a.y, a.z, a.subject_id, a.detail, a.source_type, a.raw_data,
                        s.superseding_event_id, s.reason_code
                 FROM ig_audit_events a
                 LEFT JOIN ig_audit_event_supersessions s ON s.superseded_event_id = a.id
@@ -289,6 +289,10 @@ public final class UnifiedEvidenceQueryService {
                                 + " reason=" + rs.getString("reason_code");
                         detail = detail == null || detail.isBlank() ? reason : detail + " " + reason;
                     }
+                    detail = ContainerBreakEvidenceLinks.appendAuditDetail(
+                            rs.getString("event_type"), detail, rs.getBytes("raw_data"));
+                    detail = AdminMutationEvidenceLinks.appendAuditDetail(
+                            rs.getString("event_type"), detail, rs.getBytes("raw_data"));
                     rows.add(new UnifiedEvidenceDetail(
                             valueOr(rs.getString("source_type"), "AUDIT"),
                             "audit#" + rs.getLong("id"),
@@ -329,7 +333,7 @@ public final class UnifiedEvidenceQueryService {
                             WHEN dest.node_type = 'PLAYER' THEN dest.owner_uuid
                             ELSE COALESCE(origin.owner_uuid, dest.owner_uuid) END AS player_uuid,
                        f.item_id, origin.custom_label AS origin_label,
-                       dest.custom_label AS dest_label
+                       dest.custom_label AS dest_label, o.raw_data
                 FROM ig_observations o
                 LEFT JOIN ig_nodes origin ON origin.id = o.node_id
                 LEFT JOIN ig_nodes dest ON dest.id = o.target_node_id
@@ -373,6 +377,9 @@ public final class UnifiedEvidenceQueryService {
                             + (sourceEventId == null ? "" : " sourceEvent#" + sourceEventId)
                             + " origin=" + valueOr(rs.getString("origin_label"), "(unlabeled)")
                             + " destination=" + valueOr(rs.getString("dest_label"), "(unlabeled)");
+                    detail = ContainerBreakEvidenceLinks.appendObservationDetail(detail, rs.getBytes("raw_data"));
+                    detail = AdminMutationEvidenceLinks.appendObservationDetail(
+                            rs.getString("action_type"), detail, rs.getBytes("raw_data"));
                     String rowLevel = rs.getString("level_id");
                     Double rowX = nullableDouble(rs, "x");
                     Double rowY = nullableDouble(rs, "y");
@@ -404,6 +411,7 @@ public final class UnifiedEvidenceQueryService {
             throws SQLException {
         StringBuilder sql = new StringBuilder("""
                 SELECT t.id, t.transformation_type, t.quantity, t.timestamp_ms, t.details,
+                       t.ingest_event_uuid,
                        p.level_id, p.x, p.y, p.z, p.custom_label AS player_name,
                        p.owner_uuid AS player_uuid,
                        source_fp.item_id AS source_item, result_fp.item_id AS result_item
@@ -431,16 +439,36 @@ public final class UnifiedEvidenceQueryService {
                 while (rs.next()) {
                     String sourceItem = rs.getString("source_item");
                     String resultItem = rs.getString("result_item");
-                    String detail = valueOr(rs.getString("details"), "")
-                            + " source=" + valueOr(sourceItem, "(missing)")
+                    String action = rs.getString("transformation_type");
+                    EventTaxonomy.Definition definition = EventTaxonomy
+                            .find(action, EventTaxonomy.Surface.TRANSFORMATION).orElse(null);
+                    boolean unresolved = !EventTaxonomy.isTraceableTransformation(action);
+                    String detail = "source=" + valueOr(sourceItem, "(missing)")
                             + " result=" + valueOr(resultItem, "(missing)");
+                    if (unresolved) {
+                        String reason = definition == null ? "UNCLASSIFIED_TRANSFORMATION_TYPE"
+                                : firstNonBlank(definition.fabric().reasonCode(),
+                                firstNonBlank(definition.neoForge().reasonCode(),
+                                        "TRANSFORMATION_CAUSE_UNSUPPORTED"));
+                        detail += " legacy_details=OMITTED evidence=UNRESOLVED reason=" + reason
+                                + " quantity=UNKNOWN";
+                    } else {
+                        detail = valueOr(rs.getString("details"), "") + " " + detail;
+                    }
+                    String eventUuid = rs.getString("ingest_event_uuid");
+                    if (AdminMutationEvidenceLinks.isCanonicalUuid(eventUuid)) {
+                        detail += " evidence_event_id=" + eventUuid;
+                    }
                     rows.add(new UnifiedEvidenceDetail(
                             "TRANSFORMATION", "transformation#" + rs.getLong("id"),
                             rs.getLong("timestamp_ms"), rs.getString("level_id"),
                             nullableDouble(rs, "x"), nullableDouble(rs, "y"), nullableDouble(rs, "z"),
                             firstNonBlank(rs.getString("player_name"), rs.getString("player_uuid")),
-                            rs.getString("transformation_type"), rs.getInt("quantity"),
-                            sourceItem + " -> " + resultItem, detail, "OBSERVED"));
+                            action, unresolved ? null : Integer.valueOf(rs.getInt("quantity")),
+                            unresolved ? "historical result (unverified)=" + valueOr(resultItem, "(missing)")
+                                    : sourceItem + " -> " + resultItem,
+                            detail, unresolved ? EventTaxonomy.EvidenceClass.UNRESOLVED.name()
+                                    : definition.evidenceClass().name()));
                 }
             }
         }
@@ -488,7 +516,12 @@ public final class UnifiedEvidenceQueryService {
             appendPlaceholders(sql, users.size());
             sql.append(") OR LOWER(").append(uuidExpressions.get(i)).append(") IN (");
             appendPlaceholders(sql, users.size());
-            sql.append("))");
+            sql.append(") OR LOWER(").append(uuidExpressions.get(i)).append(") IN (")
+                    .append("SELECT LOWER(player_uuid) FROM ig_player_name_history ")
+                    .append("WHERE normalized_name IN (");
+            appendPlaceholders(sql, users.size());
+            sql.append(")))");
+            users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
             users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
             users.forEach(user -> args.add(user.toLowerCase(Locale.ROOT)));
         }

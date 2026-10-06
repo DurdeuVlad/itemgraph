@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "4.0.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -129,6 +129,10 @@ public final class EventTaxonomy {
     private static final LoaderSupport IMPLEMENTED = new LoaderSupport(LoaderStatus.IMPLEMENTED, null);
     private static final LoaderSupport HISTORICAL_ONLY = new LoaderSupport(LoaderStatus.HISTORICAL_ONLY,
             "NO_NATIVE_WRITER_HISTORICAL_QUERY_ONLY");
+    private static final LoaderSupport LEGACY_TRANSFORMATION_INPUTS_UNVERIFIED = new LoaderSupport(
+            LoaderStatus.HISTORICAL_ONLY, "LEGACY_TRANSFORMATION_INPUTS_NOT_VERIFIED");
+    private static final LoaderSupport CREATIVE_TRANSFORM_UNSUPPORTED = new LoaderSupport(
+            LoaderStatus.UNSUPPORTED, "CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED");
     private static final List<ReasonCode> UNRESOLVED_REASON_CODES = List.of(
             new ReasonCode("WORLD_EVENT_API_UNAVAILABLE", 55,
                     "The loader exposes no authoritative callback for this world event."),
@@ -142,8 +146,28 @@ public final class EventTaxonomy {
                     "The available callback does not establish a projectile impact result."),
             new ReasonCode("TRANSFORMATION_INPUTS_NOT_OBSERVED", 57,
                     "The operation output is known but one or more input stacks were not observed."),
+            new ReasonCode("LEGACY_TRANSFORMATION_INPUTS_NOT_VERIFIED", 162,
+                    "The stored transformation predates complete input evidence and cannot establish lineage."),
             new ReasonCode("TRANSFORMATION_CANCELLED", 57,
-                    "The transformation operation was cancelled before a successful result.")
+                    "The transformation operation was cancelled before a successful result."),
+            new ReasonCode("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", 33,
+                    "Creative slot changes do not establish an item transformation cause."),
+            new ReasonCode("CONTAINER_SNAPSHOT_INCOMPLETE", 140,
+                    "A successful player container break was observed, but its complete pre-break inventory snapshot was unavailable."),
+            new ReasonCode("CONTAINER_BREAK_ACTOR_UNAVAILABLE", 140,
+                    "The loader reported a container-break boundary without an authoritative player actor."),
+            new ReasonCode("CONTAINER_BLOCK_ENTITY_UNAVAILABLE", 140,
+                    "The block state required a block entity, but it was unavailable at the break snapshot boundary."),
+            new ReasonCode("CONTAINER_BLOCK_ENTITY_UNSUPPORTED", 140,
+                    "The broken block entity does not expose inventory through ItemGraph's supported Container contract."),
+            new ReasonCode("CONTAINER_SLOT_LIMIT_EXCEEDED", 140,
+                    "The inventory exceeded the bounded slot count supported by the container-break snapshot."),
+            new ReasonCode("CONTAINER_SNAPSHOT_FAILED", 140,
+                    "Reading the container inventory failed before a complete snapshot could be recorded."),
+            new ReasonCode("CONTAINER_OBSERVATION_QUEUE_REJECTED", 140,
+                    "The bounded ingestion queue rejected the related container-break evidence batch."),
+            new ReasonCode("CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED", 140,
+                    "The container contents were observed before destruction, but available callbacks did not link resulting ground item entities to those contents.")
     );
     private static final List<Definition> DEFINITIONS = createDefinitions();
     private static final Map<String, Definition> BY_ID = indexById(DEFINITIONS);
@@ -173,6 +197,23 @@ public final class EventTaxonomy {
 
     public static List<String> unifiedLookupActions() {
         return UNIFIED_LOOKUP_ACTIONS;
+    }
+
+    /** Transformation IDs implemented on both loaders; shared queries have no loader provenance. */
+    public static List<String> traceableTransformationTypes() {
+        return DEFINITIONS.stream()
+                .filter(definition -> definition.surface() == Surface.TRANSFORMATION)
+                .filter(definition -> definition.fabric().status() == LoaderStatus.IMPLEMENTED
+                        && definition.neoForge().status() == LoaderStatus.IMPLEMENTED)
+                .map(Definition::id)
+                .toList();
+    }
+
+    public static boolean isTraceableTransformation(String id) {
+        return find(id, Surface.TRANSFORMATION)
+                .map(definition -> definition.fabric().status() == LoaderStatus.IMPLEMENTED
+                        && definition.neoForge().status() == LoaderStatus.IMPLEMENTED)
+                .orElse(false);
     }
 
     public static Optional<Definition> find(String id) {
@@ -241,6 +282,12 @@ public final class EventTaxonomy {
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "BREAK_BLOCK", "block_action", SourceReliability.GAME_CALLBACK_ATTEMPT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
+        audit(entries, "CONTAINER_BREAK_COMPLETED", "container_break",
+                SourceReliability.AUTHORITATIVE_GAME_RESULT, ActorStatus.PLAYER,
+                PrivacyClass.SENSITIVE_LOCATION, 140);
+        audit(entries, "CONTAINER_BREAK_UNRESOLVED", "container_break",
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 140);
         audit(entries, "INTERACT_BLOCK", "block_action", SourceReliability.GAME_CALLBACK_ATTEMPT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27, HISTORICAL_ONLY);
         audit(entries, "INTERACT_BLOCK_ATTEMPT", "block_action", SourceReliability.GAME_CALLBACK_ATTEMPT,
@@ -256,9 +303,9 @@ public final class EventTaxonomy {
         audit(entries, "KILL_ENTITY", "entity_lifecycle", SourceReliability.AUTHORITATIVE_GAME_RESULT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "THROW_ITEM", "projectile", SourceReliability.GAME_CALLBACK_ATTEMPT,
-                ActorStatus.PLAYER, PrivacyClass.PLAYER_ACTIVITY, 27);
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "SHOOT_ITEM", "projectile", SourceReliability.GAME_CALLBACK_ATTEMPT,
-                ActorStatus.PLAYER, PrivacyClass.PLAYER_ACTIVITY, 27);
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "PROJECTILE_SPAWN_ACCEPTED", "projectile", SourceReliability.AUTHORITATIVE_GAME_RESULT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
 
@@ -276,9 +323,18 @@ public final class EventTaxonomy {
                 27, "item_flow");
         action(entries, "SHOOT_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA,
                 27, "item_flow");
-        action(entries, "CRAFT", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
-                57, "transformation", "craft_item");
-        action(entries, "SMELT", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT, 57, "transformation");
+        historicalTransformation(entries, "CRAFT", "craft_item");
+        historicalTransformation(entries, "SMELT");
+        add(entries, "CRAFT_OUTPUT_UNRESOLVED", "item_processing", Surface.AUDIT_EVENT,
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE,
+                EndpointSemantics.PLAYER_CONTEXT, QuantitySemantics.UNKNOWN,
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION,
+                IMPLEMENTED, IMPLEMENTED, 162);
+        add(entries, "SMELT_OUTPUT_UNRESOLVED", "item_processing", Surface.AUDIT_EVENT,
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE,
+                EndpointSemantics.PLAYER_CONTEXT, QuantitySemantics.UNKNOWN,
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION,
+                IMPLEMENTED, IMPLEMENTED, 162);
         action(entries, "ANVIL_RENAME", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
                 57, "transformation", "anvil");
         action(entries, "ANVIL_REPAIR", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
@@ -309,9 +365,15 @@ public final class EventTaxonomy {
         action(entries, "ADMIN_ITEM_TRANSFORM", Surface.TRANSFORMATION,
                 QuantitySemantics.INPUT_OUTPUT, 33, "admin_inventory",
                 ActorStatus.UNKNOWN, PrivacyClass.STAFF_ACTIVITY);
-        action(entries, "CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION,
-                QuantitySemantics.INPUT_OUTPUT, 33, "creative_inventory",
-                ActorStatus.PLAYER, PrivacyClass.STAFF_ACTIVITY);
+        // Keep the stable ID classifiable for forward compatibility, but do
+        // not advertise it as supported: creative slot packets expose a
+        // before/after delta, not evidence that one item was transformed into
+        // another. Any such row must remain unresolved with unknown quantity.
+        add(entries, "CREATIVE_ITEM_TRANSFORM", "creative_inventory", Surface.TRANSFORMATION,
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE,
+                EndpointSemantics.UNKNOWN, QuantitySemantics.UNKNOWN,
+                ActorStatus.PLAYER, PrivacyClass.STAFF_ACTIVITY,
+                CREATIVE_TRANSFORM_UNSUPPORTED, CREATIVE_TRANSFORM_UNSUPPORTED, 33);
 
         // Planned child-issue entries are intentionally not exposed as supported
         // lookup actions until loader adapters and reproducible fixtures exist.
@@ -405,9 +467,17 @@ public final class EventTaxonomy {
                 pending, pending, ownerIssue);
     }
 
+    private static void historicalTransformation(List<Definition> entries, String id, String... aliases) {
+        add(entries, id, "transformation", Surface.TRANSFORMATION, EvidenceClass.UNRESOLVED,
+                SourceReliability.UNRESOLVED_CAUSE, EndpointSemantics.UNKNOWN,
+                QuantitySemantics.UNKNOWN, ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION,
+                LEGACY_TRANSFORMATION_INPUTS_UNVERIFIED, LEGACY_TRANSFORMATION_INPUTS_UNVERIFIED,
+                57, aliases);
+    }
+
     private static EndpointSemantics auditEndpoints(String family) {
         return switch (family) {
-            case "player_session", "chat", "command" -> EndpointSemantics.PLAYER_CONTEXT;
+            case "player_session", "chat", "command", "item_processing" -> EndpointSemantics.PLAYER_CONTEXT;
             case "admin_item_command", "creative_inventory" -> EndpointSemantics.UNKNOWN;
             case "entity_interaction", "entity_lifecycle", "projectile" -> EndpointSemantics.ACTOR_AND_TARGET;
             default -> EndpointSemantics.WORLD_LOCATION;

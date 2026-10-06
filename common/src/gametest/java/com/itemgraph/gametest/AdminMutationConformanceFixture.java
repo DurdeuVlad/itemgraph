@@ -1,6 +1,7 @@
 package com.itemgraph.gametest;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
 import com.itemgraph.audit.AdminMutationCapture;
 import com.itemgraph.db.DatabaseManager;
@@ -26,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -254,6 +256,7 @@ public final class AdminMutationConformanceFixture {
                     targetStand.getUUID().toString());
             assertTransformations(helper, watermark.transformationId(), mutationIds);
             assertNoCreativeTransformations(helper, watermark.transformationId());
+            assertRelatedEvidenceLinks(helper, watermark.auditId(), playerUuid);
             assertRawCommandHistorySuppressesItemCommands(helper, watermark.auditId(), playerUuid);
             assertManagedDropsAreNotDuplicated(helper, watermark.observationId(), playerUuid);
                 })
@@ -361,10 +364,12 @@ public final class AdminMutationConformanceFixture {
                     helper.assertTrue(attempt != null
                                     && attempt.mutationId().equals(payload.get("mutation_event_id").getAsString()),
                             "unresolved command evidence must reuse its command attempt and mutation IDs");
-                    if (payload.has("target_entity")) {
+                    if (payload.has("target_entity_uuid")) {
                         JsonObject before = payload.getAsJsonObject("before");
                         JsonObject after = payload.getAsJsonObject("after");
                         helper.assertTrue(row.detail().contains("endpoint=unresolved")
+                                        && expectedExecutionEntityUuid.equals(payload.get("target_entity_uuid").getAsString())
+                                        && "minecraft:armor_stand".equals(payload.get("target_entity_type").getAsString())
                                         && before != null && after != null
                                         && before.get("empty").getAsBoolean()
                                         && Set.of("minecraft:apple", "minecraft:carrot")
@@ -744,6 +749,83 @@ public final class AdminMutationConformanceFixture {
         } catch (SQLException failure) {
             throw new IllegalStateException("Could not verify absence of issue #33 creative transformations", failure);
         }
+    }
+
+    private static void assertRelatedEvidenceLinks(GameTestHelper helper, long watermark, String playerUuid) {
+        Set<String> observationIds = new HashSet<>();
+        Set<String> transformationIds = new HashSet<>();
+        Set<String> unresolvedIds = new HashSet<>();
+        String sql = "SELECT event_type, raw_data FROM ig_audit_events WHERE id > ? AND player_uuid = ?";
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, watermark);
+            statement.setString(2, playerUuid);
+            try (var result = statement.executeQuery()) {
+                while (result.next()) {
+                    String eventType = result.getString("event_type");
+                    byte[] raw = result.getBytes("raw_data");
+                    if (raw == null) continue;
+                    JsonObject payload = JsonParser.parseString(new String(raw, StandardCharsets.UTF_8)).getAsJsonObject();
+                    addEventIds(payload, "related_observation_event_ids", observationIds);
+                    addEventIds(payload, "related_transformation_event_ids", transformationIds);
+                    addEventIds(payload, "related_unresolved_event_ids", unresolvedIds);
+                    if (isOutcome(eventType)) {
+                        helper.assertTrue(payload.has("item_flow_link_status"),
+                                "every scoped outcome must state whether its item evidence linked");
+                        String status = payload.get("item_flow_link_status").getAsString();
+                        if ("LINKED".equals(status)) {
+                            helper.assertTrue(payload.has("related_observation_event_ids")
+                                            || payload.has("related_transformation_event_ids"),
+                                    "LINKED status requires an observation or traceable transformation UUID");
+                        } else if ("UNRESOLVED_EVIDENCE_RECORDED".equals(status)) {
+                            helper.assertTrue(payload.has("related_unresolved_event_ids")
+                                            || payload.has("outcome") && payload.has("event_id"),
+                                    "unresolved-only status requires a linked audit UUID or the unresolved record's own event UUID");
+                        } else {
+                            helper.assertTrue(Set.of("PARTIAL_LINK_LIST", "NO_ITEM_EVIDENCE_RECORDED").contains(status),
+                                    "outcome status must use the documented closed set");
+                        }
+                    }
+                }
+            }
+            assertEventIdsExist(helper, connection, observationIds,
+                    "SELECT COUNT(*) FROM ig_observations WHERE ingest_event_uuid = ?",
+                    "related observation UUID must resolve to its persisted item-flow row");
+            assertEventIdsExist(helper, connection, transformationIds,
+                    "SELECT COUNT(*) FROM ig_item_transformations WHERE ingest_event_uuid = ?",
+                    "related transformation UUID must resolve to its persisted transformation row");
+            assertEventIdsExist(helper, connection, unresolvedIds,
+                    "SELECT COUNT(*) FROM ig_audit_events WHERE ingest_event_uuid = ? AND event_type = 'ADMIN_ITEM_COMMAND_UNRESOLVED'",
+                    "related unresolved UUID must resolve to its persisted unresolved audit row");
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not verify issue #33 outcome evidence links", failure);
+        }
+        helper.assertTrue(!observationIds.isEmpty() && !transformationIds.isEmpty() && !unresolvedIds.isEmpty(),
+                "live /give, /item modify, and unsupported entity cases must each produce an outcome-openable evidence UUID");
+    }
+
+    private static void addEventIds(JsonObject payload, String key, Set<String> target) {
+        if (!payload.has(key) || !payload.get(key).isJsonArray()) return;
+        JsonArray ids = payload.getAsJsonArray(key);
+        for (var id : ids) if (id.isJsonPrimitive() && id.getAsJsonPrimitive().isString()) target.add(id.getAsString());
+    }
+
+    private static void assertEventIdsExist(GameTestHelper helper, java.sql.Connection connection,
+                                            Set<String> eventIds, String sql, String message) throws SQLException {
+        for (String eventId : eventIds) {
+            try (var statement = connection.prepareStatement(sql)) {
+                statement.setString(1, eventId);
+                try (var result = statement.executeQuery()) {
+                    helper.assertTrue(result.next() && result.getInt(1) == 1, message + ": " + eventId);
+                }
+            }
+        }
+    }
+
+    private static boolean isOutcome(String eventType) {
+        return Set.of("ADMIN_ITEM_COMMAND_EFFECT", "ADMIN_ITEM_COMMAND_FAILURE", "ADMIN_ITEM_COMMAND_UNRESOLVED",
+                "CREATIVE_SLOT_EFFECT", "CREATIVE_SLOT_ATTEMPT", "CREATIVE_BLOCK_RESULT", "CREATIVE_BLOCK_UNRESOLVED")
+                .contains(eventType);
     }
 
     private static String detailsValue(String details, String prefix) {

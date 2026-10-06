@@ -16,7 +16,7 @@ public class MigrationRunner {
     private static final Logger LOGGER = LoggerFactory.getLogger(MigrationRunner.class);
 
     /** Latest schema version applied by this source tree. */
-    public static final int LATEST_VERSION = 20;
+    public static final int LATEST_VERSION = 21;
 
     private static final List<SchemaMigration> MIGRATIONS = List.of(
             new V1__InitialSchema(),
@@ -38,7 +38,8 @@ public class MigrationRunner {
             new V17__LegacyObservationEvidence(),
             new V18__QueueEventIdempotency(),
             new V19__AuditEventSupersession(),
-            new V20__UnverifiedArmorStandInteractionEvidence()
+            new V20__UnverifiedArmorStandInteractionEvidence(),
+            new V21__PlayerNameHistory()
     );
 
     public static int runMigrations(Connection conn) throws SQLException {

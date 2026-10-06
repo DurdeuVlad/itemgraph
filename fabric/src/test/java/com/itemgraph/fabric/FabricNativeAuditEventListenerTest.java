@@ -5,11 +5,13 @@ import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.command.ItemGraphCommands;
+import com.itemgraph.command.ItemGraphPermissions;
 import com.itemgraph.ingest.InternalObservationService;
 import com.mojang.authlib.GameProfile;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerLevel;
@@ -43,8 +45,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
@@ -60,6 +64,7 @@ class FabricNativeAuditEventListenerTest {
     @AfterEach
     void clearInspectionState() {
         inspections.clear();
+        ItemGraphPermissions.setChecker(null);
     }
 
     @Test
@@ -169,10 +174,95 @@ class FabricNativeAuditEventListenerTest {
                     opens.incrementAndGet();
                     return 1;
                 },
-                player, level, pos);
+                player, level, pos, Direction.UP);
 
         assertEquals(InteractionResult.SUCCESS, result);
         assertEquals(1, opens.get());
+    }
+
+    @Test
+    void containerRightClickRoutesToFlowBrowserAndKeepsExactDimensionAndPosition() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        when(level.dimension()).thenReturn(Level.NETHER);
+        BlockPos pos = BlockPos.ZERO;
+        AtomicInteger blockHistoryOpens = new AtomicInteger();
+        AtomicInteger flowBrowserOpens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
+                inspections,
+                (p, l, clickedPos) -> { blockHistoryOpens.incrementAndGet(); return 1; },
+                (openingPlayer, openingLevel, clickedPos) -> {
+                    assertSame(player, openingPlayer);
+                    assertSame(level, openingLevel);
+                    assertEquals(pos, clickedPos);
+                    assertEquals(Level.NETHER, openingLevel.dimension());
+                    flowBrowserOpens.incrementAndGet();
+                    return 1;
+                },
+                player, level, pos, Direction.UP);
+
+        assertEquals(InteractionResult.SUCCESS, result);
+        assertEquals(0, blockHistoryOpens.get());
+        assertEquals(1, flowBrowserOpens.get());
+    }
+
+    @Test
+    void bothDoubleChestHalvesOpenTheCanonicalFlowBrowserTarget() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos left = new BlockPos(10, 64, -20);
+        var leftState = Blocks.CHEST.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                        net.minecraft.world.level.block.state.properties.ChestType.LEFT);
+        var rightState = leftState.setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                net.minecraft.world.level.block.state.properties.ChestType.RIGHT);
+        BlockPos right = left.relative(net.minecraft.world.level.block.ChestBlock.getConnectedDirection(leftState));
+        BlockPos anchor = left.getX() <= right.getX() ? left : right;
+        when(level.getBlockState(left)).thenReturn(leftState);
+        when(level.getBlockState(right)).thenReturn(rightState);
+        BlockEntity chest = mock(BlockEntity.class,
+                org.mockito.Mockito.withSettings().extraInterfaces(Container.class));
+        when(level.getBlockEntity(left)).thenReturn(chest);
+        when(level.getBlockEntity(right)).thenReturn(chest);
+        AtomicInteger opens = new AtomicInteger();
+        FabricNativeAuditEventListener.ContainerFlowOpener opener = (p, l, pos) -> {
+            assertEquals(anchor, pos);
+            opens.incrementAndGet();
+            return 1;
+        };
+
+        assertEquals(InteractionResult.SUCCESS, FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> { fail("double chest must open the flow browser"); return 0; },
+                opener, player, level, left, Direction.UP));
+        assertEquals(InteractionResult.SUCCESS, FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> { fail("double chest must open the flow browser"); return 0; },
+                opener, player, level, right, Direction.UP));
+        assertEquals(2, opens.get());
+    }
+
+    @Test
+    void rejectedContainerFlowQueryPreservesVanillaContainerInteraction() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        AtomicInteger blockHistoryOpens = new AtomicInteger();
+        AtomicInteger flowBrowserOpens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
+                inspections,
+                (p, l, pos) -> { blockHistoryOpens.incrementAndGet(); return 1; },
+                (p, l, pos) -> { flowBrowserOpens.incrementAndGet(); return 0; },
+                player, level, BlockPos.ZERO, Direction.UP);
+
+        assertNull(result);
+        assertEquals(0, blockHistoryOpens.get(), "rejected flow must not silently switch query types");
+        assertEquals(1, flowBrowserOpens.get());
     }
 
     @Test
@@ -243,12 +333,12 @@ class FabricNativeAuditEventListenerTest {
 
         assertNull(FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, l, pos) -> { opens.incrementAndGet(); return 1; },
-                player, unsupportedLevel, BlockPos.ZERO));
+                player, unsupportedLevel, BlockPos.ZERO, Direction.UP));
 
         inspections.setEnabled(playerUuid, true);
         assertNull(FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, l, pos) -> { opens.incrementAndGet(); return 0; },
-                player, serverLevelWithContainer(), BlockPos.ZERO));
+                player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
         assertEquals(1, opens.get());
     }
 
@@ -271,31 +361,145 @@ class FabricNativeAuditEventListenerTest {
                     opens.incrementAndGet();
                     return 1;
                 },
-                player, level, BlockPos.ZERO);
+                player, level, BlockPos.ZERO, Direction.UP);
 
         assertEquals(InteractionResult.SUCCESS, result);
         assertEquals(1, opens.get());
     }
 
     @Test
-    void acceptedBlockInspectionDoesNotEmitGameplayInteractionEvidence() {
+    void rightClickInspectionPassesDoorAndDoubleChestTargetsIntoUnifiedHistoryOpener() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
         ServerLevel level = mock(ServerLevel.class);
+        BlockPos chest = new BlockPos(10, 64, 10);
+        var leftChest = Blocks.CHEST.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                        net.minecraft.world.level.block.state.properties.ChestType.LEFT)
+                .setValue(net.minecraft.world.level.block.ChestBlock.FACING, Direction.NORTH);
+        BlockPos chestPartner = chest.relative(
+                net.minecraft.world.level.block.ChestBlock.getConnectedDirection(leftChest));
+        var rightChest = Blocks.CHEST.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                        net.minecraft.world.level.block.state.properties.ChestType.RIGHT)
+                .setValue(net.minecraft.world.level.block.ChestBlock.FACING, Direction.NORTH);
+        BlockPos door = new BlockPos(20, 64, 20);
+        when(level.getBlockState(chest)).thenReturn(leftChest);
+        when(level.getBlockState(chestPartner)).thenReturn(rightChest);
+        when(level.getBlockState(door)).thenReturn(Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.DoorBlock.HALF,
+                        net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER));
+        when(level.getBlockState(door.above())).thenReturn(Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.DoorBlock.HALF,
+                        net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER));
+
+        Map<BlockPos, List<com.itemgraph.query.AuditEventQueryService.ExactPosition>> opened =
+                new LinkedHashMap<>();
+        FabricNativeAuditEventListener.BlockHistoryOpener opener = (openingPlayer, openingLevel, clicked) -> {
+            opened.put(clicked, BlockInspectionTargets.resolve(openingLevel, clicked));
+            return 1;
+        };
+
+        assertEquals(InteractionResult.SUCCESS, FabricNativeAuditEventListener.handleBlockUse(
+                inspections, opener, player, level, InteractionHand.MAIN_HAND, chestPartner, Direction.UP));
+        assertEquals(InteractionResult.SUCCESS, FabricNativeAuditEventListener.handleBlockUse(
+                inspections, opener, player, level, InteractionHand.MAIN_HAND, door.above(), Direction.NORTH));
+
+        assertEquals(List.of(
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(chestPartner.getX(),
+                                chestPartner.getY(), chestPartner.getZ()),
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(chest.getX(),
+                                chest.getY(), chest.getZ())),
+                opened.get(chestPartner), "the clicked chest half must resolve both exact evidence positions");
+        assertEquals(List.of(
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(door.getX(),
+                                door.getY() + 1, door.getZ()),
+                        new com.itemgraph.query.AuditEventQueryService.ExactPosition(door.getX(),
+                                door.getY(), door.getZ())),
+                opened.get(door.above()), "clicking the upper door must resolve the full two-block door");
+    }
+
+    @Test
+    void acceptedContainerInspectionDoesNotEmitGameplayInteractionEvidence() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
         BlockPos pos = BlockPos.ZERO;
-        when(level.getBlockState(pos)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
         InternalObservationService service = mock(InternalObservationService.class);
 
         InteractionResult result;
         try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
             mocked.when(InternalObservationService::getInstance).thenReturn(service);
             result = FabricNativeAuditEventListener.handleBlockUse(
-                    inspections, (p, l, target) -> 1, player, level, InteractionHand.MAIN_HAND, pos);
+                    inspections,
+                    (p, l, target) -> {
+                        throw new AssertionError("container inspection must not run block-history lookup");
+                    },
+                    (p, l, target) -> 1, player, level, InteractionHand.MAIN_HAND, pos, Direction.UP);
         }
 
         assertEquals(InteractionResult.SUCCESS, result);
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void ordinaryBlockClickInspectsTheAdjacentFaceHistory() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos clicked = BlockPos.ZERO;
+        BlockPos target = clicked.relative(Direction.EAST);
+        when(level.getBlockState(clicked)).thenReturn(Blocks.STONE.defaultBlockState());
+
+        InteractionResult result = FabricNativeAuditEventListener.handleBlockUse(
+                inspections, (p, l, pos) -> { assertEquals(target, pos); return 1; },
+                player, level, InteractionHand.MAIN_HAND, clicked, Direction.EAST);
+
+        assertEquals(InteractionResult.SUCCESS, result);
+    }
+
+    @Test
+    void offHandBlockUseDoesNotInspectOrRecordGameplayEvidence() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        InternalObservationService service = mock(InternalObservationService.class);
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleBlockUse(
+                    inspections, (p, l, pos) -> { opens.incrementAndGet(); return 1; },
+                    player, level, InteractionHand.OFF_HAND, BlockPos.ZERO, Direction.UP);
+        }
+
+        assertEquals(InteractionResult.PASS, result);
+        assertEquals(0, opens.get());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void rejectedOrdinaryBlockFallbackPreservesGameplay() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockPos clicked = BlockPos.ZERO;
+        when(level.getBlockState(clicked)).thenReturn(Blocks.STONE.defaultBlockState());
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.handleBlockUse(
+                inspections, (p, l, pos) -> { assertEquals(clicked.relative(Direction.WEST), pos);
+                    opens.incrementAndGet(); return 0; },
+                player, level, InteractionHand.MAIN_HAND, clicked, Direction.WEST);
+
+        assertEquals(InteractionResult.PASS, result);
+        assertEquals(1, opens.get());
     }
 
     @Test
@@ -310,7 +514,7 @@ class FabricNativeAuditEventListenerTest {
         InteractionResult result = FabricNativeAuditEventListener.tryOpenInspection(
                 inspections,
                 (openingPlayer, openingLevel, clickedPos) -> 0,
-                player, level, BlockPos.ZERO);
+                player, level, BlockPos.ZERO, Direction.UP);
 
         assertNull(result);
     }
@@ -352,8 +556,24 @@ class FabricNativeAuditEventListenerTest {
         ServerPlayer player = playerWithPermission(playerUuid, false);
 
         assertNull(FabricNativeAuditEventListener.tryOpenInspection(
-                inspections, (p, l, pos) -> 1, player, serverLevelWithContainer(), BlockPos.ZERO));
+                inspections, (p, l, pos) -> 1, player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
         assertFalse(inspections.isEnabled(playerUuid));
+    }
+
+    @Test
+    void explicitInspectNodeDenialDisablesModeAndDoesNotOpenHistory() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        AtomicInteger opens = new AtomicInteger();
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.INSPECT));
+
+        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, level, pos) -> { opens.incrementAndGet(); return 1; },
+                player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
+
+        assertFalse(inspections.isEnabled(playerUuid));
+        assertEquals(0, opens.get(), "the named inspect denial must override vanilla operator status");
     }
 
     private ServerPlayer playerWithPermission(UUID uuid, boolean permitted) {
@@ -656,9 +876,8 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void craftingResultRecordsTransformationWithPrimaryIngredient() {
+    void craftingResultRecordsUnresolvedOutputWithoutClaimingPartialRecipe() {
         InternalObservationService service = mock(InternalObservationService.class);
-        CanonicalItem source = new CanonicalItem("minecraft:wheat", "fp-wheat", null, null, null);
         CanonicalItem result = new CanonicalItem("minecraft:bread", "fp-bread", null, null, null);
         ServerPlayer player = mock(ServerPlayer.class);
         ServerLevel level = mock(ServerLevel.class);
@@ -680,18 +899,55 @@ class FabricNativeAuditEventListenerTest {
         try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
              MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
             observations.when(InternalObservationService::getInstance).thenReturn(service);
-            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(ingredient)).thenReturn(source);
             canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(output)).thenReturn(result);
             FabricNativeAuditEventListener.onCrafted(player, matrix, output);
         }
 
-        ArgumentCaptor<InternalObservationService.InternalTransformation> captured =
-                ArgumentCaptor.forClass(InternalObservationService.InternalTransformation.class);
-        verify(service).submitTransformation(captured.capture());
-        assertEquals("CRAFT", captured.getValue().transformationType());
-        assertEquals(source, captured.getValue().sourceItem());
-        assertEquals(result, captured.getValue().resultItem());
-        assertEquals(1, captured.getValue().quantity());
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        verify(service, never()).submitTransformation(any());
+        assertEquals("CRAFT_OUTPUT_UNRESOLVED", captured.getValue().eventType());
+        assertEquals("minecraft:bread", captured.getValue().subjectId());
+        assertTrue(captured.getValue().detail().contains("input=UNKNOWN"));
+        assertFalse(new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("minecraft:wheat"));
+    }
+
+    @Test
+    void smeltingResultRecordsUnresolvedOutputWithoutCreatingTransformation() {
+        InternalObservationService service = mock(InternalObservationService.class);
+        CanonicalItem result = new CanonicalItem("minecraft:iron_ingot", "fp-ingot", null, null, null);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        UUID playerUuid = UUID.randomUUID();
+        ItemStack output = new ItemStack(Items.IRON_INGOT, 2);
+        when(player.level()).thenReturn(level);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getX()).thenReturn(1.0);
+        when(player.getY()).thenReturn(2.0);
+        when(player.getZ()).thenReturn(3.0);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(output)).thenReturn(result);
+            FabricNativeAuditEventListener.onSmelted(player, output);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        verify(service, never()).submitTransformation(any());
+        assertEquals("SMELT_OUTPUT_UNRESOLVED", captured.getValue().eventType());
+        assertEquals("minecraft:iron_ingot", captured.getValue().subjectId());
+        assertTrue(captured.getValue().detail().contains("quantity=2"));
+        assertTrue(captured.getValue().detail().contains("input=UNKNOWN"));
+        assertFalse(new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("smelt_ingredient"));
     }
 
     @Test

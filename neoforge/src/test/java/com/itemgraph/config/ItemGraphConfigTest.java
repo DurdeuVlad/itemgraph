@@ -13,6 +13,43 @@ import static org.junit.jupiter.api.Assertions.*;
 class ItemGraphConfigTest {
 
     @Test
+    void languageAcceptsOnlyTheSupportedServerSideLocales() {
+        com.itemgraph.i18n.ItemGraphLanguage.validateCatalogs();
+        assertEquals("nl_nl", com.itemgraph.i18n.ItemGraphLanguage.validateLocale(" NL_NL "));
+        assertEquals("zh_tw", com.itemgraph.i18n.ItemGraphLanguage.validateLocale("zh_tw"));
+        assertEquals("en_us", com.itemgraph.i18n.ItemGraphLanguage.validateLocale("en_us"));
+        IllegalArgumentException invalid = assertThrows(IllegalArgumentException.class,
+                () -> com.itemgraph.i18n.ItemGraphLanguage.validateLocale("zh_cn"));
+        assertTrue(invalid.getMessage().contains("general.language"));
+        assertTrue(invalid.getMessage().contains("en_us, nl_nl, zh_tw"));
+    }
+
+    @Test
+    void messageCatalogUsesPerKeyEnglishFallbackAndPreservesEvidencePlaceholders() {
+        com.itemgraph.command.CommandHelp.initializeMessages();
+        com.itemgraph.i18n.ItemGraphLanguage.validateCatalogs();
+        assertTrue(com.itemgraph.i18n.ItemGraphLanguage.keyFallbackInventory("nl_nl").isEmpty());
+        assertTrue(com.itemgraph.i18n.ItemGraphLanguage.keyFallbackInventory("zh_tw").isEmpty());
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("nl_nl");
+        assertEquals("[ItemGraph] Je hebt geen toestemming om dit ItemGraph-commando te gebruiken.",
+                com.itemgraph.i18n.ItemGraphLanguage.text("permission.denied",
+                        "[ItemGraph] You do not have permission to use this ItemGraph command."));
+        assertEquals("evidence#81 itemgraph:diamond 2026-10-05 12:34:56 UTC 4x OBSERVED",
+                com.itemgraph.i18n.ItemGraphLanguage.text("missing.audit.key",
+                        "evidence#{0} {1} {2} {3}x {4}", 81, "itemgraph:diamond",
+                        "2026-10-05 12:34:56 UTC", 4, "OBSERVED"));
+        assertEquals("Admin's {topic} item{raw}'s",
+                com.itemgraph.i18n.ItemGraphLanguage.text("missing.brace.apostrophe.key",
+                        "Admin's {topic} {0}", "item{raw}'s"));
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("zh_tw");
+        assertEquals("evidence#81 itemgraph:diamond 2026-10-05 12:34:56 UTC 4x OBSERVED",
+                com.itemgraph.i18n.ItemGraphLanguage.text("missing.audit.key",
+                        "evidence#{0} {1} {2} {3}x {4}", 81, "itemgraph:diamond",
+                        "2026-10-05 12:34:56 UTC", 4, "OBSERVED"));
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
+    }
+
+    @Test
     void testDefaultValues() {
         assertEquals("itemgraph/itemgraph.db", ItemGraphConfig.DATABASE_PATH.getDefault());
         assertEquals("sqlite", ItemGraphConfig.DATABASE_BACKEND.getDefault());
@@ -208,6 +245,7 @@ class ItemGraphConfigTest {
         ItemGraphConfig.SPEC.correct(config);
         assertTrue(ItemGraphConfig.SPEC.isCorrect(config), "Config populated by correct() must be correct");
         assertEquals("itemgraph/itemgraph.db", config.get(List.of("general", "database_path")));
+        assertEquals("en_us", config.get(List.of("general", "language")));
         assertEquals("database.db", config.get(List.of("general", "grieflogger_database_path")));
         assertEquals(Boolean.FALSE, config.get(List.of("general", "grieflogger_integration_enabled")));
         assertEquals(300, config.getInt(List.of("correlation", "ground_bridge_max_seconds")));
@@ -217,6 +255,13 @@ class ItemGraphConfigTest {
         assertEquals(250, config.getInt(List.of("ingestion", "poll_interval_ms")));
         assertEquals(100, config.getInt(List.of("ingestion", "max_batch_size")));
         assertEquals(Boolean.TRUE, config.get(List.of("capture", "enabled")));
+
+        config.set(List.of("general", "language"), "fr_fr");
+        IllegalArgumentException languageError = assertThrows(IllegalArgumentException.class,
+                () -> ItemGraphConfig.SPEC.correct(config));
+        assertTrue(languageError.getMessage().contains("general.language"));
+        assertTrue(languageError.getMessage().contains("en_us, nl_nl, zh_tw"));
+        config.set(List.of("general", "language"), "en_us");
 
         // Setting a valid custom value preserves correctness
         config.set(List.of("correlation", "ground_bridge_max_seconds"), 600);

@@ -54,6 +54,7 @@ abstract class QueryTestBase {
         if (dbManager != null) {
             dbManager.close();
         }
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
     }
 
     // ------------------------------------------------------------------

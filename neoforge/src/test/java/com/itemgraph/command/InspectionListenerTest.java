@@ -50,6 +50,26 @@ class InspectionListenerTest {
     @AfterEach
     void tearDown() {
         service.clear();
+        ItemGraphPermissions.setChecker(null);
+    }
+
+    @Test
+    void explicitInspectDenialClearsActiveInspectionAndDoesNotOpenHistory() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.INSPECT));
+        AtomicInteger opens = new AtomicInteger();
+        InspectionListener inspector = new InspectionListener(service,
+                (p, targetLevel, pos) -> { opens.incrementAndGet(); return 1; });
+
+        inspector.onLeftClickBlock(leftClick(player, CONTAINER_POS));
+
+        assertFalse(service.isEnabled(playerUuid));
+        assertEquals(0, opens.get(), "the explicit node denial must win even when vanilla level 2 is present");
     }
 
     @Test
@@ -73,6 +93,83 @@ class InspectionListenerTest {
         assertTrue(event.isCanceled());
         assertEquals(InteractionResult.SUCCESS, event.getCancellationResult());
         assertEquals(1, opens.get());
+    }
+
+    @Test
+    void containerRightClickRoutesToFlowBrowserAndKeepsExactDimensionAndPosition() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = serverLevelWithContainer(CONTAINER_POS);
+        when(level.dimension()).thenReturn(Level.NETHER);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+        AtomicInteger blockHistoryOpens = new AtomicInteger();
+        AtomicInteger flowBrowserOpens = new AtomicInteger();
+
+        new InspectionListener(service,
+                (p, l, pos) -> { blockHistoryOpens.incrementAndGet(); return 1; },
+                (openingPlayer, openingLevel, clickedPos) -> {
+                    assertSame(player, openingPlayer);
+                    assertSame(level, openingLevel);
+                    assertEquals(CONTAINER_POS, clickedPos);
+                    assertEquals(Level.NETHER, openingLevel.dimension());
+                    flowBrowserOpens.incrementAndGet();
+                    return 1;
+                }).onRightClickBlock(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(0, blockHistoryOpens.get());
+        assertEquals(1, flowBrowserOpens.get());
+    }
+
+    @Test
+    void bothDoubleChestHalvesOpenTheCanonicalFlowBrowserTarget() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        var leftState = Blocks.CHEST.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                        net.minecraft.world.level.block.state.properties.ChestType.LEFT);
+        var rightState = leftState.setValue(net.minecraft.world.level.block.ChestBlock.TYPE,
+                net.minecraft.world.level.block.state.properties.ChestType.RIGHT);
+        BlockPos left = CONTAINER_POS;
+        BlockPos right = left.relative(net.minecraft.world.level.block.ChestBlock.getConnectedDirection(leftState));
+        BlockPos anchor = left.getX() <= right.getX() ? left : right;
+        when(level.getBlockState(left)).thenReturn(leftState);
+        when(level.getBlockState(right)).thenReturn(rightState);
+        BlockEntity chest = mock(BlockEntity.class, withSettings().extraInterfaces(Container.class));
+        when(level.getBlockEntity(left)).thenReturn(chest);
+        when(level.getBlockEntity(right)).thenReturn(chest);
+        when(player.level()).thenReturn(level);
+        InspectionListener inspector = new InspectionListener(service,
+                (p, l, pos) -> fail("double chest right-click must open the flow browser"),
+                (p, l, pos) -> { assertEquals(anchor, pos); return 1; });
+
+        inspector.onRightClickBlock(rightClick(player, left));
+        inspector.onRightClickBlock(rightClick(player, right));
+    }
+
+    @Test
+    void rejectedContainerFlowQueryPreservesVanillaContainerInteraction() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = serverLevelWithContainer(CONTAINER_POS);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+        AtomicInteger blockHistoryOpens = new AtomicInteger();
+        AtomicInteger flowBrowserOpens = new AtomicInteger();
+
+        new InspectionListener(service,
+                (p, l, pos) -> { blockHistoryOpens.incrementAndGet(); return 1; },
+                (p, l, pos) -> { flowBrowserOpens.incrementAndGet(); return 0; }).onRightClickBlock(event);
+
+        assertFalse(event.isCanceled());
+        assertEquals(0, blockHistoryOpens.get(), "rejected flow must not silently switch query types");
+        assertEquals(1, flowBrowserOpens.get());
     }
 
     @Test
@@ -169,16 +266,19 @@ class InspectionListenerTest {
     }
 
     @Test
-    void inspectionCancellationDoesNotEmitGameplayInteractionEvidence() {
+    void containerInspectionCancellationDoesNotEmitGameplayInteractionEvidence() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);
         net.minecraft.server.level.ServerLevel level = mock(net.minecraft.server.level.ServerLevel.class);
         when(level.isClientSide()).thenReturn(false);
-        when(level.getBlockState(CONTAINER_POS)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        when(level.getBlockEntity(CONTAINER_POS)).thenReturn(mock(BlockEntity.class,
+                org.mockito.Mockito.withSettings().extraInterfaces(Container.class)));
         when(player.level()).thenReturn(level);
         PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
-        InspectionListener inspector = listener(service, (p, l, pos) -> 1);
+        InspectionListener inspector = new InspectionListener(service,
+                (p, l, pos) -> fail("container inspection must not run block-history lookup"),
+                (p, l, pos) -> 1);
         InternalObservationService observations = mock(InternalObservationService.class);
 
         try (org.mockito.MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
@@ -206,6 +306,57 @@ class InspectionListenerTest {
         listener(service, (openingPlayer, openingLevel, clickedPos) -> 0).onRightClickBlock(event);
 
         assertFalse(event.isCanceled());
+    }
+
+    @Test
+    void offHandInspectionClickDoesNotOpenHistoryOrCancelInteraction() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = serverLevelWithContainer(CONTAINER_POS);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, InteractionHand.OFF_HAND, CONTAINER_POS);
+        AtomicInteger opens = new AtomicInteger();
+
+        listener(service, (p, l, pos) -> { opens.incrementAndGet(); return 1; }).onRightClickBlock(event);
+
+        assertFalse(event.isCanceled());
+        assertEquals(0, opens.get());
+    }
+
+    @Test
+    void ordinaryBlockClickInspectsAdjacentFaceTarget() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockState(CONTAINER_POS)).thenReturn(Blocks.STONE.defaultBlockState());
+        BlockPos target = CONTAINER_POS.relative(Direction.EAST);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS, Direction.EAST);
+
+        listener(service, (p, l, pos) -> { assertEquals(target, pos); return 1; }).onRightClickBlock(event);
+
+        assertTrue(event.isCanceled());
+    }
+
+    @Test
+    void rejectedOrdinaryBlockFallbackPreservesGameplay() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockState(CONTAINER_POS)).thenReturn(Blocks.STONE.defaultBlockState());
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS, Direction.EAST);
+        AtomicInteger opens = new AtomicInteger();
+
+        listener(service, (p, l, target) -> { opens.incrementAndGet(); return 0; }).onRightClickBlock(event);
+
+        assertFalse(event.isCanceled());
+        assertEquals(1, opens.get());
     }
 
     @Test
@@ -327,8 +478,18 @@ class InspectionListenerTest {
     }
 
     private PlayerInteractEvent.RightClickBlock rightClick(ServerPlayer player, BlockPos pos) {
+        return rightClick(player, InteractionHand.MAIN_HAND, pos);
+    }
+
+    private PlayerInteractEvent.RightClickBlock rightClick(ServerPlayer player, InteractionHand hand, BlockPos pos) {
         return new PlayerInteractEvent.RightClickBlock(
-                player, InteractionHand.MAIN_HAND, pos, mock(BlockHitResult.class));
+                player, hand, pos, mock(BlockHitResult.class));
+    }
+
+    private PlayerInteractEvent.RightClickBlock rightClick(ServerPlayer player, BlockPos pos, Direction face) {
+        BlockHitResult hit = mock(BlockHitResult.class);
+        when(hit.getDirection()).thenReturn(face);
+        return new PlayerInteractEvent.RightClickBlock(player, InteractionHand.MAIN_HAND, pos, hit);
     }
 
     private PlayerInteractEvent.LeftClickBlock leftClick(ServerPlayer player, BlockPos pos) {

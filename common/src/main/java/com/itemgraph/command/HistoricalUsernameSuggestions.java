@@ -18,7 +18,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
-/** Supplies online and imported GriefLogger identity/name values for user filters. */
+/** Supplies online, native ItemGraph, and optionally imported names for user filters. */
 final class HistoricalUsernameSuggestions {
     private static final long CACHE_TTL_NANOS = 30_000_000_000L;
     private static final long FAILURE_RETRY_NANOS = 5_000_000_000L;
@@ -43,6 +43,18 @@ final class HistoricalUsernameSuggestions {
 
     static List<String> load(Connection connection) throws SQLException {
         List<String> names = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT player_name FROM ig_player_name_history")) {
+            statement.setQueryTimeout(5);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    String name = rows.getString(1);
+                    if (name != null && !name.isBlank()) {
+                        names.add(name.trim());
+                    }
+                }
+            }
+        }
         try (PreparedStatement statement = connection.prepareStatement("""
                 SELECT payload_json
                 FROM ig_grieflogger_rows

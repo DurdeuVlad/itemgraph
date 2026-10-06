@@ -2,6 +2,7 @@ package com.itemgraph.fabric;
 
 import com.itemgraph.db.DatabaseSettings;
 import com.itemgraph.config.ItemGraphOperationalSettings;
+import com.itemgraph.i18n.ItemGraphLanguage;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,7 +14,8 @@ import java.util.Properties;
 /** Simple editable properties file; Fabric does not provide a server config system. */
 record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLoggerDatabasePath,
                              boolean griefLoggerIntegrationEnabled,
-                             int groundBridgeMaxSeconds, ItemGraphOperationalSettings operationalSettings) {
+                             int groundBridgeMaxSeconds, ItemGraphOperationalSettings operationalSettings,
+                             String language) {
     static FabricItemGraphConfig load(Path gameDirectory, Path configDirectory) throws IOException {
         Path configFile = configDirectory.resolve("itemgraph.properties");
         Properties properties = new Properties();
@@ -24,6 +26,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
         } else {
             Files.createDirectories(configDirectory);
             properties.setProperty("database_path", "itemgraph/itemgraph.db");
+            properties.setProperty("language", ItemGraphLanguage.DEFAULT_LOCALE);
             properties.setProperty("database_backend", "sqlite");
             properties.setProperty("database_host", "127.0.0.1");
             properties.setProperty("database_port", "3306");
@@ -52,6 +55,12 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
 
         int groundBridgeMaxSeconds = parseBoundedInt(properties, "ground_bridge_max_seconds", 300,
                 1, 86_400, configFile);
+        String language;
+        try {
+            language = ItemGraphLanguage.validateLocale(properties.getProperty("language", ItemGraphLanguage.DEFAULT_LOCALE));
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException(invalid.getMessage() + " in " + configFile, invalid);
+        }
         int databasePort = parseBoundedInt(properties, "database_port", 3306, 1, 65_535, configFile);
         int databaseConnectionTimeoutMs = parseBoundedInt(properties, "database_connection_timeout_ms",
                 5_000, 250, 120_000, configFile);
@@ -116,7 +125,8 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
                 griefLoggerDatabasePath,
                 griefLoggerIntegrationEnabled,
                 groundBridgeMaxSeconds,
-                operationalSettings);
+                operationalSettings,
+                language);
     }
 
     private static int parseInt(Properties properties, String key, int defaultValue, Path configFile)

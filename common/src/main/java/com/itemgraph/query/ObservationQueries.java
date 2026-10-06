@@ -30,9 +30,13 @@ final class ObservationQueries {
             SELECT o.id AS o_id,
                    o.source_type AS o_source_type,
                    o.source_event_id AS o_source_event_id,
+                   o.ingest_event_uuid AS o_ingest_event_uuid,
                    o.timestamp_ms AS o_timestamp_ms,
                    o.timestamp_end_ms AS o_timestamp_end_ms,
                    CASE
+                       WHEN o.source_type = 'ITEMGRAPH_INTERNAL'
+                         AND substr(CAST(o.raw_data AS TEXT), 1, 128) LIKE '%\"capture\":\"player_container_break_contents\"%'
+                           THEN 'player_container_break_contents'
                        WHEN o.source_type = 'ITEMGRAPH_INTERNAL'
                          AND substr(CAST(o.raw_data AS TEXT), 1, 128) LIKE '%\"capture\":\"container_session_net_delta\"%'
                            THEN 'container_session_net_delta'
@@ -43,6 +47,7 @@ final class ObservationQueries {
                    END AS o_capture_type,
                    o.action_type AS o_action_type,
                    o.amount AS o_amount,
+                   o.raw_data AS o_raw_data,
                    o.correlated_at AS o_correlated_at,
                    o.correlation_status AS o_correlation_status,
                    o.item_entity_uuid AS o_item_entity_uuid,
@@ -106,6 +111,10 @@ final class ObservationQueries {
         long rawEndMs = rs.getLong("o_timestamp_end_ms");
         Long timestampEndMs = rs.wasNull() ? null : rawEndMs;
         String captureType = rs.getString("o_capture_type");
+        ContainerBreakEvidenceLinks.ObservationLinks containerBreakLinks =
+                ContainerBreakEvidenceLinks.observation(rs.getBytes("o_raw_data"));
+        AdminMutationEvidenceLinks.ObservationLinks adminMutationLinks = AdminMutationEvidenceLinks.observation(
+                rs.getBytes("o_raw_data"), rs.getString("o_action_type"));
         long rawGroupId = rs.getLong("o_source_group_id");
         Long groupId = rs.wasNull() ? null : rawGroupId;
         ObservationDetail.SourceGroup sourceGroup = null;
@@ -137,7 +146,14 @@ final class ObservationQueries {
                 timestampEndMs,
                 captureType,
                 sourceGroup,
-                rs.getString("o_disposition_reason")
+                rs.getString("o_disposition_reason"),
+                containerBreakLinks != null ? containerBreakLinks.eventId()
+                        : adminMutationLinks == null ? null : adminMutationLinks.evidenceEventId(),
+                containerBreakLinks != null ? containerBreakLinks.parentEventId()
+                        : adminMutationLinks == null ? null : adminMutationLinks.mutationEventId(),
+                containerBreakLinks == null ? null : containerBreakLinks.breakEventId(),
+                adminMutationLinks == null ? null : adminMutationLinks.mutationEventId(),
+                adminMutationLinks == null ? null : adminMutationLinks.commandAttemptEventId()
         );
     }
 

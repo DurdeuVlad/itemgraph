@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Imports every documented GriefLogger 26.2 table into an immutable, generic
@@ -39,9 +42,8 @@ public final class GriefLoggerHistoricalImporter {
     public static final List<String> SOURCE_TABLES = List.of(
             "items", "containers", "blocks", "sessions", "chats", "commands",
             "users", "usernames", "levels", "materials", "entities");
+    private static final Set<String> ACTION_ID_TABLES = Set.of("items", "containers", "blocks", "sessions");
     private static final int BATCH_SIZE = 500;
-    private static final int KNOWN_ACTION_MIN = 0;
-    private static final int KNOWN_ACTION_MAX = 17;
     /** Portable source-key width for MySQL/MariaDB composite primary keys. */
     static final int MAX_SOURCE_KEY_CODE_POINTS = 191;
 
@@ -181,7 +183,7 @@ public final class GriefLoggerHistoricalImporter {
                     try (ResultSet rows = stmt.executeQuery()) {
                         while (rows.next()) {
                             ordinal++;
-                            RowData row = rowData(rows, columns, ordinal, true);
+                            RowData row = rowData(table, rows, columns, ordinal, true);
                             if (!checkpointFound) {
                                 ensureProjection(targetConn, sourceHash, schemaFingerprint, table, row, references);
                                 if (matchesCheckpoint(row, checkpoint)) {
@@ -220,7 +222,7 @@ public final class GriefLoggerHistoricalImporter {
                      ResultSet rows = stmt.executeQuery()) {
                     while (rows.next()) {
                         ordinal++;
-                        RowData row = rowData(rows, columns, ordinal, false);
+                        RowData row = rowData(table, rows, columns, ordinal, false);
                         if (!checkpointFound) {
                             ensureProjection(targetConn, sourceHash, schemaFingerprint, table, row, references);
                             if (matchesCheckpoint(row, checkpoint)) {
@@ -264,14 +266,13 @@ public final class GriefLoggerHistoricalImporter {
     }
 
     private record RowData(String sourceKey, String legacySourceKey, Long sourceRowid, long ordinal,
-                           String payloadJson, byte[] payloadBlob, Integer actionId,
+                           String payloadJson, byte[] payloadBlob, Long actionId,
                            String unresolvedReason, Map<String, Object> values) {}
 
-    private RowData rowData(ResultSet rows, List<Column> columns, long ordinal,
+    private RowData rowData(String table, ResultSet rows, List<Column> columns, long ordinal,
                             boolean hasRowid) throws SQLException {
         Map<String, Object> values = new LinkedHashMap<>();
         byte[] opaqueBlob = null;
-        Integer actionId = null;
         List<String> primaryValues = new ArrayList<>();
         for (int i = 0; i < columns.size(); i++) {
             Column column = columns.get(i);
@@ -284,11 +285,9 @@ public final class GriefLoggerHistoricalImporter {
             if (value instanceof byte[] bytes && opaqueBlob == null) {
                 opaqueBlob = bytes.clone();
             }
-            if ((column.name().equalsIgnoreCase("action")
-                    || column.name().equalsIgnoreCase("action_id")) && value instanceof Number n) {
-                actionId = n.intValue();
-            }
         }
+        Object sourceActionId = sourceActionId(values);
+        Long actionId = parseActionId(sourceActionId);
         String payloadJson = mapJson(values);
         Long sourceRowid = null;
         String sourceKey;
@@ -305,13 +304,52 @@ public final class GriefLoggerHistoricalImporter {
             legacySourceKey = sourceKey;
         }
         String unresolved = null;
-        if (actionId != null && (actionId < KNOWN_ACTION_MIN || actionId > KNOWN_ACTION_MAX)) {
+        if (sourceActionId == null && ACTION_ID_TABLES.contains(table)) {
+            unresolved = "missing_action_id";
+        } else if (sourceActionId != null && actionId == null && ACTION_ID_TABLES.contains(table)) {
+            unresolved = "invalid_action_id:" + sourceActionId;
+        } else if (actionId != null && !isKnownAction(table, actionId)) {
             unresolved = "unknown_action_id:" + actionId;
         } else if (opaqueBlob != null) {
             unresolved = "opaque_binary_field";
         }
         return new RowData(sourceKey, legacySourceKey, sourceRowid, ordinal, payloadJson, opaqueBlob,
                 actionId, unresolved, Collections.unmodifiableMap(new LinkedHashMap<>(values)));
+    }
+
+    static Long parseActionId(Object value) {
+        if (value == null) return null;
+        try {
+            if (value instanceof BigInteger integer) return integer.longValueExact();
+            if (value instanceof BigDecimal decimal) return decimal.longValueExact();
+            if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long) {
+                return ((Number) value).longValue();
+            }
+            if (value instanceof Number number) return new BigDecimal(number.toString()).longValueExact();
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException | ArithmeticException ignored) {
+            return null;
+        }
+    }
+
+    static Object sourceActionId(Map<String, Object> values) {
+        for (String alias : List.of("action", "action_id")) {
+            for (Map.Entry<String, Object> entry : values.entrySet()) {
+                if (entry.getKey().equalsIgnoreCase(alias) && entry.getValue() != null) {
+                    return entry.getValue();
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean isKnownAction(String table, long actionId) {
+        return switch (table) {
+            case "items", "containers" -> actionId >= 0 && actionId <= 10;
+            case "blocks" -> actionId >= 0 && actionId <= 4;
+            case "sessions" -> actionId >= 0 && actionId <= 1;
+            default -> true;
+        };
     }
 
     static String sourceKeyForPrimaryValues(List<String> primaryValues) {
@@ -351,7 +389,15 @@ public final class GriefLoggerHistoricalImporter {
             stmt.setLong(6, row.ordinal());
             stmt.setString(7, row.payloadJson());
             if (row.payloadBlob() == null) stmt.setNull(8, Types.BLOB); else stmt.setBytes(8, row.payloadBlob());
-            if (row.actionId() == null) stmt.setNull(9, Types.INTEGER); else stmt.setInt(9, row.actionId());
+            // V14 uses a portable INTEGER index column (32-bit on MySQL). The
+            // immutable JSON payload and unresolved reason retain larger source
+            // IDs exactly; do not overflow this convenience index column.
+            if (row.actionId() == null || row.actionId() < Integer.MIN_VALUE
+                    || row.actionId() > Integer.MAX_VALUE) {
+                stmt.setNull(9, Types.INTEGER);
+            } else {
+                stmt.setLong(9, row.actionId());
+            }
             stmt.setLong(10, System.currentTimeMillis());
             if (row.unresolvedReason() == null) stmt.setNull(11, Types.VARCHAR); else stmt.setString(11, row.unresolvedReason());
             boolean inserted = stmt.executeUpdate() > 0;

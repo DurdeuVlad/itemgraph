@@ -15,6 +15,7 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import org.slf4j.Logger;
 
@@ -38,11 +39,13 @@ public class ItemGraph {
             }
         };
         ItemGraphCommands.setRuntimeInformation(runtimeInformation);
+        NeoForgeItemGraphPermissions.install();
         com.itemgraph.api.ItemGraphApiLifecycle.setRuntimeInformation(runtimeInformation);
 
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
         NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
+        NeoForge.EVENT_BUS.addListener(this::onServerStopped);
 
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.ItemEntityEventListener());
         NeoForge.EVENT_BUS.register(new com.itemgraph.listener.TransformationEventListener());
@@ -69,6 +72,8 @@ public class ItemGraph {
     private void onServerStarting(ServerStartingEvent event) {
         ItemCanonicalizer.setRegistryAccess(event.getServer().registryAccess());
         var operationalSettings = ItemGraphConfig.operationalSettings();
+        com.itemgraph.command.CommandHelp.initializeMessages();
+        com.itemgraph.i18n.ItemGraphLanguage.setLocale(ItemGraphConfig.language());
         var databaseSettings = ItemGraphConfig.databaseSettings();
         var griefLoggerIntegrationEnabled = ItemGraphConfig.griefLoggerIntegrationEnabled();
         var griefLoggerDatabasePath = ItemGraphConfig.griefLoggerDatabasePath();
@@ -91,11 +96,17 @@ public class ItemGraph {
         com.itemgraph.listener.ContainerInteractionTracker.getInstance().closeAllSessions();
         com.itemgraph.listener.EnderChestInteractionTracker.getInstance().closeAllSessions();
         com.itemgraph.command.InspectionService.getInstance().clear();
-        com.itemgraph.ingest.InternalObservationService.getInstance().stop();
+        // Wait for the importer to terminate before closing the database it writes to.
         com.itemgraph.ingest.IngestionService.getInstance().stop();
         // Stop the query worker before closing the database, so an in-flight /ig trace
-        // cannot be reading through a connection that is about to disappear.
+        // cannot be reading through a connection that is about to disappear. Keep the
+        // observation queue and database available through disconnect callbacks that
+        // run during orderly server shutdown.
         com.itemgraph.command.QueryDispatcher.shutdown();
+    }
+
+    private void onServerStopped(ServerStoppedEvent event) {
+        com.itemgraph.ingest.InternalObservationService.getInstance().stop();
         DatabaseManager.getInstance().close();
     }
 }

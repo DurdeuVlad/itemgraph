@@ -52,6 +52,13 @@ class DifferentialReportTests(unittest.TestCase):
             "orphaned_allocations": 0,
             "invalid_edge_nodes": 0,
             "status_mismatches": 0,
+            "queue_health": {
+                "observation_waiting_depth": 0,
+                "transformation_waiting_depth": 0,
+                "audit_waiting_depth": 0,
+                "queue_capacity_each": 10_000,
+                "dropped_since_service_start": 0,
+            },
         }
 
     @staticmethod
@@ -165,7 +172,7 @@ class DifferentialReportTests(unittest.TestCase):
 
     def test_transformation_exception_issue_is_pinned_to_issue_57(self) -> None:
         changed = copy.deepcopy(self.registry)
-        action = next(row for row in changed["actions"] if row.get("itemgraph") == "SMELT")
+        action = next(row for row in changed["actions"] if row.get("itemgraph") == "SMELT_OUTPUT_UNRESOLVED")
         action["differential_exceptions"][0]["issue"] = 34
 
         with self.assertRaisesRegex(report.ReportError, "pinned action owner"):
@@ -212,8 +219,8 @@ class DifferentialReportTests(unittest.TestCase):
             action = action_row["itemgraph"]
             semantics = action_row["quantity"]
             quantity = (report.SIGNED_DELTA_SIGNS[action] * 2 if semantics == "signed_delta" else
-                        2 if semantics == "transformation" else None)
-            source_table = ("ig_audit_events" if semantics == "none" else
+                        2 if semantics in {"transformation", "observed_stack_count"} else None)
+            source_table = ("ig_audit_events" if semantics == "none" or action == "SMELT_OUTPUT_UNRESOLVED" else
                             "ig_item_transformations" if semantics == "transformation" else "ig_observations")
             native_events.append(self.native_event(
                 event_key=f"extension.{action.lower()}", action=action,
@@ -243,10 +250,13 @@ class DifferentialReportTests(unittest.TestCase):
             ("PLACE_BLOCK", 1, 99, "must be null"),
             ("ADD_ITEM", 1, -4, "positive signed delta"),
             ("REMOVE_ITEM", 0, 4, "negative signed delta"),
-            ("CRAFT", 4, None, "positive transformed result count"),
+            ("CRAFT_OUTPUT_UNRESOLVED", 4, None, "positive observed stack count"),
         ):
             with self.subTest(action=action, quantity=quantity):
                 invalid = self.native_event(action=action, quantity=quantity)
+                if action == "CRAFT_OUTPUT_UNRESOLVED":
+                    invalid["evidence_class"] = "unresolved"
+                    invalid["unresolved_reason"] = "TRANSFORMATION_INPUTS_NOT_OBSERVED"
                 self.native["events"] = [invalid]
                 with self.assertRaisesRegex(report.ReportError, expected):
                     report.compare_reports(self.legacy, self.native)
@@ -329,6 +339,18 @@ class DifferentialReportTests(unittest.TestCase):
         self.native["invariants"]["healthy"] = False
         with self.assertRaisesRegex(report.ReportError, "disagrees"):
             report.compare_reports(self.legacy, self.native)
+
+    def test_itemgraph_report_rejects_queue_overflow_and_capacity_drift(self) -> None:
+        for path, value, message in (
+            (("observation_waiting_depth",), 10_001, "exceeds its configured capacity"),
+            (("queue_capacity_each",), 10_001, "must match the configured capacity"),
+            (("dropped_since_service_start",), 1, "must not lose accepted events"),
+        ):
+            with self.subTest(path=path):
+                self.native["invariants"]["queue_health"][path[0]] = value
+                with self.assertRaisesRegex(report.ReportError, message):
+                    report.compare_reports(self.legacy, self.native)
+                self.native["invariants"] = self.healthy_invariants()
 
     def test_itemgraph_observation_total_covers_exported_observation_events(self) -> None:
         self.native["invariants"]["total_observations"] = 0

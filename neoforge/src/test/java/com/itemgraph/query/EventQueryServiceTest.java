@@ -69,6 +69,193 @@ class EventQueryServiceTest extends QueryTestBase {
         assertTrue(line.contains("No observation #9999"), line);
     }
 
+    @Test
+    void testCanonicalEventUuidOpensLinkedAdminObservationAndRendersMutationIds() throws Exception {
+        long player = insertPlayerNode("AlphaA");
+        long fp = insertFingerprint("minecraft:diamond", "hash-diamond");
+        long obsId = insertObservation(now, player, null, fp, "ADMIN_ITEM_CREATE", 3);
+        String observationUuid = "123e4567-e89b-12d3-a456-426614174000";
+        String mutationUuid = "123e4567-e89b-12d3-a456-426614174001";
+        String attemptUuid = "123e4567-e89b-12d3-a456-426614174002";
+        String raw = "{\"event_id\":\"" + observationUuid + "\",\"mutation_event_id\":\""
+                + mutationUuid + "\",\"command_attempt_event_id\":\"" + attemptUuid + "\"}";
+        try (var update = conn.prepareStatement(
+                "UPDATE ig_observations SET source_type='ITEMGRAPH_INTERNAL', ingest_event_uuid=?, raw_data=? WHERE id=?")) {
+            update.setString(1, observationUuid);
+            update.setBytes(2, raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            update.setLong(3, obsId);
+            update.executeUpdate();
+        }
+
+        ObservationDetail obs = service.findObservationByEventUuid(conn, observationUuid).orElseThrow();
+        assertEquals(obsId, obs.id());
+        assertEquals(observationUuid, obs.evidenceEventUuid());
+        assertEquals(mutationUuid, obs.mutationEventUuid());
+        assertEquals(attemptUuid, obs.commandAttemptEventUuid());
+        String rendered = String.join("\n", QueryFormatter.formatEvent(obs));
+        assertTrue(rendered.contains("mutation event: " + mutationUuid), rendered);
+        assertTrue(rendered.contains("command attempt: " + attemptUuid), rendered);
+    }
+
+    @Test
+    void testMalformedEventUuidDoesNotQueryOrMatch() throws Exception {
+        assertTrue(service.findObservationByEventUuid(conn, "not-an-event-uuid").isEmpty());
+        assertTrue(QueryFormatter.eventUuidNotFound("not-an-event-uuid").contains("Invalid event UUID"));
+    }
+
+    @Test
+    void testOutcomeDetailExposesBoundedLinksAndPartialStatusWithoutAcceptingMalformedIds() {
+        String raw = "{\"mutation_event_id\":\"123e4567-e89b-12d3-a456-426614174001\","
+                + "\"command_attempt_event_id\":\"123e4567-e89b-12d3-a456-426614174002\","
+                + "\"item_flow_link_status\":\"PARTIAL_LINK_LIST\","
+                + "\"related_observation_event_ids\":[\"123e4567-e89b-12d3-a456-426614174000\",\"invalid\"],"
+                + "\"related_observation_event_ids_omitted\":2,"
+                + "\"related_transformation_event_ids\":[\"123e4567-e89b-12d3-a456-426614174003\"],"
+                + "\"related_unresolved_event_ids\":[\"123e4567-e89b-12d3-a456-426614174004\"]}";
+        String rendered = AdminMutationEvidenceLinks.appendAuditDetail("ADMIN_ITEM_COMMAND_EFFECT", "outcome=confirmed",
+                raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertTrue(rendered.contains("item_flow_link_status=PARTIAL_LINK_LIST"), rendered);
+        assertTrue(rendered.contains("related_observation_event_ids=123e4567-e89b-12d3-a456-426614174000"), rendered);
+        assertFalse(rendered.contains("invalid"), rendered);
+        assertTrue(rendered.contains("related_observation_event_ids_omitted=2"), rendered);
+        assertTrue(rendered.contains("related_transformation_event_ids=123e4567-e89b-12d3-a456-426614174003"), rendered);
+        assertTrue(rendered.contains("related_unresolved_event_ids=123e4567-e89b-12d3-a456-426614174004"), rendered);
+    }
+
+    @Test
+    void testMalformedUnresolvedStackSummaryIsIgnoredSafely() {
+        String raw = "{\"before\":{\"empty\":12,\"item_id\":false,\"count\":1.5}}";
+        String rendered = AdminMutationEvidenceLinks.appendAuditDetail("ADMIN_ITEM_COMMAND_UNRESOLVED", "outcome=unresolved",
+                raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertTrue(rendered.startsWith("outcome=unresolved"), rendered);
+        assertFalse(rendered.contains("before="), rendered);
+    }
+
+    @Test
+    void testCanonicalEventUuidOpensAdminTransformation() throws Exception {
+        long actor = insertPlayerNode("Moderator");
+        long before = insertFingerprint("minecraft:iron_sword", "before-hash");
+        long after = insertFingerprint("minecraft:diamond_sword", "after-hash");
+        String transformationUuid = "123e4567-e89b-12d3-a456-426614174010";
+        try (var insert = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations
+                    (transformation_type, player_node_id, source_fingerprint_id, result_fingerprint_id,
+                     quantity, timestamp_ms, details, ingest_event_uuid)
+                VALUES ('ADMIN_ITEM_TRANSFORM', ?, ?, ?, 1, ?, 'cause=item_modify target_player_uuid=target-uuid target_player_name=Target', ?)
+                """)) {
+            insert.setLong(1, actor);
+            insert.setLong(2, before);
+            insert.setLong(3, after);
+            insert.setLong(4, now);
+            insert.setString(5, transformationUuid);
+            insert.executeUpdate();
+        }
+
+        UnifiedEvidenceDetail event = service.findTransformationByEventUuid(conn, transformationUuid).orElseThrow();
+        assertEquals("TRANSFORMATION", event.source());
+        assertEquals("ADMIN_ITEM_TRANSFORM", event.actionType());
+        assertEquals(1, event.quantity());
+        String output = String.join("\n", QueryFormatter.formatUnifiedEvidence(List.of(event), "exact event UUID"));
+        assertTrue(output.contains("evidence_event_id=" + transformationUuid), output);
+        assertTrue(output.contains("minecraft:iron_sword -> minecraft:diamond_sword"), output);
+        assertTrue(output.contains("target_player_uuid=target-uuid target_player_name=Target"), output);
+    }
+
+    @Test
+    void testCanonicalEventUuidDoesNotPresentLegacyCraftEndpointsAsLineage() throws Exception {
+        long actor = insertPlayerNode("Moderator");
+        long source = insertFingerprint("minecraft:wheat", "legacy-source");
+        long result = insertFingerprint("minecraft:bread", "legacy-result");
+        String eventUuid = "123e4567-e89b-12d3-a456-426614174011";
+        try (var insert = conn.prepareStatement("""
+                INSERT INTO ig_item_transformations
+                    (transformation_type, player_node_id, source_fingerprint_id, result_fingerprint_id,
+                     quantity, timestamp_ms, details, ingest_event_uuid)
+                VALUES ('CRAFT', ?, ?, ?, 4, ?, 'synthetic ingredient wheat -> bread', ?)
+                """)) {
+            insert.setLong(1, actor);
+            insert.setLong(2, source);
+            insert.setLong(3, result);
+            insert.setLong(4, now);
+            insert.setString(5, eventUuid);
+            insert.executeUpdate();
+        }
+
+        UnifiedEvidenceDetail event = service.findTransformationByEventUuid(conn, eventUuid).orElseThrow();
+        String rendered = String.join("\n", QueryFormatter.formatUnifiedEvidence(List.of(event), "exact event UUID"));
+        assertEquals("UNRESOLVED", event.evidenceClass());
+        assertNull(event.quantity());
+        assertTrue(rendered.contains("historical result (unverified)=minecraft:bread"), rendered);
+        assertTrue(rendered.contains("historical_endpoints=UNVERIFIED"), rendered);
+        assertFalse(rendered.contains("minecraft:wheat"), rendered);
+        assertFalse(rendered.contains(" -> "), rendered);
+        assertFalse(rendered.contains("synthetic ingredient"), rendered);
+    }
+
+    @Test
+    void testCanonicalEventUuidOpensUnresolvedAuditEvidenceAndBeforeAfterSummary() throws Exception {
+        String eventUuid = "123e4567-e89b-12d3-a456-426614174020";
+        String raw = "{\"event_id\":\"" + eventUuid + "\",\"mutation_event_id\":\"123e4567-e89b-12d3-a456-426614174021\","
+                + "\"endpoint_kind\":\"entity\",\"slot\":\"weapon.mainhand\","
+                + "\"target_entity_uuid\":\"target-entity\",\"target_entity_type\":\"minecraft:zombie\","
+                + "\"before\":{\"item_id\":\"minecraft:iron_sword\",\"fingerprint\":\"before\",\"count\":1},"
+                + "\"after\":{\"item_id\":\"example:custom_sword\",\"fingerprint\":\"after\",\"count\":1}}";
+        try (var insert = conn.prepareStatement("""
+                INSERT INTO ig_audit_events
+                    (event_type, timestamp_ms, player_uuid, player_name, level_id, x, y, z,
+                     subject_id, detail, source_type, source_event_id, raw_data, ingest_event_uuid)
+                VALUES ('ADMIN_ITEM_COMMAND_UNRESOLVED', ?, NULL, NULL, 'minecraft:overworld', 10, 64, 10,
+                        'item_modify', 'outcome=confirmed_unresolved_transformation',
+                        'ITEMGRAPH_INTERNAL', 1, ?, ?)
+                """)) {
+            insert.setLong(1, now);
+            insert.setBytes(2, raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            insert.setString(3, eventUuid);
+            insert.executeUpdate();
+        }
+
+        UnifiedEvidenceDetail event = service.findAuditEventByEventUuid(conn, eventUuid).orElseThrow();
+        assertEquals("UNRESOLVED", event.evidenceClass());
+        String output = String.join("\n", QueryFormatter.formatUnifiedEvidence(List.of(event), "exact event UUID"));
+        assertTrue(output.contains("evidence_event_id=" + eventUuid), output);
+        assertTrue(output.contains("endpoint_kind=entity slot=weapon.mainhand"), output);
+        assertTrue(output.contains("target_entity_uuid=target-entity target_entity_type=minecraft:zombie"), output);
+        assertTrue(output.contains("before=minecraft:iron_sword x1"), output);
+        assertTrue(output.contains("after=example:custom_sword x1"), output);
+    }
+
+    @Test
+    void testCanonicalEventUuidOpensUnresolvedCraftOutputWithoutCreatingLineage() throws Exception {
+        String eventUuid = "123e4567-e89b-12d3-a456-426614174030";
+        String raw = "{\"event_id\":\"" + eventUuid + "\",\"event_type\":\"CRAFT_OUTPUT_UNRESOLVED\","
+                + "\"evidence_class\":\"UNRESOLVED\",\"reason_code\":\"TRANSFORMATION_INPUTS_NOT_OBSERVED\","
+                + "\"observed_output\":{\"item_id\":\"minecraft:iron_sword\",\"fingerprint_hash\":\"out-hash\",\"quantity\":2}}";
+        try (var insert = conn.prepareStatement("""
+                INSERT INTO ig_audit_events
+                    (event_type, timestamp_ms, player_uuid, player_name, level_id, x, y, z,
+                     subject_id, detail, source_type, source_event_id, raw_data, ingest_event_uuid)
+                VALUES ('CRAFT_OUTPUT_UNRESOLVED', ?, '00000000-0000-0000-0000-000000000001', 'Alice',
+                        'minecraft:overworld', 10, 64, 20, 'minecraft:iron_sword',
+                        'output=minecraft:iron_sword quantity=2 input=UNKNOWN lineage=NOT_ESTABLISHED',
+                        'ITEMGRAPH_INTERNAL', 31, ?, ?)
+                """)) {
+            insert.setLong(1, now);
+            insert.setBytes(2, raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            insert.setString(3, eventUuid);
+            insert.executeUpdate();
+        }
+
+        UnifiedEvidenceDetail event = service.findAuditEventByEventUuid(conn, eventUuid).orElseThrow();
+        assertEquals("UNRESOLVED", event.evidenceClass());
+        assertEquals("minecraft:iron_sword", event.subjectId());
+        String rendered = String.join("\n", QueryFormatter.formatUnifiedEvidence(List.of(event), "exact event UUID"));
+        assertTrue(rendered.contains("evidence_event_id=" + eventUuid), rendered);
+        assertTrue(rendered.contains("TRANSFORMATION_INPUTS_NOT_OBSERVED"), rendered);
+        assertTrue(rendered.contains("output_quantity=2"), rendered);
+        assertTrue(rendered.contains("output_fingerprint=out-hash"), rendered);
+        assertTrue(rendered.contains("input=UNKNOWN lineage=NOT_ESTABLISHED"), rendered);
+    }
+
     /** A row the source recorded no destination for must still be returned, not dropped. */
     @Test
     void testObservationWithNoDestinationIsStillReturned() throws Exception {

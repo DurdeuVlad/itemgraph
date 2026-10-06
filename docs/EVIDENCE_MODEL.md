@@ -30,6 +30,45 @@ Examples:
 
 Observed evidence should include the source and original source identifier whenever available.
 
+Administrative item commands (`/give`, `/clear`, `/item`) and creative inventory
+outcomes keep their command/packet outcome separate from item-flow observations.
+Only item observations or transformations accepted by ItemGraph's bounded ingest
+queue are listed on the related outcome; an attempt, failure, or zero-quantity
+creative block result does not create item quantity. Outcome payloads state
+`LINKED`, `UNRESOLVED_EVIDENCE_RECORDED`, `PARTIAL_LINK_LIST`, or
+`NO_ITEM_EVIDENCE_RECORDED`; each observation, transformation, and unresolved
+reference list is capped independently at 32 IDs, with an omitted count when
+truncated. `PARTIAL_LINK_LIST` means the displayed list is incomplete.
+
+Use `/ig event event:<uuid>` with a linked event UUID to open an admin/creative
+observation, transformation, or outcome audit row; `/ig event <observationId>`
+continues to accept a numeric observation ID. Attempts retain their mutation and
+command-attempt IDs, not selector expressions or command arguments. An unresolved
+outcome may show a safe before/after item ID and count summary plus the affected
+slot and player/entity endpoint. That summary does not prove a transfer or actor
+identity. Command actor and target player/entity remain separate fields. Staff
+item-command and creative evidence is protected by `itemgraph.audit` as described
+in [Security and permissions](SECURITY_AND_PERMISSIONS.md).
+
+For a successful player-caused container break, ItemGraph records the exact
+pre-break non-empty slot stacks as observed `REMOVE_ITEM` rows. The source is the
+container block entity at its dimension and coordinates. The player is retained
+as actor evidence; the destination is `UNKNOWN` because the snapshot does not
+prove that the player or a ground item entity received a particular stack. Each
+row includes slot, item registry ID, canonical fingerprint, quantity, its own
+event ID, and the parent `CONTAINER_BREAK_COMPLETED` event ID. That parent also
+stores `break_event_id`, which equals the standard `BREAK_BLOCK` row's
+`ingest_event_uuid`. The parent and all slot rows persist in one transaction, so
+a partial slot write cannot leave a false complete-snapshot claim. A canceled or
+failed break emits no removal row. A nonempty snapshot also emits a separate
+`CONTAINER_BREAK_UNRESOLVED` event using
+`CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED` until an authoritative
+callback can associate a specific resulting entity with source contents. An empty
+snapshot has no item-drop relationship to resolve, so it emits only its successful
+zero-content summary. Missing actors, vanished block entities, unsupported block-entity
+inventory contracts, and failed or oversized snapshots use distinct stable
+unresolved reason codes; no unsupported inventory adapter is queried.
+
 Raw observations and audit events are retained indefinitely. Legacy migrations V3, V4,
 and V5 preserve every pre-reset observation's source identifiers, timestamp, endpoints,
 fingerprint values, action, quantity, and `raw_data` bytes in
@@ -394,8 +433,9 @@ CREATE TABLE IF NOT EXISTS ig_item_transformations (
 Implemented transformation types:
 
 - `ANVIL_RENAME`: captured via NeoForge `AnvilRepairEvent` when an item receives a custom name or repair.
-- `CRAFTING`: captured via `ItemCraftedEvent` linking input item components to crafted output products.
-- `SMELTING`: captured via `ItemSmeltedEvent`.
+- `CRAFT_OUTPUT_UNRESOLVED` / `SMELT_OUTPUT_UNRESOLVED`: records the observed output stack, count, fingerprint, actor, time, and position. Inputs are explicitly unknown, the row is not a transformation edge, and it cannot create a trace link.
+- The raw fingerprint remains complete when a modded name or component summary is unusually long. Human-readable name/component summaries are capped at 512 characters and end with `…[truncated]`; this display bound does not alter the canonical fingerprint.
+- Legacy `CRAFT` / `SMELT` rows may contain a first-slot approximation or synthetic input from older captures. The current registry labels them unresolved and trace queries exclude them; their historical raw rows are preserved.
 
 In query output, transformations are represented chronologically as:
 

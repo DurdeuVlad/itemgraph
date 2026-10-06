@@ -111,6 +111,16 @@ public record TraceHop(
         } else if ("queue_overflow_recovery".equals(obs.captureType())) {
             detail += " [queue overflow recovery]";
         }
+        if (obs.evidenceEventUuid() != null) {
+            detail += " [evidence_event_id=" + obs.evidenceEventUuid()
+                    + " parent_event_id=" + obs.parentEventUuid()
+                    + " break_event_id=" + obs.breakEventUuid() + "]";
+        }
+        if (obs.mutationEventUuid() != null) {
+            detail += " [mutation_event_id=" + obs.mutationEventUuid();
+            if (obs.commandAttemptEventUuid() != null) detail += " command_attempt_event_id=" + obs.commandAttemptEventUuid();
+            detail += "]";
+        }
         return new TraceHop(
                 Kind.OBSERVED,
                 obs.id(),

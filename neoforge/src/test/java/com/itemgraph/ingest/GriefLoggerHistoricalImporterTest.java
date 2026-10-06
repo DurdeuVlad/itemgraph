@@ -16,6 +16,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -266,6 +269,226 @@ class GriefLoggerHistoricalImporterTest {
     }
 
     @Test
+    void unknownActionWithMalformedComponentBytesStaysOpaqueAndClaimsNoItemFlow() throws Exception {
+        Path sourcePath = tempDir.resolve("grieflogger-unknown-action.db");
+        createLookupFixture(sourcePath);
+        byte[] malformedComponents = HexFormat.of().parseHex("0500000004");
+        try (Connection source = DriverManager.getConnection("jdbc:sqlite:" + sourcePath.toAbsolutePath());
+             PreparedStatement update = source.prepareStatement(
+                     "UPDATE items SET action = 999, data = ? WHERE id = 1")) {
+            update.setBytes(1, malformedComponents);
+            assertEquals(1, update.executeUpdate());
+            try (Statement statement = source.createStatement()) {
+                assertEquals(1, statement.executeUpdate("""
+                        INSERT INTO items (id, time, user, level, x, y, z, type, data, amount, action)
+                        VALUES (2, 101, 1, 1, 10, 64, 10, 1, NULL, 4, NULL)
+                        """));
+                assertEquals(1, statement.executeUpdate("""
+                        INSERT INTO items (id, time, user, level, x, y, z, type, data, amount, action)
+                        VALUES (3, 102, 1, 1, 10, 64, 10, 1, NULL, 99, 2147483648)
+                        """));
+                assertEquals(1, statement.executeUpdate("""
+                        INSERT INTO items (id, time, user, level, x, y, z, type, data, amount, action)
+                        VALUES (4, 103, 1, 1, 10, 64, 10, 1, NULL, 7, 11)
+                        """));
+                assertEquals(1, statement.executeUpdate("""
+                        INSERT INTO items (id, time, user, level, x, y, z, type, data, amount, action)
+                        VALUES (5, 104, 1, 1, 10, 64, 10, 1, NULL, 8, 999.5)
+                        """));
+                assertEquals(1, statement.executeUpdate("""
+                        INSERT INTO items (id, time, user, level, x, y, z, type, data, amount, action, action_id)
+                        VALUES (6, 105, 1, 1, 10, 64, 10, 1, NULL, 12, 999.5, 1)
+                        """));
+            }
+        }
+        byte[] sourceBeforeImport = Files.readAllBytes(sourcePath);
+        database.initialize(tempDir.resolve("itemgraph-unknown-action.db"));
+
+        GriefLoggerHistoricalImporter.ImportReport report = new GriefLoggerHistoricalImporter(
+                new GriefLoggerAdapter(sourcePath), database).importAll();
+
+        assertEquals("COMPLETE", report.status());
+        assertEquals(6, report.rowsOpaque());
+        assertArrayEquals(sourceBeforeImport, Files.readAllBytes(sourcePath),
+                "import must leave the GriefLogger source byte-for-byte unchanged");
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_id, payload_blob, unresolved_reason
+                FROM ig_grieflogger_rows
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:1'
+                """)) {
+            statement.setString(1, report.sourceSha256());
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals(999, rows.getInt("action_id"));
+                assertArrayEquals(malformedComponents, rows.getBytes("payload_blob"));
+                assertEquals("unknown_action_id:999", rows.getString("unresolved_reason"));
+                assertFalse(rows.next());
+            }
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_id, payload_blob, unresolved_reason
+                FROM ig_grieflogger_rows
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:2'
+                """)) {
+            statement.setString(1, report.sourceSha256());
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertNull(rows.getObject("action_id"));
+                assertNull(rows.getBytes("payload_blob"));
+                assertEquals("missing_action_id", rows.getString("unresolved_reason"));
+                assertFalse(rows.next());
+            }
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_type, quantity, subject_id, evidence_class, unresolved_reason, raw_byte_hash
+                FROM ig_grieflogger_lookup
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:1'
+                """)) {
+            statement.setString(1, report.sourceSha256());
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals("UNKNOWN_ACTION_999", rows.getString("action_type"));
+                assertEquals(0, rows.getInt("quantity"));
+                assertNull(rows.getString("subject_id"));
+                assertEquals("UNRESOLVED", rows.getString("evidence_class"));
+                assertEquals("unknown_action_id:999", rows.getString("unresolved_reason"));
+                String expectedByteHash = HexFormat.of().formatHex(
+                        MessageDigest.getInstance("SHA-256").digest(malformedComponents));
+                assertEquals(expectedByteHash, rows.getString("raw_byte_hash"));
+                assertFalse(rows.next());
+            }
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_type, quantity, subject_id, evidence_class, unresolved_reason
+                FROM ig_grieflogger_lookup
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:2'
+                """)) {
+            statement.setString(1, report.sourceSha256());
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals("HISTORICAL_UNRESOLVED", rows.getString("action_type"));
+                assertEquals(0, rows.getInt("quantity"));
+                assertNull(rows.getString("subject_id"));
+                assertEquals("UNRESOLVED", rows.getString("evidence_class"));
+                assertEquals("missing_action_id", rows.getString("unresolved_reason"));
+                assertFalse(rows.next());
+            }
+        }
+        assertUnresolvedItemAction(report.sourceSha256(), "pk:3", 2_147_483_648L, null,
+                "unknown_action_id:2147483648", "UNKNOWN_ACTION_2147483648", 99);
+        assertUnresolvedItemAction(report.sourceSha256(), "pk:4", 11L, 11L,
+                "unknown_action_id:11", "UNKNOWN_ACTION_11", 7);
+        assertMalformedActionIdHasNoProjectionSemantics(report.sourceSha256());
+        assertMalformedActionAliasPrecedenceIsConsistent(report.sourceSha256());
+    }
+
+    private void assertUnresolvedItemAction(String sourceHash, String sourceKey, long sourceActionId,
+                                            Long indexedActionId,
+                                            String reason, String actionType, int sourceAmount) throws Exception {
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_id, payload_json, unresolved_reason FROM ig_grieflogger_rows
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = ?
+                """)) {
+            statement.setString(1, sourceHash);
+            statement.setString(2, sourceKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                if (indexedActionId == null) {
+                    assertNull(rows.getObject("action_id"));
+                } else {
+                    assertEquals(indexedActionId.longValue(), rows.getLong("action_id"));
+                }
+                assertTrue(rows.getString("payload_json").contains("\"action\":" + sourceActionId));
+                assertEquals(reason, rows.getString("unresolved_reason"));
+                assertFalse(rows.next());
+            }
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_type, quantity, subject_id, evidence_class, unresolved_reason
+                FROM ig_grieflogger_lookup
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = ?
+                """)) {
+            statement.setString(1, sourceHash);
+            statement.setString(2, sourceKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals(actionType, rows.getString("action_type"));
+                assertEquals(0, rows.getInt("quantity"),
+                        "source amount " + sourceAmount + " is not a flow claim");
+                assertNull(rows.getString("subject_id"));
+                assertEquals("UNRESOLVED", rows.getString("evidence_class"));
+                assertEquals(reason, rows.getString("unresolved_reason"));
+                assertFalse(rows.next());
+            }
+        }
+    }
+
+    private void assertMalformedActionIdHasNoProjectionSemantics(String sourceHash) throws Exception {
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_id, payload_json, unresolved_reason FROM ig_grieflogger_rows
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:5'
+                """)) {
+            statement.setString(1, sourceHash);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertNull(rows.getObject("action_id"));
+                assertTrue(rows.getString("payload_json").contains("\"action\":999.5"));
+                assertEquals("invalid_action_id:999.5", rows.getString("unresolved_reason"));
+                assertFalse(rows.next());
+            }
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_type, quantity, subject_id, evidence_class, unresolved_reason
+                FROM ig_grieflogger_lookup
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:5'
+                """)) {
+            statement.setString(1, sourceHash);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals("HISTORICAL_UNRESOLVED", rows.getString("action_type"));
+                assertEquals(0, rows.getInt("quantity"));
+                assertNull(rows.getString("subject_id"));
+                assertEquals("UNRESOLVED", rows.getString("evidence_class"));
+                assertEquals("invalid_action_id:999.5", rows.getString("unresolved_reason"));
+                assertFalse(rows.next());
+            }
+        }
+    }
+
+    private void assertMalformedActionAliasPrecedenceIsConsistent(String sourceHash) throws Exception {
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_id, payload_json, unresolved_reason FROM ig_grieflogger_rows
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:6'
+                """)) {
+            statement.setString(1, sourceHash);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertNull(rows.getObject("action_id"));
+                assertTrue(rows.getString("payload_json").contains("\"action\":999.5"));
+                assertTrue(rows.getString("payload_json").contains("\"action_id\":1"));
+                assertEquals("invalid_action_id:999.5", rows.getString("unresolved_reason"));
+                assertFalse(rows.next());
+            }
+        }
+        try (PreparedStatement statement = database.getConnection().prepareStatement("""
+                SELECT action_type, quantity, subject_id, evidence_class, unresolved_reason
+                FROM ig_grieflogger_lookup
+                WHERE source_sha256 = ? AND table_name = 'items' AND source_key = 'pk:6'
+                """)) {
+            statement.setString(1, sourceHash);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals("HISTORICAL_UNRESOLVED", rows.getString("action_type"));
+                assertEquals(0, rows.getInt("quantity"));
+                assertNull(rows.getString("subject_id"));
+                assertEquals("UNRESOLVED", rows.getString("evidence_class"));
+                assertEquals("invalid_action_id:999.5", rows.getString("unresolved_reason"));
+                assertFalse(rows.next());
+            }
+        }
+    }
+
+    @Test
     void rejectsReadableDatabaseWithoutSupportedCoreSchema() throws Exception {
         Path sourcePath = tempDir.resolve("unrelated.db");
         Class.forName("org.sqlite.JDBC");
@@ -424,7 +647,7 @@ class GriefLoggerHistoricalImporterTest {
         Class.forName("org.sqlite.JDBC");
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
              Statement stmt = conn.createStatement()) {
-            stmt.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, data BLOB, amount INTEGER, action INTEGER)");
+            stmt.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, data BLOB, amount INTEGER, action INTEGER, action_id INTEGER)");
             stmt.execute("CREATE TABLE containers (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, data BLOB, amount INTEGER, action INTEGER)");
             stmt.execute("CREATE TABLE blocks (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, type INTEGER, action INTEGER)");
             stmt.execute("CREATE TABLE sessions (id INTEGER PRIMARY KEY, time INTEGER, user INTEGER, level INTEGER, x INTEGER, y INTEGER, z INTEGER, action INTEGER)");
@@ -441,7 +664,7 @@ class GriefLoggerHistoricalImporterTest {
             stmt.execute("INSERT INTO levels VALUES (1, 'minecraft:overworld')");
             stmt.execute("INSERT INTO materials VALUES (1, 'minecraft:diamond_sword')");
             stmt.execute("INSERT INTO entities VALUES (1, 'minecraft:zombie')");
-            stmt.execute("INSERT INTO items VALUES (1, 100, 1, 1, 10, 64, 10, 1, NULL, 2, 0)");
+            stmt.execute("INSERT INTO items (id, time, user, level, x, y, z, type, data, amount, action) VALUES (1, 100, 1, 1, 10, 64, 10, 1, NULL, 2, 0)");
             stmt.execute("INSERT INTO containers VALUES (1, 110, 1, 1, 11, 64, 10, 1, NULL, 3, 1)");
             stmt.execute("INSERT INTO blocks VALUES (1, 120, 1, 1, 12, 64, 10, 1, 0)");
             stmt.execute("INSERT INTO sessions VALUES (1, 130, 1, 1, 12, 64, 10, 0)");

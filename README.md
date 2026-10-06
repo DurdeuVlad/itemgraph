@@ -28,9 +28,10 @@ is absent. The four release files are:
 
 The compatible variants are a migration bridge while the M8 parity gates remain
 open. ItemGraph will switch to the standard loader jar as the only supported
-artifact only after every M8 acceptance gate, the differential replay, the
-native-only 24-hour staging window, and the recorded rollback rehearsal in [the
-cutover plan](docs/GRIEFLOGGER_PARITY.md) are complete. That cutover retires the
+artifact only after every M8 feature-parity gate and the separate M10 operator
+cutover checks in [the cutover plan](docs/GRIEFLOGGER_PARITY.md) are approved.
+Those later operational checks do not make the GriefLogger JAR or database
+runtime dependencies. That cutover retires the
 GriefLogger jar dependency; it does not change the read-only importer or delete
 the retained source database copy.
 
@@ -60,6 +61,14 @@ Raw evidence retention is fixed at `indefinite`; ItemGraph does not purge raw
 evidence. Legacy V3–V5 topology resets preserve old observation rows and their
 raw payloads in `ig_legacy_observation_evidence`; these superseded rows remain
 available for forensic review and are excluded from current graph queries.
+
+Server messages can use `en_us`, `nl_nl`, or `zh_tw` through NeoForge
+`general.language` or Fabric `language`. Text is rendered server-side for vanilla
+clients; missing keys fall back to English. Help entry text and navigation labels
+have translated entries; 174 authored source phrases currently use the explicit
+English fallback inventory, including detailed help topics. The exact GriefLogger
+1.2.10-1.21.1 locale inventory is unknown; supported ItemGraph locales are
+based on pinned 26.2 source config research only.
 
 > Evidence first. Inference second. Confidence explicit. Every conclusion traceable.
 
@@ -154,15 +163,29 @@ The first useful vertical slice should:
 
 ## Commands
 
-Implemented and available (all require permission level 2):
+Implemented and available. Unset named permissions fall back to vanilla permission
+level 2; permission providers can delegate each sensitive surface by exact node. See
+`/ig help permissions` and [Security and permissions](docs/SECURITY_AND_PERMISSIONS.md).
+Every command requires `itemgraph.command` plus its exact leaf nodes where listed; nodes
+do not inherit through dotted names. An explicit permission-provider denial overrides
+operator status, while an unset node falls back to vanilla permission level 2.
 
 ```text
 /ig help [topic]
+/ig help permissions
 /ig status
 /ig audit
 /ig ingest now
+/ig ingest history
 /ig event   <observationId>
 /ig explain <edgeId>
+/ig lookup <eventType> [limit] [sinceMinutes]
+/ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]
+/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]
+/ig lookup page <page> <eventType> [limit] [sinceMinutes]
+/ig lookup action.<value> [user.<value>] [include.<value>] [exclude.<value>] [time.<value>] radius.<value>
+/ig lookup provenance <sourceSha256> <table> <sourceKey> [limit]
+/ig page <page> [session]
 /ig trace item <query> [limit] [sinceMinutes]
 /ig trace player <playerName> [limit] [sinceMinutes]
 /ig trace container <x> <y> <z> [limit] [sinceMinutes]
@@ -172,14 +195,21 @@ Implemented and available (all require permission level 2):
 /ig inspect [on|off|status]
 ```
 
-- `/ig help`: bare `/itemgraph` or `/ig` shows the full live command tree. `/ig help <topic>` shows syntax, permission, defaults, query semantics, and an example; unknown topics list the valid topics.
+Native ItemGraph event capture starts automatically when enabled in config.
+`/ig ingest now` is only needed to sync from a configured GriefLogger source.
+
+- `/ig help`: bare `/itemgraph` or `/ig` shows a short task-first overview. `/ig help commands` is a compact task hub that points to detailed topics; `/ig help <topic>` provides exact routes, syntax, and examples where applicable. Run `/ig help permissions` for the exact access nodes. Unknown topics list the valid topics.
 - `/ig audit`: performs off-thread verification of database invariants (conservation, positivity, relational graph integrity, and allocation state consistency).
-- `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows the chronological timeline, including transformations (`[TRANSFORMATION <type> <- <source>]`).
+- `/ig trace item`: accepts numeric fingerprint IDs, item registry names, or custom item names. Quote namespaced IDs or names containing spaces (for example, `/ig gui item "minecraft:netherite_boots"`); use `/ig gui item "id:123"` to force an exact fingerprint ID when a bare numeric query is ambiguous. Shows supported chronological lineage, including anvil transformations. Craft/smelt outputs with unobserved inputs remain unresolved audit events and do not create trace edges.
 - `/ig trace player`: shows all movements involving a player across inventories, ground drops/pickups, containers, and armor stands.
 - `/ig trace container`: reconstructs item ingress and egress for a container at coordinates `(x, y, z)`.
-- `/ig gui`: opens the same item/player/container timelines in a vanilla six-row chest menu. Each page has at most 45 timeline entries; entries distinguish observed from inferred movement, and selecting one opens evidence details. Ambiguous item matches and duplicate player/container nodes require candidate selection rather than silently choosing a target. The menu is permission-level 2, uses no custom client screen or packet, and rejects inventory-movement actions.
-- `/ig inspect`: toggles a per-player container-inspection mode. With it enabled, right-clicking a block whose block entity implements `Container` opens that exact dimension/position in the read-only flow browser instead of the normal container GUI. `on`, `off`, and `status` are deterministic forms. The mode requires permission level 2 on both command and click, clears on logout/server stop, and does not consume the held item or record the inspection click as a transfer.
-- `limit` defaults to 20 and is capped at 100; `sinceMinutes` defaults to unbounded. Player query results and the database-backed portion of `/ig status` return on the server thread. Entity-less server-thread console/RCON commands receive an acceptance message; completed query lines are logged because vanilla RCON returns its response buffer before asynchronous work completes. `/ig ingest now` queues one complete ingest-and-correlate cycle on the background worker. Full argument table and output format: [Query model](docs/QUERY_MODEL.md).
+- `/ig event`, `/ig explain`, and `/ig trace`: preserve their stable visible text and provide bounded hover fields for evidence class, safe item identity, canonical fingerprint hash, event kind, UTC time, and recorded endpoints. Recorded spatial endpoints include a player-only, one-use `[Go to ...]` link; it rechecks the originating query permissions when clicked and works only while that dimension is loaded.
+- `/ig gui`: opens item/player/container timelines in a vanilla six-row chest menu. Each page has at most nine entries. A numbered chat companion identifies each row by evidence class, safe item identity, event kind, and UTC time when available; row numbers match menu slots. Hover text and icons add detail. In a selected detail page, hover each paper icon to read its field; use the page controls and Back button to navigate. Ambiguous targets require candidate selection; missing identities have an explicit fallback. The command and every menu action require `itemgraph.command`, `itemgraph.gui`, and `itemgraph.audit`; see [Security and permissions](docs/SECURITY_AND_PERMISSIONS.md). The menu uses no custom client screen or packet and rejects inventory-movement actions.
+- `/ig inspect`: toggles per-player inspection mode. Left-clicking a block shows that block's paginated audit history in chat. Right-clicking a block entity that implements `Container` opens the read-only flow browser instead of the normal container GUI. Double chests clicked on either half resolve to the same canonical anchor used when their contents are recorded. Other right-clicks show paginated block history; ordinary blocks select the block on the clicked face. A click is consumed only after the read-only request is accepted. `on`, `off`, and `status` are deterministic forms. The command and each inspection click require `itemgraph.command.inspect`; an inspection click on a container also requires `itemgraph.gui`. Permission loss clears inspection mode, and inspection does not use the held item or record an inspection click as a transfer.
+- `/ig lookup`: a level-1 lookup-only moderator needs both `itemgraph.command` and `itemgraph.command.lookup`. Add `itemgraph.command.page` for `/ig page` and clickable page controls. Provider denies override operator level 2; unset nodes use the level-2 fallback. Use `/ig help permissions` for the other nodes.
+- `/ig lookup` and `/ig lookup filters` return native or unified evidence, depending on the syntax. Historical reads are asynchronous and read-only. Native event capture runs automatically when enabled in config. `/ig ingest now` optionally syncs from a configured GriefLogger source; `/ig ingest history` is a separate read-only import from that source. Full argument table and output format: [Query model](docs/QUERY_MODEL.md).
+
+New admins: start with the [admin quick start](docs/ADMIN_QUICK_START.md), which maps common incident questions to every live feature and explains how to interpret evidence.
 
 Sample `/ig trace item` output:
 
@@ -217,6 +247,9 @@ The complete boundary and authorization rules are in [Preview integration API](d
 - [Evidence model](docs/EVIDENCE_MODEL.md)
 - [ItemGraph event taxonomy](docs/EVENT_TAXONOMY.md)
 - [GriefLogger integration](docs/GRIEFLOGGER_INTEGRATION.md)
+- [Complete GriefLogger and ItemGraph feature comparison](docs/FEATURE_PARITY_INVENTORY.md)
+- [GriefLogger source audit](docs/GRIEFLOGGER_SOURCE_AUDIT.md)
+- [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md)
 - [Query model](docs/QUERY_MODEL.md)
 - [Security and permissions](docs/SECURITY_AND_PERMISSIONS.md)
 - [Test plan](docs/TEST_PLAN.md)

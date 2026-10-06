@@ -2,6 +2,8 @@ package com.itemgraph.command;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
 import net.neoforged.bus.api.EventPriority;
@@ -23,20 +25,37 @@ public class InspectionListener {
         int open(ServerPlayer player, Level level, BlockPos pos);
     }
 
+    @FunctionalInterface
+    interface ContainerFlowOpener {
+        int open(ServerPlayer player, Level level, BlockPos pos);
+    }
+
     private final InspectionService inspections;
     private final BlockHistoryOpener blockHistoryOpener;
+    private final ContainerFlowOpener containerFlowOpener;
 
     public InspectionListener() {
-        this(InspectionService.getInstance(), InspectionListener::openBlockHistory);
+        this(InspectionService.getInstance(), InspectionListener::openBlockHistory,
+                InspectionListener::openContainerFlow);
     }
 
     InspectionListener(InspectionService inspections, BlockHistoryOpener blockHistoryOpener) {
+        this(inspections, blockHistoryOpener,
+                (player, level, pos) -> blockHistoryOpener.open(player, level, pos));
+    }
+
+    InspectionListener(InspectionService inspections, BlockHistoryOpener blockHistoryOpener,
+                       ContainerFlowOpener containerFlowOpener) {
         this.inspections = inspections;
         this.blockHistoryOpener = blockHistoryOpener;
+        this.containerFlowOpener = containerFlowOpener;
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (event.getHand() != InteractionHand.MAIN_HAND) {
+            return;
+        }
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
@@ -44,14 +63,20 @@ public class InspectionListener {
         if (level.isClientSide() || !inspections.isEnabled(player.getUUID())) {
             return;
         }
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
             return;
         }
-        if (!BlockInspectionTargets.isInspectableRightClickTarget(level, event.getPos())) {
-            return;
-        }
-        if (blockHistoryOpener.open(player, level, event.getPos()) == 0) {
+        BlockPos target = BlockInspectionTargets.resolveRightClickTarget(
+                level, event.getPos(), event.getHitVec().getDirection());
+        boolean container = level.getBlockEntity(target) instanceof Container;
+        BlockPos inspectionTarget = container
+                ? BlockInspectionTargets.canonicalPosition(level, target)
+                : target;
+        int accepted = container
+                ? containerFlowOpener.open(player, level, inspectionTarget)
+                : blockHistoryOpener.open(player, level, inspectionTarget);
+        if (accepted == 0) {
             return;
         }
         event.setCancellationResult(InteractionResult.SUCCESS);
@@ -70,7 +95,7 @@ public class InspectionListener {
         if (level.isClientSide() || !inspections.isEnabled(player.getUUID())) {
             return;
         }
-        if (!player.createCommandSourceStack().hasPermission(2)) {
+        if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
             return;
         }
@@ -95,5 +120,10 @@ public class InspectionListener {
     private static int openBlockHistory(ServerPlayer player, Level level, BlockPos pos) {
         return ItemGraphCommands.openBlockInspection(player.createCommandSourceStack(),
                 level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    private static int openContainerFlow(ServerPlayer player, Level level, BlockPos pos) {
+        return FlowBrowserService.openContainer(player.createCommandSourceStack(),
+                level.dimension().location().toString(), pos.getX(), pos.getY(), pos.getZ(), null);
     }
 }

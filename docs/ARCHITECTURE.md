@@ -15,7 +15,7 @@ neoforge adapter┘
 ```
 
 - `core/` contains Java-only domain records (`CanonicalItem`, `CorrelationResult`, and `NodeType`) and loader-neutral ports. It must not import Minecraft, Brigadier, Fabric, NeoForge, SQLite, or JDBC packages. `verifyCoreArchitecture` enforces that source boundary.
-- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence and migrations are shared runtime components here. The optional GriefLogger read-only migration adapter is disabled by default.
+- `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence and migrations, including UUID-keyed name history derived from native `PLAYER_JOIN` evidence, are shared runtime components here. The optional GriefLogger read-only migration adapter is disabled by default.
 - `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite and MariaDB Connector/J as nested Fabric jars; its compatible jar replaces the metadata, requires GriefLogger, and strips only the nested SQLite jar.
 - `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite and MariaDB Connector/J; its compatible jar requires GriefLogger, keeps MariaDB Connector/J, and omits the Jar-in-Jar SQLite module.
 
@@ -545,11 +545,30 @@ was lost becomes an ignored duplicate on replay rather than a second quantity or
 row. Producer `source_event_id` remains separate and continues to represent source-level
 identity.
 
-The native worker limits each transformation write and shutdown flush to the configured
-`ingestion.max_batch_size`. Failed transformation batches return to the same bounded queue
-with exponential backoff; the status queue count includes in-flight transformations. A
-requeue overflow or shutdown write failure increments the evidence-loss counter and logs
-the number of dropped records. Legacy migrations V3–V5 copy the original observation
+The internal persistence worker limits observation, transformation, and audit writes,
+including its shutdown drain, to `ingestion.max_batch_size`. A loader shutdown closes queue
+admission before draining accepted ItemGraph records on the persistence worker. The ingestion
+worker has a 5-second graceful wait plus a 5-second interrupt wait. The internal persistence
+worker uses the same bound; if it is still inside JDBC, the lifecycle callback hands its
+queued and in-flight immutable events to an ItemGraph daemon writer, then waits at most 5 seconds
+for the recovery-file write. `ingest_event_uuid` makes the next startup's database replay
+idempotent. The recovery file is retained until all its records are confirmed durable in ItemGraph
+storage. Malformed or unsupported recovery files are preserved and prevent capture from starting.
+If shutdown finds already-accepted pre-start records while the primary recovery file cannot be
+read, it writes those records to the adjacent `itemgraph-pending-evidence.json.overflow` file and
+leaves the primary file intact. Startup merges both files after the primary file is readable; both
+are removed only after all recovered records commit.
+If the recovery writer fails or exceeds its deadline, the log and evidence-loss counter report the
+outstanding record count; a late write may finish only if the process remains alive and the
+filesystem returns. JDBC connection close runs on a daemon closer with a 1-second wait, so the
+server callback does not wait forever on a driver that ignores interruption. The lifecycle callback
+never performs evidence JDBC writes or recovery-file I/O itself. A rejected post-stop submission increments the evidence-loss counter.
+A pre-transaction failure or confirmed rollback increments the evidence-loss counter.
+If commit or rollback leaves the durable result uncertain, ItemGraph increments the
+separate persistence-outcome-unknown counter. Failed live transformation batches return to the same bounded queue with exponential
+backoff; the status queue count includes in-flight transformations. A requeue overflow also
+increments the evidence-loss counter and logs the dropped record count. Legacy migrations
+V3–V5 copy the original observation
 fields, referenced fingerprint values, and raw payload into
 `ig_legacy_observation_evidence` before clearing endpoints written under obsolete
 topology rules. That archive is retained but excluded from live
@@ -731,27 +750,75 @@ ItemGraph JDBC connection.
   block-entity container (crafting grids and anvils) are not watched by the block
   container tracker; Ender Chest menus are handled by the player-owned tracker above.
 
+### Player-broken containers (#140)
+- Fabric takes the immutable slot snapshot in `PlayerBlockBreakEvents.BEFORE` and
+  persists it only in `AFTER`; `CANCELED` discards it. On NeoForge 1.21.1,
+  `BlockEvent.BreakEvent` is pre-mutation, so `AdminCreativeBlockResultMixin` wraps
+  `ServerPlayerGameMode.destroyBlock`, snapshots before the call, and requires both
+  a successful return and a changed block/block-entity state before recording. The
+  wrapper is a narrow mixin because NeoForge exposes no post-result player-break event.
+- `ContainerBreakCapture` copies at most 512 non-empty slot values on the server
+  thread: slot number, item registry ID, canonical component fingerprint, count,
+  player actor, dimension, container position, timestamp, and UUID event identity.
+  Its queued records contain immutable values only. Database writes remain on the
+  bounded worker.
+- Each slot persists as `REMOVE_ITEM` with `targetType=DESTROYED_CONTAINER`. The
+  observation routes the broken container to the per-dimension `UNKNOWN` sink;
+  the recorded player is actor evidence and is not treated as item recipient.
+  `CONTAINER_BREAK_COMPLETED` is the parent row; every slot raw payload carries its
+  `cause_event_id`. `submitEvidenceBatch` admits the parent, all slot rows, and—only
+  when the snapshot has item contents—the unresolved drop-link row together. An empty
+  snapshot has no drop-link row because no item entity could have resulted. The parent
+  and its slots are persisted in one database
+  transaction; a slot write failure rolls back the completion claim and every slot
+  already written in that transaction. The immutable group remains one retry and
+  shutdown-spool unit. Slot IDs are deterministic from parent event ID plus slot.
+- The completion payload contains a deterministic `break_event_id` that matches the
+  `ingest_event_uuid` of the loader's standard `BREAK_BLOCK` audit row. This makes
+  the container snapshot traceable to the exact block-break record on both loaders.
+- A break of one double-chest block entity snapshots only that half. The surviving
+  half remains its own inventory and is not counted as lost. For nonempty snapshots,
+  item-entity drops have
+  no defensible per-stack link to individual source slots at these callbacks, so the
+  parent records `drop_link_status=UNRESOLVED` and a separate
+  `CONTAINER_BREAK_UNRESOLVED` audit row carries the stable reason
+  `CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED`; no player or ground
+  transfer edge is fabricated. Both audit rows and all slot rows are admitted
+  together. Empty snapshots emit only the completion row with zero slots and quantity.
+  `CONTAINER_BREAK_UNRESOLVED` is taxonomy actor `UNKNOWN`; lookup reports
+  `(actor unavailable)` when no player identity was recorded. Oversized, missing-actor,
+  vanished-block-entity, unsupported-block-entity,
+  or failed snapshots become `CONTAINER_BREAK_UNRESOLVED` evidence with stable
+  reason codes. Non-inventory block entities are ignored; capability-backed
+  inventory adapters not implementing `Container` remain owned by #34 and do not
+  create false container-break incidents.
+
 ### Command-toggled container inspection (Issue 10)
 
 - `/ig inspect` stores only per-player UUID state in `InspectionService`; it is cleared on
   logout and server stop and is not persisted.
-- `InspectionListener` handles `PlayerInteractEvent.RightClickBlock` at `HIGHEST` priority.
-  It acts only when inspection is active, the player still has permission level 2, and the
-  clicked block entity implements `Container`. It submits the flow-browser query first; only
-  an accepted query cancels the click with `InteractionResult.SUCCESS`, which prevents both
-  the normal container GUI and held-item use path from running. A rejected query preserves
-  the ordinary container interaction instead of leaving the player with neither screen.
-- Fabric's `FabricNativeAuditEventListener` applies the same decision through
-  `UseBlockCallback`: it checks the server-side `Container`, calls the shared
-  `FlowBrowserService.openContainer`, and returns `SUCCESS` only after the query is accepted.
+- NeoForge's `InspectionListener` handles `PlayerInteractEvent.RightClickBlock` at `HIGHEST`
+  priority and left-click starts; Fabric's `FabricNativeAuditEventListener` applies the same
+  selection through `UseBlockCallback` and `AttackBlockCallback`.
+- A right-click whose target block entity implements `Container` calls the shared
+  `FlowBrowserService.openContainer` with the exact dimension and coordinates. Either half
+  of a valid double chest resolves to the canonical anchor used by container capture. Only
+  an accepted query consumes the click and prevents the normal container GUI and held-item
+  use path. A rejected query preserves ordinary container interaction.
+- Left-clicks call the bounded exact-position audit-history query. Non-container
+  right-clicks also query block history: supported functional blocks select the clicked
+  block, while ordinary blocks select the adjacent block on the clicked face. A rejected
+  query preserves normal Minecraft interaction. Every route requires current permission
+  level 2 and keeps its result private to the player.
   The Fabric disconnect callback clears that player's inspection state; server stop clears
   any remaining state. This follows Fabric's documented callback contract: listeners run
   until one returns a non-`PASS` `InteractionResult` ([Fabric 1.21.1 event guide](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md)).
 - Because the click is cancelled before `ContainerSessionListener` records it, inspection
   is not container-transfer evidence. The opened `FlowBrowserMenu` contains only a
   `SimpleContainer`, so its Open/Close lifecycle cannot create a block-entity-backed watch.
-- Unsupported blocks and inactive/disabled inspection return `PASS`-equivalent vanilla
-  behavior: the event remains uncancelled and the normal interaction pipeline proceeds.
+- Inactive/disabled inspection returns `PASS`-equivalent vanilla behavior: the event remains
+  uncancelled and the normal interaction pipeline proceeds. While inspection is enabled,
+  non-container right-clicks use the block-history route described above.
 
 ### Expanded Query UX
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
@@ -764,11 +831,11 @@ ItemGraph JDBC connection.
 
 ## Transformation Lineage (Phase 9)
 
-Item transformations (identity shifts) are tracked in `ig_item_transformations`:
-- Records transitions linking source fingerprint to result fingerprint (`ANVIL_RENAME`, `CRAFTING`, `SMELTING`).
-- Captured via `TransformationEventListener` (`AnvilRepairEvent`, `ItemCraftedEvent`, `ItemSmeltedEvent`).
-- Persisted asynchronously via `InternalObservationService` with a memory-bounded queue (10,000 capacity).
-- Surfaced chronologically in item trace timelines as `[TRANSFORMATION <type> <- <source>]` hops.
+Item transformations with known inputs and results are tracked in `ig_item_transformations`:
+- Current lineage links source and result fingerprints for `ANVIL_RENAME` and `ANVIL_REPAIR`.
+- Craft and smelt result-take events are stored in `ig_audit_events` as `CRAFT_OUTPUT_UNRESOLVED` and `SMELT_OUTPUT_UNRESOLVED`; the output is recorded, inputs are unknown, and no trace edge is created.
+- Legacy `CRAFT` and `SMELT` transformation rows remain readable but are classified historical-only and excluded from trace lineage.
+- Evidence is persisted asynchronously through `InternalObservationService` and its bounded queue.
 
 ## Database Invariant Auditing & Diagnostics (Phase 10)
 

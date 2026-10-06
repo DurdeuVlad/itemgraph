@@ -2,12 +2,14 @@ package com.itemgraph.config;
 
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.db.DatabaseSettings;
+import com.itemgraph.i18n.ItemGraphLanguage;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 public class ItemGraphConfig {
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
     public static final ModConfigSpec.ConfigValue<String> DATABASE_PATH;
+    public static final ModConfigSpec.ConfigValue<String> LANGUAGE;
     public static final ModConfigSpec.ConfigValue<String> DATABASE_BACKEND;
     public static final ModConfigSpec.ConfigValue<String> DATABASE_HOST;
     public static final ModConfigSpec.ConfigValue<Integer> DATABASE_PORT;
@@ -40,6 +42,15 @@ public class ItemGraphConfig {
         DATABASE_PATH = defineString(
                 BUILDER.comment("Path to ItemGraph SQLite database relative to game directory, or absolute path"),
                 "database_path", "general.database_path", "itemgraph/itemgraph.db");
+        LANGUAGE = BUILDER.define("language", ItemGraphLanguage.DEFAULT_LOCALE, value -> {
+            if (!(value instanceof String text)) return false;
+            try {
+                ItemGraphLanguage.validateLocale(text);
+                return true;
+            } catch (IllegalArgumentException invalid) {
+                throw new IllegalArgumentException(invalid.getMessage());
+            }
+        });
 
         DATABASE_BACKEND = defineString(BUILDER.comment(
                 "ItemGraph storage backend: sqlite, mysql, mariadb, or mysql_mariadb"),
@@ -205,6 +216,10 @@ public class ItemGraphConfig {
 
     public static boolean griefLoggerIntegrationEnabled() {
         return GRIEFLOGGER_INTEGRATION_ENABLED.get();
+    }
+
+    public static String language() {
+        return ItemGraphLanguage.validateLocale(LANGUAGE.get());
     }
 
     static java.nio.file.Path resolveDatabasePath(String path) {

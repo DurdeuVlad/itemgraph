@@ -9,10 +9,12 @@ import com.itemgraph.gametest.ItemGraphReplayReportFixture;
 import com.itemgraph.gametest.ProjectileConformanceFixture;
 import com.itemgraph.ingest.InternalObservationService;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.ServerboundChatCommandPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
@@ -24,11 +26,18 @@ import net.minecraft.world.entity.projectile.Snowball;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionResult;
 
 import java.sql.SQLException;
 import java.util.Map;
@@ -37,9 +46,12 @@ import java.util.Map;
 public final class EntityInteractionGameTests implements FabricGameTest {
     @GameTest(template = "fabric-gametest-api-v1:empty", timeoutTicks = 100)
     public void serverInteractPacketPersistsEntityAttemptAndArmorStandOutcome(GameTestHelper helper) {
+        long replayAuditWatermark = BucketPickupConformanceFixture.auditWatermark();
+        long replayTransformationWatermark = ItemGraphReplayReportFixture.transformationWatermark();
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         ServerPlayer fluidPlayer = helper.makeMockServerPlayerInLevel();
         ServerPlayer movementPlayer = helper.makeMockServerPlayerInLevel();
+        FabricNativeAuditEventListener.recordChatMessage(player, "itemgraph_replay_chat");
         InternalObservationService observations = InternalObservationService.getInstance();
         long droppedBefore = observations.getTotalDropped();
         var quantityObservationsBefore = EntityInteractionConformanceFixture.snapshotQuantityObservations();
@@ -47,6 +59,42 @@ public final class EntityInteractionGameTests implements FabricGameTest {
         var movementRowsBefore = ItemMovementConformanceFixture.snapshotRows();
         ProjectileConformanceFixture.Watermark projectileWatermark = ProjectileConformanceFixture.watermark();
         long bucketAuditWatermark = BucketPickupConformanceFixture.auditWatermark();
+
+        BlockPos interactionChest = helper.absolutePos(new BlockPos(12, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(interactionChest, Blocks.CHEST.defaultBlockState(), 3),
+                "could not place the chest for the native block interaction replay");
+        player.teleportTo(interactionChest.getX() + 0.5, interactionChest.getY(), interactionChest.getZ() + 2.0);
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STICK));
+        BlockHitResult chestHit = new BlockHitResult(Vec3.atCenterOf(interactionChest), Direction.NORTH,
+                interactionChest, false);
+        UseBlockCallback.EVENT.invoker().interact(player, helper.getLevel(), InteractionHand.MAIN_HAND, chestHit);
+
+        BlockPos placementSupport = helper.absolutePos(new BlockPos(14, 1, 2));
+        helper.assertTrue(helper.getLevel().setBlock(placementSupport, Blocks.STONE.defaultBlockState(), 3),
+                "could not place the support block for native block placement replay");
+        player.teleportTo(placementSupport.getX() + 0.5, placementSupport.getY(), placementSupport.getZ() + 2.0);
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.DIAMOND_BLOCK));
+        BlockHitResult placementHit = new BlockHitResult(Vec3.atCenterOf(placementSupport), Direction.UP,
+                placementSupport, false);
+        BlockPos placedBlock = placementSupport.above();
+        helper.assertTrue(helper.getLevel().setBlock(placedBlock, Blocks.DIAMOND_BLOCK.defaultBlockState(), 3),
+                "could not establish the diamond block state for the native placement listener replay");
+        helper.assertTrue(helper.getLevel().getBlockState(placedBlock).is(Blocks.DIAMOND_BLOCK),
+                "diamond block state was not present before dispatching the native placement hook");
+        FabricNativeAuditEventListener.onBlockItemPlaced(
+                new BlockPlaceContext(new UseOnContext(player, InteractionHand.MAIN_HAND, placementHit)),
+                (BlockItem) Items.DIAMOND_BLOCK, InteractionResult.SUCCESS,
+                Map.of(placedBlock, Blocks.AIR.defaultBlockState()), null);
+
+        BlockPos killedCowPos = helper.absolutePos(new BlockPos(16, 1, 2));
+        Cow killedCow = new Cow(EntityType.COW, helper.getLevel());
+        killedCow.moveTo(killedCowPos.getX() + 0.5, killedCowPos.getY(), killedCowPos.getZ() + 0.5, 0.0F, 0.0F);
+        helper.assertTrue(helper.getLevel().addFreshEntity(killedCow),
+                "could not spawn the cow for native kill replay");
+        player.teleportTo(killedCowPos.getX() + 1.0, killedCowPos.getY(), killedCowPos.getZ() + 0.5);
+        helper.assertTrue(killedCow.hurt(player.damageSources().playerAttack(player), 100.0F)
+                        && !killedCow.isAlive(),
+                "player damage did not kill the cow used by the native kill replay");
 
         Snowball snowball = new Snowball(helper.getLevel(), player);
         snowball.shootFromRotation(player, player.getXRot(), player.getYRot(), 0.0F, 1.5F, 0.0F);
@@ -155,6 +203,14 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                 "mock server player did not pick up the accepted diamond stack");
         helper.assertTrue(inventoryCount(movementPlayer, Items.DIAMOND) == 4,
                 "ground pickup must restore all four diamonds to player inventory");
+        FabricNativeAuditEventListener.onItemUseFinished(player,
+                new ItemStack(Items.APPLE), ItemStack.EMPTY);
+        FabricNativeAuditEventListener.onItemDestroyed(player, new ItemStack(Items.WOODEN_SWORD));
+        SimpleContainer craftMatrix = new SimpleContainer(1);
+        craftMatrix.setItem(0, new ItemStack(Items.PAPER));
+        FabricNativeAuditEventListener.onCrafted(player, craftMatrix, new ItemStack(Items.BOOK));
+        FabricNativeAuditEventListener.onDisconnect(fluidPlayer);
+        player.connection.handleChatCommand(new ServerboundChatCommandPacket("say itemgraph_replay_command"));
 
         observations.stop();
         helper.assertTrue(observations.getQueueSize() == 0,
@@ -190,10 +246,15 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
             ItemGraphReplayReportFixture.writeIfRequested(helper, "fabric",
                     Math.min(movementWatermark, projectileWatermark.observationId()),
-                    bucketAuditWatermark,
+                    replayAuditWatermark, replayTransformationWatermark,
                     Map.of(movementPlayer.getUUID().toString(), "actor:replay-mover",
                             playerUuid, "actor:replay-interactor",
-                            fluidPlayer.getUUID().toString(), "actor:replay-fluid"), waterPos);
+                            fluidPlayer.getUUID().toString(), "actor:replay-fluid"), waterPos,
+                    Map.of("PLACE_BLOCK", placedBlock,
+                            "INTERACT_BLOCK_ATTEMPT", interactionChest,
+                            "KILL_ENTITY", killedCowPos));
+            helper.assertValueEqual(droppedBefore, observations.getTotalDropped(),
+                    "the interactions must not lose evidence to a full or failed queue");
         });
     }
 

@@ -1,6 +1,8 @@
 # CurseForge Publishing Guide & Brand Assets
 
-This document contains everything needed to list and publish **ItemGraph** on CurseForge.
+This document is a local draft for a future ItemGraph CurseForge listing. Verify every
+version-specific asset and feature claim against the approved release before publishing.
+Editing this draft does not publish or authorize changes to the external CurseForge page.
 
 ---
 
@@ -8,18 +10,18 @@ This document contains everything needed to list and publish **ItemGraph** on Cu
 
 | Asset | File Path | Dimensions | CurseForge Field | Notes |
 |---|---|---|---|---|
-| **Project Avatar (Logo)** | [`docs/branding/curseforge_avatar_512.png`](file:///E:/Github2/itemgraph/docs/branding/curseforge_avatar_512.png) | 512 × 512 | **Project Logo** | Dark slate tile with amber graph trace, nearest-neighbour pixel art. Also available in 1024×1024 at [`docs/branding/curseforge_avatar_1024.png`](file:///E:/Github2/itemgraph/docs/branding/curseforge_avatar_1024.png). |
-| **Header Banner** | [`docs/branding/curseforge_banner.png`](file:///E:/Github2/itemgraph/docs/branding/curseforge_banner.png) | 1024 × 256 | **Project Description Header** | Includes title "ItemGraph", tagline, and slate graph motifs. Embed at top of Description. |
-| **In-Game Icon** | [`src/main/resources/itemgraph_icon.png`](file:///E:/Github2/itemgraph/src/main/resources/itemgraph_icon.png) | 256 × 256 | Bundled in Jar | Loaded by NeoForge mods menu via `neoforge.mods.toml`. |
-| **Release Jar** | [`build/libs/itemgraph-0.3.0.jar`](file:///E:/Github2/itemgraph/build/libs/itemgraph-0.3.0.jar) | Jar File | **File Upload** | Built with Java 21, NeoForge 21.1.248. |
+| **Project Avatar (Logo)** | [`docs/branding/curseforge_avatar_512.png`](curseforge_avatar_512.png) | 512 × 512 | **Project Logo** | Dark slate tile with amber graph trace, nearest-neighbour pixel art. Also available in 1024×1024 at [`docs/branding/curseforge_avatar_1024.png`](curseforge_avatar_1024.png). |
+| **Header Banner** | [`docs/branding/curseforge_banner.png`](curseforge_banner.png) | 1024 × 256 | **Project Description Header** | Includes title "ItemGraph", tagline, and slate graph motifs. Embed at top of Description. |
+| **In-Game Icon** | `common/src/main/resources/itemgraph_icon.png` | 256 × 256 | Bundled in Jar | The NeoForge metadata references the root resource path `itemgraph_icon.png`. |
+| **Release Jar** | `itemgraph-<version>-neoforge.jar` | Jar File | **File Upload** | Upload only the approved release artifact for the target game and loader. Do not use a stale local build path. |
 
 ---
 
 ## 2. Project Metadata
 
 - **Project Name**: `ItemGraph`
-- **Primary Tagline / Short Description** (169 / 255 chars):
-  > *A server-side forensic moderation mod for NeoForge 1.21.1. Reconstructs item movement, stack splits, and transformations through time from authoritative evidence.*
+- **Primary Tagline / Short Description**:
+  > *A server-side forensic moderation mod for Minecraft 1.21.1. NeoForge is the primary loader; Fabric is also supported. Reconstruct item movement through time from recorded evidence.*
 - **Primary Category**: `Server Utility`
 - **Secondary Categories**: `Utility & QoL`, `Management & Hosting`
 - **Environment**:
@@ -66,7 +68,7 @@ CurseForge projects with 3–5 clean screenshots convert substantially higher. T
 
 **Trace item movement through time.**
 
-ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **NeoForge 1.21.1**.
+ItemGraph is a server-side Minecraft moderation and forensic analysis mod for **Minecraft 1.21.1**. NeoForge is the primary loader; Fabric is also supported. Players do not need ItemGraph installed on their clients.
 
 Existing loggers (like GriefLogger or CoreProtect) are exceptional at telling you *what happened at a single coordinate*—who opened a chest, who broke a block, or who picked up an item. But when items disappear across players, ground drops, and containers, server admins are left manually cross-referencing timestamps.
 
@@ -84,20 +86,20 @@ Instead of assigning artificial, invasive UUIDs to every Minecraft item, ItemGra
 2. **Strict Quantity Conservation**: The engine never manufactures quantity ($\sum \text{allocated} \le \text{evidenced capacity}$). Stack splits (1-to-many) and merges (many-to-1) are tracked through an explicit allocation ledger.
 3. **Explicit Provenance**: Chat and logs strictly distinguish `[OBSERVED]` raw evidence from `[INFERRED conf=...]` transfers.
 4. **Read-Only Integration**: GriefLogger's SQLite database is strictly read-only (`PRAGMA query_only = ON`). ItemGraph owns its own isolated SQLite storage (`run/itemgraph/itemgraph.db`).
-5. **Zero Server Lag**: Graph traversals, heavy historical scans, and invariant audits execute exclusively on asynchronous worker threads.
+5. **Bounded Background Work**: Historical scans and invariant audits run on background workers. Capture uses bounded queues and exposes queue health; no absolute zero-lag guarantee is made.
 
 ---
 
 ### ✨ Key Features
 
 - **Ground Bridge Reconstruction**: Reconstructs player-to-player transfers across ground tosses and pickups within configurable correlation windows.
-- **Authoritative Entity Continuity**: Matches Minecraft `ItemEntity` UUIDs on drop and pickup, boosting transfer confidence to `0.9990`.
+- **Authoritative Entity Continuity**: Where a drop and pickup share an observed Minecraft `ItemEntity` UUID, ItemGraph uses that continuity as a deterministic inference factor; its score is not a probability.
 - **Transformation Tracking**: Automatically links item identity shifts across **Anvil repairs & renames**, **Crafting tables**, and **Smelting furnaces**.
 - **Armor Stand & Container Integration**: Records the server's completed armor-stand interaction result without claiming an item transfer; supports standard chest, barrel, and hopper inventories.
 - **Vanilla Flow Browser (`/ig gui`)**: Opens a six-row chest GUI for item, player, or container timelines on a vanilla client; menu interactions are display-only and cannot move items.
 - **Container Inspector (`/ig inspect`)**: Lets a moderator right-click supported containers to inspect the exact dimension/position without opening or mutating the normal inventory.
 - **Block interaction audit**: Records the same main-hand attempts on GriefLogger's supported vanilla functional blocks. These are attempt records; ItemGraph does not label a pre-use callback as a completed interaction.
-- **Moderator Help (`/ig help`)**: Documents every command topic with syntax, permissions, evidence semantics, limits, and examples.
+- **Moderator Help (`/ig help`)**: Lists command routes and provides topic syntax, evidence semantics, limits, and examples; `/ig help permissions` explains access nodes.
 - **Preview Integration API**: Trusted NeoForge mods can register an evidence source, submit direct observations, and query bounded flows through `com.itemgraph.api` `PREVIEW_1`.
 - **Live Invariant Auditor (`/ig audit`)**: Self-diagnosing auditor verifies database health, quantity conservation, and relational integrity on demand.
 
@@ -105,7 +107,7 @@ Instead of assigning artificial, invasive UUIDs to every Minecraft item, ItemGra
 
 ### 📜 Commands & Examples
 
-*All commands require permission level 2 (moderator/op).*
+**Permissions:** Every command checks `itemgraph.command` plus its exact command-specific nodes. Each unset node falls back to vanilla permission level 2; an explicit permission-provider denial overrides operator status. For example, `/ig gui` also requires `itemgraph.gui` and `itemgraph.audit`. Read [`/ig help permissions`](https://github.com/DurdeuVlad/itemgraph/blob/main/docs/SECURITY_AND_PERMISSIONS.md) for the full command matrix before granting moderator access.
 
 #### `/ig trace item <query> [limit] [sinceMinutes]`
 Reconstructs the complete lifecycle of an item by numeric fingerprint ID, item registry ID (e.g. `minecraft:netherite_boots` or `diamond_sword`), or custom name.
@@ -123,6 +125,9 @@ Explains *why* ItemGraph inferred a transfer, detailing mathematical factor scor
 Inferred Edge #8: amount=1, conf=0.9990
 Explanation: Ground bridge (exact transfer): Alice dropped 1x minecraft:netherite_boots at GROUND 15,64,15 (obs#15); Bob picked up 1x there 3s later (obs#16). Matched on exact item fingerprint, same ground block, within 300s window. Authoritative Minecraft ItemEntity UUID match establishes direct entity continuity on the ground.
 ```
+
+The confidence score is deterministic evidence weighting, not a calibrated probability.
+Use `/ig explain <edgeId>` to inspect the factors and supporting observation IDs.
 
 #### `/ig trace player <playerName> [limit] [sinceMinutes]`
 Reconstructs all item ingress, egress, container interactions, and ground exchanges involving a specific player.
@@ -158,9 +163,9 @@ Displays live operational health, background ingestion checkpoints, correlation 
 
 ### 📦 Installation & Requirements
 
-- **Platform**: **NeoForge 1.21.1** (tested on `21.1.248+`)
+- **Platform**: **Minecraft 1.21.1**, NeoForge primary (tested on `21.1.248+`); Fabric build also supported
 - **Java**: Java 21+
 - **Environment**: **Server-Side Only**. Players do not need ItemGraph installed on their clients to join.
-- **Required**: NeoForge 1.21.1 and Java 21+.
+- **Required**: Minecraft 1.21.1, the matching loader, and Java 21+.
 - **Standalone operation**: ItemGraph records its supported native observations without GriefLogger. Installing GriefLogger does not enable or change ItemGraph's behavior. Operators can explicitly enable the read-only GriefLogger migration bridge with the loader config setting `general.grieflogger_integration_enabled` (NeoForge) or `grieflogger_integration_enabled` (Fabric).
 ```

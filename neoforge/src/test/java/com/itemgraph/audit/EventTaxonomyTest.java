@@ -3,11 +3,13 @@ package com.itemgraph.audit;
 import com.itemgraph.audit.EventTaxonomy.ActorStatus;
 import com.itemgraph.audit.EventTaxonomy.EvidenceClass;
 import com.itemgraph.audit.EventTaxonomy.LoaderStatus;
+import com.itemgraph.audit.EventTaxonomy.PrivacyClass;
 import com.itemgraph.audit.EventTaxonomy.QuantitySemantics;
 import com.itemgraph.audit.EventTaxonomy.Surface;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,12 +51,26 @@ class EventTaxonomyTest {
                     definition.neoForge().reasonCode() == null, definition.id() + " NeoForge support");
         }
         assertTrue(EventTaxonomy.VERSION.matches("\\d+\\.\\d+\\.\\d+"));
+        assertEquals("4.0.0", EventTaxonomy.VERSION,
+                "privacy-contract changes must increment the taxonomy major version");
 
         Set<String> reasons = new HashSet<>();
         for (EventTaxonomy.ReasonCode reason : EventTaxonomy.unresolvedReasonCodes()) {
             assertTrue(reasons.add(reason.id()), "duplicate reason code: " + reason.id());
-            assertTrue(reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57, reason.id());
+            assertTrue(reason.ownerIssue() == 33 || (reason.ownerIssue() >= 55 && reason.ownerIssue() <= 57)
+                            || reason.ownerIssue() == 140 || reason.ownerIssue() == 162,
+                    reason.id());
         }
+        assertTrue(reasons.contains("CONTAINER_BREAK_ACTOR_UNAVAILABLE"));
+        assertTrue(reasons.contains("CONTAINER_BLOCK_ENTITY_UNAVAILABLE"));
+        assertTrue(reasons.contains("CONTAINER_BLOCK_ENTITY_UNSUPPORTED"));
+        assertTrue(reasons.contains("LEGACY_TRANSFORMATION_INPUTS_NOT_VERIFIED"));
+        assertTrue(reasons.contains("CONTAINER_SLOT_LIMIT_EXCEEDED"));
+        assertTrue(reasons.contains("CONTAINER_SNAPSHOT_FAILED"));
+        assertTrue(EventTaxonomy.auditLookupTypes().contains("CRAFT_OUTPUT_UNRESOLVED"));
+        assertTrue(EventTaxonomy.auditLookupTypes().contains("SMELT_OUTPUT_UNRESOLVED"));
+        assertFalse(EventTaxonomy.isTraceableTransformation("CRAFT"));
+        assertFalse(EventTaxonomy.isTraceableTransformation("SMELT"));
     }
 
     @Test
@@ -113,6 +129,14 @@ class EventTaxonomyTest {
     }
 
     @Test
+    void projectileAuditRowsWithExactLocationsAreSensitive() {
+        for (String eventType : List.of("THROW_ITEM", "SHOOT_ITEM", "PROJECTILE_SPAWN_ACCEPTED")) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(eventType, Surface.AUDIT_EVENT).orElseThrow();
+            assertEquals(PrivacyClass.SENSITIVE_LOCATION, definition.privacy(), eventType);
+        }
+    }
+
+    @Test
     void plannedChildFamiliesAreExplicitAndDoNotClaimRuntimeSupport() {
         EventTaxonomy.Definition explosion = EventTaxonomy.find("EXPLOSION_BLOCK_CHANGE", Surface.AUDIT_EVENT)
                 .orElseThrow();
@@ -140,6 +164,21 @@ class EventTaxonomyTest {
                 .orElseThrow();
         assertEquals(EventTaxonomy.SourceReliability.GAME_CALLBACK_ATTEMPT,
                 breakBlock.sourceReliability());
+        EventTaxonomy.Definition containerBreak = EventTaxonomy
+                .find("CONTAINER_BREAK_COMPLETED", Surface.AUDIT_EVENT).orElseThrow();
+        assertEquals(140, containerBreak.ownerIssue());
+        assertEquals(EventTaxonomy.SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                containerBreak.sourceReliability());
+        assertEquals(ActorStatus.PLAYER, containerBreak.actor());
+        EventTaxonomy.Definition unresolvedContainerBreak = EventTaxonomy
+                .find("CONTAINER_BREAK_UNRESOLVED", Surface.AUDIT_EVENT).orElseThrow();
+        assertEquals(EvidenceClass.UNRESOLVED, unresolvedContainerBreak.evidenceClass());
+        assertEquals(ActorStatus.UNKNOWN, unresolvedContainerBreak.actor(),
+                "an unresolved break family may have no authoritative player actor");
+        assertTrue(EventTaxonomy.unifiedLookupActions().contains("REMOVE_ITEM"));
+        assertTrue(EventTaxonomy.unresolvedReasonCodes().stream()
+                .anyMatch(reason -> reason.id().equals("CONTAINER_DROP_RELATIONSHIP_NOT_AUTHORITATIVELY_LINKED")
+                        && reason.ownerIssue() == 140));
         EventTaxonomy.Definition placeBlock = EventTaxonomy.find("PLACE_BLOCK", Surface.AUDIT_EVENT)
                 .orElseThrow();
         assertEquals(EventTaxonomy.SourceReliability.GAME_CALLBACK_ATTEMPT,
@@ -175,6 +214,37 @@ class EventTaxonomyTest {
             assertEquals(QuantitySemantics.SIGNED_DELTA, event.quantity());
         }
         assertTrue(EventTaxonomy.find("ADMIN_ITEM_TRANSFORM", Surface.TRANSFORMATION).isPresent());
-        assertTrue(EventTaxonomy.find("CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION).isPresent());
+        EventTaxonomy.Definition creativeTransform = EventTaxonomy
+                .find("CREATIVE_ITEM_TRANSFORM", Surface.TRANSFORMATION).orElseThrow();
+        assertEquals(LoaderStatus.UNSUPPORTED, creativeTransform.fabric().status());
+        assertEquals("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", creativeTransform.fabric().reasonCode());
+        assertEquals(LoaderStatus.UNSUPPORTED, creativeTransform.neoForge().status());
+        assertEquals("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", creativeTransform.neoForge().reasonCode());
+        assertEquals(EvidenceClass.UNRESOLVED, creativeTransform.evidenceClass());
+        assertEquals(EventTaxonomy.SourceReliability.UNRESOLVED_CAUSE,
+                creativeTransform.sourceReliability());
+        assertEquals(EventTaxonomy.EndpointSemantics.UNKNOWN, creativeTransform.endpoints());
+        assertEquals(QuantitySemantics.UNKNOWN, creativeTransform.quantity());
+        assertFalse(EventTaxonomy.traceableTransformationTypes().contains("CRAFT"));
+        assertFalse(EventTaxonomy.traceableTransformationTypes().contains("CREATIVE_ITEM_TRANSFORM"));
+        assertTrue(EventTaxonomy.isTraceableTransformation("ADMIN_ITEM_TRANSFORM"));
+        assertFalse(EventTaxonomy.isTraceableTransformation("FUTURE_TRANSFORM"));
+        assertTrue(EventTaxonomy.unresolvedReasonCodes().stream()
+                .anyMatch(reason -> reason.id().equals("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED")));
+        assertFalse(creativeTransform.queryableOn(EventTaxonomy.Loader.FABRIC));
+        assertFalse(creativeTransform.queryableOn(EventTaxonomy.Loader.NEOFORGE));
+        assertFalse(EventTaxonomy.unifiedLookupActions().contains("CREATIVE_ITEM_TRANSFORM"));
+        EventTaxonomy.definitions().stream()
+                .filter(definition -> definition.surface() == Surface.TRANSFORMATION)
+                .forEach(definition -> assertEquals(definition.fabric(), definition.neoForge(),
+                        "shared transformation queries need matching loader classifications: "
+                                + definition.id()));
+        List<String> implementedOnBothLoaders = EventTaxonomy.definitions().stream()
+                .filter(definition -> definition.surface() == Surface.TRANSFORMATION)
+                .filter(definition -> definition.fabric().status() == EventTaxonomy.LoaderStatus.IMPLEMENTED
+                        && definition.neoForge().status() == EventTaxonomy.LoaderStatus.IMPLEMENTED)
+                .map(EventTaxonomy.Definition::id)
+                .toList();
+        assertEquals(implementedOnBothLoaders, EventTaxonomy.traceableTransformationTypes());
     }
 }

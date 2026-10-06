@@ -5,6 +5,7 @@ import com.itemgraph.ingest.EntityInteractionEvidence;
 import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.audit.AdminMutationCapture;
+import com.itemgraph.audit.ContainerBreakCapture;
 import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.neoforge.mixin.BucketItemAccessor;
 import net.minecraft.commands.CommandSourceStack;
@@ -54,17 +55,30 @@ public final class NativeAuditEventListener {
     @SubscribeEvent
     public void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            ItemGraphCommands.clearPageSession(player.getUUID());
-            submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
+            recordPlayerQuit(player);
         }
+    }
+
+    public static void recordPlayerQuit(ServerPlayer player) {
+        if (player == null || player.level().isClientSide()) {
+            return;
+        }
+        ItemGraphCommands.clearPageSession(player.getUUID());
+        submit("PLAYER_QUIT", player, player.level(), player.blockPosition(), null, null);
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onChat(ServerChatEvent event) {
         ServerPlayer player = event.getPlayer();
         if (player != null && !event.isCanceled()) {
-            submit("CHAT_MESSAGE", player, player.level(), player.blockPosition(),
-                    null, bounded(event.getRawText()));
+            recordChatMessage(player, event.getRawText());
+        }
+    }
+
+    /** Records the accepted server chat payload through the same path used by the native event callback. */
+    public static void recordChatMessage(ServerPlayer player, String message) {
+        if (player != null && !player.level().isClientSide()) {
+            submit("CHAT_MESSAGE", player, player.level(), player.blockPosition(), null, bounded(message));
         }
     }
 
@@ -232,12 +246,15 @@ public final class NativeAuditEventListener {
     private static void submit(String eventType, ServerPlayer player, Level level, BlockPos pos,
                                String subjectId, String detail,
                                List<AuditEventQueryService.ExactPosition> supersessionPositions) {
+        String linkedBreakEventId = eventType.equals("BREAK_BLOCK") && level instanceof ServerLevel serverLevel
+                ? ContainerBreakCapture.activeBreakEventId(player, serverLevel, pos) : null;
         InternalObservationService.getInstance().submitAuditEvent(
                 new InternalObservationService.InternalAuditEvent(
                         System.currentTimeMillis(), eventType,
                         player.getUUID().toString(), player.getGameProfile().getName(),
                         level.dimension().location().toString(),
-                        pos.getX(), pos.getY(), pos.getZ(), subjectId, detail, null, supersessionPositions));
+                        pos.getX(), pos.getY(), pos.getZ(), subjectId, detail, null,
+                        null, linkedBreakEventId, supersessionPositions));
     }
 
     private static String blockId(BlockState state) {

@@ -1,6 +1,7 @@
 package com.itemgraph.fabric;
 
 import com.itemgraph.command.ItemGraphCommands;
+import com.itemgraph.command.ItemGraphPermissions;
 import com.itemgraph.command.InspectionService;
 import com.itemgraph.query.AuditEventQueryService;
 import com.itemgraph.query.AuditLookupFilters;
@@ -27,8 +28,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -85,6 +89,41 @@ class FabricItemGraphCommandsParityTest {
     }
 
     @Test
+    void documentedGuideAndParserCorpusCommandsParseAgainstRegisteredCommandTreeOnFabric() throws Exception {
+        Path root = Path.of("").toAbsolutePath();
+        while (root != null && !Files.exists(root.resolve("docs/ADMIN_QUICK_START.md"))) {
+            root = root.getParent();
+        }
+        assertNotNull(root, "test process must be able to locate repository documentation");
+        String guide = Files.readString(root.resolve("docs/ADMIN_QUICK_START.md"));
+        String corpus = Files.readString(root.resolve(
+                "docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt"));
+        assertTrue(corpus.startsWith("# PARSER-ONLY TEST INPUT — NEVER paste or execute"),
+                "the broad test corpus must be labeled as syntax-only and non-executable");
+        String startMarker = "<!-- guide-command-examples:start -->";
+        String endMarker = "<!-- guide-command-examples:end -->";
+        int start = guide.indexOf(startMarker);
+        int end = guide.indexOf(endMarker);
+        assertTrue(start >= 0 && end > start, "quick-start command example markers must be paired");
+
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        List<String> examples = new ArrayList<>(guide.substring(start + startMarker.length(), end).lines()
+                .map(String::strip)
+                .filter(line -> line.startsWith("/ig "))
+                .map(line -> line.substring(1))
+                .toList());
+        examples.addAll(corpus.lines().map(String::strip)
+                .filter(line -> line.startsWith("/ig "))
+                .map(line -> line.substring(1))
+                .toList());
+        assertFalse(examples.isEmpty(), "guide and parser corpus must contain /ig syntax examples");
+        for (String example : examples) {
+            assertParsedCompletely(dispatcher.parse(example, source), "quick-start example /" + example);
+        }
+    }
+
+    @Test
     void lookupHelpUsesTheSharedAuditEventCatalogOnFabric() throws Exception {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();
@@ -93,6 +132,27 @@ class FabricItemGraphCommandsParityTest {
         assertEquals(1, dispatcher.execute("itemgraph help lookup", source));
         assertTrue(String.join("\n", messages).contains(
                 "eventType: " + String.join(", ", AuditEventQueryService.EVENT_TYPES) + "."));
+    }
+
+    @Test
+    void protectedEvidenceSurfacesFailClosedWithoutAuditOnFabric() throws Exception {
+        ItemGraphPermissions.setChecker((checkedSource, node) -> Set.of(ItemGraphPermissions.COMMAND,
+                ItemGraphPermissions.LOOKUP, ItemGraphPermissions.PAGE, ItemGraphPermissions.EVENT,
+                ItemGraphPermissions.EXPLAIN, ItemGraphPermissions.TRACE, ItemGraphPermissions.GUI).contains(node));
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        for (String command : List.of("ig event 1", "ig explain 1", "ig trace item diamond", "ig gui item diamond")) {
+            assertThrows(com.mojang.brigadier.exceptions.CommandSyntaxException.class,
+                    () -> dispatcher.execute(command, source), command);
+            verify(source, never()).sendSuccess(any(), anyBoolean());
+        }
+
+        for (String command : List.of("ig lookup BREAK_BLOCK", "ig lookup KILL_ENTITY",
+                "ig lookup PROJECTILE_SPAWN_ACCEPTED", "ig lookup filters action.break_block radius.5")) {
+            assertEquals(0, dispatcher.execute(command, source), command);
+            verify(source, org.mockito.Mockito.atLeastOnce()).sendFailure(any());
+            verify(source, never()).sendSuccess(any(), anyBoolean());
+        }
     }
 
     @BeforeAll
@@ -108,6 +168,7 @@ class FabricItemGraphCommandsParityTest {
     @AfterEach
     void clearInspectionState() {
         inspectionService.clear();
+        ItemGraphPermissions.setChecker(null);
     }
 
     @Test
@@ -155,6 +216,50 @@ class FabricItemGraphCommandsParityTest {
         assertFalse(inspectionService.isEnabled(playerUuid));
         assertTrue(messages.isEmpty(), "a denied inspect command must not emit a success receipt");
         verify(denied, never()).sendFailure(any());
+    }
+
+    @Test
+    void namedPermissionNodesAllowLookupAndExplicitlyDenyIndependentSurfacesOnFabric() {
+        CommandSourceStack levelOne = source();
+        when(levelOne.hasPermission(2)).thenReturn(false);
+        Map<String, Boolean> decisions = Map.ofEntries(
+                Map.entry(ItemGraphPermissions.COMMAND, true),
+                Map.entry(ItemGraphPermissions.LOOKUP, true),
+                Map.entry(ItemGraphPermissions.INSPECT, false),
+                Map.entry(ItemGraphPermissions.PAGE, false),
+                Map.entry(ItemGraphPermissions.TRACE, false),
+                Map.entry(ItemGraphPermissions.EVENT, false),
+                Map.entry(ItemGraphPermissions.EXPLAIN, false),
+                Map.entry(ItemGraphPermissions.AUDIT, false),
+                Map.entry(ItemGraphPermissions.GUI, false),
+                Map.entry(ItemGraphPermissions.INGEST, false),
+                Map.entry(ItemGraphPermissions.IMPORT, false));
+        ItemGraphPermissions.setChecker((source, node) -> decisions.getOrDefault(node, source.hasPermission(2)));
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+
+        assertFalse(dispatcher.parse("itemgraph lookup BREAK_BLOCK", levelOne).getReader().canRead());
+        for (String denied : List.of("itemgraph inspect on", "itemgraph page 1", "itemgraph trace item stone",
+                "itemgraph event 1", "itemgraph explain 1", "itemgraph audit", "itemgraph gui item stone",
+                "itemgraph ingest now", "itemgraph ingest history")) {
+            assertTrue(dispatcher.parse(denied, levelOne).getReader().canRead(),
+                    "explicit permission denial must win for " + denied);
+        }
+
+        CommandSourceStack operator = source();
+        assertFalse(ItemGraphPermissions.check(operator, ItemGraphPermissions.INSPECT),
+                "explicit deny must override operator permission");
+        assertTrue(ItemGraphPermissions.check(operator, "itemgraph.unset"),
+                "unset permission must use the vanilla level-2 fallback");
+    }
+
+    @Test
+    void absentPermissionProviderKeepsVanillaLevelTwoFallbackOnFabric() {
+        CommandSourceStack levelOne = source();
+        when(levelOne.hasPermission(2)).thenReturn(false);
+        ItemGraphPermissions.setChecker(null);
+        assertFalse(ItemGraphPermissions.canUse(levelOne, ItemGraphPermissions.LOOKUP));
+
+        assertTrue(ItemGraphPermissions.canUse(source(), ItemGraphPermissions.LOOKUP));
     }
 
     @Test

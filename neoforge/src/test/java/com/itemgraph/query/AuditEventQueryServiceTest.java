@@ -60,6 +60,18 @@ class AuditEventQueryServiceTest {
             insert.setString(10, "hello");
             insert.executeUpdate();
 
+            insert.setString(1, "COMMAND_ATTEMPT");
+            insert.setLong(2, 2_500L);
+            insert.setString(3, "uuid-alex");
+            insert.setString(4, "Alex");
+            insert.setString(5, "minecraft:overworld");
+            insert.setDouble(6, 10);
+            insert.setDouble(7, 64);
+            insert.setDouble(8, -3);
+            insert.setString(9, null);
+            insert.setString(10, "command=example:test");
+            insert.executeUpdate();
+
             insert.setString(1, "BREAK_BLOCK");
             insert.setLong(2, 3_000L);
             insert.setString(3, "uuid-sam");
@@ -81,7 +93,7 @@ class AuditEventQueryServiceTest {
 
         List<AuditEventDetail> recent = service.find(
                 conn, "all", null, new QueryWindow(2_000L, 3_000L), 100);
-        assertEquals(List.of("BREAK_BLOCK", "CHAT_MESSAGE"),
+        assertEquals(List.of("BREAK_BLOCK", "COMMAND_ATTEMPT", "CHAT_MESSAGE"),
                 recent.stream().map(AuditEventDetail::eventType).toList());
 
         String formatted = String.join("\n", QueryFormatter.formatAuditEvents(
@@ -230,6 +242,40 @@ class AuditEventQueryServiceTest {
                 conn, "all", null, QueryWindow.unbounded(), "minecraft:overworld",
                 java.util.stream.IntStream.range(0, 9)
                         .mapToObj(i -> new AuditEventQueryService.ExactPosition(i, 64, 0)).toList(), 10, 0));
+    }
+
+    @Test
+    void nativeHistoricalNameResolvesByUuidForDirectFilteredAndExactAuditLookups() throws Exception {
+        try (PreparedStatement insert = conn.prepareStatement("""
+                INSERT INTO ig_audit_events
+                    (event_type, timestamp_ms, player_uuid, player_name, level_id, x, y, z, subject_id)
+                VALUES ('BREAK_BLOCK', 10, 'uuid-alex', 'Alex', 'minecraft:overworld', 10, 64, 0, 'minecraft:stone')
+                """)) {
+            insert.executeUpdate();
+        }
+        try (PreparedStatement insert = conn.prepareStatement("""
+                INSERT INTO ig_player_name_history
+                    (player_uuid, normalized_name, player_name, first_seen_ms, last_seen_ms)
+                VALUES ('uuid-alex', 'oldalex', 'OldAlex', 1, 9),
+                       ('uuid-other', 'oldalex', 'OldAlex', 1, 9)
+                """)) {
+            insert.executeUpdate();
+        }
+        try (PreparedStatement insert = conn.prepareStatement("""
+                INSERT INTO ig_audit_events
+                    (event_type, timestamp_ms, player_uuid, player_name, level_id, x, y, z, subject_id)
+                VALUES ('BREAK_BLOCK', 9, 'uuid-other', 'Other', 'minecraft:overworld', 11, 64, 0, 'minecraft:dirt')
+                """)) {
+            insert.executeUpdate();
+        }
+
+        assertEquals(2, service.find(conn, "all", "OldAlex", QueryWindow.unbounded(), 10).size());
+        assertEquals(2, service.findFiltered(conn,
+                AuditLookupFilters.parse("user.oldalex radius.10", 100),
+                "minecraft:overworld", 10, 64, 0, 10, 0).size());
+        assertEquals(1, service.findExact(conn, "all", "OldAlex", QueryWindow.unbounded(),
+                "minecraft:overworld", List.of(new AuditEventQueryService.ExactPosition(10, 64, 0)),
+                10, 0).size());
     }
 
     @Test

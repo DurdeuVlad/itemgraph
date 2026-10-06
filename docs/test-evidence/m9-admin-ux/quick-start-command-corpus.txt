@@ -1,0 +1,36 @@
+# PARSER-ONLY TEST INPUT — NEVER paste or execute these lines on a server.
+# The loader tests parse syntax only. They do not check permissions, stored IDs,
+# capture state, query results, or safety of stateful/import commands.
+/ig help journeys
+/ig help lookup admin
+/ig help lookup lifecycle
+/ig help lookup transformations
+/ig lookup BREAK_BLOCK 10 60
+/ig trace item "minecraft:stone" 10 60
+/ig inspect status
+/ig inspect on
+/ig inspect off
+/ig ingest history
+/ig event event:00000000-0000-0000-0000-000000000000
+/ig page 2
+/ig gui container minecraft:overworld 120 64 -30
+/ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 50 1440
+/ig lookup near minecraft:overworld 120 64 -30 32 ADMIN_ITEM_COMMAND_EFFECT 50 1440
+/ig trace item "minecraft:diamond" 50 1440
+/ig trace item "id:123" 50 1440
+/ig lookup near minecraft:overworld 120 64 -30 32 CREATIVE_SLOT_EFFECT 50 1440
+/ig lookup near minecraft:overworld 120 64 -30 32 CREATIVE_BLOCK_RESULT 50 1440
+/ig lookup filters action.creative_item_create radius.32 time.24h
+/ig lookup filters action.creative_item_remove radius.32 time.24h
+/ig lookup near minecraft:overworld 120 64 -30 16 CONTAINER_BREAK_COMPLETED 50 1440
+/ig lookup near minecraft:overworld 120 64 -30 16 CONTAINER_BREAK_UNRESOLVED 50 1440
+/ig trace container 120 64 -30 50 1440
+/ig trace item "minecraft:diamond" 20 1440
+/ig lookup action.break_block include.diamond_ore radius.50 time.1h
+/ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 20 60
+/ig lookup KILL_ENTITY 50 1440
+/ig lookup THROW_ITEM 50 1440
+/ig lookup PROJECTILE_SPAWN_ACCEPTED 50 1440
+/ig event 633
+/ig event event:123e4567-e89b-12d3-a456-426614174000
+/ig explain 8

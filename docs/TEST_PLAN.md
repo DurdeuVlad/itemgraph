@@ -1,5 +1,15 @@
 # Test Plan
 
+## Locale startup and message checks
+
+Focused unit checks validate supported locale normalization, reject `zh_cn` and
+unknown values with a `general.language` diagnostic, verify server-owned Dutch
+messages, exercise per-key English fallback, and check that formatted item/evidence
+identifiers, timestamps, quantities, and evidence-class values remain exact
+across locale selection. NeoForge and Fabric startup paths apply the selected
+locale before database initialization. An isolated no-network live server test
+and a full audit of every user-visible message surface remain batch-end checks.
+
 ## Objective
 
 ItemGraph must be reliable enough for moderation disputes.
@@ -13,6 +23,48 @@ Testing should focus on correctness, explainability, quantity conservation, temp
 - staging server controlled scenarios
 
 Never use production as the primary test environment.
+
+## Stalled JDBC shutdown and pending-evidence recovery
+
+- `InternalObservationServiceTest.stalledJdbcShutdownReturnsAndRecoversTheAcceptedEvent`
+  blocks an audit insert while ignoring interruption, verifies shutdown returns
+  within the 10-second worker wait plus the 5-second recovery-writer wait and margin, verifies the in-flight event is
+  present in ItemGraph's recovery file, then reopens SQLite and proves the event
+  appears exactly once and the recovery file is removed only after commit.
+- `InternalObservationServiceTest.replayAfterCommittedBatchLostAcknowledgementDoesNotDuplicateEvidence`
+  commits an observation to SQLite, throws after `Connection.commit()` to simulate
+  a lost acknowledgement, replays the immutable record, and verifies one durable
+  row for observations, transformations, and audit events.
+- `InternalObservationServiceTest.failedRecoveryLoadClosesAdmissionAndPreservesOriginalFile`
+  starts with a malformed primary recovery file and an already-accepted event,
+  verifies later submissions are rejected and counted, then verifies recovery
+  saves the accepted event to the adjacent `.overflow` file without changing the
+  malformed original. After the primary file is repaired, restart replays the
+  overflow event once and removes that file only after commit.
+- `InternalObservationServiceTest.startupRecoveryIoRunsOffCallerAndPersistsSavedEventsBeforeNewEvents`
+  holds the recovery-file lock while `start()` returns, then submits a new event
+  and verifies the saved event persists first.
+- `InternalObservationServiceTest.producerRacingCorruptRecoveryIsEitherDurablyPreservedOrRejected`
+  holds the queue lock to force a producer that passed its first gate check to
+  race failed recovery; the event must either be durably written to overflow or
+  rejected and counted.
+- `InternalObservationServiceTest.observationBatchIsRejectedAtomicallyWhenRecoveredQueueExceedsProducerLimit`
+  restores a queue at the recovery capacity and verifies a later observation
+  batch is wholly rejected and fully counted, with no partial enqueue.
+- `InternalObservationServiceTest.failedTransformationBatchIsSpooledAndReplayedAfterDatabaseReturns`
+  covers a definite failure before transaction start and confirms transformation
+  recovery uses the same path.
+- `PendingEvidenceSpoolTest` round-trips observations, transformations, audit
+  events, canonical components, raw byte payloads, and supersession positions;
+  it also verifies malformed files are preserved and the shutdown caller returns
+  within its deadline when the recovery-file worker simulates an interrupt-ignoring
+  filesystem stall.
+- `DatabaseManagerTest.jdbcCloseThatIgnoresInterruptCannotHoldServerShutdown`
+  holds `Connection.close()` past its bound and verifies database state is marked
+  closed while the daemon cleanup worker finishes later.
+- This test injects the stall locally; it does not claim that every JDBC vendor
+  has identical interruption or close behavior. The recovery file is ItemGraph
+  owned and does not read or modify a GriefLogger database.
 
 ## Local NeoForge operations check (2026-09-30)
 
@@ -362,35 +414,148 @@ registry therefore keeps this mapping unresolved against the release and labels
 the richer behavior as an ItemGraph extension. The NeoForge and Fabric runs are
 local isolated server GameTests with mock players and direct server-handler
 dispatch, as directed by the operator; they are not live-client transport tests.
+The mock fixture establishes the world states directly, then posts one NeoForge
+`EntityPlaceEvent`/`RightClickBlock` or invokes Fabric's registered
+`UseBlockCallback` and Fabric's placement capture handler with a simulated
+before/after state. This exercises the production
+listener and durable audit queue without double-dispatching hooks from both a
+mock packet and an explicit callback. It verifies listener persistence, not the
+real-client placement or packet transport path.
 
-The same GameTest exports six persisted item movement and projectile rows plus
-seven audit events only after its durable read-only assertions pass. Its
+The current GameTest exports eight persisted item-flow rows, one transformation,
+and sixteen audit events only after its durable read-only assertions pass. It
+pins each audit action to its expected namespaced subject, and pins block placement,
+block interaction, and kill positions relative to the template origin. Its
 `BREAK_BLOCK` report row is restricted to the successful source-water pickup at
 the fixture position; the separate synthetic water-source/lava-result guard
 probe remains a unit assertion and is excluded because GriefLogger cannot
 produce it through a real bucket pickup.
-`ItemGraphReplayReportFixture` queries `ig_observations` and the allowlisted
-`ig_audit_events` columns through `DatabaseManager.openReadOnlyConnection()`;
+`ItemGraphReplayReportFixture` queries `ig_observations`,
+`ig_item_transformations`, and allowlisted `ig_audit_events` columns through
+`DatabaseManager.openReadOnlyConnection()`;
 the artifact contains profile-normalized action identities, fixture-relative
 coordinates, namespaced subjects, and replay actor aliases, with no player
 UUIDs, names, database row IDs, audit detail, or raw payloads. CI validates
 separate native-only Fabric and NeoForge reports and uploads only the normalized
-JSON. This export validates report
-shape and redaction; it does not establish GriefLogger equivalence or complete
-the paired replay, 24-hour soak, or rollback criteria in
-#31. The raw schema-v3 report also contains an `AuditService.audit` summary from
-one read-only transaction snapshot over the complete isolated GameTest
+JSON. This export validates covered events, report shape, redaction, and database
+invariants; it does not establish live GriefLogger runtime equivalence. Staging
+soak and rollback rehearsal are
+separate M10 operator/release gates. The raw schema-v5 report also contains an
+`AuditService.audit` summary from one read-only transaction snapshot over the
+complete isolated GameTest
 database. Every active edge must have SOURCE and DESTINATION allocation sums
 equal to its amount, linked evidence with matching fingerprints, actions, and
 actor endpoints, and no unsupported allocation roles; every observation must
 remain within its quantity capacity. Edge time bounds must equal the source and
 destination observation timestamps in forward order. Both the fixture and CI
 normalizer require zero allocation, edge-time, positivity, orphan, endpoint,
-and lifecycle violations. The normalized schema-v5 comparison report retains
+and lifecycle violations. The normalized schema-v6 comparison report retains
 this count-only summary without database IDs or violation details. Comparator
 fixtures verify that profile-linked native extensions remain visible with an
 issue URL and stable reason while passing the difference gate; unlinked field
 mismatches, including quantity changes, remain failures.
+
+For each loader, `tools/itemgraph_feature_coverage.py` emits a redacted sidecar
+for every compatibility-registry action and all eleven exact-release database
+table families. It records exact-release writer dispositions and replay counts
+separately from table-family dispositions. Reference tables are represented by
+native evidence fields; `usernames` maps to the native UUID-keyed
+`ig_player_name_history` index populated from `PLAYER_JOIN` evidence. The report
+omits raw name-history values and UUIDs; its username category count is the
+number of normalized `PLAYER_JOIN` events, not distinct name-history rows.
+`not-observed-in-replay` means the current selected scenario did not exercise
+an action/category; it does not establish missing implementation. Table-family
+counts are event signals, not GriefLogger source row counts, distinct reference
+values, or proof of schema equivalence.
+
+### Native-only release-contract replay, #31 (2026-10-04)
+
+- Ran `:neoforge:test :neoforge:runGameTestServer :fabric:test
+  :fabric:runGameTest` with `ITEMGRAPH_DIFFERENTIAL_REPORT_DIR` set to the
+  ignored `build/local-replay-report` directory. The NeoForge GameTest server
+  used Minecraft 1.21.1, NeoForge 21.1.248, Java 21, and ItemGraph 0.3.2 only;
+  the Fabric server also ran the same native-only fixture. Neither loader
+  required a GriefLogger JAR or database. The combined Gradle run passed.
+- Each loader emitted 25 persisted native events. The profile-pinned normalizer
+  and coverage reporter accepted both reports: 20 of 28 registry actions were
+  observed, all six release event-table families were represented, four of five
+  reference-table families were represented, and `users` was actor-reference
+  only. The full Gradle result included 510 NeoForge unit tests, 6 NeoForge
+  GameTests, 75 Fabric unit tests, and 7 Fabric GameTests. Python normalizer,
+  coverage, and differential-report suites passed 63 tests.
+- Observed action categories include join/quit, chat, command attempt, item
+  add/remove/drop/pickup/throw/shoot/consume/break, craft, block break/place/
+  interaction, kill, and entity interaction outcomes. Chat and command rows are
+  separate from the six action-event tables. Reports omit player names and
+  UUIDs, chat/command text, audit detail, database row IDs, and absolute
+  coordinates. Both reports passed queue, persistence-accounting,
+  temporal-order, quantity-conservation, privacy, and whole-database integrity
+  checks with zero violations.
+- The eight registry actions without replay rows are classified: denied entity
+  interaction is an ItemGraph extension tracked by #75; `SMELT`,
+  `ANVIL_RENAME`, and `ANVIL_REPAIR` are transformation coverage tracked by
+  #57; `HOPPER_INSERT` and `HOPPER_EXTRACT` are automation extensions tracked
+  by #34; `ADD_ITEM_ENDER` and `REMOVE_ITEM_ENDER` have no writer in exact
+  release 1.2.10-1.21.1 and are documented under #76. The compatibility
+  registry and coverage sidecar assign each row its owner issue and writer
+  disposition. No exact-release no-writer action is treated as implemented
+  parity.
+- For the added chat, player-quit, consume, durability-break, and craft rows,
+  the GameTest invokes the same server-side capture methods used by the native
+  callbacks. The fixture proves those methods persist correctly through ItemGraph's
+  durable path; it does not independently prove loader callback delivery for
+  each of those scenarios. The report makes no connected-client or live
+  GriefLogger claim.
+- This proves native-only startup and the listed replay/report invariants; it
+  does not establish live GriefLogger runtime equivalence, GUI/client
+  transport, or complete command acceptance for #24. Independent adversarial
+  review and the remaining cross-loader report review are required before #31
+  can close.
+
+### Current release-contract classifications (#31)
+
+For each loader, `tools/itemgraph_feature_coverage.py` also emits a separate
+schema-v2 redacted sidecar for every compatibility-registry action. It records
+the exact-release writer disposition, ItemGraph implementation classification,
+profile source table, and count found in the selected replay. The sidecar
+explicitly separates a feature absent from a replay from an action that the
+verified release has no writer for; unobserved actions were tracked under #31
+(closed 2026-10-05). It also emits unresolved rows for issues #136, #137,
+#138, and #140 (all closed 2026-10-05), plus
+five durability categories. Exact 1.2.10-1.21.1 fixture facts remain separate
+from pinned 26.2 source-only research: the fixture confirms the REMOVE_ITEM
+BreakContainerEvent writer class for both loaders but not its timing details;
+it does not record locale inventory, named permission nodes, rich history-chat
+payloads, or queue/transaction/recovery semantics. Durable ItemGraph unit-test
+references are evidence outside this replay and do not close these issues. The
+validator rejects missing, duplicated, malformed, misclassified, or extra
+requirement fields (including privacy data) and verifies the pinned profile and
+fixture hashes. Open acceptance stays unresolved pending issue-specific proof.
+
+### M8 milestone batch, 2026-10-05
+
+- Ran `:neoforge:test :neoforge:runGameTestServer :fabric:test
+  :fabric:runGameTest` on Minecraft 1.21.1 with Java 21 and ItemGraph 0.3.2;
+  no GriefLogger JAR or database was loaded. NeoForge unit tests: 546 total,
+  zero failures/errors, six skipped; all seven required GameTests passed.
+  Fabric unit tests: 86 total, zero failures/errors, two skipped. The Fabric
+  GameTest manifest was updated to register #140's `ContainerBreakGameTests`;
+  the rerun then passed all eight required tests.
+- The coverage, differential-report, and container-break-report Python suites
+  passed 53, 11, and 11 tests respectively. The NeoForge and Fabric normalized
+  native-only reports each contain 25 events, classify all 28 registry actions
+  and 11 release table families, and report zero unobserved table families.
+  Each sidecar has 20 observed actions and eight unobserved actions. The
+  separate container-break reports passed redaction and conservation validation
+  for both loaders.
+- Three registry actions have no writer in the exact release profile:
+  `INTERACT_ENTITY` has no 1.2.10 release action ID/writer and is kept as a
+  pinned-source-only extension; `ADD_ITEM_ENDER` and `REMOVE_ITEM_ENDER` have
+  exact enum IDs but no writer. These are distinct from the eight actions not
+  exercised by the selected replay. Requirements #136, #137, #138, #140, and
+  five durability categories remain explicitly unresolved in the reports until
+  their acceptance and PR checks pass. No connected-client, production, or
+  distributable-jar test was part of this batch.
 - explanation available
 
 ## Coffer/modded inventory test
@@ -410,12 +575,161 @@ Verify that ItemGraph reports authoritative inventory evidence independent of cl
 
 ## Performance tests
 
+CI integration tests and GameTests emit redacted performance JSON under
+`ITEMGRAPH_PERFORMANCE_REPORT_DIR`. `tools/validate_itemgraph_performance_report.py`
+checks the pinned report schema, loader/backend identity, exact durable row
+counts, queue accounting, unresolved component-payload decode failures, and
+existing server-thread submission ceilings. The unresolved-payload metric counts
+every failed serialized `DataComponentPatch` decode, including negative-cache
+hits; it does not represent every unresolved observation or graph event.
+`tools/test_validate_itemgraph_performance_report.py` covers malformed schemas,
+rejection accounting, and the complete artifact set. CI uploads the validated
+`itemgraph-performance-reports` artifact for 14 days.
+
+The fifteen-report set covers NeoForge SQLite burst (8,000 events), Fabric SQLite
+flush (32 events), NeoForge and Fabric each against disposable MySQL and MariaDB
+(512 synthetic events, 20 concurrent raw-JDBC ledger lookups, and 20 registered
+`/ig lookup radius.20` command queries per backend),
+plus one-second live tick-hook idle samples for NeoForge and Fabric against
+SQLite, and worker-only idle samples against MySQL and MariaDB. All idle reports
+compare durable `ig_observations`, `ig_audit_events`, and
+`ig_item_transformations` row counts before and after the sample, assert zero
+accepted, persisted, rejected, queued, queried, correlated, or heartbeat work,
+and record heap snapshots at the sample boundary.
+Network-backend samples do not represent live server ticks. These are CI
+baselines, not production memory budgets.
+NeoForge shutdown saturation (10,000 accepted audit events, one explicitly
+rejected over-capacity submission, worker-owned bounded drain, and exact durable
+row verification), and a cross-loader SQLite correlation workload (500 accepted
+observations, five passes over 50 drop/pickup pairs each, and 250 quantity-
+conserving inferred edges). The correlation reports verify durable source rows,
+finalized observations, edge totals, and source/destination allocation totals.
+The network probes require both raw-JDBC and registered command-query overlap
+with event submissions and include labeled synthetic automation and
+modded-inventory events. The command workload runs Brigadier parsing, the shared
+`ItemGraphCommands` lookup handler, JDBC query dispatch, and queued result
+delivery with mocked Minecraft server/player objects. It returns matching
+synthetic audit rows and reports redacted completion, failure, overlap, total,
+maximum, and p95 dispatch-to-callback latency. This measures the application
+lookup path on disposable CI databases; it does not measure live-client delivery,
+real server tick impact, or third-party adapter behavior. Adapter-specific load
+and staging-derived latency/memory budgets remain open; CI timings are measurements,
+not production budgets.
+
+The performance reports snapshot process-wide metrics. Each queue GameTest now
+stops and drains the prior worker, clears its counters, and restarts it before
+measuring; each GameTest has its own batch. Each report records the loader
+runtime's `grieflogger_runtime_state`: loader GameTests query the loader and
+assert absence, while NeoForge JUnit probes without an initialized mod list
+record `unavailable`. The validator requires `absent` for GameTest reports,
+rejects `present` everywhere, and permits `unavailable` only for those
+NeoForge JUnit scenarios. Reports use schema version 3 for the explicit
+three-state provenance.
+The validator requires the enqueue sample count to equal this scenario's
+attempted-event count, and each network
+report's query sample count to equal its 20 raw-JDBC plus 20 registered command
+lookups. It requires all 20 command callbacks to complete successfully and at
+least one callback to finish while submissions continue. Correlation reports
+must contain exactly five successful passes and the expected durable quantity
+allocations. This catches metrics accidentally carried in from another test.
+Reports still contain one CI run per scenario; their latency and heap fields are
+diagnostic rather than statistical regression baselines. `heap_used_bytes` is a
+point-in-time snapshot, not peak memory or allocation rate. The latency histogram
+reports coarse upper-bound buckets, so it cannot support narrow p95 regression
+gates.
+
 Native-only startup must be tested with a valid GriefLogger-compatible SQLite
 file named `database.db` present in the game directory while
 `grieflogger_integration_enabled=false`. Verify the ItemGraph server reaches
 `Done`, native event rows persist to ItemGraph's own database, and no GriefLogger
 database connection is opened. Repeat with the setting `true` to verify the
 read-only migration path while source write attempts still fail.
+
+Two redacted CI artifacts show why those limits matter. Runs
+[36944915206](https://github.com/DurdeuVlad/itemgraph/actions/runs/36944915206)
+and [37011138142](https://github.com/DurdeuVlad/itemgraph/actions/runs/37011138142)
+used the same pinned 8,000-event NeoForge burst, but the reported slowest
+server-thread batch was 12.85 ms and 20.40 ms, respectively. Their NeoForge
+MySQL query average was 30.82 ms and 42.04 ms, with histogram p95 upper bounds
+of 50 ms and 100 ms. The first artifact also counted 8,025 enqueue samples for
+8,000 events in the NeoForge queue report and 36 for 32 events in the Fabric
+queue report; these mismatches exposed cross-test metric contamination. The
+GameTests and validator now isolate and reject that condition.
+
+GitHub documents each standard hosted runner job as a new virtual machine
+(public `ubuntu-latest`: 4 CPUs and 16 GB RAM; [runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)),
+so consecutive CI runs do not share a calibrated machine. [Google Benchmark's
+guide](https://github.com/google/benchmark/blob/main/docs/user_guide.md) uses
+warmups, repeated runs, and random interleaving, with [statistical
+comparison](https://github.com/google/benchmark/blob/main/docs/tools.md) to
+separate performance change from machine noise. [OpenJDK JMH](https://github.com/openjdk/jmh)
+recommends a standalone harness setup for more reliable JVM measurements. These
+practices support repeated, environment-matched staging runs for ItemGraph.
+They do not supply ItemGraph's production budgets. Until those measurements
+exist, CI gates the established 50 ms server-thread submission ceiling, exact
+queue bounds, durability/loss accounting, and report-shape/workload invariants.
+The separate five-second application command-query cancellation deadline is not
+a measured command-latency budget; the CI fixture uses a 30-second callback
+completion wait. CI does not invent persistence, correlation, query, or memory
+budgets.
+
+### Consolidated local validation (2026-10-02)
+
+- One Gradle invocation ran `:neoforge:test`, `:neoforge:runGameTestServer`,
+  `:fabric:test`, and `:fabric:runGameTest`. It completed successfully. NeoForge
+  and Fabric each passed all 3 required GameTests. The NeoForge probe accepted
+  8,000 events, measured a 9.299 ms slowest 400-event submission batch, peaked
+  at 7,900 queued events, and verified exactly 8,000 matching durable rows,
+  zero drops, and an empty queue. Fabric verified exactly 32 matching durable
+  rows after its end-tick flush. NeoForge used a fresh temporary GameTest
+  directory through `-PitemgraphGameTestDirectory`; the default project path is
+  unchanged.
+- `python -B tools/test_validate_itemgraph_performance_report.py` passed all 12
+  validator cases, including rejection of a missing queue-depth measurement;
+  `git diff --check` passed. Local GameTests did not write performance JSON
+  because `ITEMGRAPH_PERFORMANCE_REPORT_DIR` was unset. Both network backend
+  integration tests compiled and were skipped by their GitHub Actions-only
+  guard. CI artifact upload and MySQL/MariaDB performance reports therefore
+  remain unverified locally.
+- These runs use ItemGraph 0.3.2 and build no distributable mod jar. They are
+  isolated SQLite checks and do not establish staging latency or memory budgets.
+
+### Consolidated local validation (2026-10-03)
+
+- `:neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`
+  completed successfully without packaging a distributable mod JAR. JUnit XML
+  reports 471 NeoForge tests and 67 Fabric tests, with zero failures/errors;
+  six NeoForge and two Fabric tests were skipped. The four MySQL/MariaDB
+  performance probes are intentionally GitHub Actions-only, so their registered
+  command path still requires the next hosted CI run for runtime evidence.
+- `python -B tools/test_validate_itemgraph_performance_report.py` passed all 28
+  cases, including the registered command callback count, overlap, and latency
+  invariants; `git diff --check` passed. The command report records aggregates
+  only, with no player identity or evidence detail.
+
+### Measured local performance profile
+
+- Environment: Windows 11 x64, OpenJDK 21.0.12.1, Minecraft 1.21.1,
+  NeoForge 21.1.248, ItemGraph only, and a fresh temporary SQLite database and
+  GameTest directory for every sample. GriefLogger was absent.
+- Five separate `:neoforge:runGameTestServer` runs passed all four registered
+  GameTests. The 8,000-event burst persisted exactly 8,000 rows with zero drops
+  on each run. The slowest measured server-thread producer batch ranged from
+  3.95 ms to 5.39 ms; the existing 50 ms guard passed each run.
+- Five separate
+  `:neoforge:test --tests com.itemgraph.ingest.InternalObservationServiceTest.saturatedQueueDrainsOnWorkerDuringShutdownAndReportsExplicitRejection`
+  executions were forced with `--rerun-tasks` so Gradle did not reuse a cached
+  test result. Each accepted 10,000 audit records, rejected one extra record,
+  persisted all 10,000 accepted rows, and emptied the queue. Measured graceful
+  drain times were 626, 627, 650, 647, and 666 ms; batches remained capped at
+  100 records.
+- The shutdown report is a single elapsed-time sample per run, not a worst-case
+  driver-stall test. The 1,000 ms CI threshold is a regression budget for this
+  exact healthy SQLite fixture, derived from the 666 ms maximum observed across
+  five local repetitions and checked against hosted CI. It does not bound a
+  stalled database operation or establish production/staging latency or memory
+  budgets. The server continues waiting for active writes to finish to preserve
+  accepted evidence.
 
 Measure:
 
@@ -490,9 +804,12 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `QuantityFlowTest` | stack splits/merges, partial transfers, windows, capacity limits, competing candidates, idempotency, restart continuity, and rollback atomicity (19 tests) |
 | `TransformationEventListenerTest` | anvil rename/repair, crafting matrix fallback, smelting, client guards, and empty-stack handling (12 tests) |
 | `EntityInteractionEvidenceTest` | Armor stand method outcomes, target UUID, actor/position/dimension, and client-side suppression; interaction attempts are queried separately from completed results |
-| `InternalObservationServiceTest` | bounded queue/backpressure, native-capture overflow retention/exhaustion and worker persistence after primary-queue saturation, concurrent enqueue, 2,000-record worker persistence, shutdown flush and failure accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
+| `InternalObservationServiceTest` | bounded queue/backpressure, native-capture overflow retention/exhaustion and worker persistence after primary-queue saturation, concurrent enqueue/stop admission race, 2,000-record worker persistence, shutdown flush, confirmed-loss and unknown-commit accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
 | `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
 | `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
+| `ItemGraphCommandsHelpTest`, `FabricItemGraphCommandsParityTest` | provider-absent level-2 fallback on each loader; root plus lookup grants for a level-1 user; explicit denials for inspect, page, trace, event, explain, audit, GUI, ingest, and import; help topic exposes exact lookup delegation nodes |
+| `QueryDispatcherTest` | named trace permission is revoked after query submission and before server-thread delivery; level-1 lookup without audit permission cannot run a broad/protected query or reveal rows/has-next metadata; entity-less off-thread delivery drops results and actions when audit permission is revoked during the wait |
+| `FlowBrowserMenuTest`, `InspectionListenerTest`, `FabricNativeAuditEventListenerTest` | explicit GUI denial blocks menu navigation and closes the menu; explicit inspect denial clears inspection mode and prevents lookup on both loaders |
 | `ItemGraphConfigTest` | default values, config paths and metadata, strict NeoForge type/range rejection, and NightConfig default correction without clamping invalid supplied values (8 tests) |
 | `ItemGraphOperationalSettingsTest`, `ItemGraphConfigTest`, `FabricItemGraphConfigTest`, `QueryLimitsTest`, `TraceQueryServiceTest.configuredPageCapConstrainsSqlBackedTracePages` | fail-closed operational bounds and policies, both-loader defaults/custom values, Fabric config re-read creates the next startup snapshot, NeoForge worker guard against live setting changes and application after worker stop, atomic rejection without changing the query cap, capture controls, query cap on command and SQL-backed GUI pages, queue idle poll/batch/flush-tick/heartbeat settings, and retention invariants |
 | `FabricItemGraphPageDispatchTest` | executed `/ig page` and `/itemgraph page` failures for missing, malformed, and expired explicit sessions; expired-session owner-map cleanup; cross-player token denial without invalidating the owner's session; and permission-level-2 enforcement on both roots |
@@ -503,8 +820,8 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `CorrelationEngineTest` | ground bridging/scoring, cross-source confirmed/ambiguous groups, canceled-source conflicts, legacy edge supersession, temporal ordering, and MVP chain (24 tests) |
 | `ItemCanonicalizerTest` | fingerprint determinism and DataComponent decoding (Phase 3) |
 | `NodeManagerTest` | node identity resolution (Phase 4) |
-| `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction, and concurrent shared-connection transaction isolation (5 + 10 tests) |
-| `GriefLoggerHistoricalImporterTest` | all 11 source tables, all 18 action IDs, opaque binary retention, source-byte immutability, supported-schema rejection, independent-writer concurrency, durable failed-run counts, per-table checkpoints, and idempotent replay |
+| `GriefLoggerAdapterTest`, `IngestionServiceTest` | read-only ingestion, checkpoints, flow direction, worker termination before stop returns, and concurrent shared-connection transaction isolation (5 + 11 tests) |
+| `GriefLoggerHistoricalImporterTest` | all 11 source tables and all 18 action IDs, including recognized/table-invalid IDs, oversized 64-bit and non-integral malformed IDs, and malformed component-byte retention; unresolved projection has zero quantity/null subject with consistent reasons; source-byte immutability; supported-schema rejection; independent-writer concurrency; durable failed-run counts; per-table checkpoints; and idempotent replay |
 | `DatabaseManagerTest` | migrations V1–V14, interval/group/edge-state schema, API source/external-key schema, historical import provenance/checkpoints, dedup constraints, read-only query connection, and independent writer configuration |
 | `EventQueryServiceTest` | found/not-found, dangling references rendering as "no such row", OBSERVED labelling |
 | `ExplainQueryServiceTest` | evidence resolved back to observation detail, no cross-edge evidence leakage, unjustifiable edges reported, evidence cap, and SQL NULL confidence rejection (8 tests) |
@@ -513,12 +830,12 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ContainerInteractionTrackerTest`, `ContainerSessionListenerTest` | open/close net deltas, timestamp intervals, multi-viewer ambiguity, capability-credit subtraction, and zero-net limitation (14 + 1 tests) |
 | `V9InternalObservationDedupTest`, `V10InternalDedupEntityUuidTest` | partial-index, UUID, destination-sensitive dedup, NULL-UUID preservation, and V11 idempotence (5 + 6 tests) |
 | `ItemEntityEventListenerPartialPickupTest` | pending-pickup resolution: emit on reduced count, drop on removal/expiry, keep while unchanged |
-| `FlowBrowserMenuTest` | vanilla six-row menu type, compact resolved-menu titles, textual provenance/confidence/evidence labels, every click category rejected or handled as navigation/detail only, and permission recheck (3 tests) |
+| `FlowBrowserMenuTest` | vanilla six-row menu type, compact resolved-menu titles, textual provenance/confidence/evidence labels, numbered nine-row chat companion with UTC timestamps and safe identity fallbacks, every click category rejected or handled as navigation/detail only, and permission recheck |
 | `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container and `/ig inspect` command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
-| `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest`, `FabricNativeAuditEventListenerTest` | per-player inspect state, deterministic command forms, permission denial, supported/unsupported clicks, browser-queue rejection fallback, NeoForge logout and Fabric disconnect handlers, and canceled-click isolation from session tracking |
+| `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest`, `FabricNativeAuditEventListenerTest` | per-player inspect state, deterministic command forms, permission denial, block-history fallback, exact Container-to-flow-browser routing on both loaders, browser-queue rejection fallback, NeoForge logout and Fabric disconnect handlers, and canceled-click isolation from session tracking |
 | `ItemGraphCommandsHelpTest` | bare-root overview, every help topic, invalid-topic diagnostics, permission denial, registered-path/help synchronization, literal/player/item/dimension suggestions, published filter examples under both roots, aliases and bounds, value completion, page-session expiry, and vanilla `ClientboundCommandsPacket` command-tree encode/decode (expanded in #24) |
 | `FabricItemGraphCommandsParityTest` | Fabric-side command registration, all published lookup examples under both roots, filter aliases and bounds, action/user/item value suggestions, duplicate/conflicting/fifth-filter completion limits, permission denial, invalid pages, inspect/page syntax, and vanilla `ClientboundCommandsPacket` command-tree encode/decode |
-| `LookupPageSessionPolicyTest`, `QueryDispatcherNoResultTest` | page expiry boundary and paging limits on Fabric; asynchronous no-result delivery as a command failure on the server thread |
+| `LookupPageSessionPolicyTest`, `FabricItemGraphPageDispatchTest`, `QueryDispatcherNoResultTest`, `QueryFormatterTest` | page expiry boundary and offset limits; generated Previous/Next commands retain the page-session UUID; exact-multiple row counts do not emit an empty next page; generic asynchronous failure delivery; empty unified-evidence message formatting; real Fabric filtered lookup against an empty ItemGraph database returns the documented message on the server thread. |
 | `ItemGraphCommandsHelpTest`, `ItemGraphPageSessionSecurityTest`, `InspectionListenerTest` | NeoForge black-box rejection of another player's copied lookup-page token; page-session ownership and explicit cleanup; NeoForge inspection logout cleanup. `NativeAuditEventListenerTest.playerLogoutClearsItsPageSessionAndRecordsQuit` and `FabricNativeAuditEventListenerTest.disconnectHandlerClearsOnlyThatPlayersStateAndRecordsPlayerQuit` invoke the audit handlers directly. Fabric inspection logout cleanup is tested by `InspectionListenerTest.logoutClearsOnlyThatPlayersInspectionMode`. Loader callback/event-bus registration remains source-inspected; these tests do not prove socket disconnect transport. Command roots remain exactly `/itemgraph` and `/ig` |
 | `ItemGraphApiTest` | service-issued `SourceHandle`, registration idempotency/spoof rejection, deduplication, endpoint/field validation, malformed-map/custom-name validation, stale-source/database/shutdown outcomes, coordinate-less external inventories, stable opaque block and portable endpoint IDs, committed exact-quantity automation persistence and observed trace readback, simulation/rollback/rejection suppression, same-ID bounded queue-full retry and exhaustion, concurrent submissions against a saturated 128-entry retry queue with visible `QUEUE_FULL`, opaque evidence refs, ambiguity, player-coordinate suppression, limit/window conversion, canonical separator-forgery resistance, provenance, explanation/supporting evidence, and lifecycle |
 | `FabricTransferStorageAdapterTest` | native Fabric `Transaction` commit, outer rollback, nested rollback, exact full and partial insertion/extraction quantities, rejected transfer suppression, bounded whole-transaction overflow suppression, and UNKNOWN opposite endpoint attribution |
@@ -529,7 +846,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `AutomationAdapterGameTests` / `AutomationAdapterConformanceFixture` | Both loaders replay a seven-item nether star stack through their native opt-in adapter from portable storage into a placed shulker-like storage endpoint. Fabric uses `ItemStorage.SIDED` and nested `Transaction`; NeoForge uses the placed block's `Capabilities.ItemHandler.BLOCK`. The fixture checks 7 = 4 + 3 conservation and reads two persisted endpoint deltas with exact quantities, slot policy, item fingerprint, and endpoint identity. The 2026-10-02 grouped loader run passed this replay on both loaders. These fixtures use vanilla/API storage and do not establish compatibility with a particular third-party backpack or capability mod. |
 | `V12PreviewApiSourcesAndExternalNodesTest` | `ig_api_sources`, `ig_nodes.external_key`, unique external identity, and coordinate-less `EXTERNAL_INVENTORY` schema (3 tests) |
 
-Last passing full loader test run: **571 unit tests, 0 failures, 0 errors, 8 skipped**, plus **8 required GameTests per loader** (`:neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`, 2026-10-02). NeoForge passed 495 unit tests (6 skipped) and 8 required GameTests; Fabric passed 76 unit tests (2 skipped) and 8 required GameTests. The skipped tests require local MySQL/MariaDB services; hosted CI runs those integration tests against MariaDB 10.11 and MySQL 8.0. The Issue #34 adapter replay moves seven nether stars from portable storage into a placed shulker through each loader's native adapter, checks 7 = 4 + 3 conservation, and reads both persisted endpoint deltas back. The test fixtures use a Fabric `SingleStackStorage` and NeoForge `ItemStackHandler` for portable inventory; they do not include a third-party backpack implementation. The replay checks source and destination IDs, opaque coordinate redaction, item ID, amount, slot policy, and absence of player ownership. Hopper snapshots reject overflowing slot counts before inventory iteration and suppress the entire delta pair when a previously observed container cannot be read again.
+Latest full loader test run after merging the #34 adapter stack onto the updated main: **592 NeoForge tests (0 failures, 6 skipped) and 97 Fabric tests (0 failures, 2 skipped)** (`:neoforge:test :fabric:test`, local post-merge run); the NeoForge-embedded GameTest batch reported all 12 required tests passed. The skipped unit tests require local MySQL/MariaDB services; hosted CI provides those endpoints and the standalone cross-loader GameTest/replay gates. The Issue #34 adapter replay moves seven nether stars from portable storage into a placed shulker through each loader's native adapter, checks 7 = 4 + 3 conservation, and reads both persisted endpoint deltas back. The test fixtures use a Fabric `SingleStackStorage` and NeoForge `ItemStackHandler` for portable inventory; they do not include a third-party backpack implementation. The replay checks source and destination IDs, opaque coordinate redaction, item ID, amount, slot policy, and absence of player ownership. Hopper snapshots reject overflowing slot counts before inventory iteration and suppress the entire delta pair when a previously observed container cannot be read again.
 
 ## M8 issue #24: command semantics and page ownership
 
@@ -537,6 +854,7 @@ Last passing full loader test run: **571 unit tests, 0 failures, 0 errors, 8 ski
 - `ItemGraphCommandsHelpTest.allPublishedLookupExamplesParseForBothItemGraphRoots` and `FabricItemGraphCommandsParityTest.allPublishedLookupExamplesParseForBothItemGraphRootsOnFabric` check all 15 published lookup examples through both `/ig` and `/itemgraph`. Each example asserts complete Brigadier parsing, retention of the `lookupFilters` argument, and normalized `AuditLookupFilters` action IDs, player names, item registry IDs, radius, and time window against a fixed clock. Separate tests verify aliases, comma values, required radius, five-filter bounds, suggestions, permissions, invalid pages, and inspect/page syntax. Existing query tests cover deterministic empty-result errors and previous/next action generation.
 - `ItemGraphCommandsInspectTest.inspectCommandTogglesAndExplicitFormsAreDeterministic` and `FabricItemGraphCommandsParityTest.inspectCommandExecutesBothRootsWithDeterministicStateAndMessagesOnFabric` now execute the same toggle, explicit `on`/`off`, and `status` sequence through both roots on both loaders. They assert player-scoped state and the same seven exact success receipts. Both permission-denial tests verify denied callers cannot change state or emit a success receipt, and assert the command body does not send a failure message when Brigadier rejects permission. Dispatcher tests still do not prove vanilla-client transport.
 - `CommandPacketGameTests.inspectCommandsExecuteFromClientPacketsAndPersistAttempts` in both loader GameTest suites sends `ServerboundChatCommandPacket` instances through the server's `handleChatCommand` handler for `itemgraph inspect on`, `ig inspect status`, and `ig inspect off`. It checks permission-level-2 execution, enabled/status/disabled state transitions, exactly one durable `COMMAND_ATTEMPT` row per command with player attribution and timestamp, and an unchanged snapshot of each `ig_observations` cell's JDBC value and Java type. The shared fixture queries ItemGraph's database read-only after the audit watermark. The test uses an embedded mock player and calls the packet handler directly; it proves packet-handler-to-audit persistence on each loader, not socket transport, rendered client output, or GriefLogger differential behavior.
+- The command packet GameTest's outer timeout is 4,000 ticks on both loaders. Its persistence probe retains a 10-second wall-clock deadline; this avoids a fast headless server reaching the tick limit before the asynchronous durability deadline can report success or failure. Hosted CI initially exposed the old 400-tick limit in Fabric; both loader GameTests passed after aligning the limits.
 - `ItemGraphCommandsHelpTest.vanillaCommandTreePacketCodecRoundTripsBothCommandRoots` and `FabricItemGraphCommandsParityTest.vanillaCommandTreePacketCodecRoundTripsBothCommandRootsOnFabric` encode and decode the complete registered command tree with Minecraft 1.21.1's `ClientboundCommandsPacket.STREAM_CODEC`. Each asserts the `/ig` redirect targets `/itemgraph`, the lookup/page/inspect children survive decode, `/gl` and `/grieflogger` stay absent, and the packet is fully consumed. This catches unsupported Brigadier argument serializers in both loader test suites, but does not prove a live server/client connection or rendered output.
 - `ItemGraphCommandsHelpTest.malformedLookupFiltersReturnExactFailuresOnBothRootsAndForms` and `FabricItemGraphCommandsParityTest.malformedLookupFiltersReturnExactFailuresOnBothRootsAndFormsOnFabric` execute invalid lookups through both roots and both direct/`lookup filters` forms on each loader. They assert exact failure output for missing radius, malformed and invalid radius, unknown and duplicate filters, include/exclude conflict, and six filters, with no success output. The filter parser also accepts a valid exactly-five-filter lookup on both loaders. Because the command returns the parser failure before database dispatch, these tests distinguish validation feedback from database errors.
 - `pageSessionTokensAreIsolatedByPlayerAndExplicitlyClearable` executes the page command with another level-2 player holding a copied UUID token and expects `No active lookup page session`; `ItemGraphPageSessionSecurityTest` runs the same player-keyed session lookup and cleanup contract in the Fabric suite. Page lifetime and offset boundaries remain covered by `LookupPageSessionPolicyTest` and the NeoForge command tests.
@@ -844,8 +1162,10 @@ shutdown, the isolated SQLite database contained rows for every exercised event,
 and the bot received results from both generic and filtered `/ig lookup` commands.
 The same staging checkout persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows,
 and `/ig inspect on` opened a read-only `minecraft:generic_9x6` flow browser for
-the populated chest. The remaining cutover work is the documented migration and
-retention procedure; no production change is authorized by this test.
+the populated chest. Those craft/smelt rows predate #162 and are historical
+evidence only; current capture stores unresolved output evidence without lineage.
+The remaining cutover work is the documented migration and retention procedure;
+no production change is authorized by this test.
 
 The 2026-09-30 NeoForge staging startup additionally ran `:neoforge:runServer`
 with the shared `common` and `core` source sets attached to the ModDev run. It
@@ -909,7 +1229,7 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   and the Ender action constants to remain enum-only with their stable
   no-writer reason.
 - These are source/binary mapping checks; they do not replace the full
-  loader replay or the differential acceptance owned by #31.
+  ItemGraph-only loader conformance matrix owned by #31.
 - The paired NeoForge and Fabric `EntityInteractionGameTests` also perform an
   actual server-side water-bucket use against a source block. The shared
   `BucketPickupConformanceFixture` requires one durable `BREAK_BLOCK` audit row
@@ -952,12 +1272,20 @@ port 27993; NeoForge used port 27994. These replays are staging evidence only.
   session net-delta raw markers and non-negative intervals, distinct drop and
   pickup event identities, and the exact spawned entity UUID and fingerprint
   across the drop/pickup pair. Ground endpoints must stay in the same dimension
-  and within one block to account for entity movement between event capture and the server
-  tick that confirms the drop. It compares the full prior quantity-row
-  snapshot to ensure the replay did not mutate earlier evidence. NeoForge calls
-  the two-argument `Player.drop` overload so `ItemTossEvent` reaches the native
-  listener; Fabric calls the three-argument `ServerPlayer.drop` overload covered
-  by its accepted-entity mixin. The mock-player GameTests verify both loader
+  and within one block. The native replay differs by one block in pickup Y
+  (Fabric=1, NeoForge=2). The fixtures use loader-specific event hooks:
+  NeoForge's patched two-argument `Player.drop(ItemStack, boolean)` fires
+  `ItemTossEvent` through `CommonHooks.onPlayerTossEvent`; its three-argument
+  overload bypasses that hook. Fabric's accepted-entity capture uses the
+  three-argument `ServerPlayer.drop` path. NeoForge floors pickup coordinates
+  in its pickup listener; Fabric captures the entity position at `playerTouch`
+  return. These capture rules do not prove the cause of the one-block report
+  delta: `NodeManager` floors ground endpoints for both loaders, and normalized
+  reports omit sub-block coordinates. The fixture-level cause remains
+  unverified. A probe using NeoForge's three-argument overload omitted
+  `DROP_ITEM`, confirming that it is not a valid substitute for NeoForge's
+  toss-event path. The test compares the full prior quantity-row snapshot to
+  ensure the replay did not mutate earlier evidence. The mock-player GameTests verify both loader
   persistence paths but do not establish client transport or GriefLogger-present
   differential parity. The other exact-release item writers and full #27
   replay remain outstanding.
@@ -970,6 +1298,7 @@ Automated checks currently cover the shared query and both loader adapters:
 - `InternalObservationServiceTest.blockRemovalLinksEarlierInteractionsWithoutDeletingRawEvidence` verifies native interaction retention, two-cell door supersession, imported GriefLogger row supersession, retry idempotency, reason/evidence IDs in ordinary lookup, and active inspector filtering.
 - The same internal observation test uses a 616-code-point imported source key, including non-BMP characters, to prove supersession stores the full key and uses a code-point-safe indexed prefix. It also checks that a case-variant key recorded after a break stays active. `MariaDbDialectIntegrationTest` checks the V19 MySQL/MariaDB columns use `LONGTEXT` for the source key and a fixed 64-character digest for the primary key.
 - NeoForge `InspectionListenerTest` and Fabric `FabricNativeAuditEventListenerTest` verify per-player and permission behavior, accepted-query cancellation, queue-rejection gameplay fallback, and shared unified-history dispatch.
+- The same loader adapter suites verify right-click parity: off-hand clicks are ignored; a main-hand click on an ordinary block inspects the adjacent clicked-face position; recognized functional blocks and modded `Container` block entities inspect their clicked structure. Queue rejection preserves vanilla behavior. The maintainer skipped visible-client clicks, so client transport and rendered inspector output remain unverified.
 
 On 2026-09-30, the development server started in a fresh temporary directory with
 `eula=true`, bound only to `127.0.0.1:25575`, and loaded only ItemGraph 0.3.2,
@@ -981,7 +1310,7 @@ player interaction, queue saturation, conservation, or live supersession matrix.
 
 The implementation follows the observed GriefLogger cleanup behavior at the presentation boundary while keeping evidence immutable: GriefLogger removes old interaction rows after an interactable block/door break; ItemGraph records `BLOCK_REMOVED_AT_TARGET` links in its own schema V19 tables and retains the native row, imported projection, and immutable provenance. Source reference: [`RemoveBlockInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveBlockInteractionsEvent.java) and [`RemoveDoorInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveDoorInteractionsEvent.java).
 
-**Visible-client matrix status:** skipped by the maintainer. No connected-client clicks were run for ordinary/function blocks, single/double chests, doors, empty/missing history, block removal, door removal, repeated clicks, or query-queue saturation. Issue #26 is closed, but this client evidence remains unverified; its closure is not proof that the matrix ran. Automated adapter/query tests and the dedicated-server startup/migration smoke above remain the available evidence. No production or staging instance is involved.
+**Visible-client matrix status:** skipped under the maintainer's instruction at the time (later superseded by authorized local MCPilot testing; see issue #153). No connected-client clicks were run for ordinary/function blocks, single/double chests, doors, empty/missing history, block removal, door removal, repeated clicks, or query-queue saturation. Issue #26 is closed, but this client evidence remains unverified; its closure is not proof that the matrix ran. Automated adapter/query tests and the dedicated-server startup/migration smoke above remain the available evidence. No production or staging instance is involved.
 
 ## M8 issue #75: entity interaction outcomes
 
@@ -1005,8 +1334,13 @@ the legacy unified-lookup aliases (including the `interact_block` mapping),
 that each shared query choice is implemented or historical-queryable on both
 loaders, and that planned #55–#57 definitions do not claim runtime support.
 They validate the shared taxonomy contract; they do not prove loader event capture,
-database persistence of new event families, or runtime parity. Those checks
-belong to the child issue fixtures and the consolidated M9 acceptance pass.
+database persistence of new event families, or runtime parity. #162 additionally
+requires focused fixtures proving result-only craft/smelt rows preserve observed
+output metadata, carry the unresolved reason and event ID, and never appear as
+trace hops. The consolidated M9 acceptance pass must persist and replay both
+`CRAFT_OUTPUT_UNRESOLVED` and `SMELT_OUTPUT_UNRESOLVED` on NeoForge and Fabric,
+then assert neither event creates a trace hop. Those checks belong to the child
+issue fixtures and the consolidated M9 acceptance pass.
 
 # Issue #33 administrative item capture batch
 
@@ -1102,4 +1436,226 @@ capture.
 Run the loader test suites and GameTest suites once after the whole #33
 implementation batch, then run the full M9 CI matrix after milestone work is
 complete. Do not build distributable artifacts unless the mod version is bumped.
+
+## M11 admin-first UX validation (final milestone batch complete)
+
+- `InspectionListenerTest.containerRightClickRoutesToFlowBrowserAndKeepsExactDimensionAndPosition`
+  and `FabricNativeAuditEventListenerTest.containerRightClickRoutesToFlowBrowserAndKeepsExactDimensionAndPosition`
+  verify that Container block entities take the flow-browser route and preserve their
+  clicked position and dimension. The paired `bothDoubleChestHalvesOpenTheCanonicalFlowBrowserTarget`
+  tests verify either half resolves to the canonical anchor used by capture. Their
+  `rejectedContainerFlowQueryPreservesVanillaContainerInteraction` counterparts verify
+  that queue rejection does not silently switch to a block-history query. Existing
+  non-container inspection tests continue to cover block-history behavior.
+- `ItemGraphCommandsHelpTest.helpListsEveryRegisteredCommandPath` (the registered-path
+  assertion in the current suite) checks `lookup near`, `lookup page`, `lookup player`,
+  `lookup filters`, and `lookup provenance` help topics. Both loader suites parse the
+  short read-only quick-start commands and the shared
+  `docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt` against their registered
+  Brigadier trees. The broad corpus is syntax-only test input: parsing does not execute
+  commands or verify permissions, stored IDs, capture state, query results, or safety.
+- `ItemGraphCommandsHelpTest.lookupOnlyGrantCannotReachSensitiveEventAliasesOrSavedPages`
+  attempts direct, coordinate, and filtered queries for sensitive location/lifecycle data
+  without `itemgraph.audit`, then checks protected pages retain the audit grant.
+  `sensitiveLookupAliasesAndBroadFiltersRetainAuditPermissionAcrossPages` verifies audit
+  event privacy comes from the `AUDIT_EVENT` taxonomy surface while unified filters also
+  include sensitive observation/transformation surfaces (`THROW_ITEM` is the regression
+  case). Fabric runs the same direct/near/filter denial cases through its shared command
+  registration. The help tests check the source-prefixed observation-ID route and exact
+  lookup, GUI, page, trace, and explain grants.
+- Before issue #145 expanded M11, the #142/#143 implementation had a grouped baseline.
+  The final milestone-end batch, after all three issues were implemented, ran:
+  `./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`.
+  It completed successfully. NeoForge unit tests: 518 total, 0 failures, 0 errors, 6 skipped;
+  all 6 required NeoForge GameTests passed. Fabric unit tests: 78 total, 0 failures, 0 errors,
+  2 skipped; all 7 required Fabric GameTests passed. XML test reports independently confirm
+  the unit-test totals and failure/error/skip counts.
+- Focused help validation passed after the final help edits:
+  `./gradlew :neoforge:test --tests com.itemgraph.command.ItemGraphCommandsHelpTest`.
+  The help suite checks the task-first overview, exhaustive command catalog, detailed topics,
+  suggestions, and executable examples. `python tools\validate_admin_ux_docs.py` and
+  `git diff --check` passed.
+- Isolated live-client replay used a fresh NeoForge 1.21.1 development server from the M11
+  worktree, bound to loopback port 25575, with ItemGraph and no other mods. The EULA was
+  accepted for this temporary test only. Both MCPilot clients were configured with `mute=true`.
+  `/ig help` returned question-based task routes, exact first commands, topic-help links,
+  permission level 2, the evidence-status caveat, and the Admin Quick Start link.
+  `/ig help commands` returned grouped command paths and distinguished documented
+  configuration/API surfaces from commands. A separate non-operator received Minecraft's
+  unknown-command response for `/ig help`, confirming that the permission-gated root is
+  unavailable to that player.
+- For inspector routing, the test created a chest at `minecraft:overworld (0,64,0)` and
+  populated it with five diamonds using server commands. With `/ig inspect on`, a right-click
+  opened `ItemGraph: container #2` rather than the vanilla chest inventory. Its tooltip named
+  the exact dimension, position, node, and time window; the item row was labeled
+  `[OBSERVED] 5x minecraft:diamond`. The MCPilot `gui snapshot` reply for slot 0 was
+  `type=minecraft:diamond`, `count=1`, `displayName=[OBSERVED] 5x minecraft:diamond`;
+  the displayed item is a one-count menu token carrying the five-item observed label. Selecting
+  it opened `Observation #1`. The screenshots show the location/window tooltip and selection
+  screen; the slot label is preserved here from the live MCPilot response because it is not
+  legible in the screenshots. This confirms click routing, read-only browser, location
+  disclosure, and selection path; the command-created fixture does not validate ordinary
+  player-transfer attribution or completeness.
+- Screenshots: [task-first help overview](test-evidence/m11-admin-first-ux/task-first-help-overview.png),
+  [container flow browser](test-evidence/m11-admin-first-ux/container-inspection.png), and
+  [selected observation](test-evidence/m11-admin-first-ux/container-flow-selection.png). The
+  catalog chat capture is [here](test-evidence/m11-admin-first-ux/command-catalog-chat.png).
+  Full chat history and GUI slot snapshots were also checked through MCPilot.
+- The user explicitly authorized this connected-client replay; the earlier decision to skip
+  live clicks for #26 does not apply. No production server, distributable mod JAR, version bump,
+  or publication was involved. Independent adversarial review caught a furnace/container route
+  mismatch in the feature map; the guide now routes furnaces to the flow browser, and the docs
+  validator checks the two routes in separate table rows. The reviewer rechecked the correction
+  and found no remaining P1/P2 issue. PR checks on the final pushed head remain required before
+  merge.
+- The first CI run on the M11 PR failed one pre-existing NeoForge test:
+  `QueryDispatcherTest.testDispatchDataDropsInlineCallbackWhenServerExecutorRunsOffThread`.
+  Its query returned immediately, allowing the future to complete before `dispatchData`
+  registered its completion handler; the inline executor then ran on the test/server thread,
+  a valid synchronous path that the test incorrectly rejected. The test now blocks the query
+  on a latch until `dispatchData` returns, then releases it in `finally`, making the intended
+  off-thread inline-executor case deterministic. The focused test passed, and the complete
+  NeoForge/Fabric unit and GameTest batch passed again after this test-only correction. No
+  production code changed for this CI fix; a new CI run on the corrected commit is pending.
+
+## M8 issues #138 and #146: structured chat and scannable flow rows
+
+- `QueryDispatcherTest.structuredChatHoverAddsBoundedSafeFieldsWithoutChangingVisibleFormatterText`
+  and `FabricItemGraphPageDispatchTest.fabricChatBoundaryPreservesVisibleQueryLineAndUsesStructuredSafeHoverFields`
+  cover unchanged visible `QueryFormatter` output, typed hover fields, UTC time, canonical fingerprint hash,
+  field bounds, and omission of NBT/component payloads on both loaders.
+- `QueryDispatcherTest.resultLocationTokenIsPlayerScopedOneUseAndRechecksOriginPermission`
+  covers cross-player replay rejection, permission revocation at click time, and one-use teleport action.
+  `locationActionRejectsMissingDimensionAndNonFiniteCoordinates` covers invalid dimension and non-finite
+  target rejection, while click handling rejects dimensions not loaded by the server.
+- `FlowBrowserMenuTest.pageCompanionLabelsObservedInferredAndUnresolvedRowsWithoutExposingRawMetadata`
+  and `pageCompanionKeepsAmbiguousTransformationAndUnresolvedStatesDistinct` cover observed, inferred,
+  ambiguous source-group, recorded transformation type, missing fingerprint, unresolved target/empty page,
+  UTC labels, and preservation of resolver candidate ten on its own nine-row page.
+- The M8 milestone-end loader batch and both loader GameTest suites passed on 2026-10-05; see
+  “M8 milestone batch, 2026-10-05” above. The earlier M11 connected-client replay documented
+  above covers the older menu path, not this new chat companion. A refreshed 2026-10-05
+  connected-client capture for #146 is recorded below; #146 closed on
+  2026-10-05 after PR CI and review. The operator's earlier decision to skip
+  live clicks for #26 was later superseded by authorized local MCPilot testing
+  (see #153).
+## M8 issue #140: contents of player-broken containers
+
+Both loader GameTest suites run `ContainerBreakConformanceFixture` through the
+real `ServerPlayerGameMode.destroyBlock` path. It breaks an empty single chest, a
+separate single chest with exactly one five-item stack, a populated single chest
+with all 27 slots occupied (including component variants), and one half of a
+double chest with different contents in each half. It also cancels a real break
+through each loader's cancellation hook. Read-only database assertions require
+one completed parent per successful break, one unresolved drop-link row only for
+each nonempty snapshot, one
+`REMOVE_ITEM` row per non-empty slot, exact slot/count/fingerprint provenance,
+the broken container as source, `UNKNOWN` as destination, and a stable
+`break_event_id` link to the matching standard `BREAK_BLOCK` row. The double-
+chest assertion verifies that breaking one half does not count the surviving
+half's contents. A successful container break with no authoritative actor must
+persist one `CONTAINER_BREAK_UNRESOLVED` row with null player columns, stable
+`CONTAINER_BREAK_ACTOR_UNAVAILABLE` reason, and `actor_status=UNKNOWN`. Its
+redacted report case carries only a hashed evidence reference, relative fixture
+position, stable reason, and UNKNOWN actor status; it has no player alias or
+parent link. The redacted conformance report proves four player-attributed break
+cases, one actor-unavailable unresolved case, three nonempty drop-link outcomes,
+29 slot rows, and conservation of 386 source items.
+Empty-container assertions reject a drop-link reason in the completion payload and
+a separate `CONTAINER_BREAK_UNRESOLVED` row. Taxonomy and formatter tests require the
+unresolved event actor to be `UNKNOWN` and display `(actor unavailable)` when both
+player ID and name are absent; a present player name remains visible.
+The same live-server fixture breaks an ordinary sign block entity and asserts
+that it creates no container-break audit event or item-content observation; the
+canceled chest also creates no contents event.
+
+`InternalObservationServiceTest` verifies that an audit-queue capacity failure
+rejects the related parent and item rows as one batch, and injects a second-slot
+write failure to prove the completion summary and first slot row roll back in the
+same transaction. `PendingEvidenceSpoolTest` round-trips nested related slot rows
+as one retry unit. `DESTROYED_CONTAINER` maps to `CONTAINER -> UNKNOWN` without
+creating a player item endpoint. Producer retries use stable parent, break, and
+per-slot event IDs; persisted queue retries retain the same immutable record and
+are covered by idempotency tests.
+
+The adapters deliberately do not link the container snapshot to emitted ground
+entities: the available 1.21.1 callbacks do not establish per-stack identity.
+For a nonempty snapshot the parent row records `drop_link_status=UNRESOLVED`, and a
+linked unresolved audit row records the stable reason code. An empty snapshot has no
+item-drop relation and records neither field nor unresolved drop-link row.
+Fabric obtains the successful-result boundary from `PlayerBlockBreakEvents.AFTER`;
+NeoForge uses the narrow `ServerPlayerGameMode.destroyBlock` wrapper because its
+`BlockEvent.BreakEvent` runs before mutation. The complete M8 loader and GameTest
+batch passed on 2026-10-05; see the milestone batch above. No GriefLogger jar or
+database was loaded. PR CI remains required for issue acceptance; distributable jar
+tasks remain excluded until an explicit mod-version bump.
+
+## M12 admin-first UX batch — 2026-10-05
+
+The focused command-help suite passed after the five-message root overview and
+`/ig help guide` topic were finalized:
+
+```powershell
+.\gradlew.bat :neoforge:test --tests com.itemgraph.command.ItemGraphCommandsHelpTest
+```
+
+The end-of-milestone cross-loader batch then passed with 632 reported tests, zero
+failures/errors, and 8 skipped tests (NeoForge: 546 tests, 0 failures/errors, 6
+skipped; Fabric: 86 tests, 0 failures/errors, 2 skipped):
+
+```powershell
+.\gradlew.bat :neoforge:test :fabric:test --no-daemon --max-workers=1 --rerun-tasks
+```
+
+Fabric reported all 8 required GameTests passed; the NeoForge GameTest task also
+completed successfully. `python tools/validate_admin_ux_docs.py` and
+`git diff --check` passed. Independent UX review corrected an overbroad CurseForge
+claim about per-topic permission details; the README and local listing now direct
+admins to `/ig help permissions` for the complete node matrix.
+
+The connected-client check used MC Pilot client `itemgraph-qa-1.21.1-neoforge`
+against a fresh temporary NeoForge 21.1.248 / Minecraft 1.21.1 dev server on
+`127.0.0.1:25575`, with ItemGraph 0.3.2 as the only gameplay mod and native
+GriefLogger integration disabled. Bare `/ig` rendered all five overview messages
+at once in open chat. MC Pilot reported a 427×240 logical viewport at device scale
+factor 2 (854×480 effective). Screenshot: [help overview in open chat](test-evidence/m12-admin-first-ux/help-overview-open-chat.png).
+The QA client had every Minecraft sound category, including music, at `0.0` and
+its MC Pilot `mute` flag enabled. The isolated server, world, and database were
+under the temporary QA directory; the loopback server was stopped after capture
+and the client disconnected. No production service, GriefLogger jar/database,
+external listing, version bump, or distributable ItemGraph jar was used.
+
+This proves #149's root-help layout and the M12 documentation/help contracts. A
+separate connected-client capture for #146 is recorded below. The explicit skip
+of #26 live clicks is unchanged. M12 issue acceptance and merge remain tied to
+PR review/merge and the unresolved M8 evidence above.
+
+## M8 issue #146: flow-browser numbered companion replay — 2026-10-05
+
+The fresh temporary NeoForge 21.1.248 / Minecraft 1.21.1 server ran ItemGraph
+0.3.2 as its only gameplay mod on `127.0.0.1:25575`; GriefLogger integration was
+disabled. MC Pilot client `itemgraph-qa-1.21.1-neoforge` used the existing muted
+profile. In the disposable world, `/give @s minecraft:diamond 3` and a second
+`/give @s minecraft:diamond 2` produced two `ADMIN_ITEM_CREATE` observations.
+Two drops produced `DROP_ITEM` observations for the same canonical diamond
+fingerprint. `/ig gui item "id:1"` opened `ItemGraph: item #1` with four matching
+rows. Its numbered companion showed `OBSERVED`, safe `minecraft:diamond`
+identity, each `ADMIN_ITEM_CREATE` or `DROP_ITEM` kind, and UTC time.
+
+Evidence is paired: [menu page with four matching rows](test-evidence/m8-flow-browser/page-1-menu.png)
+and [the page's four numbered chat companion lines](test-evidence/m8-flow-browser/page-1-companion.png).
+The MC Pilot viewport was 427×240 logical pixels at device scale factor 2
+(854×480 effective, default GUI scale). Selecting slot 1 opened `Observation #1`;
+MC Pilot's post-resynchronization state showed the row slot and cursor empty. The
+checked-in detail screenshot proves the detail page opened; it does not show the
+transient cursor state. No raw component payload, unrelated player, or remote
+inventory was present in the companion. The no-client-mod vanilla menu remained
+read-only after the click.
+
+This supplements `FlowBrowserMenuTest`'s cross-loader observed, inferred,
+ambiguous-source-group, transformation, missing-fingerprint, unresolved-state,
+page-boundary, and item-movement rejection assertions. The isolated server,
+world, and database were in the temporary QA directory; the server was stopped
+after capture and the client disconnected. No production server or GriefLogger jar/database was used. #146 closed
+on 2026-10-05 after PR CI and review of the attached screenshots.
 
