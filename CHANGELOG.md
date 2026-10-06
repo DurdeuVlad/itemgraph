@@ -36,6 +36,60 @@ explicitly not claimed here.
 - The event taxonomy is version 4.0.0; integrations reading ItemGraph event
   IDs should review `docs/EVENT_TAXONOMY.md` before upgrading.
 
+### For beta testers
+
+Install on a test server, not production. ItemGraph is server-side; players
+need no mod. Use the standard jar unless the server runs GriefLogger
+1.2.10-1.21.1 — in that case use the `-grieflogger-compatible` jar. Fabric
+also needs Fabric API; NeoForge 21.1.x needs no extra dependency. First start
+migrates the database to schema V21 (automatic; back up first).
+
+Worth exercising, roughly in order:
+
+1. `/ig` with no arguments — a five-line task overview. Follow
+   `/ig help commands`, `/ig help journeys`, `/ig help permissions`.
+2. Give a non-op test account only `itemgraph.command`: help and
+   `/ig status` should work; `/ig lookup` should fail with the exact missing
+   node named.
+3. Drop an item and pick it up (NeoForge): `/ig trace item diamond` should
+   show player → ground → player, and `/ig explain <edgeId>` prints the
+   deterministic evidence behind the inferred edge.
+4. `/give` yourself an item — the outcome appears as admin-mutation audit
+   evidence with linked item observation IDs (`/ig event event:<uuid>`).
+5. Fill a chest, then break it: `/ig inspect` on the position should show
+   per-slot contents removed by the break.
+6. `/ig inspect on`, click blocks and double chests — one paged timeline per
+   position; `/ig inspect off` when done.
+7. `/ig status` leads with an ACTION line; `/ig audit` reports invariant
+   health (`HEALTHY` when satisfied).
+8. `/ig lookup` accepts the direct GriefLogger filter form
+   (`action`, `user`, `radius`, `time`, `include`/`exclude`, `page`), e.g.
+   `/ig lookup action.remove_item user.<name> radius.10 time.1h`.
+9. Set `general.language` (NeoForge) or `language` (Fabric) to `nl_nl` or
+   `zh_tw` and restart — chat text localizes server-side.
+10. Optional: point `grieflogger_database_path` at a copy of a real
+    GriefLogger SQLite database with `grieflogger_integration_enabled=true`
+    and confirm historical rows surface in lookups (import is read-only).
+
+Known boundaries — not bugs, tracked under open issues:
+
+- Fabric drop→pickup ground bridging still keys to spawn position; the
+  NeoForge fix is shipped, Fabric follows under #166.
+- Modded inventories/hopper-adjacent adapters beyond vanilla coverage (#34),
+  world/environmental causes (#55), entity/projectile lifecycle detail (#56),
+  trade/enchant/brew/smith/loot transformations (#57), `/ig export` (#37),
+  first-class ambiguous/unresolved query surfaces (#44), and
+  component-aware/absolute-time filters (#45) are open M9 work.
+- Craft/smelt records keep output-only UNRESOLVED evidence by design (#162).
+- `zh_cn` is not a selectable locale (#136 scope was en_us/nl_nl/zh_tw).
+- CI performance numbers are regression evidence, not production budgets;
+  staging-derived budgets are open under #32/#58.
+
+Reporting: open a GitHub bug report with `0.4.0-beta.1` as the version, your
+loader + Minecraft 1.21.1 + Java versions, the smallest reproduction that
+shows the problem, and sanitized `/ig status` or command output. Do not
+paste real player data, private coordinates, databases, or unredacted logs.
+
 ### Fixed
 
 - **Drop ground endpoint at rest position (#166, NeoForge):** drop
