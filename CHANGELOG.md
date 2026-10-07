@@ -8,6 +8,12 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Inspection packet coverage** (issue #178). A consumed or denied inspection
+  right-click now consumes its whole packet set: the off-hand `useItemOn` and
+  the item-use twin (`RightClickItem` on NeoForge, `UseItemCallback` on
+  Fabric) can no longer place blocks, throw pearls, or use food on the
+  inspected scene — including the revocation-detecting click whose twin
+  arrives after the mode cleared (`InspectionService.markInteractionConsumed`).
 - **Copy and affordance polish** (UX audit F6+F7+F10). `/ig inspect on` now
   repeats the disable hint from the toggle path; `[Go to ...]` links disclose
   their teleport consequence on hover; result sets past the eight-link cap

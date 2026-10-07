@@ -754,13 +754,26 @@ ItemGraph JDBC connection.
 - NeoForge's `InspectionListener` handles `PlayerInteractEvent.RightClickBlock` at `HIGHEST`
   priority and left-click starts; Fabric's `FabricNativeAuditEventListener` applies the same
   selection through `UseBlockCallback` and `AttackBlockCallback`.
+- A consumed right-click produces more packets than the block-use itself: the client also
+  sends the off-hand `useItemOn` and, when its predicted result was not consuming, a
+  separate item-use packet. `InspectionListener` consumes `RightClickItem` and off-hand
+  `RightClickBlock` while inspection is on; Fabric does the same through `UseItemCallback`
+  and the off-hand half of `UseBlockCallback`, so a held bucket, ender pearl, or off-hand
+  item can never mutate the inspected scene. The revocation-detecting click clears the
+  mode before its twin packets arrive, so every consume path calls
+  `InspectionService.markInteractionConsumed` — a five-tick marker that keeps the twins
+  consumable after the mode is already off.
 - A right-click whose target block entity implements `Container` calls the shared
   `FlowBrowserService.openContainer` with the exact dimension and coordinates. Either half
   of a valid double chest resolves to the canonical anchor used by container capture. An
   accepted query consumes the click and prevents the normal container GUI and held-item
   use path; a click that detects a revoked `itemgraph.command.inspect` grant is also
   consumed. A rejected query preserves ordinary container interaction.
-- Left-clicks call the bounded exact-position audit-history query. Non-container
+- Left-clicks call the bounded exact-position audit-history query once per dig:
+  Fabric's `AttackBlockCallback` mixin already filters to `START_DESTROY_BLOCK`
+  (`fabric-events-interaction-v0` `ServerPlayerInteractionManagerMixin` ignores
+  STOP/ABORT), matching NeoForge's `Action.START` filter — one dispatch per
+  left-click on both loaders, never one per action packet. Non-container
   right-clicks also query block history: supported functional blocks select the clicked
   block, while ordinary blocks select the adjacent block on the clicked face. When a
   block-history request is not accepted, a missing `itemgraph.audit` grant consumes the

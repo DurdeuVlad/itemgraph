@@ -720,7 +720,7 @@ class ItemGraphCommandsHelpTest {
         assertEquals(1, dispatcher.execute("itemgraph help inspect", source));
         String inspectHelp = String.join("\n", successes);
         assertTrue(inspectHelp.contains("Unset grants use level 2"));
-        assertTrue(inspectHelp.contains("denied clicks never break or toggle blocks"));
+        assertTrue(inspectHelp.contains("denied clicks never break, toggle, or place/use held items"));
         assertTrue(inspectHelp.contains("Example: /ig inspect on"));
 
         successes.clear();
