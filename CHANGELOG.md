@@ -16,7 +16,8 @@ The project follows a simple pre-1.0 development changelog model.
 - **Documented accepted UX limits** (UX audit F8+F9, issue #177).
   `docs/QUERY_MODEL.md` now records the one-line-per-row chat-density
   trade-off (with the designated summary-mode remedy) and that `/ig page`
-  requires a player entity so console/RCON sources cannot page.
+  requires a player entity for saved-session continuation — console/RCON
+  sources can still page directly via `/ig lookup page`.
   `docs/CONFIGURATION.md` records the localization scope precisely: 214
   catalog keys per locale but only the nine `source.*` hover labels are
   translated — help topic bodies and overview lines ship English under

@@ -228,9 +228,10 @@ becomes a complaint, the designated remedy is a summary mode (count + top N + a
 "page for more" prompt), not thinner rows.
 
 `/ig page` continues a live in-player lookup session and therefore requires a player
-entity — it fails with `page.player_required` for console or RCON sources. There is no
-console paging surface; console operators re-run the originating query with a tighter
-`limit` or narrower filters instead.
+entity — it fails with `page.player_required` for console or RCON sources. Saved-session
+continuation is the only player-gated paging path: console/RCON can still fetch a page
+directly via `/ig lookup page <page> <eventType>` (rows go to the server log) or re-run
+the originating query with a tighter `limit` or narrower filters.
 
 ### Not-found handling
 

@@ -59,7 +59,7 @@ inventory, so no exact-release locale compatibility claim is made.
 
 Localization coverage is deliberately partial (recorded scope). All 214 catalog
 keys are present and validated in each of `en_us`, `nl_nl`, and `zh_tw`, but the
-nine `source.<sha256>` hover-label keys (Evidence, Item, Canonical metadata
+nine `source.<sha256>` hover/action-label keys (Evidence, Item, Canonical metadata
 fingerprint, Event, UTC time, Origin, Destination, Previous, Next) are the only
 translated `sourceText` phrases: the 36 `/ig help` topic bodies, the five-line
 command overview, and the permission recipes resolve to their English source
