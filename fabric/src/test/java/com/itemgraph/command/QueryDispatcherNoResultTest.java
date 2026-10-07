@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -74,6 +75,7 @@ class QueryDispatcherNoResultTest {
         org.mockito.ArgumentCaptor<Component> failure = org.mockito.ArgumentCaptor.forClass(Component.class);
         verify(source).sendFailure(failure.capture());
         assertEquals("[ItemGraph] No recorded history found.", failure.getValue().getString());
-        verify(source, never()).sendSuccess(any(), anyBoolean());
+        // Only the acceptance acknowledgment is a success message; the result itself is a failure.
+        verify(source, times(1)).sendSuccess(any(), anyBoolean());
     }
 }

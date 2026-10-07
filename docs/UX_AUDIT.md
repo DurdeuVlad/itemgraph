@@ -80,6 +80,9 @@ contention on the single-worker/64-deep executor).
 interactive sources, or send a notice only when completion exceeds a
 threshold. Match the existing `query.accepted_log` pattern.
 
+*Resolved (issue #174):* `dispatch` now sends the localized
+`query.accepted` acknowledgment to every player-sourced query.
+
 ### F2 — M — Player timeout surfaces internal cancellation text
 
 When `PLAYER_QUERY_TIMEOUT_MS` (5 s) fires, `QueryCancellation.cancel()`
@@ -95,6 +98,11 @@ also includes queue wait time, which the message does not explain.
 *Recommendation:* map `QueryFailure` caused by cancellation to a user-facing
 "query timed out after 5 s; narrow the window, filters, or limit and retry"
 in the async delivery path.
+
+*Resolved (issue #174):* `QueryCancellation.cancelTimedOut` records whether
+execution had begun when the deadline fired; `callerFailureMessage` maps a
+dispatcher timeout to `query.timed_out` (execution) or
+`query.timed_out_queued` (queue wait) instead of the JDBC sentinel text.
 
 ### F3 — M — Inspection mode silently disables on permission loss; the triggering click then mutates the world
 
@@ -133,6 +141,9 @@ async paths.
 *Recommendation:* unify on the explicit message (it is already authored and
 translated); silent-drop is defensible as an anti-confirmation measure, but
 the inconsistency itself confuses admins debugging access grants.
+
+*Resolved (issue #174):* `deliver` now sends `permission.result_revoked`
+when the recheck fails, matching the other two async paths.
 
 ### F5 — L — Flow-browser page turns have no visible loading state
 
@@ -242,8 +253,8 @@ Ordered by severity; each is a bounded change except F3, which touches
 listener semantics and needs a documented decision on click consumption.
 
 1. ~~F3 — inspect revocation notice + click-consumption decision~~ (resolved, #173).
-2. F2 — user-facing timeout/cancellation message on the async path.
-3. F1 — acceptance feedback for interactive queries.
-4. F4 — unify revoked-permission result behavior.
+2. ~~F2 — user-facing timeout/cancellation message on the async path~~ (resolved, #174).
+3. ~~F1 — acceptance feedback for interactive queries~~ (resolved, #174).
+4. ~~F4 — unify revoked-permission result behavior~~ (resolved, #174).
 5. F5 — visible in-menu page loading (or remove the dead suffix).
 6. F6/F7/F10 — copy and affordance polish.

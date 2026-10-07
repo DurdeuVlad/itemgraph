@@ -253,15 +253,28 @@ public final class QueryDispatcher {
         } catch (RejectedExecutionException e) {
             return rejectQueue(source);
         }
-        ScheduledFuture<?> playerTimeout = source.getEntity() instanceof ServerPlayer
-                ? schedulePlayerTimeout(cancellation) : null;
+        ScheduledFuture<?> scheduledTimeout = null;
+        if (source.getEntity() instanceof ServerPlayer) {
+            try {
+                scheduledTimeout = schedulePlayerTimeout(cancellation);
+            } catch (RejectedExecutionException stopping) {
+                // The deadline scheduler is gone during server shutdown; the query still
+                // delivers normally — there is just nothing left to time out.
+                LOGGER.warn("ItemGraph query '{}' accepted without a timeout deadline: the scheduler is stopping", label);
+            }
+        }
+        final ScheduledFuture<?> playerTimeout = scheduledTimeout;
+        if (source.getEntity() instanceof ServerPlayer) {
+            source.sendSuccess(() -> Component.literal(
+                    ItemGraphLanguage.text("query.accepted", "[ItemGraph] Query accepted; results will appear in chat shortly.")), false);
+        }
 
         if (server != null && Thread.currentThread() == serverThread && source.getEntity() == null) {
             source.sendSuccess(() -> Component.literal(
                     ItemGraphLanguage.text("query.accepted_log", "[ItemGraph] Query accepted; completed results will be written to the server log.")), false);
             future.whenComplete((output, throwable) -> {
                 cancelTimeout(playerTimeout);
-                deliver(source, server, serverThread, requiredPermissions, label, output, throwable);
+                deliver(source, server, serverThread, requiredPermissions, label, output, throwable, cancellation);
             });
             return 1;
         }
@@ -296,7 +309,8 @@ public final class QueryDispatcher {
                 cancellation.cancel();
                 future.cancel(true);
                 LOGGER.warn("ItemGraph query '{}' timed out on synchronous worker", label);
-                source.sendFailure(Component.literal(QueryFormatter.queryFailed(ItemGraphLanguage.text("query.timed_out", "the query timed out"))));
+                source.sendFailure(Component.literal(QueryFormatter.queryFailed(ItemGraphLanguage.text("query.timed_out",
+                        "the query timed out; narrow the time window, filters, or limit and retry"))));
                 return 0;
             } catch (Exception e) {
                 Throwable cause = unwrap(e);
@@ -308,7 +322,7 @@ public final class QueryDispatcher {
 
         future.whenComplete((output, throwable) -> {
             cancelTimeout(playerTimeout);
-            deliver(source, server, serverThread, requiredPermissions, label, output, throwable);
+            deliver(source, server, serverThread, requiredPermissions, label, output, throwable, cancellation);
         });
 
         return 1;
@@ -467,6 +481,7 @@ public final class QueryDispatcher {
                     if (cancellation.isCancelled()) {
                         throw new SQLException("query cancelled before execution began");
                     }
+                    cancellation.markStarted();
                     result = query.run(cancellation.instrument(conn));
                     if (!cancellation.finish()) {
                         throw new SQLException("query cancelled before completion");
@@ -491,7 +506,8 @@ public final class QueryDispatcher {
     }
 
     private static void deliver(CommandSourceStack source, MinecraftServer server, Thread serverThread,
-                                List<String> permissionNodes, String label, QueryOutput output, Throwable throwable) {
+                                List<String> permissionNodes, String label, QueryOutput output, Throwable throwable,
+                                QueryCancellation cancellation) {
         if (server == null) {
             LOGGER.warn("Dropping /ig {} result: the command source has no server.", label);
             return;
@@ -499,8 +515,11 @@ public final class QueryDispatcher {
 
         // The hop back onto the server thread. Everything below this line runs on it.
         server.execute(() -> {
-            if (Thread.currentThread() != serverThread || !canStillReport(source, server)
-                    || !authorizedFor(source, permissionNodes)) {
+            if (Thread.currentThread() != serverThread || !canStillReport(source, server)) {
+                return;
+            }
+            if (!authorizedFor(source, permissionNodes)) {
+                source.sendFailure(Component.literal(ItemGraphLanguage.text("permission.result_revoked", "[ItemGraph] You no longer have permission to view this ItemGraph result.")));
                 return;
             }
             boolean entityless = source.getEntity() == null;
@@ -511,7 +530,8 @@ public final class QueryDispatcher {
                 Throwable cause = unwrap(throwable);
                 LOGGER.error("ItemGraph query '{}' failed", label, cause);
                 if (!entityless) {
-                    source.sendFailure(Component.literal(QueryFormatter.queryFailed(callerFailureMessage(label, cause))));
+                    source.sendFailure(Component.literal(QueryFormatter.queryFailed(
+                            callerFailureMessage(label, cause, cancellation))));
                 }
                 return;
             }
@@ -545,6 +565,23 @@ public final class QueryDispatcher {
             return "status query failed; inspect the server log for connection details";
         }
         return String.valueOf(cause.getMessage());
+    }
+
+    /**
+     * Maps a failed async query to caller-facing text. A dispatcher-fired timeout is
+     * reported as a timeout — distinguishing a query that never left the worker queue
+     * from one cancelled mid-execution — instead of leaking the JDBC cancellation
+     * sentinel message. Other failures keep the underlying cause text.
+     */
+    static String callerFailureMessage(String label, Throwable cause, QueryCancellation cancellation) {
+        if (cancellation != null && cancellation.wasTimedOut()) {
+            return cancellation.timedOutInQueue()
+                    ? ItemGraphLanguage.text("query.timed_out_queued",
+                            "the query waited too long in the worker queue; retry shortly")
+                    : ItemGraphLanguage.text("query.timed_out",
+                            "the query timed out; narrow the time window, filters, or limit and retry");
+        }
+        return callerFailureMessage(label, cause);
     }
 
     static boolean authorizedFor(CommandSourceStack source, List<String> permissionNodes) {
@@ -690,7 +727,7 @@ public final class QueryDispatcher {
     }
 
     private static ScheduledFuture<?> schedulePlayerTimeout(QueryCancellation cancellation) {
-        return queryTimeoutExecutor().schedule(cancellation::cancel,
+        return queryTimeoutExecutor().schedule(cancellation::cancelTimedOut,
                 PLAYER_QUERY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
 
@@ -766,10 +803,27 @@ public final class QueryDispatcher {
         private SQLiteConnection activeConnection;
         private volatile boolean cancelled;
         private boolean finished;
+        private volatile boolean started;
+        private volatile boolean timedOut;
+        private volatile boolean timedOutInQueue;
         private final Set<Statement> activeStatements = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
         boolean isCancelled() {
             return cancelled;
+        }
+
+        /** Called once just before the query body runs, so a deadline that fires during connection setup still counts as queue time. */
+        void markStarted() {
+            started = true;
+        }
+
+        boolean wasTimedOut() {
+            return timedOut;
+        }
+
+        /** True when the timeout fired while the query still waited in the worker queue. */
+        boolean timedOutInQueue() {
+            return timedOutInQueue;
         }
 
         synchronized boolean finish() {
@@ -852,6 +906,13 @@ public final class QueryDispatcher {
                 activeConnection = null;
             }
             activeStatements.clear();
+        }
+
+        /** Dispatcher-fired deadline; records whether execution had begun so callers can phrase the timeout correctly. */
+        synchronized void cancelTimedOut() {
+            timedOut = true;
+            timedOutInQueue = !started;
+            cancel();
         }
 
         synchronized void cancel() {

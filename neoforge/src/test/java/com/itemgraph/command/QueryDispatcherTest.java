@@ -440,7 +440,7 @@ class QueryDispatcherTest {
         assertTrue(returnedWithoutBlocking, "player command dispatch must not block off-thread");
         assertEquals(1, resultCode.get());
         assertTrue(callbackQueued.await(5, java.util.concurrent.TimeUnit.SECONDS));
-        verify(source, never()).sendSuccess(any(), anyBoolean());
+        verify(source, times(1)).sendSuccess(any(), anyBoolean());
         verify(source, never()).sendFailure(any());
     }
 
@@ -624,7 +624,7 @@ class QueryDispatcherTest {
     }
 
     @Test
-    void testTextQueryRechecksPermissionBeforeDelivery(@TempDir Path tempDir) throws Exception {
+    void revokedTextQueryResultReportsRevocationInsteadOfSilentDrop(@TempDir Path tempDir) throws Exception {
         DatabaseManager.getInstance().initialize(tempDir.resolve("permission-revoked-query.db"));
         CommandSourceStack source = mock(CommandSourceStack.class);
         MinecraftServer server = mock(MinecraftServer.class);
@@ -654,8 +654,17 @@ class QueryDispatcherTest {
         traceAllowed.set(false);
         queuedTask.get().run();
 
-        verify(source, never()).sendSuccess(any(), anyBoolean());
-        verify(source, never()).sendFailure(any());
+        ArgumentCaptor<Component> failures = ArgumentCaptor.forClass(Component.class);
+        verify(source).sendFailure(failures.capture());
+        assertTrue(failures.getValue().getString().contains("no longer have permission"),
+                "a revoked result must be reported instead of silently dropped");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.function.Supplier<Component>> successes =
+                ArgumentCaptor.forClass(java.util.function.Supplier.class);
+        verify(source, times(1)).sendSuccess(successes.capture(), anyBoolean());
+        assertFalse(successes.getAllValues().stream().anyMatch(supplier ->
+                        supplier.get().getString().contains("sensitive")),
+                "revoked query output must never reach the player");
     }
 
     @Test
@@ -906,7 +915,7 @@ class QueryDispatcherTest {
         assertTrue(inlineCallbackRan.await(5, java.util.concurrent.TimeUnit.SECONDS));
         verify(source, atLeastOnce()).getEntity();
         verify(source, never()).hasPermission(2);
-        verify(source, never()).sendSuccess(any(), anyBoolean());
+        verify(source, times(1)).sendSuccess(any(), anyBoolean());
         verify(source, never()).sendFailure(any());
     }
 
@@ -984,6 +993,163 @@ class QueryDispatcherTest {
         verify(source).sendFailure(failure.capture());
         assertTrue(failure.getValue().getString().contains("queue is full"));
         releaseWorker.countDown();
+    }
+
+    @Test
+    void playerQueryGetsAcceptedMessageBeforeAsyncResult(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("player-accepted.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        CountDownLatch callbackQueued = new CountDownLatch(1);
+        AtomicReference<Runnable> queuedTask = new AtomicReference<>();
+        List<String> successMessages = new CopyOnWriteArrayList<>();
+        Thread serverThread = Thread.currentThread();
+
+        when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(player);
+        when(player.hasDisconnected()).thenReturn(false);
+        when(server.getRunningThread()).thenReturn(serverThread);
+        when(server.isStopped()).thenReturn(false);
+        doAnswer(invocation -> {
+            queuedTask.set(invocation.getArgument(0));
+            callbackQueued.countDown();
+            return null;
+        }).when(server).execute(any(Runnable.class));
+        doAnswer(invocation -> {
+            java.util.function.Supplier<Component> message = invocation.getArgument(0);
+            successMessages.add(message.get().getString());
+            return null;
+        }).when(source).sendSuccess(any(), anyBoolean());
+
+        assertEquals(1, QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "player-query", conn ->
+                QueryOutput.found(List.of("result line"))));
+        assertFalse(successMessages.isEmpty(), "the player must see that the query was accepted");
+        assertTrue(successMessages.get(0).contains("accepted"));
+        assertTrue(callbackQueued.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        queuedTask.get().run();
+        assertEquals("result line", successMessages.get(1));
+    }
+
+    @Test
+    void playerExecutionTimeoutReportsTimeoutInsteadOfJdbcCancellation(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("player-exec-timeout.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        CountDownLatch queryStarted = new CountDownLatch(1);
+        CountDownLatch releaseQuery = new CountDownLatch(1);
+        CountDownLatch callbackQueued = new CountDownLatch(1);
+        AtomicReference<Runnable> queuedTask = new AtomicReference<>();
+        Thread serverThread = Thread.currentThread();
+
+        when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(player);
+        when(player.hasDisconnected()).thenReturn(false);
+        when(server.getRunningThread()).thenReturn(serverThread);
+        when(server.isStopped()).thenReturn(false);
+        doAnswer(invocation -> {
+            queuedTask.set(invocation.getArgument(0));
+            callbackQueued.countDown();
+            return null;
+        }).when(server).execute(any(Runnable.class));
+
+        assertEquals(1, QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "player-timeout", conn -> {
+            queryStarted.countDown();
+            try {
+                releaseQuery.await(30, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new SQLException(e);
+            }
+            return QueryOutput.found(List.of("late result"));
+        }));
+        assertTrue(queryStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        // Hold the query past the five-second dispatcher deadline so the timeout fires mid-execution.
+        Thread.sleep(6_000);
+        releaseQuery.countDown();
+        assertTrue(callbackQueued.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        queuedTask.get().run();
+
+        ArgumentCaptor<Component> failures = ArgumentCaptor.forClass(Component.class);
+        verify(source).sendFailure(failures.capture());
+        String message = failures.getValue().getString();
+        assertTrue(message.contains("timed out"), message);
+        assertTrue(message.contains("retry"), message);
+        assertFalse(message.contains("cancelled"), message);
+    }
+
+    @Test
+    void queuedPlayerQueryTimeoutReportsQueueWait(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("player-queue-timeout.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        CountDownLatch occupierStarted = new CountDownLatch(1);
+        CountDownLatch releaseOccupier = new CountDownLatch(1);
+        CountDownLatch callbacksQueued = new CountDownLatch(2);
+        List<Runnable> queuedTasks = new CopyOnWriteArrayList<>();
+        Thread serverThread = Thread.currentThread();
+
+        when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(player);
+        when(player.hasDisconnected()).thenReturn(false);
+        when(server.getRunningThread()).thenReturn(serverThread);
+        when(server.isStopped()).thenReturn(false);
+        doAnswer(invocation -> {
+            queuedTasks.add(invocation.getArgument(0));
+            callbacksQueued.countDown();
+            return null;
+        }).when(server).execute(any(Runnable.class));
+
+        // The first query occupies the single worker past the dispatcher deadline.
+        assertEquals(1, QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "occupier", conn -> {
+            occupierStarted.countDown();
+            try {
+                releaseOccupier.await(30, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new SQLException(e);
+            }
+            return QueryOutput.found(List.of("occupier done"));
+        }));
+        assertTrue(occupierStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        // The second query waits in the worker queue while the first blocks.
+        assertEquals(1, QueryDispatcher.dispatch(source, ItemGraphPermissions.COMMAND, "queued", conn ->
+                QueryOutput.found(List.of("queued done"))));
+        Thread.sleep(6_000);
+        releaseOccupier.countDown();
+        assertTrue(callbacksQueued.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        queuedTasks.forEach(Runnable::run);
+
+        ArgumentCaptor<Component> failures = ArgumentCaptor.forClass(Component.class);
+        verify(source, times(2)).sendFailure(failures.capture());
+        List<String> messages = failures.getAllValues().stream().map(Component::getString).toList();
+        assertTrue(messages.get(0).contains("timed out"), messages.get(0));
+        assertTrue(messages.get(1).contains("waited too long in the worker queue"),
+                "a deadline reached while still queued must say so: " + messages.get(1));
+    }
+
+    @Test
+    void callerFailureMessageMapsDispatcherTimeouts() {
+        QueryDispatcher.QueryCancellation executionTimeout = new QueryDispatcher.QueryCancellation();
+        executionTimeout.markStarted();
+        executionTimeout.cancelTimedOut();
+        assertEquals("the query timed out; narrow the time window, filters, or limit and retry",
+                QueryDispatcher.callerFailureMessage("trace",
+                        new SQLException("query cancelled before completion"), executionTimeout));
+
+        QueryDispatcher.QueryCancellation queueTimeout = new QueryDispatcher.QueryCancellation();
+        queueTimeout.cancelTimedOut();
+        assertEquals("the query waited too long in the worker queue; retry shortly",
+                QueryDispatcher.callerFailureMessage("trace",
+                        new SQLException("query cancelled before execution began"), queueTimeout));
+
+        QueryDispatcher.QueryCancellation plainCancel = new QueryDispatcher.QueryCancellation();
+        plainCancel.cancel();
+        SQLException realFailure = new SQLException("syntax error near WHERE");
+        assertEquals("syntax error near WHERE",
+                QueryDispatcher.callerFailureMessage("trace", realFailure, plainCancel));
     }
 
     @Test
