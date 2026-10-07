@@ -199,6 +199,10 @@ reasonable, but there is no compact mode.
 mode (count + top N + "page for more") is the natural knob — do not remove
 per-row hovers, they carry evidence identity.
 
+*Resolved as documented (issue #177):* `docs/QUERY_MODEL.md` records the
+trade-off and the designated summary-mode remedy next to the output
+contract.
+
 ### F9 — L — Help topics are English-only in localized catalogs
 
 `CommandHelp.initializeMessages` registers all topic bodies through
@@ -213,6 +217,13 @@ mechanism already exists to measure this gap.
 English, clients need no assets) — record it as a known localization limit
 in `docs/CONFIGURATION.md` and consider translating the overview and
 `journeys`/`permissions` topics first if coverage is ever extended.
+
+*Resolved as documented (issue #177):* `docs/CONFIGURATION.md` states the
+scope precisely next to `general.language` — 214 keys per locale, exactly
+nine translated `source.*` hover labels, English `sourceText` fallback for
+the 36 topic bodies and overview lines. The same QUERY_MODEL pass records
+that `/ig page` requires a player entity (`page.player_required`), so
+console/RCON sources cannot page.
 
 ### F10 — I — Unknown-help-topic error dumps ~35 topics on one line
 
