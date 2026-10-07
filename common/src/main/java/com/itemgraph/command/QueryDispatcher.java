@@ -334,7 +334,13 @@ public final class QueryDispatcher {
      */
     static <T> CompletableFuture<T> submitData(DataQuery<T> query) {
         QueryCancellation cancellation = new QueryCancellation();
-        ScheduledFuture<?> timeout = schedulePlayerTimeout(cancellation);
+        ScheduledFuture<?> timeout;
+        try {
+            timeout = schedulePlayerTimeout(cancellation);
+        } catch (RejectedExecutionException stopping) {
+            timeout = null;
+            LOGGER.warn("ItemGraph data query accepted without a timeout deadline: the scheduler is stopping");
+        }
         CompletableFuture<T> future;
         try {
             future = CompletableFuture.supplyAsync(
@@ -343,7 +349,8 @@ public final class QueryDispatcher {
             cancelTimeout(timeout);
             throw rejected;
         }
-        future.whenComplete((result, failure) -> cancelTimeout(timeout));
+        ScheduledFuture<?> scheduledTimeout = timeout;
+        future.whenComplete((result, failure) -> cancelTimeout(scheduledTimeout));
         return future;
     }
 
@@ -393,12 +400,24 @@ public final class QueryDispatcher {
         }
         Thread serverThread = server.getRunningThread();
         QueryCancellation cancellation = new QueryCancellation();
+        ScheduledFuture<?> scheduledTimeout;
+        try {
+            scheduledTimeout = schedulePlayerTimeout(cancellation);
+        } catch (RejectedExecutionException stopping) {
+            // The deadline scheduler is gone during server shutdown; the query still
+            // delivers normally — there is just nothing left to time out.
+            scheduledTimeout = null;
+            LOGGER.warn("ItemGraph data query '{}' accepted without a timeout deadline: the scheduler is stopping", label);
+        }
+        final ScheduledFuture<?> timeout = scheduledTimeout;
         CompletableFuture<T> future;
         try {
             future = CompletableFuture.supplyAsync(() -> executeData(query, cancellation), queryExecutor());
         } catch (RejectedExecutionException e) {
+            cancelTimeout(timeout);
             return rejectQueue(source);
         }
+        future.whenComplete((result, throwable) -> cancelTimeout(timeout));
         future.whenComplete((result, throwable) -> server.execute(() -> {
             if (Thread.currentThread() != serverThread) {
                 failureConsumer.run();
@@ -422,7 +441,7 @@ public final class QueryDispatcher {
                     cause = cause.getCause();
                 }
                 LOGGER.error("ItemGraph data query '{}' failed", label, cause);
-                source.sendFailure(Component.literal(QueryFormatter.queryFailed(String.valueOf(cause.getMessage()))));
+                source.sendFailure(Component.literal(QueryFormatter.queryFailed(callerFailureMessage(label, cause, cancellation))));
                 failureConsumer.run();
                 return;
             }

@@ -13,6 +13,14 @@ The project follows a simple pre-1.0 development changelog model.
   deadline is reported as a query timeout or a queue wait instead of leaking
   JDBC cancellation text; and a permission revoked before delivery replaces
   the result with an explicit notice on every async path.
+- **Visible flow-browser loading state** (UX audit F5). While a page turn or
+  detail open is in flight, the open flow-browser menu now shows the pending
+  state: the page label gains the `(loading)` suffix and the paging arrows are
+  greyed out, so controls no longer look live while clicks are gated. GUI data
+  queries now share the five-second deadline used by text queries, and a
+  rejected, failed, stale, or timed-out load restores the previous page rather
+  than leaving the menu stuck greyed. The `browser.loading_suffix` catalog
+  value now carries its intended leading space via a `\ ` escape.
 
 ### Fixed
 

@@ -159,6 +159,15 @@ page label / disable controls in the current menu) or drop the dead
 `loading_suffix` branch; a chat "loading page…" line per turn is a
 lower-effort alternative.
 
+*Resolved (issue #175):* `markMenuLoading` greys the paging controls and
+appends `browser.loading_suffix` to the page label inside the open menu as
+soon as a page/detail request is dispatched, mutating slots in place so the
+`expectedMenu` identity check still applies. `dispatchData` now carries the
+same five-second deadline as text queries, and a rejected, failed, stale, or
+timed-out load re-renders the previous page via `restoreMenuAfterFailedLoad`
+instead of leaving the menu stuck greyed. A `\ ` escape in the catalog gives
+the suffix its intended leading space.
+
 ### F6 — L — `/ig inspect on` omits the disable hint present in the toggle path
 
 `inspect.enabled_full` (toggle path) ends with "use /ig inspect off to
