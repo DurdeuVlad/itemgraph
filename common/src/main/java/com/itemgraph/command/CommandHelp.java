@@ -61,8 +61,48 @@ public final class CommandHelp {
         return List.copyOf(withPermission);
     }
 
-    static String validTopicsText() {
-        return String.join(", ", TOPIC_NAMES);
+    /**
+     * Returns up to five topic names nearest to the typed value — substring matches first,
+     * then names within a small edit distance — so an unknown-topic message can point at
+     * recovery candidates instead of dumping every topic.
+     */
+    static String closestTopicsText(String topic) {
+        String normalized = normalize(topic);
+        if (normalized.isEmpty()) {
+            return "";
+        }
+        List<String> substring = TOPIC_NAMES.stream()
+                .filter(name -> name.contains(normalized) || normalized.contains(name))
+                .limit(5)
+                .toList();
+        if (!substring.isEmpty() || normalized.length() < 4) {
+            return String.join(", ", substring);
+        }
+        return TOPIC_NAMES.stream()
+                .map(name -> Map.entry(name, editDistance(name, normalized)))
+                .filter(entry -> entry.getValue() <= 3)
+                .sorted(Map.Entry.comparingByValue())
+                .limit(5)
+                .map(Map.Entry::getKey)
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    private static int editDistance(String a, String b) {
+        int[] costs = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) {
+            costs[j] = j;
+        }
+        for (int i = 1; i <= a.length(); i++) {
+            costs[0] = i;
+            int previous = i - 1;
+            for (int j = 1; j <= b.length(); j++) {
+                int current = costs[j];
+                costs[j] = Math.min(Math.min(costs[j - 1] + 1, costs[j] + 1),
+                        previous + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1));
+                previous = current;
+            }
+        }
+        return costs[b.length()];
     }
 
     private static String normalize(String topic) {

@@ -8,6 +8,11 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Copy and affordance polish** (UX audit F6+F7+F10). `/ig inspect on` now
+  repeats the disable hint from the toggle path; `[Go to ...]` links disclose
+  their teleport consequence on hover; result sets past the eight-link cap
+  end with a "…N more locations not shown" line; and an unknown `/ig help`
+  topic suggests the closest topic names instead of dumping all 36.
 - **Player-facing async query feedback** (UX audit F1+F2+F4). `/ig` text
   queries now acknowledge acceptance in chat; the dispatcher's five-second
   deadline is reported as a query timeout or a queue wait instead of leaking

@@ -261,8 +261,10 @@ details span more than one page, and Back to return to the timeline.
 For `/ig event`, `/ig explain`, `/ig trace`, and paged history results, hover a chat row for
 evidence class, safe item identity, canonical fingerprint hash when available, event kind,
 UTC time, and recorded endpoints. Click `[Go to ...]` only when you want to move your own
-player to a recorded spatial endpoint; the link expires after two minutes, works once, and
-requires the same query permissions when clicked. Console results remain plain text.
+player to a recorded spatial endpoint — the link's hover says exactly that. It expires
+after two minutes, works once, and requires the same query permissions when clicked. At
+most eight links render per result; a closing line reports any recorded locations that
+were not shown. Console results remain plain text.
 
 ## 6. Read the evidence correctly
 
