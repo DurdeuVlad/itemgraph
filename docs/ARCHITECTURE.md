@@ -403,10 +403,17 @@ the RCON response buffer immediately afterward. Entity-less server-thread source
 receive a synchronous “query accepted” response; completed query lines are written to the
 server log instead of a response buffer that has already been returned.
 
-Player-originated queries have the same five-second per-statement timeout and cancellation
-behavior, but no total wall-clock deadline across a callback that executes several statements.
-A JDBC driver that does not honor statement timeout or cancellation can still occupy the single
-worker; the 64-entry queue remains bounded and rejects additional requests.
+Player-originated queries announce acceptance in chat, then have the same five-second
+per-statement timeout and cancellation behavior. Their dispatcher deadline is a wall-clock
+bound measured from dispatch over queue wait plus execution: a timeout after the query
+body begins is reported as a query timeout, while a timeout before that is reported as a
+queue wait — the internal JDBC cancellation text never reaches the caller. Entity-less
+sources have no dispatcher deadline, only the per-statement JDBC timeout, so a callback
+that executes several statements is not bounded as a whole. A result whose permission is
+revoked before delivery is replaced by an explicit permission-revoked failure on every
+delivery path. A JDBC driver that does not honor statement timeout or cancellation can
+still occupy the single worker; the 64-entry queue remains bounded and rejects additional
+requests.
 
 ### Preview mod-integration API worker
 

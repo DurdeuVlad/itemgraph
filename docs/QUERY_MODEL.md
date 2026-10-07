@@ -120,13 +120,18 @@ worker's writer connection. The shared worker accepts at most 64 waiting queries
 requests receive an explicit queue-full failure. Full rationale and prior art:
 "Query execution: off-thread, reported back on-thread" in `docs/ARCHITECTURE.md`.
 
-A player command returns success as soon as the query is *accepted*; the answer arrives a
-tick or two later. Entity-less commands dispatched on the server thread, including vanilla
-RCON, receive an acceptance message and write completed results to the server log because the
-RCON response buffer is returned with the command. Entity-less off-thread callers can receive
-results synchronously within the five-second buffer timeout. Player queries have a five-second
-SQLite cancellation deadline as well: the progress handler interrupts a selective scan so
-the single query worker cannot be monopolized by one lookup.
+A player command returns success as soon as the query is *accepted* and tells the player so;
+the answer arrives a tick or two later. Entity-less commands dispatched on the server
+thread, including vanilla RCON, receive an acceptance message and write completed results
+to the server log because the RCON response buffer is returned with the command. Entity-less
+off-thread callers can receive results synchronously within the five-second buffer timeout.
+Player queries have a five-second SQLite cancellation deadline measured from dispatch: when
+the deadline fires mid-execution the failure says the query timed out, and when it fires
+before the query body begins — while queued or still opening its connection — the failure
+says it waited too long in the queue — never the raw JDBC cancellation text. The progress handler interrupts a
+selective scan so the single query worker cannot be monopolized by one lookup. If the
+originating permission is revoked before delivery, the completed result is replaced by an
+explicit permission-revoked failure on every async path.
 
 `/ig inspect` changes only per-player volatile state and returns immediately. A left-click
 uses the bounded query worker for an exact-position audit-history page. Right-clicking a

@@ -6,6 +6,14 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Added
+
+- **Player-facing async query feedback** (UX audit F1+F2+F4). `/ig` text
+  queries now acknowledge acceptance in chat; the dispatcher's five-second
+  deadline is reported as a query timeout or a queue wait instead of leaking
+  JDBC cancellation text; and a permission revoked before delivery replaces
+  the result with an explicit notice on every async path.
+
 ### Fixed
 
 - **Inspection-mode denial and revocation handling** (`docs/UX_AUDIT.md` finding F3).
