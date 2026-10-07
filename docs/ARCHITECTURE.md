@@ -769,7 +769,11 @@ ItemGraph JDBC connection.
   accepted query consumes the click and prevents the normal container GUI and held-item
   use path; a click that detects a revoked `itemgraph.command.inspect` grant is also
   consumed. A rejected query preserves ordinary container interaction.
-- Left-clicks call the bounded exact-position audit-history query. Non-container
+- Left-clicks call the bounded exact-position audit-history query once per dig:
+  Fabric's `AttackBlockCallback` mixin already filters to `START_DESTROY_BLOCK`
+  (`fabric-events-interaction-v0` `ServerPlayerInteractionManagerMixin` ignores
+  STOP/ABORT), matching NeoForge's `Action.START` filter — one dispatch per
+  left-click on both loaders, never one per action packet. Non-container
   right-clicks also query block history: supported functional blocks select the clicked
   block, while ordinary blocks select the adjacent block on the clicked face. When a
   block-history request is not accepted, a missing `itemgraph.audit` grant consumes the
