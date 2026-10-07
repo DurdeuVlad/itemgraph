@@ -10,11 +10,11 @@ behavior are listed in [Security and permissions](SECURITY_AND_PERMISSIONS.md).
 
 ItemGraph targets Minecraft 1.21.1. Choose the file for the server's loader; NeoForge is
 the primary loader and Fabric is also supported. Install ItemGraph on the server only;
-players do not need the mod on their clients. Use the standard loader file for standalone
-ItemGraph. A GriefLogger-compatible file is only for the exact GriefLogger release named
-by that file and is not required for standalone capture. Do not install both ItemGraph
-variants together. Download the approved release file, place it in the server's `mods/`
-folder, and restart. Current file names and compatibility targets are listed in the
+players do not need the mod on their clients. ItemGraph replaces GriefLogger: remove the
+GriefLogger mod jar before installing — both loaders declare the conflict in metadata and
+the server will refuse to boot with both mods present. Keep the GriefLogger database file
+for the optional read-only history import described in the README. Download the approved
+release file, place it in the server's `mods/` folder, and restart. Current file names and compatibility targets are listed in the
 [README](../README.md).
 
 Before running a command, make sure your permission provider has not explicitly denied

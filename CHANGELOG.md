@@ -6,18 +6,31 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Removed
+
+- **GriefLogger-compatible artifact variants retired.** ItemGraph replaces
+  GriefLogger and no longer ships `-grieflogger-compatible` jars or declares
+  the GriefLogger mod a usable companion. Both loaders now declare the
+  GriefLogger mod a hard conflict (NeoForge `type="incompatible"`, Fabric
+  `breaks`), store listings mark the relation `incompatible`, and releases
+  publish only the two standard jars. Migration path: remove the GriefLogger
+  mod jar, keep its `database.db`, and use the unchanged opt-in read-only
+  import (`grieflogger_integration_enabled` + `grieflogger_database_path`).
+
 ## [0.4.0-beta.1] — 2026-10-06
 
 First public beta of the ItemGraph 0.4 line. The standalone GriefLogger
 1.2.10-1.21.1 feature-parity milestone (M8) is complete on both loaders, and
 this release also carries the M9 admin UX, named-permission, privacy, and
 reliability work delivered since 0.3.2. Four artifacts are published:
-standard and `-grieflogger-compatible` jars for NeoForge and Fabric. Use the
-standard jar when GriefLogger is absent; the compatible variants omit
-ItemGraph's embedded SQLite driver for servers still running GriefLogger
-1.2.10-1.21.1. ItemGraph is pre-1.0 and this build is a beta: the native-only
-production cutover (M10, issues #71/#72) and the open M9 extension issues are
-explicitly not claimed here.
+standard and `-grieflogger-compatible` jars for NeoForge and Fabric. The
+`-grieflogger-compatible` jars are the last coexistence artifacts — they are
+deprecated, and from the next release ItemGraph ships only the standard jars
+and declares itself incompatible with the GriefLogger mod. Prefer the
+standard jar and remove the GriefLogger mod; keep its `database.db` file for
+the optional read-only import. ItemGraph is pre-1.0 and this build is a beta:
+the native-only production cutover (M10, issues #71/#72) and the open M9
+extension issues are explicitly not claimed here.
 
 ### Upgrade notes
 
@@ -39,10 +52,12 @@ explicitly not claimed here.
 ### For beta testers
 
 Install on a test server, not production. ItemGraph is server-side; players
-need no mod. Use the standard jar unless the server runs GriefLogger
-1.2.10-1.21.1 — in that case use the `-grieflogger-compatible` jar. Fabric
-also needs Fabric API; NeoForge 21.1.x needs no extra dependency. First start
-migrates the database to schema V21 (automatic; back up first).
+need no mod. Use the standard jar and remove the GriefLogger mod jar if the
+server still runs it — ItemGraph replaces it, and this beta's
+`-grieflogger-compatible` jars are the last coexistence artifacts. To keep
+GriefLogger history, retain its `database.db` file for the import in step 10.
+Fabric also needs Fabric API; NeoForge 21.1.x needs no extra dependency.
+First start migrates the database to schema V21 (automatic; back up first).
 
 Worth exercising, roughly in order:
 

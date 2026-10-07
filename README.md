@@ -8,26 +8,25 @@ Its purpose is to reconstruct plausible item-type and stack-quantity movement ac
 
 **ItemGraph runs independently of GriefLogger.** Native capture, storage, reconstruction, and native queries require neither the GriefLogger jar nor its database. A separate read-only migration bridge can import legacy evidence when explicitly enabled. Native replacement coverage is tracked in [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md). Fabric and NeoForge use loader-specific event adapters over the same ItemGraph ledger.
 
-Each loader has a standard build and a GriefLogger-compatible build. For GriefLogger
-`1.2.10-1.21.1`, install the artifact ending in
-`-<loader>-grieflogger-compatible.jar`; it omits only ItemGraph's SQLite dependency,
-keeps the MariaDB Connector/J driver for ItemGraph-owned MySQL/MariaDB storage, and
-requires that exact GriefLogger release. Use the standard loader jar when GriefLogger
-is absent. The four release files are:
+ItemGraph **replaces** GriefLogger — the two mods must not be installed
+together, and each loader declares the conflict in its metadata (NeoForge
+`incompatible`, Fabric `breaks`). Both jars embed a SQLite driver in a way the
+module system cannot deduplicate, so coexistence was never a stable state.
+Releases ship exactly two files:
 
 - `itemgraph-<version>-fabric.jar`
-- `itemgraph-<version>-fabric-grieflogger-compatible.jar`
 - `itemgraph-<version>-neoforge.jar`
-- `itemgraph-<version>-neoforge-grieflogger-compatible.jar`
 
-The compatible variants are a migration bridge while the M8 parity gates remain
-open. ItemGraph will switch to the standard loader jar as the only supported
-artifact only after every M8 feature-parity gate and the separate M10 operator
-cutover checks in [the cutover plan](docs/GRIEFLOGGER_PARITY.md) are approved.
-Those later operational checks do not make the GriefLogger JAR or database
-runtime dependencies. That cutover retires the
-GriefLogger jar dependency; it does not change the read-only importer or delete
-the retained source database copy.
+To migrate a server that runs GriefLogger: stop the server, remove the
+GriefLogger mod jar, keep its `database.db` file, install the standard
+ItemGraph jar, and point `grieflogger_database_path` at the retained database
+with `grieflogger_integration_enabled=true` to import the history read-only.
+Only the GriefLogger `1.2.10-1.21.1` schema is a tested import source; other
+versions are rejected cleanly rather than mis-imported.
+
+The `0.4.0-beta.1` release additionally published two
+`-grieflogger-compatible` jars as the final coexistence artifacts; they are
+deprecated and no later release ships them.
 
 The legacy bridge is disabled by default and does not probe `database.db`. To
 use it during migration, set NeoForge `general.grieflogger_integration_enabled=true`

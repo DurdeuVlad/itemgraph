@@ -1086,7 +1086,12 @@ was present after stop, but no pre-start hash was captured; this is not a hash-v
 no-write claim. Standalone live movement scenarios remain blocked until GriefLogger can be
 isolated without modifying its existing database.
 
-## GriefLogger-compatible artifact smoke test (isolated RustiCraft clone)
+## GriefLogger-compatible artifact smoke test (isolated RustiCraft clone) — superseded
+
+> Superseded: the `-grieflogger-compatible` artifacts were retired after
+> `0.4.0-beta.1`; ItemGraph now declares the GriefLogger mod incompatible on
+> both loaders. This section is retained as the historical record of the
+> 0.3.x coexistence variant and no longer describes a shipping artifact.
 
 On 2026-09-28, `java -classpath gradle/wrapper/gradle-wrapper.jar
 org.gradle.wrapper.GradleWrapperMain clean build verifyGriefLoggerCompatibleJar`

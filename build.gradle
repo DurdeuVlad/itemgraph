@@ -28,5 +28,5 @@ subprojects {
 tasks.named('build') {
     dependsOn ':core:build', ':core:verifyCoreArchitecture', ':common:build', ':common:verifySharedLoaderBoundary',
             ':fabric:build', ':fabric:verifyFabricJar',
-            ':neoforge:build', ':neoforge:verifyGriefLoggerCompatibleJar'
+            ':neoforge:build', ':neoforge:verifyNeoForgeJar'
 }

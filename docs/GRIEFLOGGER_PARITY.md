@@ -504,12 +504,11 @@ classified as a strict ItemGraph extension to preserve vanilla-client support.
 
 This is a separate deployment procedure, not an M8 feature-parity test.
 ItemGraph feature conformance is researched and tested locally with ItemGraph
-alone. Any later operator decision to retire the compatible artifacts requires
-the separate approval and deployment evidence below.
-Until then, the standard and compatible loader jars remain distinct so an
-operator can choose a dependency-safe migration path. After cutover, the
-standard ItemGraph jar is the only supported runtime artifact; GriefLogger is
-not a runtime dependency. The read-only importer remains available for a
+alone. The operator decision has since been taken: ItemGraph replaces
+GriefLogger outright, so the `-grieflogger-compatible` artifacts were retired
+and both loaders declare the GriefLogger mod incompatible. The standard
+ItemGraph jar is the only supported runtime artifact; GriefLogger is not a
+runtime dependency. The read-only importer remains available for a
 checksummed historical database when an operator explicitly configures it.
 
 1. Before cutover, stop the staging server and make an immutable, checksummed

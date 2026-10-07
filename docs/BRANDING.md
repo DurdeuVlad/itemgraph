@@ -29,11 +29,10 @@ ItemGraph is the standalone replacement product for GriefLogger. Normal
 operation must capture, retain, query, and reconstruct ItemGraph-owned evidence
 without a GriefLogger mod, database, or process. The GriefLogger database reader
 is an optional, read-only path for importing historical evidence during
-migration; it is not part of native capture or storage. Any temporary
-GriefLogger-compatible artifact exists only for servers that deliberately run
-both mods during migration. The end state is the standard ItemGraph artifact
-alone, after the documented native feature-parity and operator cutover gates
-are met.
+migration; it is not part of native capture or storage. The GriefLogger mod
+itself is declared incompatible on both loaders — ItemGraph and GriefLogger
+are never installed together, and the standard ItemGraph artifact alone is the
+only supported build.
 
 ItemGraph should replace GriefLogger's useful operator workflows with
 ItemGraph-owned implementations and provide explainable item-flow reconstruction
