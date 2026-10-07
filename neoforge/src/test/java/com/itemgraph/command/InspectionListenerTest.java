@@ -54,7 +54,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void explicitInspectDenialClearsActiveInspectionAndDoesNotOpenHistory() {
+    void explicitInspectDenialDisablesModeNotifiesAndConsumesClick() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);
@@ -65,11 +65,14 @@ class InspectionListenerTest {
         AtomicInteger opens = new AtomicInteger();
         InspectionListener inspector = new InspectionListener(service,
                 (p, targetLevel, pos) -> { opens.incrementAndGet(); return 1; });
+        PlayerInteractEvent.LeftClickBlock event = leftClick(player, CONTAINER_POS);
 
-        inspector.onLeftClickBlock(leftClick(player, CONTAINER_POS));
+        inspector.onLeftClickBlock(event);
 
         assertFalse(service.isEnabled(playerUuid));
+        assertTrue(event.isCanceled(), "the revocation-detecting click must not break the inspected block");
         assertEquals(0, opens.get(), "the explicit node denial must win even when vanilla level 2 is present");
+        verify(player).sendSystemMessage(any(net.minecraft.network.chat.Component.class));
     }
 
     @Test
@@ -201,7 +204,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void permissionLossDisablesModeWithoutSuppressingVanillaInteraction() {
+    void permissionLossDisablesModeNotifiesAndConsumesDetectionClick() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = player(playerUuid, false);
@@ -215,9 +218,79 @@ class InspectionListenerTest {
             return 1;
         }).onRightClickBlock(event);
 
-        assertFalse(event.isCanceled());
+        assertTrue(event.isCanceled(), "the revocation-detecting click is consumed so nothing mutates unexpectedly");
+        assertEquals(InteractionResult.FAIL, event.getCancellationResult());
         assertFalse(service.isEnabled(playerUuid));
         assertEquals(0, opens.get());
+        var notice = org.mockito.ArgumentCaptor.forClass(net.minecraft.network.chat.Component.class);
+        verify(player).sendSystemMessage(notice.capture());
+        assertTrue(notice.getValue().getString().contains("permission was revoked"),
+                "the revocation notice must explain why inspection stopped");
+    }
+
+    @Test
+    void deniedAuditLeftClickIsConsumedAndPreservesTheBlock() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+        AtomicInteger opens = new AtomicInteger();
+        PlayerInteractEvent.LeftClickBlock event = leftClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> {
+            opens.incrementAndGet();
+            return 0;
+        }).onLeftClickBlock(event);
+
+        assertTrue(event.isCanceled(), "a stable permission denial must not let the click break the block");
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void deniedAuditNonContainerRightClickIsConsumed() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockEntity(CONTAINER_POS)).thenReturn(mock(BlockEntity.class));
+        when(level.getBlockState(CONTAINER_POS)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        when(player.level()).thenReturn(level);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+        AtomicInteger opens = new AtomicInteger();
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> {
+            opens.incrementAndGet();
+            return 0;
+        }).onRightClickBlock(event);
+
+        assertTrue(event.isCanceled(), "a denied non-container right-click must not toggle or place");
+        assertEquals(InteractionResult.FAIL, event.getCancellationResult());
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void deniedAuditContainerRightClickPreservesVanillaAccess() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = serverLevelWithContainer(CONTAINER_POS);
+        when(player.level()).thenReturn(level);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+        AtomicInteger opens = new AtomicInteger();
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> {
+            opens.incrementAndGet();
+            return 0;
+        }).onRightClickBlock(event);
+
+        assertFalse(event.isCanceled(), "rejected container right-clicks still open the chest normally");
+        assertEquals(1, opens.get());
     }
 
     @Test
@@ -292,7 +365,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void rejectedNonContainerRightClickPreservesGameplay() {
+    void transientlyRejectedNonContainerRightClickPreservesGameplay() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);
@@ -342,7 +415,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void rejectedOrdinaryBlockFallbackPreservesGameplay() {
+    void transientlyRejectedOrdinaryBlockFallbackPreservesGameplay() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);
@@ -383,7 +456,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void rejectedLeftClickPreservesBlockBreaking() {
+    void transientlyRejectedLeftClickPreservesBlockBreaking() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);

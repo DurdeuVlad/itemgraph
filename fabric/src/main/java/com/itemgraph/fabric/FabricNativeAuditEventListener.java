@@ -13,6 +13,7 @@ import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.ItemGraphPermissions;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.command.FlowBrowserService;
+import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.query.AuditEventQueryService;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import com.mojang.brigadier.ParseResults;
@@ -27,6 +28,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.ChatType;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -223,7 +225,8 @@ public final class FabricNativeAuditEventListener {
             }
             if (!ItemGraphPermissions.canUse(serverPlayer.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
                 InspectionService.getInstance().clear(serverPlayer.getUUID());
-                return InteractionResult.PASS;
+                notifyInspectionRevoked(serverPlayer);
+                return InteractionResult.FAIL;
             }
             InteractionResult inspectionResult = tryOpenLeftClickInspection(
                     InspectionService.getInstance(), FabricNativeAuditEventListener::openBlockHistory,
@@ -280,8 +283,13 @@ public final class FabricNativeAuditEventListener {
 
     /**
      * Handles the Fabric equivalent of NeoForge's high-priority inspection
-     * listener. All targets use the same exact, mixed-source timeline. A click
-     * is consumed only after the asynchronous read-only request is accepted.
+     * listener. All targets use the same exact, mixed-source timeline. A click is
+     * consumed when its read-only request is accepted, when the request is denied
+     * for a missing permission grant (a stable, already-messaged denial must not
+     * mutate the inspected scene), and when the click itself detects that
+     * {@code itemgraph.command.inspect} was revoked — that click disables the mode,
+     * notifies the player, and is consumed. Transient rejections and all rejected
+     * container right-clicks keep vanilla behavior.
      */
     static InteractionResult tryOpenInspection(InspectionService inspections,
                                                 BlockHistoryOpener blockHistoryOpener,
@@ -307,7 +315,8 @@ public final class FabricNativeAuditEventListener {
         }
         if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
-            return null;
+            notifyInspectionRevoked(player);
+            return InteractionResult.FAIL;
         }
         BlockPos target = BlockInspectionTargets.resolveRightClickTarget(level, pos, face);
         boolean container = level.getBlockEntity(target) instanceof Container;
@@ -317,10 +326,21 @@ public final class FabricNativeAuditEventListener {
         int accepted = container
                 ? containerFlowOpener.open(player, level, inspectionTarget)
                 : blockHistoryOpener.open(player, level, inspectionTarget);
-        return accepted == 0 ? null : InteractionResult.SUCCESS;
+        if (accepted == 0) {
+            // Container right-clicks always pass so a denied flow request still opens
+            // the chest; a denied non-container request is consumed instead.
+            return !container && deniedByMissingGrant(player, ItemGraphPermissions.INSPECT, ItemGraphPermissions.AUDIT)
+                    ? InteractionResult.FAIL : null;
+        }
+        return InteractionResult.SUCCESS;
     }
 
-    /** Left-click inspection applies to every block; consume breaking only after the query is accepted. */
+    /**
+     * Left-click inspection applies to every block. The click is consumed when the
+     * query is accepted, when it is denied for a missing grant (a denied inspection
+     * must not break the block), and when it detects grant revocation; transient
+     * rejections keep vanilla breaking.
+     */
     static InteractionResult tryOpenLeftClickInspection(InspectionService inspections,
                                                           BlockHistoryOpener blockHistoryOpener,
                                                           ServerPlayer player,
@@ -332,9 +352,29 @@ public final class FabricNativeAuditEventListener {
         }
         if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
-            return null;
+            notifyInspectionRevoked(player);
+            return InteractionResult.FAIL;
         }
-        return blockHistoryOpener.open(player, level, pos) == 0 ? null : InteractionResult.SUCCESS;
+        if (blockHistoryOpener.open(player, level, pos) == 0) {
+            return deniedByMissingGrant(player, ItemGraphPermissions.INSPECT, ItemGraphPermissions.AUDIT)
+                    ? InteractionResult.FAIL : null;
+        }
+        return InteractionResult.SUCCESS;
+    }
+
+    /**
+     * Whether an unaccepted inspection request failed on a missing permission grant rather
+     * than a transient rejection. The route's whole node set is re-checked — not only the
+     * downstream grant — so a grant revoked between the listener check and the dispatch
+     * still reads as a stable denial.
+     */
+    private static boolean deniedByMissingGrant(ServerPlayer player, String... permissionNodes) {
+        return !ItemGraphPermissions.canUseAll(player.createCommandSourceStack(), permissionNodes);
+    }
+
+    private static void notifyInspectionRevoked(ServerPlayer player) {
+        player.sendSystemMessage(Component.literal(ItemGraphLanguage.text("inspect.disabled_revoked",
+                "[ItemGraph] Inspection disabled: the itemgraph.command.inspect permission was revoked.")));
     }
 
     private static int openBlockHistory(ServerPlayer player, ServerLevel level, BlockPos pos) {

@@ -337,7 +337,7 @@ public final class CommandHelp {
                 "[ItemGraph] The command and each supported click enforce the same permission check. /ig inspect toggles; /ig inspect on enables; /ig inspect off disables; /ig inspect status reports without changing.",
                 "[ItemGraph] Toggle, status, and click recognition require itemgraph.command.inspect. Block history reads eventType=all and also requires itemgraph.audit; the container flow browser separately requires itemgraph.gui and itemgraph.audit.",
                 "[ItemGraph] While enabled, left-click inspects that block; right-click a Container opens its flow browser; a right-click on a non-container opens paginated block history (ordinary blocks target the block on the clicked face).",
-                "[ItemGraph] The click is consumed only after the read-only request is accepted, so held items are not used and inspection is not transfer evidence. State clears on logout and server stop.",
+                "[ItemGraph] An accepted request consumes the click. A request denied for a missing grant, and a click that detects a revoked inspect permission, is also consumed — denied clicks never break or toggle blocks — while transient rejections and rejected container right-clicks keep vanilla behavior. Inspection is not transfer evidence. State clears on logout and server stop.",
                 "[ItemGraph] Example: /ig inspect on");
         topics.put("inspect", inspect);
         return Map.copyOf(topics);

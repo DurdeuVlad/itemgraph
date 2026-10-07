@@ -989,7 +989,9 @@ Observed checks:
 - `deop IGBotGui` while inspection was enabled cleared the mode on the next click: the
   chest opened vanilla `minecraft:generic_9x3`, `/ig inspect status` was rejected as a
   permission-gated command, and after re-op status reported disabled
-  (`27-deopped-chest-vanilla.png`).
+  (`27-deopped-chest-vanilla.png`). *Note (#173): under current semantics the
+  revocation-detecting click itself is consumed with an "inspection disabled —
+  permission revoked" notice; the vanilla chest opens on the following click.*
 - Reconnect cleanup was verified by enabling inspection, running `client reconnect`, and
   receiving `Container inspection is disabled` from `/ig inspect status` after rejoin.
 - Server-stop cleanup was verified by enabling inspection, stopping with RCON `stop`,

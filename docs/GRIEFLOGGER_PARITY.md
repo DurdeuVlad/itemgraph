@@ -341,8 +341,11 @@ history, so ItemGraph deliberately keeps clicked-position behavior for its
 built-in functional blocks; this is a documented-contract extension to the
 release implementation. ItemGraph also keeps clicked-position support for
 modded `Container` block entities. Unlike GriefLogger,
-ItemGraph consumes a click only after its bounded asynchronous history request
-is accepted, so queue rejection leaves the normal game interaction available.
+ItemGraph consumes a click after its bounded asynchronous history request
+is accepted or when the request is denied for a missing grant — a denied
+inspection must not break or toggle blocks — while transient rejection
+(queue full, database unavailable) leaves the normal game interaction
+available and rejected container right-clicks keep vanilla chest access.
 `InspectionListenerTest` and `FabricNativeAuditEventListenerTest` cover these
 branches locally. Those automated tests do not prove client rendering or packet
 transport. The MC Pilot runs below verify selected connected-client inspector

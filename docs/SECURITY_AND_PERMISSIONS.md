@@ -184,12 +184,20 @@ time where available; the number maps to the corresponding menu slot. It does no
 expose raw NBT/component payloads, unrelated players, or hidden inventories.
 
 `/ig inspect` requires both `itemgraph.command` and `itemgraph.command.inspect`.
-`InspectionListener` rechecks permission on every supported-container click, and permission
-loss clears that player's inspection mode without suppressing the ordinary block interaction.
-Inspection block-history requests return bounded chat history. Right-clicking a supported
-container opens the read-only flow browser, which additionally checks `itemgraph.gui` and
-`itemgraph.audit`;
+`InspectionListener` (NeoForge) and `FabricNativeAuditEventListener` (Fabric) recheck
+permission on every main-hand inspection click. Permission
+loss disables that player's inspection mode: the click that detects the revocation is
+consumed and the player is told the mode was disabled, so a denied click never breaks or
+toggles the inspected scene. Inspection block-history requests return bounded chat
+history. Right-clicking a supported container opens the read-only flow browser, which
+additionally checks `itemgraph.gui` and `itemgraph.audit`;
 inspection does not grant access to the live container inventory or relax any GUI check.
+When an inspection click's request is not accepted, the outcome depends on the cause and
+the target: a missing downstream grant (`itemgraph.audit` for block history,
+`itemgraph.gui` for containers) is a stable denial already reported in chat, so the click
+is consumed — except container right-clicks, which always fall through so a denied flow
+request still opens the chest normally. Transient rejections such as a full query queue or
+an unavailable database preserve vanilla interaction for every target.
 The inspection-mode toggle, `on`, `off`, `status`, and supported-click recognition require
 `itemgraph.command.inspect`. A block-history request queries `eventType=all`, so it can
 include staff-private evidence and additionally requires `itemgraph.audit` before the

@@ -134,7 +134,9 @@ block entity implementing `Container` opens the vanilla flow browser and queries
 container item-flow timeline. Either half of a valid double chest resolves to the same
 canonical anchor used by container capture. Other right-clicks open the audit-history view:
 supported functional blocks select the clicked block, and ordinary blocks select the
-adjacent block on the clicked face. A rejected query does not consume the gameplay click.
+adjacent block on the clicked face. A query rejected for a missing grant consumes the
+click — except container right-clicks, which preserve vanilla interaction — while a
+transient rejection does not consume the click.
 The inspector excludes rows with a schema V19 supersession link, while ordinary lookup
 shows those immutable rows with the replacement break ID and reason.
 
@@ -274,15 +276,22 @@ off`, and `/ig inspect status` are deterministic forms.
 
 While active, a server-side right-click on a block whose block entity implements `Container`
 opens that exact dimension/position in the read-only browser. After the browser query is
-accepted, the normal container screen and held-item use path do not run. If the bounded
-query queue rejects the request, vanilla interaction remains intact. Left-clicking any block
-continues to open that block's exact-position paginated audit-history view in chat.
+accepted, the normal container screen and held-item use path do not run. Left-clicking any
+block continues to open that block's exact-position paginated audit-history view in chat.
 Right-clicking a non-container block opens block history too: supported functional blocks
-select the clicked block; ordinary blocks select the block on the clicked face. If that
-query is rejected, vanilla interaction remains intact. The mode is per player UUID,
-requires `itemgraph.command` and `itemgraph.command.inspect` on command and click, and
-clears on logout and server stop. An unset node falls back to vanilla permission level 2;
-an explicit provider denial blocks access. Opening ItemGraph's menu is not recorded as a
+select the clicked block; ordinary blocks select the block on the clicked face. When an
+inspection request is not accepted, the outcome depends on the cause and the target: a
+missing downstream grant (`itemgraph.audit` for block history, `itemgraph.gui` for
+containers) is a stable denial that is already reported in chat, so the click is consumed
+and cannot break blocks or toggle functional blocks — except container
+right-clicks, which always fall through so a denied flow request still opens the chest
+normally. Transient rejections (a full query queue or an unavailable database) preserve
+vanilla interaction for every target. If `itemgraph.command.inspect` itself is revoked
+while the mode is on, the click that detects it disables inspection, tells the player the
+permission was revoked, and is consumed. The mode is per player UUID, requires
+`itemgraph.command` and `itemgraph.command.inspect` on command and click, and clears on
+logout and server stop. An unset node falls back to vanilla permission level 2; an explicit
+provider denial blocks access. Opening ItemGraph's menu is not recorded as a
 container-transfer observation.
 
 ### View an observation
