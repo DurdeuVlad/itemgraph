@@ -218,7 +218,10 @@ exact UTC timestamp, and recorded endpoints. Raw NBT and component serialization
 included. Console output stays plain text. Recorded spatial endpoints may add a `[Go to ...]`
 action that works only for the requesting player through a short-lived, one-use token; the
 token stores the exact permission nodes for the originating query and checks them again on
-click. The target dimension must currently be loaded, and all target coordinates must be finite.
+click. The link's hover discloses that it teleports only the clicker. At most eight links
+are rendered; when more distinct locations were recorded a closing line reports how many
+were not shown. The target dimension must currently be loaded, and all target coordinates
+must be finite.
 
 ### Not-found handling
 

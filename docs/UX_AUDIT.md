@@ -177,6 +177,9 @@ disable"; `inspect.enabled` (deterministic `on` path) does not
 
 *Recommendation:* align the two strings.
 
+*Resolved (issue #176):* `inspect.enabled` now carries the same "use /ig
+inspect off to disable" hint as `inspect.enabled_full` in all three locales.
+
 ### F7 — L — `[Go to ...]` links do not disclose the consequence at the affordance
 
 `sendLocationActions` renders `[Go to <dimension> <x> <y> <z>]` with
@@ -186,6 +189,11 @@ does not say the click teleports.
 
 *Recommendation:* add hover text such as "Teleports you (only you) to this
 recorded location" on the link component.
+
+*Resolved (issue #176):* the link now carries exactly that hover
+(`navigation.go_to_hover`), and a result set with more recorded locations
+than the eight-link display cap ends with a `navigation.more_locations`
+line instead of silently truncating.
 
 ### F8 — L — Large pages flood chat with one message per row
 
@@ -222,6 +230,11 @@ but visually heavy.
 
 *Recommendation:* point to `/ig help commands` + list the closest matches
 instead of the whole set.
+
+*Resolved (issue #176):* `CommandHelp.closestTopicsText` returns up to five
+substring/edit-distance matches; the failure now reads "Closest topics: {1}.
+Use /ig help commands to list every topic." and falls back to a localized
+"none" when nothing is near.
 
 ### F11 — I — Deliberate design confirmations (preserve these)
 

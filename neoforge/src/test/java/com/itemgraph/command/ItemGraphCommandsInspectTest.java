@@ -70,6 +70,12 @@ class ItemGraphCommandsInspectTest {
         assertEquals(1, dispatcher.execute("ig inspect off", source));
         assertFalse(service.isEnabled(playerUuid), "off must remain disabled");
 
+        assertEquals(1, dispatcher.execute("ig inspect on", source));
+        assertTrue(service.isEnabled(playerUuid), "on must enable from a disabled state");
+
+        assertEquals(1, dispatcher.execute("itemgraph inspect", source));
+        assertFalse(service.isEnabled(playerUuid));
+
         assertEquals(1, dispatcher.execute("ig inspect", source));
         assertTrue(service.isEnabled(playerUuid));
 
@@ -82,6 +88,8 @@ class ItemGraphCommandsInspectTest {
                 "[ItemGraph] Inspection is already enabled.",
                 "[ItemGraph] Inspection disabled.",
                 "[ItemGraph] Inspection is already disabled.",
+                "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable.",
+                "[ItemGraph] Inspection disabled.",
                 "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable.",
                 "[ItemGraph] Inspection disabled."), messages);
     }
