@@ -190,17 +190,36 @@ public final class NativeAuditEventListener {
             return;
         }
         Entity target = event.getTarget();
+        String reason = entityInteractionDenialReason(player, level);
         if (target instanceof ArmorStand) {
             EntityInteractionEvidence.recordArmorStandCallbackCanceled(
                     player, (ArmorStand) target, event.getHand(),
-                    player.getItemInHand(event.getHand()), "entity_interact");
+                    player.getItemInHand(event.getHand()), "entity_interact",
+                    reason != null ? reason : "LOADER_CALLBACK_CANCELED");
             return;
         }
         submit("INTERACT_ENTITY_DENIED", player, level, target.blockPosition(),
                 BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(),
                 EntityInteractionEvidence.canceledAttemptDetails(
                         target, event.getHand(), player.getItemInHand(event.getHand()),
-                        "callback=entity_interact reason=LOADER_CALLBACK_CANCELED"));
+                        "callback=entity_interact reason="
+                                + (reason != null ? reason : "LOADER_CALLBACK_CANCELED")));
+    }
+
+    /**
+     * Attributes an entity-interaction denial to inspection mode when the
+     * consumed-interaction marker (or a still-enabled mode) says ItemGraph's
+     * inspection listener canceled it, so foreign cancellations stay
+     * distinguishable in evidence.
+     */
+    private static String entityInteractionDenialReason(ServerPlayer player, ServerLevel level) {
+        com.itemgraph.command.InspectionService inspections =
+                com.itemgraph.command.InspectionService.getInstance();
+        if (inspections.isEnabled(player.getUUID())) {
+            return "INSPECTION_MODE";
+        }
+        return inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime())
+                ? "INSPECTION_WINDOW" : null;
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
@@ -211,9 +230,12 @@ public final class NativeAuditEventListener {
         }
         Entity target = event.getTarget();
         boolean canceled = event.isCanceled();
+        String reason = canceled ? entityInteractionDenialReason(player, level) : null;
+        String canceledCompletion = reason != null
+                ? "callback_canceled reason=" + reason : "callback_canceled";
         String completion = target instanceof ArmorStand
-                ? (canceled ? "callback_canceled" : "armor_stand_return_hook")
-                : (canceled ? "callback_canceled" : "specific_result_unobserved");
+                ? (canceled ? canceledCompletion : "armor_stand_return_hook")
+                : (canceled ? canceledCompletion : "specific_result_unobserved");
         String detail = canceled
                 ? EntityInteractionEvidence.canceledAttemptDetails(
                         target, event.getHand(), player.getItemInHand(event.getHand()), completion)

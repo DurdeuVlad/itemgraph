@@ -1,13 +1,25 @@
 package com.itemgraph.command;
 
 import com.itemgraph.i18n.ItemGraphLanguage;
+import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEntityLinkPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
+import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Leashable;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import java.util.ArrayList;
+import java.util.List;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
@@ -173,6 +185,80 @@ public class InspectionListener {
             return;
         }
         event.setCanceled(true);
+    }
+
+    /**
+     * Consumes entity right-clicks while inspection is active (or within the
+     * twin-packet window of a consumed click) so armor-stand equipping, shearing,
+     * milking, and other entity interactions cannot mutate the inspected scene.
+     * The denial remains audit evidence: {@code NativeAuditEventListener}'s
+     * LOWEST-priority entity handlers record {@code INTERACT_ENTITY_DENIED} for
+     * canceled entity interactions.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
+        if (!shouldConsumeEntityInteraction(event)) {
+            return;
+        }
+        denyEntityInteraction((ServerPlayer) event.getEntity(), event.getLevel(), event.getTarget());
+        // FAIL, not the default PASS: the cancellation result is returned to
+        // vanilla's packet handler, and PASS would report the interaction as
+        // unhandled rather than denied.
+        event.setCancellationResult(InteractionResult.FAIL);
+        event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onEntityInteractSpecific(PlayerInteractEvent.EntityInteractSpecific event) {
+        if (!shouldConsumeEntityInteraction(event)) {
+            return;
+        }
+        denyEntityInteraction((ServerPlayer) event.getEntity(), event.getLevel(), event.getTarget());
+        event.setCancellationResult(InteractionResult.FAIL);
+        event.setCanceled(true);
+    }
+
+    private boolean shouldConsumeEntityInteraction(PlayerInteractEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return false;
+        }
+        Level level = event.getLevel();
+        return !level.isClientSide()
+                && (inspections.isEnabled(player.getUUID())
+                        || inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()));
+    }
+
+    private void denyEntityInteraction(ServerPlayer player, Level level, Entity target) {
+        // Multipart entities are not networked under their part id; resync the
+        // parent instead (the audit row still names the packet's actual target).
+        Entity resyncTarget = target instanceof net.neoforged.neoforge.entity.PartEntity<?> part
+                ? part.getParent() : target;
+        // Mark the consume: a predicted non-consuming entity interact can emit a
+        // useItem twin packet, which must stay covered if the mode clears first.
+        inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+        // A denied interaction predicts client-side; resync the held stacks and
+        // the target's visible state so the prediction reverts to server truth.
+        // This mirrors ServerEntity's pairing resync: entity data is nullable
+        // when every value is default, equipment ships all slots (including
+        // empty ones to clear a predicted equip), link/passengers cover
+        // predicted leashes and mounts.
+        player.containerMenu.sendAllDataToRemote();
+        List<net.minecraft.network.syncher.SynchedEntityData.DataValue<?>> dataValues =
+                resyncTarget.getEntityData().getNonDefaultValues();
+        if (dataValues != null) {
+            player.connection.send(new ClientboundSetEntityDataPacket(resyncTarget.getId(), dataValues));
+        }
+        if (resyncTarget instanceof LivingEntity living) {
+            List<Pair<EquipmentSlot, ItemStack>> equipment = new ArrayList<>();
+            for (EquipmentSlot slot : EquipmentSlot.values()) {
+                equipment.add(Pair.of(slot, living.getItemBySlot(slot)));
+            }
+            player.connection.send(new ClientboundSetEquipmentPacket(resyncTarget.getId(), equipment));
+        }
+        if (resyncTarget instanceof Leashable leashable) {
+            player.connection.send(new ClientboundSetEntityLinkPacket(resyncTarget, leashable.getLeashHolder()));
+        }
+        player.connection.send(new ClientboundSetPassengersPacket(resyncTarget));
     }
 
     @SubscribeEvent

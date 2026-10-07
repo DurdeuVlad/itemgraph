@@ -251,7 +251,7 @@ public final class FabricNativeAuditEventListener {
         });
         UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
-                recordEntityInteractionAttempt(serverPlayer, serverLevel, hand, entity);
+                return handleEntityUse(InspectionService.getInstance(), serverPlayer, serverLevel, hand, entity);
             }
             return InteractionResult.PASS;
         });
@@ -380,6 +380,75 @@ public final class FabricNativeAuditEventListener {
         // predicted the use (pearl thrown, bucket swapped) reverts to server truth.
         player.containerMenu.sendAllDataToRemote();
         return InteractionResultHolder.fail(stack);
+    }
+
+    /**
+     * The Fabric equivalent of NeoForge's inspection-mode entity gating: while
+     * inspection is active (or within the twin-packet window of a consumed
+     * click) the entity right-click is denied so armor-stand equipping,
+     * shearing, milking, and other entity interactions cannot mutate the
+     * inspected scene. The denial stays audit evidence — recorded as
+     * {@code INTERACT_ENTITY_DENIED} rather than a plain attempt.
+     */
+    static InteractionResult handleEntityUse(InspectionService inspections,
+                                             ServerPlayer player, ServerLevel level,
+                                             net.minecraft.world.InteractionHand hand, Entity entity) {
+        if (inspections != null && player != null && level != null
+                && (inspections.isEnabled(player.getUUID())
+                        || inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()))) {
+            recordEntityInteractionDenied(player, level, hand, entity,
+                    inspections.isEnabled(player.getUUID()) ? "INSPECTION_MODE" : "INSPECTION_WINDOW");
+            // Mark the consume: a predicted non-consuming entity interact can
+            // emit a useItem twin packet, which must stay covered if the mode
+            // clears first.
+            inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+            // A denied interaction predicts client-side; resync the held stacks
+            // and the target's visible state so the prediction reverts to
+            // server truth. This mirrors ServerEntity's pairing resync: entity
+            // data is nullable when every value is default, equipment ships all
+            // slots (including empty ones to clear a predicted equip),
+            // link/passengers cover predicted leashes and mounts.
+            player.containerMenu.sendAllDataToRemote();
+            Entity resyncTarget = entity instanceof net.minecraft.world.entity.boss.EnderDragonPart part
+                    ? part.parentMob : entity;
+            java.util.List<net.minecraft.network.syncher.SynchedEntityData.DataValue<?>> dataValues =
+                    resyncTarget.getEntityData().getNonDefaultValues();
+            if (dataValues != null) {
+                player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket(
+                        resyncTarget.getId(), dataValues));
+            }
+            if (resyncTarget instanceof net.minecraft.world.entity.LivingEntity living) {
+                java.util.List<com.mojang.datafixers.util.Pair<net.minecraft.world.entity.EquipmentSlot, ItemStack>>
+                        equipment = new java.util.ArrayList<>();
+                for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values()) {
+                    equipment.add(com.mojang.datafixers.util.Pair.of(slot, living.getItemBySlot(slot)));
+                }
+                player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket(
+                        resyncTarget.getId(), equipment));
+            }
+            if (resyncTarget instanceof net.minecraft.world.entity.Leashable leashable) {
+                player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityLinkPacket(
+                        resyncTarget, leashable.getLeashHolder()));
+            }
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetPassengersPacket(resyncTarget));
+            // Set last: the aggregate UseEntityCallback decorator would otherwise
+            // record a second, misattributed INTERACT_ENTITY_DENIED for this
+            // same FAIL — and nothing below can throw between here and return.
+            EntityInteractionEvidence.markListenerRecordedDenial();
+            return InteractionResult.FAIL;
+        }
+        recordEntityInteractionAttempt(player, level, hand, entity);
+        return InteractionResult.PASS;
+    }
+
+    static void recordEntityInteractionDenied(ServerPlayer player, ServerLevel level,
+                                              net.minecraft.world.InteractionHand hand, Entity entity,
+                                              String reason) {
+        submit("INTERACT_ENTITY_DENIED", player, level, entity.blockPosition(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
+                EntityInteractionEvidence.canceledAttemptDetails(
+                        entity, hand, player.getItemInHand(hand),
+                        "callback=use_entity reason=" + reason));
     }
 
     /**

@@ -203,7 +203,11 @@ the item-use twin packet (`ServerboundUseItemPacket`, NeoForge `RightClickItem` 
 `UseItemCallback`) are consumed while the mode is on or within five game ticks of a
 consumed click (`InspectionService.markInteractionConsumed`), so held or off-hand items
 cannot mutate the scene even on the revocation-detecting click whose twin arrives after
-the mode was already cleared.
+the mode was already cleared. Entity right-clicks are likewise consumed while
+inspecting or within the same marker window (NeoForge `EntityInteract` /
+`EntityInteractSpecific` at `HIGHEST` priority, Fabric `UseEntityCallback`), and the
+denial is still recorded as `INTERACT_ENTITY_DENIED` evidence — armor-stand
+equipping, shearing, milking, leashing, and name tags cannot mutate the scene.
 The inspection-mode toggle, `on`, `off`, `status`, and supported-click recognition require
 `itemgraph.command.inspect`. A block-history request queries `eventType=all`, so it can
 include staff-private evidence and additionally requires `itemgraph.audit` before the

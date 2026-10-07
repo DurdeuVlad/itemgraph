@@ -348,6 +348,9 @@ inspection must not break or toggle blocks — while transient rejection
 available and rejected container right-clicks keep vanilla chest access.
 Consumed clicks also consume the off-hand `useItemOn` and item-use twin
 packets, so held or off-hand items cannot mutate the inspected scene.
+Entity right-clicks are also consumed (denied and recorded as
+`INTERACT_ENTITY_DENIED` evidence), so armor-stand equipping, shearing, milking,
+leashing, and name tags cannot mutate it either.
 `InspectionListenerTest` and `FabricNativeAuditEventListenerTest` cover these
 branches locally. Those automated tests do not prove client rendering or packet
 transport. The MC Pilot runs below verify selected connected-client inspector
