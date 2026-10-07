@@ -213,6 +213,45 @@ class FlowBrowserMenuTest {
     }
 
     @Test
+    void loadingStateDisablesPagingControlsAndMarksPageLabel() {
+        Inventory inventory = mock(Inventory.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        java.util.List<ItemStack> items = new java.util.ArrayList<>(
+                java.util.Collections.nCopies(FlowBrowserMenu.MENU_SLOT_COUNT, ItemStack.EMPTY));
+        items.set(45, new ItemStack(Items.ARROW));
+        ItemStack label = new ItemStack(Items.PAPER);
+        label.set(DataComponents.CUSTOM_NAME,
+                net.minecraft.network.chat.Component.literal("Page 1"));
+        items.set(49, label);
+        items.set(53, new ItemStack(Items.ARROW));
+        FlowBrowserMenu menu = new FlowBrowserMenu(1, inventory, items, Map.of(), (p, a) -> {});
+        player.containerMenu = menu;
+
+        FlowBrowserService.markMenuLoading(player);
+
+        assertEquals(Items.GRAY_STAINED_GLASS_PANE, menu.getContainer().getItem(45).getItem(),
+                "the previous-page control is visibly disabled while loading");
+        assertEquals(Items.GRAY_STAINED_GLASS_PANE, menu.getContainer().getItem(53).getItem(),
+                "the next-page control is visibly disabled while loading");
+        assertEquals("Page 1 (loading)",
+                menu.getContainer().getItem(49).get(DataComponents.CUSTOM_NAME).getString());
+        assertSame(menu, player.containerMenu,
+                "the loading state mutates slots in place so the expected-menu check stays valid");
+
+        FlowBrowserService.markMenuLoading(player);
+        assertEquals("Page 1 (loading)",
+                menu.getContainer().getItem(49).get(DataComponents.CUSTOM_NAME).getString(),
+                "re-marking a loading menu must not double the suffix");
+    }
+
+    @Test
+    void loadingMarkerIgnoresPlayersWithoutAFlowMenuOpen() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        player.containerMenu = null;
+        assertDoesNotThrow(() -> FlowBrowserService.markMenuLoading(player));
+    }
+
+    @Test
     void pageCompanionKeepsContainerBreakCorrelationDetailsOnHover() {
         TraceHop removal = new TraceHop(TraceHop.Kind.OBSERVED, 31, null, null, 2,
                 1_700_000_004_000L, 1_700_000_004_000L, null,

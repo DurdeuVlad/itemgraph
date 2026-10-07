@@ -1080,6 +1080,58 @@ class QueryDispatcherTest {
     }
 
     @Test
+    void dataQueryTimeoutReportsTimeoutAndRunsFailureConsumer(@TempDir Path tempDir) throws Exception {
+        DatabaseManager.getInstance().initialize(tempDir.resolve("data-timeout.db"));
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        CountDownLatch queryStarted = new CountDownLatch(1);
+        CountDownLatch releaseQuery = new CountDownLatch(1);
+        CountDownLatch callbackQueued = new CountDownLatch(1);
+        AtomicReference<Runnable> queuedTask = new AtomicReference<>();
+        AtomicBoolean failureRan = new AtomicBoolean(false);
+        Thread serverThread = Thread.currentThread();
+
+        when(source.getServer()).thenReturn(server);
+        when(source.getEntity()).thenReturn(player);
+        when(source.hasPermission(2)).thenReturn(true);
+        when(player.hasDisconnected()).thenReturn(false);
+        when(server.getRunningThread()).thenReturn(serverThread);
+        when(server.isStopped()).thenReturn(false);
+        doAnswer(invocation -> {
+            queuedTask.set(invocation.getArgument(0));
+            callbackQueued.countDown();
+            return null;
+        }).when(server).execute(any(Runnable.class));
+
+        assertEquals(1, QueryDispatcher.dispatchData(source, List.of(ItemGraphPermissions.GUI), "gui-timeout",
+                conn -> {
+                    queryStarted.countDown();
+                    try {
+                        releaseQuery.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new SQLException(e);
+                    }
+                    return "late";
+                },
+                (s, result) -> { },
+                () -> failureRan.set(true)));
+        assertTrue(queryStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        Thread.sleep(6_000);
+        releaseQuery.countDown();
+        assertTrue(callbackQueued.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        queuedTask.get().run();
+
+        assertTrue(failureRan.get(), "a timed-out data query must run the failure consumer so menus can restore");
+        ArgumentCaptor<Component> failures = ArgumentCaptor.forClass(Component.class);
+        verify(source).sendFailure(failures.capture());
+        String message = failures.getValue().getString();
+        assertTrue(message.contains("timed out"), message);
+        assertFalse(message.contains("cancelled"), "the JDBC cancellation sentinel must not leak: " + message);
+    }
+
+    @Test
     void queuedPlayerQueryTimeoutReportsQueueWait(@TempDir Path tempDir) throws Exception {
         DatabaseManager.getInstance().initialize(tempDir.resolve("player-queue-timeout.db"));
         CommandSourceStack source = mock(CommandSourceStack.class);

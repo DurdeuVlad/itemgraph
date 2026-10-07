@@ -373,6 +373,18 @@ DTOs. Its callback opens or updates `FlowBrowserMenu` only on the server thread.
 uses vanilla `MenuType.GENERIC_9x6`; its server-side click handler never delegates item
 movement to `ChestMenu`, and every GUI action rechecks permission level 2.
 
+While a page or detail request is in flight, `FlowBrowserService.markMenuLoading` mutates
+the open menu's slots in place — the `SimpleContainer` update syncs to the client without
+replacing `player.containerMenu`, so the completion callback's expected-menu check still
+applies. The page label gains `browser.loading_suffix` and the paging arrows are swapped for
+grey glass panes; `BrowserSession.loading` continues to gate the underlying actions, so the
+greyed controls cannot dispatch. `dispatchData` applies the same five-second deadline as
+text queries, so a stuck query cancels rather than wedging the menu. A rejected, failed,
+stale, or timed-out load calls `restoreMenuAfterFailedLoad`, which clears the flag and
+re-renders the still-current page when the original menu is still open; because the failure
+consumer can run off the server thread while the executor shuts down, the re-render half is
+gated on the server thread and the flag reset is the only guaranteed effect off it.
+
 ### Prior art
 
 This pattern was checked against real mods before being adopted rather than derived from
