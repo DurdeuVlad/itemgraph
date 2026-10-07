@@ -10,8 +10,13 @@ which is disabled until explicitly enabled in ItemGraph configuration.
 
 | GriefLogger installation | ItemGraph behavior |
 |---|---|
-| Default, GriefLogger absent or present | ItemGraph records native evidence into its own database. It does not probe `database.db` or perform any GriefLogger database reads. |
-| Explicit migration mode | Set `general.grieflogger_integration_enabled=true` in NeoForge or `grieflogger_integration_enabled=true` in Fabric and configure `grieflogger_database_path`. ItemGraph then polls supported `items` and `containers` rows read-only; `/ig ingest history` separately imports the documented legacy tables. |
+| Default, GriefLogger absent (the only supported state) | ItemGraph records native evidence into its own database. It does not probe `database.db` or perform any GriefLogger database reads. |
+| Explicit migration mode | Set `general.grieflogger_integration_enabled=true` in NeoForge or `grieflogger_integration_enabled=true` in Fabric and configure `grieflogger_database_path` at a retained `database.db` file (GriefLogger writes it to `config/grieflogger/`). ItemGraph then polls supported `items` and `containers` rows read-only; `/ig ingest history` separately imports the documented legacy tables. |
+
+Every released GriefLogger version shares the same 11-table SQLite schema, so
+one capability contract accepts all of them; [GriefLogger schema
+versions](GRIEFLOGGER_SCHEMA_VERSIONS.md) documents the cross-version evidence
+and the discovery/WAL caveats for automatic import.
 
 Native capture, ItemGraph-owned storage, correlation, and native queries work in
 either mode. The migration bridge is not needed for normal ItemGraph operation;
