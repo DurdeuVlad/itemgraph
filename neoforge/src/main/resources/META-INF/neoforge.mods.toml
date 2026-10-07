@@ -33,18 +33,16 @@ config="itemgraph-neoforge.mixins.json"
     ordering="NONE"
     side="BOTH"
 
-# GriefLogger is an OPTIONAL evidence source. ItemGraph operates without it:
-# GriefLogger ingestion cycles are skipped when the database file is absent, and
-# ItemGraph records its supported native NeoForge events and capability changes.
-# When GriefLogger IS present, ItemGraph reads its SQLite database read-only and
-# groups confirmed copies so both raw rows remain auditable but add one capacity.
-# The standard ItemGraph artifact bundles sqlite-jdbc via JarJar. GriefLogger
-# 1.2.10 also embeds SQLite in its main mod module, so use the dedicated
-# grieflogger-compatible artifact when that version is installed.
+# ItemGraph REPLACES GriefLogger; the two mods must never be installed
+# together. ItemGraph bundles sqlite-jdbc via JarJar while GriefLogger embeds
+# org.sqlite.* in its main mod module, so the pair crashes Java module
+# resolution at startup even before product-level conflicts are considered.
+# Marking the dependency incompatible makes that failure an explicit, clean
+# refusal instead of a module-resolution error. Migrating servers keep their
+# GriefLogger database file: the read-only import bridge opens it through
+# grieflogger_database_path once the GriefLogger mod jar itself is removed.
 [[dependencies.${mod_id}]]
     modId="grieflogger"
     type="${grieflogger_dependency_type}"
     reason="${grieflogger_dependency_reason}"
     versionRange="${grieflogger_version_range}"
-    ordering="AFTER"
-    side="BOTH"

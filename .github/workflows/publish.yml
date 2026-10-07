@@ -132,9 +132,7 @@ jobs:
           github-tag: ${{ steps.version_data.outputs.tag_name }}
           github-files: |
             build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric.jar
-            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
             build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge.jar
-            build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
           github-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric and NeoForge 1.21.1)
           github-version: ${{ steps.version_data.outputs.version }}
           github-version-type: ${{ steps.version_data.outputs.github_version_type }}
@@ -160,7 +158,7 @@ jobs:
           java: |
             21
           dependencies: |
-            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
+            grieflogger(incompatible){modrinth:grieflogger}{curseforge:435029}
 
       - name: Publish Fabric standard build to Modrinth
         id: publish_fabric_modrinth
@@ -182,51 +180,7 @@ jobs:
           java: |
             21
           dependencies: |
-            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
-
-      - name: Publish Fabric GriefLogger-compatible build
-        id: publish_fabric_grieflogger
-        if: ${{ !cancelled() }}
-        uses: Kir-Antipov/mc-publish@v3.3
-        with:
-          curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
-          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
-          curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
-          curseforge-version: ${{ steps.version_data.outputs.version }}
-          version-type: ${{ steps.version_data.outputs.version_type }}
-          changelog-file: release-notes.md
-          game-versions: |
-            1.21.1
-          loaders: |
-            fabric
-          environment: dedicated-server
-          java: |
-            21
-          dependencies: |
-            grieflogger@1.2.10-1.21.1(required){modrinth:grieflogger}{curseforge:435029}
-
-      - name: Publish Fabric GriefLogger-compatible build to Modrinth
-        id: publish_fabric_grieflogger_modrinth
-        if: ${{ !cancelled() && steps.modrinth_gate.outputs.enabled == 'true' }}
-        uses: Kir-Antipov/mc-publish@v3.3
-        with:
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
-          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
-          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
-          modrinth-version: '${{ steps.version_data.outputs.version }}+fabric-gl'
-          version-type: ${{ steps.version_data.outputs.version_type }}
-          changelog-file: release-notes.md
-          game-versions: |
-            1.21.1
-          loaders: |
-            fabric
-          environment: dedicated-server
-          java: |
-            21
-          dependencies: |
-            grieflogger@1.2.10-1.21.1(required){modrinth:grieflogger}{curseforge:435029}
+            grieflogger(incompatible){modrinth:grieflogger}{curseforge:435029}
 
       - name: Publish NeoForge standard build
         id: publish_neoforge
@@ -248,7 +202,7 @@ jobs:
           java: |
             21
           dependencies: |
-            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
+            grieflogger(incompatible){modrinth:grieflogger}{curseforge:435029}
 
       - name: Publish NeoForge standard build to Modrinth
         id: publish_neoforge_modrinth
@@ -270,51 +224,7 @@ jobs:
           java: |
             21
           dependencies: |
-            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
-
-      - name: Publish NeoForge GriefLogger-compatible build
-        id: publish_neoforge_grieflogger
-        if: ${{ !cancelled() }}
-        uses: Kir-Antipov/mc-publish@v3.3
-        with:
-          curseforge-id: ${{ secrets.CURSEFORGE_PROJECT_ID }}
-          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
-          curseforge-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
-          curseforge-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
-          curseforge-version: ${{ steps.version_data.outputs.version }}
-          version-type: ${{ steps.version_data.outputs.version_type }}
-          changelog-file: release-notes.md
-          game-versions: |
-            1.21.1
-          loaders: |
-            neoforge
-          environment: dedicated-server
-          java: |
-            21
-          dependencies: |
-            grieflogger@1.2.10-1.21.1(required){modrinth:grieflogger}{curseforge:435029}
-
-      - name: Publish NeoForge GriefLogger-compatible build to Modrinth
-        id: publish_neoforge_grieflogger_modrinth
-        if: ${{ !cancelled() && steps.modrinth_gate.outputs.enabled == 'true' }}
-        uses: Kir-Antipov/mc-publish@v3.3
-        with:
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
-          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
-          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
-          modrinth-version: '${{ steps.version_data.outputs.version }}+neoforge-gl'
-          version-type: ${{ steps.version_data.outputs.version_type }}
-          changelog-file: release-notes.md
-          game-versions: |
-            1.21.1
-          loaders: |
-            neoforge
-          environment: dedicated-server
-          java: |
-            21
-          dependencies: |
-            grieflogger@1.2.10-1.21.1(required){modrinth:grieflogger}{curseforge:435029}
+            grieflogger(incompatible){modrinth:grieflogger}{curseforge:435029}
 
       - name: Write publication summary
         if: ${{ always() }}
@@ -324,12 +234,8 @@ jobs:
           MODRINTH_STATUS: ${{ steps.modrinth_gate.outputs.status }}
           FABRIC_CURSEFORGE_URL: ${{ steps.publish_fabric.outputs.curseforge-url }}
           FABRIC_MODRINTH_URL: ${{ steps.publish_fabric_modrinth.outputs.modrinth-url }}
-          FABRIC_GL_CURSEFORGE_URL: ${{ steps.publish_fabric_grieflogger.outputs.curseforge-url }}
-          FABRIC_GL_MODRINTH_URL: ${{ steps.publish_fabric_grieflogger_modrinth.outputs.modrinth-url }}
           NEOFORGE_CURSEFORGE_URL: ${{ steps.publish_neoforge.outputs.curseforge-url }}
           NEOFORGE_MODRINTH_URL: ${{ steps.publish_neoforge_modrinth.outputs.modrinth-url }}
-          NEOFORGE_GL_CURSEFORGE_URL: ${{ steps.publish_neoforge_grieflogger.outputs.curseforge-url }}
-          NEOFORGE_GL_MODRINTH_URL: ${{ steps.publish_neoforge_grieflogger_modrinth.outputs.modrinth-url }}
         run: |
           {
             echo "## Publication results"
@@ -338,10 +244,6 @@ jobs:
             echo "- Modrinth gate: ${MODRINTH_STATUS:-not evaluated}"
             echo "- CurseForge Fabric: ${FABRIC_CURSEFORGE_URL:-not published}"
             echo "- Modrinth Fabric: ${FABRIC_MODRINTH_URL:-not published}"
-            echo "- CurseForge Fabric GriefLogger-compatible: ${FABRIC_GL_CURSEFORGE_URL:-not published}"
-            echo "- Modrinth Fabric GriefLogger-compatible: ${FABRIC_GL_MODRINTH_URL:-not published}"
             echo "- CurseForge NeoForge: ${NEOFORGE_CURSEFORGE_URL:-not published}"
             echo "- Modrinth NeoForge: ${NEOFORGE_MODRINTH_URL:-not published}"
-            echo "- CurseForge NeoForge GriefLogger-compatible: ${NEOFORGE_GL_CURSEFORGE_URL:-not published}"
-            echo "- Modrinth NeoForge GriefLogger-compatible: ${NEOFORGE_GL_MODRINTH_URL:-not published}"
           } >> "${GITHUB_STEP_SUMMARY}"

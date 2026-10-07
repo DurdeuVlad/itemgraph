@@ -19,20 +19,24 @@ legacy-source queries require that source evidence be imported or synchronized.
 
 ## Artifact selection and SQLite module compatibility
 
-The standard `itemgraph-<version>.jar` bundles `org.xerial:sqlite-jdbc` and
-MariaDB Connector/J with NeoForge Jar-in-Jar and keeps GriefLogger optional. GriefLogger
-`1.2.10-1.21.1` packages `org.sqlite.*` in its main mod module; when both standard
-artifacts load, Java module resolution sees two modules exporting `org.sqlite.util`
-and aborts server startup. Jar-in-Jar version negotiation cannot remove classes
-embedded in GriefLogger's main JAR.
+ItemGraph replaces GriefLogger; the two mods are never installed together.
+Each ItemGraph jar bundles `org.xerial:sqlite-jdbc` and MariaDB Connector/J —
+NeoForge via Jar-in-Jar, Fabric via nested jars. GriefLogger `1.2.10-1.21.1`
+packages `org.sqlite.*` in its main mod module; when both mods load, Java
+module resolution sees two modules exporting `org.sqlite.util` and aborts
+server startup, and Jar-in-Jar version negotiation cannot remove classes
+embedded in GriefLogger's main JAR. Because coexistence was never stable, both
+loaders declare the conflict in metadata: `type="incompatible"` in
+`META-INF/neoforge.mods.toml` and `breaks.grieflogger` in `fabric.mod.json`,
+so a server that still has the GriefLogger jar refuses to boot with an
+explicit conflict message rather than a module-resolution crash.
 
-For servers running GriefLogger `1.2.10-1.21.1`, use
-`itemgraph-<version>-grieflogger-compatible.jar`. It omits ItemGraph's SQLite
-Jar-in-Jar dependency, keeps ItemGraph's MariaDB Connector/J driver, uses GriefLogger's SQLite classes, and declares that exact
-GriefLogger version as required in `META-INF/neoforge.mods.toml`. Do not install
-both ItemGraph artifacts together. CI builds and structurally verifies both; the
-release workflow attaches both to GitHub Releases and publishes each CurseForge
-file with matching dependency metadata.
+The earlier `-grieflogger-compatible` artifacts (which omitted ItemGraph's
+SQLite copy and required GriefLogger `1.2.10-1.21.1`) were retired after
+`0.4.0-beta.1`; no later release ships them. To migrate a server that runs
+GriefLogger: stop the server, remove the GriefLogger mod jar, keep its
+`database.db`, install the standard ItemGraph jar, and enable the read-only
+import below pointed at the retained file.
 
 ItemGraph-owned storage can use SQLite (the default) or MySQL/MariaDB through the
 same migration and query contract. NeoForge exposes `general.database_backend`,

@@ -14,9 +14,7 @@ on:
         options:
           - all
           - fabric
-          - fabric-grieflogger-compatible
           - neoforge
-          - neoforge-grieflogger-compatible
 
 permissions:
   contents: read
@@ -138,11 +136,9 @@ jobs:
           fi
 
           case "${VARIANT}" in
-            all) VERSIONS=("${VERSION}+fabric" "${VERSION}+fabric-gl" "${VERSION}+neoforge" "${VERSION}+neoforge-gl") ;;
+            all) VERSIONS=("${VERSION}+fabric" "${VERSION}+neoforge") ;;
             fabric) VERSIONS=("${VERSION}+fabric") ;;
-            fabric-grieflogger-compatible) VERSIONS=("${VERSION}+fabric-gl") ;;
             neoforge) VERSIONS=("${VERSION}+neoforge") ;;
-            neoforge-grieflogger-compatible) VERSIONS=("${VERSION}+neoforge-gl") ;;
             *) echo "Unsupported variant: ${VARIANT}" >&2; exit 1 ;;
           esac
 
@@ -198,29 +194,7 @@ jobs:
           modrinth-java: |
             21
           modrinth-dependencies: |
-            grieflogger(optional){modrinth:grieflogger}
-
-      - name: Publish Fabric GriefLogger-compatible build to Modrinth
-        id: publish_fabric_grieflogger
-        if: ${{ steps.modrinth_gate.outputs.enabled == 'true' && (inputs.variant == 'all' || inputs.variant == 'fabric-grieflogger-compatible') }}
-        uses: Kir-Antipov/mc-publish@v3.3
-        with:
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
-          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-fabric-grieflogger-compatible.jar
-          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (Fabric 1.21.1, GriefLogger 1.2.10 compatible)
-          modrinth-version: '${{ steps.version_data.outputs.version }}+fabric-gl'
-          modrinth-version-type: ${{ steps.version_data.outputs.version_type }}
-          modrinth-changelog-file: release-notes.md
-          modrinth-game-versions: |
-            1.21.1
-          modrinth-loaders: |
-            fabric
-          modrinth-environment: dedicated-server
-          modrinth-java: |
-            21
-          modrinth-dependencies: |
-            grieflogger@1.2.10-1.21.1(required){modrinth:grieflogger}
+            grieflogger(incompatible){modrinth:grieflogger}
 
       - name: Publish NeoForge standard build to Modrinth
         id: publish_neoforge
@@ -242,29 +216,7 @@ jobs:
           modrinth-java: |
             21
           modrinth-dependencies: |
-            grieflogger(optional){modrinth:grieflogger}
-
-      - name: Publish NeoForge GriefLogger-compatible build to Modrinth
-        id: publish_neoforge_grieflogger
-        if: ${{ steps.modrinth_gate.outputs.enabled == 'true' && (inputs.variant == 'all' || inputs.variant == 'neoforge-grieflogger-compatible') }}
-        uses: Kir-Antipov/mc-publish@v3.3
-        with:
-          modrinth-id: itemgraph
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
-          modrinth-files: build/libs/itemgraph-${{ steps.version_data.outputs.version }}-neoforge-grieflogger-compatible.jar
-          modrinth-name: ItemGraph ${{ steps.version_data.outputs.version }} (NeoForge 1.21.1, GriefLogger 1.2.10 compatible)
-          modrinth-version: '${{ steps.version_data.outputs.version }}+neoforge-gl'
-          modrinth-version-type: ${{ steps.version_data.outputs.version_type }}
-          modrinth-changelog-file: release-notes.md
-          modrinth-game-versions: |
-            1.21.1
-          modrinth-loaders: |
-            neoforge
-          modrinth-environment: dedicated-server
-          modrinth-java: |
-            21
-          modrinth-dependencies: |
-            grieflogger@1.2.10-1.21.1(required){modrinth:grieflogger}
+            grieflogger(incompatible){modrinth:grieflogger}
 
       - name: Write publication summary
         if: ${{ always() }}
@@ -272,16 +224,12 @@ jobs:
         env:
           MODRINTH_STATUS: ${{ steps.modrinth_gate.outputs.status }}
           FABRIC_URL: ${{ steps.publish_fabric.outputs.modrinth-url }}
-          FABRIC_GL_URL: ${{ steps.publish_fabric_grieflogger.outputs.modrinth-url }}
           NEOFORGE_URL: ${{ steps.publish_neoforge.outputs.modrinth-url }}
-          NEOFORGE_GL_URL: ${{ steps.publish_neoforge_grieflogger.outputs.modrinth-url }}
         run: |
           {
             echo "## Modrinth publication results"
             echo
             echo "- Modrinth gate: ${MODRINTH_STATUS:-not evaluated}"
             echo "- Fabric: ${FABRIC_URL:-not published}"
-            echo "- Fabric GriefLogger-compatible: ${FABRIC_GL_URL:-not published}"
             echo "- NeoForge: ${NEOFORGE_URL:-not published}"
-            echo "- NeoForge GriefLogger-compatible: ${NEOFORGE_GL_URL:-not published}"
           } >> "${GITHUB_STEP_SUMMARY}"

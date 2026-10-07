@@ -16,8 +16,8 @@ neoforge adapter┘
 
 - `core/` contains Java-only domain records (`CanonicalItem`, `CorrelationResult`, and `NodeType`) and loader-neutral ports. It must not import Minecraft, Brigadier, Fabric, NeoForge, SQLite, or JDBC packages. `verifyCoreArchitecture` enforces that source boundary.
 - `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence and migrations, including UUID-keyed name history derived from native `PLAYER_JOIN` evidence, are shared runtime components here. The optional GriefLogger read-only migration adapter is disabled by default.
-- `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite and MariaDB Connector/J as nested Fabric jars; its compatible jar replaces the metadata, requires GriefLogger, and strips only the nested SQLite jar.
-- `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite and MariaDB Connector/J; its compatible jar requires GriefLogger, keeps MariaDB Connector/J, and omits the Jar-in-Jar SQLite module.
+- `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its jar includes SQLite and MariaDB Connector/J as nested Fabric jars and declares the GriefLogger mod a hard conflict (`breaks`).
+- `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its jar bundles SQLite and MariaDB Connector/J and declares the GriefLogger mod `incompatible`.
 
 `RuntimeInformationPort` is declared in `core` and is implemented by both loader composition roots. `ItemGraphCommands` and API validation use this port for the mod version and installed-mod lookup instead of calling either loader's discovery API. Both adapters initialize the shared runtime with platform-owned config paths, server registry access, and server lifecycle callbacks.
 
@@ -81,7 +81,7 @@ into the shared ledger. Both loaders
 share the read-only `FlowBrowserService` for coordinate inspection; GriefLogger ingestion
 remains optional and read-only on both loaders.
 
-The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the temporary coexistence jars that require GriefLogger `1.2.10-1.21.1`.
+The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers; the temporary `grieflogger-compatible` coexistence jars were retired once ItemGraph declared the GriefLogger mod incompatible on both loaders.
 
 The architecture is designed around four requirements:
 
@@ -844,8 +844,8 @@ ItemGraph owns:
 **JDBC driver provisioning**: `sqlite-jdbc` is bundled in the ItemGraph jar via
 `jarJar` (version range `[3.40.0.0,4.0.0.0)`, prefer `3.46.1.0`) and MariaDB
 Connector/J `3.5.7` is bundled for both MySQL and MariaDB network storage. Production
-boots standalone and the dedicated GriefLogger-compatible artifact removes only the
-SQLite copy so GriefLogger remains the sole provider of `org.sqlite.*`. Dev
+boots standalone; GriefLogger is declared incompatible because its own embedded
+SQLite cannot be deduplicated by JarJar, so `org.sqlite.*` can never be shared. Dev
 runs launch the mod from `build/classes`, so the project's jarJar contents never
 materialize — `build.gradle` adds the driver to `additionalRuntimeClasspath` only when
 no jar in `run/mods` embeds `sqlite-jdbc` (adding it unconditionally alongside such a

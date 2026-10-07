@@ -18,6 +18,9 @@
     "fabric-api": "${fabric_api_version}",
     "fabric-permissions-api-v0": "*"
   },
+  "breaks": {
+    "grieflogger": "*"
+  },
   "custom": {
     "mc-publish": {
       "modrinth": "itemgraph",
