@@ -34,7 +34,7 @@ that, not against general usability alone.
 | Flow browser | `FlowBrowserService` + `FlowBrowserMenu` — vanilla 9×6 chest menu, 9 rows/page, chat companion | Loading (chat), empty, ambiguous candidate pages, stale timeline, detail view, denied |
 | In-world inspection | `InspectionListener` + `InspectionService` + `BlockInspectionTargets` | Enabled/disabled/status, container vs non-container routing, canonical double-chest anchor |
 | Paging + navigation | `AuditPageSession` (8/player, 30 min TTL), `/ig page`, `/ig goto` one-use 2-min tokens | Expired session, revoked permission, invalid token |
-| Localization | `ItemGraphLanguage` — `en_us`, `nl_nl`, `zh_tw`, per-key English fallback | All catalog keys present in all three locales (211 at audit time) |
+| Localization | `ItemGraphLanguage` — `en_us`, `nl_nl`, `zh_tw`, per-key English fallback | All catalog keys present in all three locales (211 at audit time, 217 now) |
 | Docs | `README.md`, `docs/ADMIN_QUICK_START.md`, `docs/QUERY_MODEL.md`, `docs/SECURITY_AND_PERMISSIONS.md` | Kept in sync by `tools/validate_admin_ux_docs.py` |
 
 ## 3. Journey assessment
@@ -207,6 +207,10 @@ reasonable, but there is no compact mode.
 mode (count + top N + "page for more") is the natural knob — do not remove
 per-row hovers, they carry evidence identity.
 
+*Resolved as documented (issue #177):* `docs/QUERY_MODEL.md` records the
+trade-off and the designated summary-mode remedy next to the output
+contract.
+
 ### F9 — L — Help topics are English-only in localized catalogs
 
 `CommandHelp.initializeMessages` registers all topic bodies through
@@ -221,6 +225,14 @@ mechanism already exists to measure this gap.
 English, clients need no assets) — record it as a known localization limit
 in `docs/CONFIGURATION.md` and consider translating the overview and
 `journeys`/`permissions` topics first if coverage is ever extended.
+
+*Resolved as documented (issue #177):* `docs/CONFIGURATION.md` states the
+scope precisely next to `general.language` — 217 keys per locale, exactly
+nine translated `source.*` hover/action labels, English `sourceText`
+fallback for the 36 topic bodies and overview lines. The same QUERY_MODEL
+pass records that `/ig page` requires a player entity
+(`page.player_required`) — console/RCON sources cannot continue a saved
+session but can page directly via `/ig lookup page`.
 
 ### F10 — I — Unknown-help-topic error dumps ~35 topics on one line
 

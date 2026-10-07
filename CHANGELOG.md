@@ -18,6 +18,15 @@ The project follows a simple pre-1.0 development changelog model.
   deadline is reported as a query timeout or a queue wait instead of leaking
   JDBC cancellation text; and a permission revoked before delivery replaces
   the result with an explicit notice on every async path.
+- **Documented accepted UX limits** (UX audit F8+F9, issue #177).
+  `docs/QUERY_MODEL.md` now records the one-line-per-row chat-density
+  trade-off (with the designated summary-mode remedy) and that `/ig page`
+  requires a player entity for saved-session continuation — console/RCON
+  sources can still page directly via `/ig lookup page`.
+  `docs/CONFIGURATION.md` records the localization scope precisely: 217
+  catalog keys per locale but only the nine `source.*` hover labels are
+  translated — help topic bodies and overview lines ship English under
+  `nl_nl`/`zh_tw` by design.
 - **Visible flow-browser loading state** (UX audit F5). While a page turn or
   detail open is in flight, the open flow-browser menu now shows the pending
   state: the page label gains the `(loading)` suffix and the paging arrows are

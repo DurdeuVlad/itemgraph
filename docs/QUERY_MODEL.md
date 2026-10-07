@@ -223,6 +223,19 @@ are rendered; when more distinct locations were recorded a closing line reports 
 were not shown. The target dimension must currently be loaded, and all target coordinates
 must be finite.
 
+**Chat density is a deliberate trade-off (recorded limit).** Each result row is its own
+chat message, so a `limit=100` lookup produces ~101 lines plus up to eight `[Go to ...]`
+link lines and the `[Previous]/[Next]` action row. There is no compact mode: per-row
+hovers carry evidence identity and must not be stripped to save lines. If flooding
+becomes a complaint, the designated remedy is a summary mode (count + top N + a
+"page for more" prompt), not thinner rows.
+
+`/ig page` continues a live in-player lookup session and therefore requires a player
+entity — it fails with `page.player_required` for console or RCON sources. Saved-session
+continuation is the only player-gated paging path: console/RCON can still fetch a page
+directly via `/ig lookup page <page> <eventType>` (rows go to the server log) or re-run
+the originating query with a tighter `limit` or narrower filters.
+
 ### Not-found handling
 
 A missing id is reported as a command **failure** with a plain message
