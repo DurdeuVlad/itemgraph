@@ -737,14 +737,21 @@ ItemGraph JDBC connection.
   selection through `UseBlockCallback` and `AttackBlockCallback`.
 - A right-click whose target block entity implements `Container` calls the shared
   `FlowBrowserService.openContainer` with the exact dimension and coordinates. Either half
-  of a valid double chest resolves to the canonical anchor used by container capture. Only
-  an accepted query consumes the click and prevents the normal container GUI and held-item
-  use path. A rejected query preserves ordinary container interaction.
+  of a valid double chest resolves to the canonical anchor used by container capture. An
+  accepted query consumes the click and prevents the normal container GUI and held-item
+  use path; a click that detects a revoked `itemgraph.command.inspect` grant is also
+  consumed. A rejected query preserves ordinary container interaction.
 - Left-clicks call the bounded exact-position audit-history query. Non-container
   right-clicks also query block history: supported functional blocks select the clicked
-  block, while ordinary blocks select the adjacent block on the clicked face. A rejected
-  query preserves normal Minecraft interaction. Every route requires current permission
-  level 2 and keeps its result private to the player.
+  block, while ordinary blocks select the adjacent block on the clicked face. When a
+  block-history request is not accepted, a missing `itemgraph.audit` grant consumes the
+  click — a denied inspection must not break blocks or toggle functional blocks — while
+  transient rejections (a full queue or an unavailable database) preserve normal
+  Minecraft interaction. Rejected container right-clicks always preserve ordinary
+  container interaction so a missing `itemgraph.gui` grant still opens the chest. Every
+  route requires `itemgraph.command` and `itemgraph.command.inspect` on the click; the
+  block-history route also requires `itemgraph.audit`, and the container flow route
+  requires `itemgraph.gui` plus `itemgraph.audit`. Results stay private to the player.
   The Fabric disconnect callback clears that player's inspection state; server stop clears
   any remaining state. This follows Fabric's documented callback contract: listeners run
   until one returns a non-`PASS` `InteractionResult` ([Fabric 1.21.1 event guide](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md)).
@@ -753,7 +760,10 @@ ItemGraph JDBC connection.
   `SimpleContainer`, so its Open/Close lifecycle cannot create a block-entity-backed watch.
 - Inactive/disabled inspection returns `PASS`-equivalent vanilla behavior: the event remains
   uncancelled and the normal interaction pipeline proceeds. While inspection is enabled,
-  non-container right-clicks use the block-history route described above.
+  non-container right-clicks use the block-history route described above. If the
+  `itemgraph.command.inspect` grant is revoked while the mode is enabled, the click that
+  detects the revocation disables the mode, notifies the player, and is consumed
+  (`FAIL`-equivalent on Fabric, canceled on NeoForge) rather than falling through.
 
 ### Expanded Query UX
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.

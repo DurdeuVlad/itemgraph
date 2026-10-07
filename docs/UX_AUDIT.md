@@ -52,8 +52,9 @@ that, not against general usability alone.
   Recovery paths exist at every decision point.
 - **Nearby incident:** `/ig inspect on` → left-click = block history,
   right-click container = flow browser, right-click non-container = paged
-  history. Clicks are consumed only after the read-only request is accepted,
-  so denied/unsupported clicks fall through to vanilla.
+  history. Clicks are consumed once the read-only request is accepted, on
+  permission revocation, and on missing-grant denials; transient rejections
+  and rejected container right-clicks still fall through to vanilla.
 - **Operations:** `/ig status` prints an ACTION line, a summary, then
   DIAGNOSTIC counters; the help topic teaches how to read them. Deliberately
   dense but documented.
@@ -113,6 +114,12 @@ permission revoked" message; consider consuming the current click so a
 denied inspection never mutates the evidence scene. Document the chosen
 behavior in `docs/SECURITY_AND_PERMISSIONS.md` and `docs/QUERY_MODEL.md`
 (the validator asserts exact routing text there).
+
+*Resolved (issue #173):* both listeners now send the localized
+`inspect.disabled_revoked` notice and consume the revocation-detecting
+click on both loaders; missing-grant denials on block-history clicks are
+consumed, while transient rejections and rejected container right-clicks
+still fall through to vanilla.
 
 ### F4 — M — Revoked-permission feedback is inconsistent across async paths
 
@@ -198,9 +205,9 @@ instead of the whole set.
 
 ### F11 — I — Deliberate design confirmations (preserve these)
 
-- Rejected inspect requests fall through to vanilla so a missing
-  `itemgraph.gui` grant still lets the chest open normally
-  (`InspectionListener` + `FlowBrowserService.open`).
+- Transient inspect-request rejections fall through to vanilla, and
+  rejected container right-clicks still open the chest normally even when
+  `itemgraph.gui` is missing (`InspectionListener` + `FlowBrowserService.open`).
 - `eventUuidNotFound` distinguishes malformed input from a well-formed but
   unmatched UUID and suggests the correct syntax (`QueryFormatter`).
 - `/ig goto` tokens are one-use, 2-minute, player-bound, and re-check the
@@ -234,7 +241,7 @@ instead of the whole set.
 Ordered by severity; each is a bounded change except F3, which touches
 listener semantics and needs a documented decision on click consumption.
 
-1. F3 — inspect revocation notice + click-consumption decision.
+1. ~~F3 — inspect revocation notice + click-consumption decision~~ (resolved, #173).
 2. F2 — user-facing timeout/cancellation message on the async path.
 3. F1 — acceptance feedback for interactive queries.
 4. F4 — unify revoked-permission result behavior.

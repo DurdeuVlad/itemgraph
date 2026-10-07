@@ -482,7 +482,7 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void rejectedOrdinaryBlockFallbackPreservesGameplay() {
+    void transientlyRejectedOrdinaryBlockFallbackPreservesGameplay() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -501,7 +501,7 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void rejectedBlockInspectionPreservesGameplay() {
+    void transientlyRejectedBlockInspectionPreservesGameplay() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -518,7 +518,7 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void rejectedLeftClickInspectionPreservesBlockBreaking() {
+    void transientlyRejectedLeftClickInspectionPreservesBlockBreaking() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -548,14 +548,56 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void FabricInspectionPermissionLossDisablesMode() {
+    void FabricInspectionPermissionLossDisablesModeNotifiesAndConsumes() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, false);
 
-        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, l, pos) -> 1, player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
         assertFalse(inspections.isEnabled(playerUuid));
+        verify(player).sendSystemMessage(any());
+    }
+
+    @Test
+    void deniedAuditNonContainerUseIsConsumed() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(mock(BlockEntity.class));
+        when(level.getBlockState(BlockPos.ZERO)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> 0, player, level, BlockPos.ZERO, Direction.UP));
+    }
+
+    @Test
+    void rejectedContainerUsePreservesVanillaAccessOnAnyRejection() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+
+        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> 0, player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
+    }
+
+    @Test
+    void deniedAuditLeftClickIsConsumed() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenLeftClickInspection(
+                inspections, (p, l, pos) -> { opens.incrementAndGet(); return 0; },
+                player, mock(ServerLevel.class), BlockPos.ZERO);
+
+        assertEquals(InteractionResult.FAIL, result, "a stable permission denial must not let the click break the block");
+        assertEquals(1, opens.get());
     }
 
     @Test
@@ -566,12 +608,13 @@ class FabricNativeAuditEventListenerTest {
         AtomicInteger opens = new AtomicInteger();
         ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.INSPECT));
 
-        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, level, pos) -> { opens.incrementAndGet(); return 1; },
                 player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
 
         assertFalse(inspections.isEnabled(playerUuid));
         assertEquals(0, opens.get(), "the named inspect denial must override vanilla operator status");
+        verify(player).sendSystemMessage(any());
     }
 
     private ServerPlayer playerWithPermission(UUID uuid, boolean permitted) {

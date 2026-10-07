@@ -6,6 +6,20 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Inspection-mode denial and revocation handling** (`docs/UX_AUDIT.md` finding F3).
+  On both NeoForge and Fabric, a click that detects a revoked
+  `itemgraph.command.inspect` grant now disables inspection, reports "Inspection
+  disabled: the itemgraph.command.inspect permission was revoked.", and is consumed
+  instead of falling through to vanilla — previously that click could break the
+  block being inspected. Requests denied for a missing downstream grant
+  (`itemgraph.audit`, or `itemgraph.gui` on containers) are now consumed for
+  left-clicks and non-container right-clicks so a denied inspection never mutates
+  the scene; container right-clicks still fall through so vanilla chest access is
+  preserved, and transient rejections (queue full, database unavailable) still
+  preserve ordinary interaction.
+
 ### Added
 
 - **Admin-facing UX audit** (`docs/UX_AUDIT.md`). Flux-UX review of the `/ig`

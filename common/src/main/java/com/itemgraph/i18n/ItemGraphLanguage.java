@@ -44,6 +44,7 @@ public final class ItemGraphLanguage {
             "audit.invalid_timestamps", "audit.nonpositive", "audit.orphaned", "audit.invalid_nodes",
             "audit.status_mismatches", "audit.violations_list", "goto.rejected", "help.unknown_topic",
             "lookup.unknown_event_type", "inspect.enabled_full", "inspect.enabled", "inspect.disabled",
+            "inspect.disabled_revoked",
             "inspect.already_enabled", "inspect.already_disabled", "inspect.status", "inspect.enabled_word",
             "inspect.disabled_word", "navigation.go_to", "inspect.block_permission", "lookup.player_required",
             "lookup.invalid_filter", "lookup.audit_required", "page.player_required", "page.invalid_session",

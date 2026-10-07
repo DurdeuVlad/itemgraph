@@ -1,6 +1,8 @@
 package com.itemgraph.command;
 
+import com.itemgraph.i18n.ItemGraphLanguage;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
@@ -17,6 +19,14 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
  * <p>The listener runs before normal interaction listeners. Cancellation prevents
  * the vanilla block and item interaction paths, so the held item is not consumed
  * and no audit or container-transfer event is created for the inspection request.</p>
+ *
+ * <p>A click is consumed when its read-only request is accepted, when the request is
+ * denied for a missing permission grant (a stable, already-messaged denial must not
+ * mutate the inspected scene), and when the click itself detects that
+ * {@code itemgraph.command.inspect} was revoked — that click disables the mode,
+ * notifies the player, and is consumed. Transient rejections (queue full, database
+ * unavailable) and all rejected container right-clicks keep vanilla behavior so a
+ * missing {@code itemgraph.gui} grant still opens the chest normally.</p>
  */
 public class InspectionListener {
 
@@ -64,7 +74,8 @@ public class InspectionListener {
             return;
         }
         if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
-            inspections.clear(player.getUUID());
+            revokeInspection(player);
+            consumeDenied(event);
             return;
         }
         BlockPos target = BlockInspectionTargets.resolveRightClickTarget(
@@ -77,6 +88,11 @@ public class InspectionListener {
                 ? containerFlowOpener.open(player, level, inspectionTarget)
                 : blockHistoryOpener.open(player, level, inspectionTarget);
         if (accepted == 0) {
+            // Container right-clicks always fall through so a denied flow request still
+            // opens the chest; a denied non-container request is consumed instead.
+            if (!container && deniedByMissingGrant(player, ItemGraphPermissions.INSPECT, ItemGraphPermissions.AUDIT)) {
+                consumeDenied(event);
+            }
             return;
         }
         event.setCancellationResult(InteractionResult.SUCCESS);
@@ -96,11 +112,15 @@ public class InspectionListener {
             return;
         }
         if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
-            inspections.clear(player.getUUID());
+            revokeInspection(player);
+            event.setCanceled(true);
             return;
         }
 
         if (blockHistoryOpener.open(player, level, event.getPos()) == 0) {
+            if (deniedByMissingGrant(player, ItemGraphPermissions.INSPECT, ItemGraphPermissions.AUDIT)) {
+                event.setCanceled(true);
+            }
             return;
         }
         event.setCanceled(true);
@@ -115,6 +135,28 @@ public class InspectionListener {
 
     public void clearAll() {
         inspections.clear();
+    }
+
+    /**
+     * Whether an unaccepted inspection request failed on a missing permission grant rather
+     * than a transient rejection. The route's whole node set is re-checked — not only the
+     * downstream grant — so a grant revoked between the listener check and the dispatch
+     * still reads as a stable denial. The denial message was already sent by the dispatch
+     * layer, so the only question left is whether vanilla interaction is safe to allow.
+     */
+    private static boolean deniedByMissingGrant(ServerPlayer player, String... permissionNodes) {
+        return !ItemGraphPermissions.canUseAll(player.createCommandSourceStack(), permissionNodes);
+    }
+
+    private void revokeInspection(ServerPlayer player) {
+        inspections.clear(player.getUUID());
+        player.sendSystemMessage(Component.literal(ItemGraphLanguage.text("inspect.disabled_revoked",
+                "[ItemGraph] Inspection disabled: the itemgraph.command.inspect permission was revoked.")));
+    }
+
+    private static void consumeDenied(PlayerInteractEvent.RightClickBlock event) {
+        event.setCancellationResult(InteractionResult.FAIL);
+        event.setCanceled(true);
     }
 
     private static int openBlockHistory(ServerPlayer player, Level level, BlockPos pos) {
