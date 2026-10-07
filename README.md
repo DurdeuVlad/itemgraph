@@ -240,6 +240,7 @@ The complete boundary and authorization rules are in [Preview integration API](d
 - [Evidence model](docs/EVIDENCE_MODEL.md)
 - [ItemGraph event taxonomy](docs/EVENT_TAXONOMY.md)
 - [GriefLogger integration](docs/GRIEFLOGGER_INTEGRATION.md)
+- [GriefLogger schema versions](docs/GRIEFLOGGER_SCHEMA_VERSIONS.md)
 - [Complete GriefLogger and ItemGraph feature comparison](docs/FEATURE_PARITY_INVENTORY.md)
 - [GriefLogger source audit](docs/GRIEFLOGGER_SOURCE_AUDIT.md)
 - [GriefLogger replacement parity](docs/GRIEFLOGGER_PARITY.md)
