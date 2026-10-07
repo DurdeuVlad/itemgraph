@@ -28,13 +28,13 @@ that, not against general usability alone.
 | Surface | Implementation | States covered |
 | --- | --- | --- |
 | Command tree `/itemgraph`, `/ig` | `ItemGraphCommands.register` (`common/.../ItemGraphCommands.java`) | Unauthorized nodes hidden via Brigadier `requires` (progressive disclosure) |
-| In-game help | `CommandHelp` — 5-line overview, ~35 topics, `journeys *` task groupings | Unknown topic → full topic list + failure line |
+| In-game help | `CommandHelp` — 5-line overview, ~35 topics, `journeys *` task groupings | Unknown topic → closest-matches + failure line (F10) |
 | Async query pipeline | `QueryDispatcher` — single worker, queue of 64, 5 s statement timeout | Accepted (console only), queued, timed out, denied, DB down |
 | Chat output | `QueryFormatter` — labelled `[OBSERVED]` / `[INFERRED conf=x]` / `UNRESOLVED` / `PROVENANCE_ONLY` rows | Empty, truncated, ambiguous candidates, superseded edges |
 | Flow browser | `FlowBrowserService` + `FlowBrowserMenu` — vanilla 9×6 chest menu, 9 rows/page, chat companion | Loading (chat), empty, ambiguous candidate pages, stale timeline, detail view, denied |
 | In-world inspection | `InspectionListener` + `InspectionService` + `BlockInspectionTargets` | Enabled/disabled/status, container vs non-container routing, canonical double-chest anchor |
 | Paging + navigation | `AuditPageSession` (8/player, 30 min TTL), `/ig page`, `/ig goto` one-use 2-min tokens | Expired session, revoked permission, invalid token |
-| Localization | `ItemGraphLanguage` — `en_us`, `nl_nl`, `zh_tw`, per-key English fallback | All 211 catalog keys present in all three locales |
+| Localization | `ItemGraphLanguage` — `en_us`, `nl_nl`, `zh_tw`, per-key English fallback | All catalog keys present in all three locales (211 at audit time) |
 | Docs | `README.md`, `docs/ADMIN_QUICK_START.md`, `docs/QUERY_MODEL.md`, `docs/SECURITY_AND_PERMISSIONS.md` | Kept in sync by `tools/validate_admin_ux_docs.py` |
 
 ## 3. Journey assessment

@@ -56,8 +56,8 @@ Everything below this heading and above "Not yet implemented" is live.
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
 under either name. Bare `/itemgraph` and bare `/ig` show a short task-first command
 overview. `/ig help commands` is a compact task hub pointing to detailed topics, and
-`/ig help <topic>` shows exact routes and one detailed topic; an unknown topic fails with the valid topic
-list. The root requires `itemgraph.command`; each command checks its named leaf permission
+`/ig help <topic>` shows exact routes and one detailed topic; an unknown topic fails with up to five
+closest topic suggestions and a pointer to `/ig help commands`. The root requires `itemgraph.command`; each command checks its named leaf permission
 and, for protected evidence, `itemgraph.audit` as listed in
 `docs/SECURITY_AND_PERMISSIONS.md`. When a permission provider has no explicit decision,
 ItemGraph falls back to vanilla permission level 2. An explicit provider denial blocks
