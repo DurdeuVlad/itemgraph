@@ -56,8 +56,8 @@ Everything below this heading and above "Not yet implemented" is live.
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
 under either name. Bare `/itemgraph` and bare `/ig` show a short task-first command
 overview. `/ig help commands` is a compact task hub pointing to detailed topics, and
-`/ig help <topic>` shows exact routes and one detailed topic; an unknown topic fails with the valid topic
-list. The root requires `itemgraph.command`; each command checks its named leaf permission
+`/ig help <topic>` shows exact routes and one detailed topic; an unknown topic fails with up to five
+closest topic suggestions and a pointer to `/ig help commands`. The root requires `itemgraph.command`; each command checks its named leaf permission
 and, for protected evidence, `itemgraph.audit` as listed in
 `docs/SECURITY_AND_PERMISSIONS.md`. When a permission provider has no explicit decision,
 ItemGraph falls back to vanilla permission level 2. An explicit provider denial blocks
@@ -218,7 +218,10 @@ exact UTC timestamp, and recorded endpoints. Raw NBT and component serialization
 included. Console output stays plain text. Recorded spatial endpoints may add a `[Go to ...]`
 action that works only for the requesting player through a short-lived, one-use token; the
 token stores the exact permission nodes for the originating query and checks them again on
-click. The target dimension must currently be loaded, and all target coordinates must be finite.
+click. The link's hover discloses that it teleports only the clicker. At most eight links
+are rendered; when more distinct locations were recorded a closing line reports how many
+were not shown. The target dimension must currently be loaded, and all target coordinates
+must be finite.
 
 **Chat density is a deliberate trade-off (recorded limit).** Each result row is its own
 chat message, so a `limit=100` lookup produces ~101 lines plus up to eight `[Go to ...]`

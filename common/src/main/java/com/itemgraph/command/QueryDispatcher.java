@@ -91,6 +91,7 @@ public final class QueryDispatcher {
     private static final int MAX_QUEUED_QUERIES = 64;
     private static final long PLAYER_QUERY_TIMEOUT_MS = 5_000L;
     private static final int MAX_LOCATION_GRANTS = 512;
+    private static final int MAX_LOCATION_LINKS = 8;
     private static final long LOCATION_GRANT_TTL_MS = 2 * 60 * 1_000L;
     private static final Map<UUID, LocationGrant> LOCATION_GRANTS = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -658,22 +659,32 @@ public final class QueryDispatcher {
         return sanitized.length() <= maxLength ? sanitized : sanitized.substring(0, maxLength - 3) + "...";
     }
 
-    private static void sendLocationActions(CommandSourceStack source, List<String> permissionNodes,
-                                            List<LocationAction> locations) {
+    static void sendLocationActions(CommandSourceStack source, List<String> permissionNodes,
+                                    List<LocationAction> locations) {
         if (!(source.getEntity() instanceof ServerPlayer player) || locations.isEmpty()) return;
         long now = System.currentTimeMillis();
-        LOCATION_GRANTS.entrySet().removeIf(entry -> entry.getValue().expiresAtMs() <= now);
-        for (LocationAction location : locations.stream().distinct().limit(8).toList()) {
+        List<LocationAction> distinct = locations.stream().distinct().toList();
+        int shown = 0;
+        for (LocationAction location : distinct.stream().limit(MAX_LOCATION_LINKS).toList()) {
             List<String> actionPermissions = location.permissionNodes().isEmpty()
                     ? permissionNodes : location.permissionNodes();
             UUID token = issueLocationGrant(player.getUUID(), actionPermissions, location, now);
             if (token == null) break;
+            shown++;
             String label = "[" + ItemGraphLanguage.text("navigation.go_to", "Go to {0} {1} {2} {3}",
                     location.dimension(), formatCoordinate(location.x()), formatCoordinate(location.y()),
                     formatCoordinate(location.z())) + "]";
             player.sendSystemMessage(Component.literal(label).withStyle(style -> style
                     .withColor(ChatFormatting.AQUA).withUnderlined(true)
-                    .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/ig goto " + token))));
+                    .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/ig goto " + token))
+                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(
+                            ItemGraphLanguage.text("navigation.go_to_hover",
+                                    "Teleports you (only you) to this recorded location."))))));
+        }
+        if (shown < distinct.size()) {
+            player.sendSystemMessage(Component.literal(ItemGraphLanguage.text("navigation.more_locations",
+                    "[ItemGraph] ...and {0} more recorded locations could not be shown; narrow the query to reach them.",
+                    distinct.size() - shown)));
         }
     }
 

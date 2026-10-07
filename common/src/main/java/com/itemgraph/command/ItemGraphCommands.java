@@ -266,7 +266,7 @@ public final class ItemGraphCommands {
                 .filter(node -> node.levelId() != null && node.x() != null && node.y() != null && node.z() != null)
                 .filter(node -> Double.isFinite(node.x()) && Double.isFinite(node.y()) && Double.isFinite(node.z()))
                 .map(node -> new QueryDispatcher.LocationAction(node.levelId(), node.x(), node.y(), node.z()))
-                .distinct().limit(8).toList();
+                .distinct().toList();
     }
 
     private static List<QueryDispatcher.LocationAction> locationsForHops(TraceResult result) {
@@ -605,8 +605,13 @@ public final class ItemGraphCommands {
         String topic = StringArgumentType.getString(ctx, "topic");
         List<String> lines = CommandHelp.topicLines(topic);
         if (lines == null) {
+            String closest = CommandHelp.closestTopicsText(topic);
+            if (closest.isEmpty()) {
+                closest = ItemGraphLanguage.text("help.no_close_topics", "none");
+            }
             source.sendFailure(Component.literal(ItemGraphLanguage.text("help.unknown_topic",
-                    "[ItemGraph] Unknown help topic ''{0}''. Valid topics: {1}", topic, CommandHelp.validTopicsText())));
+                    "[ItemGraph] Unknown help topic '{0}'. Closest topics: {1}. Use /ig help commands to list every topic.",
+                    topic, closest)));
             return 0;
         }
         lines.forEach(line -> source.sendSuccess(() -> Component.literal(ItemGraphLanguage.sourceText(line)), false));
@@ -959,7 +964,7 @@ public final class ItemGraphCommands {
         boolean changed = InspectionService.getInstance().setEnabled(player.getUUID(), enabled);
         ctx.getSource().sendSuccess(() -> Component.literal(enabled
                 ? changed
-                        ? ItemGraphLanguage.text("inspect.enabled", "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history.")
+                        ? ItemGraphLanguage.text("inspect.enabled", "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable.")
                         : ItemGraphLanguage.text("inspect.already_enabled", "[ItemGraph] Inspection is already enabled.")
                 : changed
                         ? ItemGraphLanguage.text("inspect.disabled", "[ItemGraph] Inspection disabled.")

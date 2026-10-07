@@ -28,13 +28,13 @@ that, not against general usability alone.
 | Surface | Implementation | States covered |
 | --- | --- | --- |
 | Command tree `/itemgraph`, `/ig` | `ItemGraphCommands.register` (`common/.../ItemGraphCommands.java`) | Unauthorized nodes hidden via Brigadier `requires` (progressive disclosure) |
-| In-game help | `CommandHelp` — 5-line overview, ~35 topics, `journeys *` task groupings | Unknown topic → full topic list + failure line |
+| In-game help | `CommandHelp` — 5-line overview, ~35 topics, `journeys *` task groupings | Unknown topic → closest-matches + failure line (F10) |
 | Async query pipeline | `QueryDispatcher` — single worker, queue of 64, 5 s statement timeout | Accepted (console only), queued, timed out, denied, DB down |
 | Chat output | `QueryFormatter` — labelled `[OBSERVED]` / `[INFERRED conf=x]` / `UNRESOLVED` / `PROVENANCE_ONLY` rows | Empty, truncated, ambiguous candidates, superseded edges |
 | Flow browser | `FlowBrowserService` + `FlowBrowserMenu` — vanilla 9×6 chest menu, 9 rows/page, chat companion | Loading (chat), empty, ambiguous candidate pages, stale timeline, detail view, denied |
 | In-world inspection | `InspectionListener` + `InspectionService` + `BlockInspectionTargets` | Enabled/disabled/status, container vs non-container routing, canonical double-chest anchor |
 | Paging + navigation | `AuditPageSession` (8/player, 30 min TTL), `/ig page`, `/ig goto` one-use 2-min tokens | Expired session, revoked permission, invalid token |
-| Localization | `ItemGraphLanguage` — `en_us`, `nl_nl`, `zh_tw`, per-key English fallback | All catalog keys present in all three locales (211 at audit time, 214 now) |
+| Localization | `ItemGraphLanguage` — `en_us`, `nl_nl`, `zh_tw`, per-key English fallback | All catalog keys present in all three locales (211 at audit time, 217 now) |
 | Docs | `README.md`, `docs/ADMIN_QUICK_START.md`, `docs/QUERY_MODEL.md`, `docs/SECURITY_AND_PERMISSIONS.md` | Kept in sync by `tools/validate_admin_ux_docs.py` |
 
 ## 3. Journey assessment
@@ -177,6 +177,9 @@ disable"; `inspect.enabled` (deterministic `on` path) does not
 
 *Recommendation:* align the two strings.
 
+*Resolved (issue #176):* `inspect.enabled` now carries the same "use /ig
+inspect off to disable" hint as `inspect.enabled_full` in all three locales.
+
 ### F7 — L — `[Go to ...]` links do not disclose the consequence at the affordance
 
 `sendLocationActions` renders `[Go to <dimension> <x> <y> <z>]` with
@@ -186,6 +189,11 @@ does not say the click teleports.
 
 *Recommendation:* add hover text such as "Teleports you (only you) to this
 recorded location" on the link component.
+
+*Resolved (issue #176):* the link now carries exactly that hover
+(`navigation.go_to_hover`), and a result set with more recorded locations
+than the eight-link display cap ends with a `navigation.more_locations`
+line instead of silently truncating.
 
 ### F8 — L — Large pages flood chat with one message per row
 
@@ -219,7 +227,7 @@ in `docs/CONFIGURATION.md` and consider translating the overview and
 `journeys`/`permissions` topics first if coverage is ever extended.
 
 *Resolved as documented (issue #177):* `docs/CONFIGURATION.md` states the
-scope precisely next to `general.language` — 214 keys per locale, exactly
+scope precisely next to `general.language` — 217 keys per locale, exactly
 nine translated `source.*` hover/action labels, English `sourceText`
 fallback for the 36 topic bodies and overview lines. The same QUERY_MODEL
 pass records that `/ig page` requires a player entity
@@ -234,6 +242,11 @@ but visually heavy.
 
 *Recommendation:* point to `/ig help commands` + list the closest matches
 instead of the whole set.
+
+*Resolved (issue #176):* `CommandHelp.closestTopicsText` returns up to five
+substring/edit-distance matches; the failure now reads "Closest topics: {1}.
+Use /ig help commands to list every topic." and falls back to a localized
+"none" when nothing is near.
 
 ### F11 — I — Deliberate design confirmations (preserve these)
 

@@ -126,6 +126,56 @@ class QueryDispatcherTest {
     }
 
     @Test
+    void locationLinksCapAtEightDiscloseTeleportOnHoverAndReportTheRemainder() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        when(player.getUUID()).thenReturn(UUID.randomUUID());
+        when(source.getEntity()).thenReturn(player);
+        List<Component> messages = new CopyOnWriteArrayList<>();
+        doAnswer(invocation -> {
+            messages.add(invocation.getArgument(0));
+            return null;
+        }).when(player).sendSystemMessage(any(Component.class));
+
+        List<QueryDispatcher.LocationAction> locations = java.util.stream.IntStream.range(0, 10)
+                .mapToObj(i -> new QueryDispatcher.LocationAction("minecraft:overworld", i, 64, i))
+                .toList();
+        QueryDispatcher.sendLocationActions(source, List.of(ItemGraphPermissions.TRACE), locations);
+
+        assertEquals(9, messages.size(), "eight links plus one truncation line");
+        HoverEvent hover = messages.get(0).getStyle().getHoverEvent();
+        assertNotNull(hover, "the link must disclose its consequence");
+        assertTrue(hover.getValue(HoverEvent.Action.SHOW_TEXT).getString().contains("Teleports you (only you)"),
+                "hover names the teleport consequence");
+        assertTrue(messages.get(8).getString().contains("2 more recorded locations"),
+                "the closing line reports the unshown remainder: " + messages.get(8).getString());
+    }
+
+    @Test
+    void locationLinksUnderTheCapSendNoTruncationLine() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        CommandSourceStack source = mock(CommandSourceStack.class);
+        when(player.getUUID()).thenReturn(UUID.randomUUID());
+        when(source.getEntity()).thenReturn(player);
+        List<Component> messages = new CopyOnWriteArrayList<>();
+        doAnswer(invocation -> {
+            messages.add(invocation.getArgument(0));
+            return null;
+        }).when(player).sendSystemMessage(any(Component.class));
+
+        List<QueryDispatcher.LocationAction> locations = java.util.stream.IntStream.range(0, 5)
+                .mapToObj(i -> new QueryDispatcher.LocationAction("minecraft:overworld", i, 64, i))
+                .toList();
+        QueryDispatcher.sendLocationActions(source, List.of(ItemGraphPermissions.TRACE), locations);
+
+        assertEquals(5, messages.size());
+        assertTrue(messages.stream().noneMatch(m -> m.getString().contains("more recorded locations")),
+                "no remainder line when everything was shown");
+        assertTrue(messages.stream().allMatch(m -> m.getStyle().getHoverEvent() != null),
+                "every link carries the disclosure hover");
+    }
+
+    @Test
     void dataQueriesRejectAnyMissingPermissionInTheRequiredSurfaceSet() {
         CommandSourceStack source = mock(CommandSourceStack.class);
         ItemGraphPermissions.setChecker((checkedSource, node) -> !node.equals(ItemGraphPermissions.AUDIT));

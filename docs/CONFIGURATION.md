@@ -57,7 +57,7 @@ only in the pinned GriefLogger 26.2 source research, not in ItemGraph's shipped
 locale set. The exact GriefLogger 1.2.10-1.21.1 release fixture has no locale
 inventory, so no exact-release locale compatibility claim is made.
 
-Localization coverage is deliberately partial (recorded scope). All 214 catalog
+Localization coverage is deliberately partial (recorded scope). All 217 catalog
 keys are present and validated in each of `en_us`, `nl_nl`, and `zh_tw`, but the
 nine `source.<sha256>` hover/action-label keys (Evidence, Item, Canonical metadata
 fingerprint, Event, UTC time, Origin, Destination, Previous, Next) are the only

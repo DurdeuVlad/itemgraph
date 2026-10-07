@@ -749,7 +749,7 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
-    void unknownHelpTopicFailsWithValidTopics() throws Exception {
+    void unknownHelpTopicSuggestsClosestTopicsInsteadOfDumpingAll() throws Exception {
         CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
         CommandSourceStack source = source();
         ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
@@ -757,9 +757,23 @@ class ItemGraphCommandsHelpTest {
         assertEquals(0, dispatcher.execute("itemgraph help not-a-topic", source));
         verify(source).sendFailure(failure.capture());
         assertTrue(failure.getValue().getString().contains("Unknown help topic 'not-a-topic'"));
-        assertTrue(failure.getValue().getString().contains("trace item"));
-        assertTrue(failure.getValue().getString().contains("gui container"));
-        assertTrue(failure.getValue().getString().contains("guide"));
+        assertTrue(failure.getValue().getString().contains("/ig help commands"),
+                "recovery must point at the topic list rather than dump it");
+        assertFalse(failure.getValue().getString().contains("gui container"),
+                "unrelated topics must not be dumped into the failure line");
+    }
+
+    @Test
+    void unknownHelpTopicOffersNearMissTopics() throws Exception {
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+
+        assertEquals(0, dispatcher.execute("itemgraph help trac", source));
+        verify(source).sendFailure(failure.capture());
+        assertTrue(failure.getValue().getString().contains("trace item"),
+                "a prefix miss must surface the closest matching topics");
+        assertTrue(failure.getValue().getString().contains("trace player"));
     }
 
     @Test
