@@ -247,6 +247,7 @@ The complete boundary and authorization rules are in [Preview integration API](d
 - [Query model](docs/QUERY_MODEL.md)
 - [Security and permissions](docs/SECURITY_AND_PERMISSIONS.md)
 - [Test plan](docs/TEST_PLAN.md)
+- [UX audit](docs/UX_AUDIT.md)
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Branding](docs/BRANDING.md)
 

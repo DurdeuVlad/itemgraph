@@ -6,6 +6,16 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Added
+
+- **Admin-facing UX audit** (`docs/UX_AUDIT.md`). Flux-UX review of the `/ig`
+  command tree, in-game help, async query feedback, flow browser, in-world
+  inspection, permission denials, paging/location actions, localization, and
+  the operator docs. Records ten findings with implementation evidence —
+  including silent acceptance/timeout/revocation gaps in the async query path
+  and an inspect-mode revocation fall-through — plus a prioritized follow-up
+  backlog. No behavior changes.
+
 ### Removed
 
 - **GriefLogger-compatible artifact variants retired.** ItemGraph replaces
