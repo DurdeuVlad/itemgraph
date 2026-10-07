@@ -27,6 +27,15 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
  * notifies the player, and is consumed. Transient rejections (queue full, database
  * unavailable) and all rejected container right-clicks keep vanilla behavior so a
  * missing {@code itemgraph.gui} grant still opens the chest normally.</p>
+ *
+ * <p>A consumed right-click produces more than the block-use packet: the client
+ * also sends the off-hand {@code useItemOn} and, when its predicted result was
+ * not consuming, a separate item-use packet ({@code ServerboundUseItemPacket}).
+ * Both are consumed while inspection is on — or within
+ * {@link InspectionService#CONSUMED_PACKET_WINDOW_TICKS} of a consumed click —
+ * so a held bucket, pearl, or off-hand item cannot mutate the inspected scene.
+ * The marker, not {@code isEnabled}, covers the revocation-detecting click: it
+ * clears the mode before its twin packets arrive.</p>
  */
 public class InspectionListener {
 
@@ -63,18 +72,29 @@ public class InspectionListener {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
-        if (event.getHand() != InteractionHand.MAIN_HAND) {
-            return;
-        }
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
         Level level = event.getLevel();
-        if (level.isClientSide() || !inspections.isEnabled(player.getUUID())) {
+        if (level.isClientSide()) {
+            return;
+        }
+        if (event.getHand() != InteractionHand.MAIN_HAND) {
+            // The off-hand twin of a consumed click must not place or use the
+            // off-hand item on the inspected block.
+            if (inspections.isEnabled(player.getUUID())
+                    || inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime())) {
+                inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+                consumeDenied(event);
+            }
+            return;
+        }
+        if (!inspections.isEnabled(player.getUUID())) {
             return;
         }
         if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             revokeInspection(player);
+            inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
             consumeDenied(event);
             return;
         }
@@ -91,11 +111,37 @@ public class InspectionListener {
             // Container right-clicks always fall through so a denied flow request still
             // opens the chest; a denied non-container request is consumed instead.
             if (!container && deniedByMissingGrant(player, ItemGraphPermissions.INSPECT, ItemGraphPermissions.AUDIT)) {
+                inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
                 consumeDenied(event);
             }
             return;
         }
+        inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
         event.setCancellationResult(InteractionResult.SUCCESS);
+        event.setCanceled(true);
+    }
+
+    /**
+     * Consumes the item-use twin of a right-click while inspection is active —
+     * or within the twin-packet window of a consumed click — so a held bucket,
+     * ender pearl, or food item is never used on an inspected scene. The marker
+     * covers the revocation-detecting click, whose twin arrives after the mode
+     * was already cleared.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onRightClickItem(PlayerInteractEvent.RightClickItem event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+        Level level = event.getLevel();
+        if (level.isClientSide()) {
+            return;
+        }
+        if (!inspections.isEnabled(player.getUUID())
+                && !inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime())) {
+            return;
+        }
+        event.setCancellationResult(InteractionResult.FAIL);
         event.setCanceled(true);
     }
 

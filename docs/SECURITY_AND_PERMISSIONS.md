@@ -197,7 +197,13 @@ the target: a missing downstream grant (`itemgraph.audit` for block history,
 `itemgraph.gui` for containers) is a stable denial already reported in chat, so the click
 is consumed — except container right-clicks, which always fall through so a denied flow
 request still opens the chest normally. Transient rejections such as a full query queue or
-an unavailable database preserve vanilla interaction for every target.
+an unavailable database preserve vanilla interaction for every target. Consumption covers
+the click's whole packet set, not only the block-use event: the off-hand `useItemOn` and
+the item-use twin packet (`ServerboundUseItemPacket`, NeoForge `RightClickItem` / Fabric
+`UseItemCallback`) are consumed while the mode is on or within five game ticks of a
+consumed click (`InspectionService.markInteractionConsumed`), so held or off-hand items
+cannot mutate the scene even on the revocation-detecting click whose twin arrives after
+the mode was already cleared.
 The inspection-mode toggle, `on`, `off`, `status`, and supported-click recognition require
 `itemgraph.command.inspect`. A block-history request queries `eventType=all`, so it can
 include staff-private evidence and additionally requires `itemgraph.audit` before the

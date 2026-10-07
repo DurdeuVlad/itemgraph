@@ -21,6 +21,7 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.commands.CommandSourceStack;
@@ -33,6 +34,7 @@ import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -149,6 +151,14 @@ public final class FabricNativeAuditEventListener {
                                             net.minecraft.world.InteractionHand hand, BlockPos pos,
                                             Direction face) {
         if (hand != net.minecraft.world.InteractionHand.MAIN_HAND) {
+            // The off-hand twin of a consumed click must not place or use the
+            // off-hand item on the inspected block.
+            if (player != null && inspections != null
+                    && (inspections.isEnabled(player.getUUID())
+                            || inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()))) {
+                inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+                return InteractionResult.FAIL;
+            }
             return InteractionResult.PASS;
         }
         InteractionResult inspectionResult = tryOpenInspection(
@@ -233,6 +243,12 @@ public final class FabricNativeAuditEventListener {
                     serverPlayer, serverLevel, pos);
             return inspectionResult == null ? InteractionResult.PASS : inspectionResult;
         });
+        UseItemCallback.EVENT.register((player, level, hand) -> {
+            if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
+                return handleItemUse(InspectionService.getInstance(), serverPlayer, serverLevel, hand);
+            }
+            return InteractionResultHolder.pass(player.getItemInHand(hand));
+        });
         UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
                 recordEntityInteractionAttempt(serverPlayer, serverLevel, hand, entity);
@@ -315,6 +331,7 @@ public final class FabricNativeAuditEventListener {
         }
         if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
+            inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
             notifyInspectionRevoked(player);
             return InteractionResult.FAIL;
         }
@@ -329,10 +346,37 @@ public final class FabricNativeAuditEventListener {
         if (accepted == 0) {
             // Container right-clicks always pass so a denied flow request still opens
             // the chest; a denied non-container request is consumed instead.
-            return !container && deniedByMissingGrant(player, ItemGraphPermissions.INSPECT, ItemGraphPermissions.AUDIT)
-                    ? InteractionResult.FAIL : null;
+            if (!container && deniedByMissingGrant(player, ItemGraphPermissions.INSPECT, ItemGraphPermissions.AUDIT)) {
+                inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+                return InteractionResult.FAIL;
+            }
+            return null;
         }
+        inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
         return InteractionResult.SUCCESS;
+    }
+
+    /**
+     * The Fabric equivalent of NeoForge's {@code RightClickItem} handling: while
+     * inspection is active — or within
+     * {@link InspectionService#CONSUMED_PACKET_WINDOW_TICKS} of a consumed click —
+     * the item-use twin of a right-click must not use the held item (bucket,
+     * ender pearl, food). The marker covers the revocation-detecting click, whose
+     * twin arrives after the mode was already cleared.
+     */
+    static InteractionResultHolder<ItemStack> handleItemUse(
+            InspectionService inspections, ServerPlayer player, ServerLevel level,
+            net.minecraft.world.InteractionHand hand) {
+        if (player == null || hand == null) {
+            return InteractionResultHolder.pass(ItemStack.EMPTY);
+        }
+        ItemStack stack = player.getItemInHand(hand);
+        if (inspections == null || level == null
+                || (!inspections.isEnabled(player.getUUID())
+                        && !inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()))) {
+            return InteractionResultHolder.pass(stack);
+        }
+        return InteractionResultHolder.fail(stack);
     }
 
     /**

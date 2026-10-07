@@ -309,7 +309,10 @@ right-clicks, which always fall through so a denied flow request still opens the
 normally. Transient rejections (a full query queue or an unavailable database) preserve
 vanilla interaction for every target. If `itemgraph.command.inspect` itself is revoked
 while the mode is on, the click that detects it disables inspection, tells the player the
-permission was revoked, and is consumed. The mode is per player UUID, requires
+permission was revoked, and is consumed. Consumption covers the whole click: the off-hand
+`useItemOn` and the item-use twin packet are consumed while the mode is on or within five
+ticks of a consumed click, so held or off-hand items are never used on the inspected
+scene. The mode is per player UUID, requires
 `itemgraph.command` and `itemgraph.command.inspect` on command and click, and clears on
 logout and server stop. An unset node falls back to vanilla permission level 2; an explicit
 provider denial blocks access. Opening ItemGraph's menu is not recorded as a

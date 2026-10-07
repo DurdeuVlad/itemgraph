@@ -460,7 +460,7 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void offHandBlockUseDoesNotInspectOrRecordGameplayEvidence() {
+    void offHandBlockUseIsConsumedWhileInspectingWithoutRecordingEvidence() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -476,7 +476,7 @@ class FabricNativeAuditEventListenerTest {
                     player, level, InteractionHand.OFF_HAND, BlockPos.ZERO, Direction.UP);
         }
 
-        assertEquals(InteractionResult.PASS, result);
+        assertEquals(InteractionResult.FAIL, result);
         assertEquals(0, opens.get());
         verifyNoInteractions(service);
     }
@@ -615,6 +615,89 @@ class FabricNativeAuditEventListenerTest {
         assertFalse(inspections.isEnabled(playerUuid));
         assertEquals(0, opens.get(), "the named inspect denial must override vanilla operator status");
         verify(player).sendSystemMessage(any());
+    }
+
+    @Test
+    void offHandBlockUseIsConsumedWhileInspectingWithoutOpeningHistory() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.handleBlockUse(
+                inspections, (p, l, pos) -> { opens.incrementAndGet(); return 1; },
+                player, level, InteractionHand.OFF_HAND, BlockPos.ZERO, Direction.UP);
+
+        // The off-hand twin of an inspection click must not place or use the
+        // off-hand item, but it must not open a second history view either.
+        assertEquals(InteractionResult.FAIL, result);
+        assertEquals(0, opens.get());
+    }
+
+    @Test
+    void offHandBlockUsePassesWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+
+        assertEquals(InteractionResult.PASS, FabricNativeAuditEventListener.handleBlockUse(
+                inspections, (p, l, pos) -> 1,
+                player, serverLevelWithContainer(), InteractionHand.OFF_HAND, BlockPos.ZERO, Direction.UP));
+    }
+
+    @Test
+    void itemUseIsConsumedWhileInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.handleItemUse(
+                inspections, player, mock(ServerLevel.class), InteractionHand.MAIN_HAND).getResult());
+    }
+
+    @Test
+    void itemUsePassesWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+
+        assertEquals(InteractionResult.PASS, FabricNativeAuditEventListener.handleItemUse(
+                inspections, player, mock(ServerLevel.class), InteractionHand.MAIN_HAND).getResult());
+    }
+
+    @Test
+    void itemUseTwinIsConsumedAfterRevocationClearedTheMode() {
+        // The revocation-detecting block click clears the mode before its twin
+        // item-use packet arrives, so the consumed-interaction marker — not
+        // isEnabled — must still consume the twin.
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        when(level.getGameTime()).thenReturn(100L);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.INSPECT));
+
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> 1, player, level, BlockPos.ZERO, Direction.UP));
+        assertFalse(inspections.isEnabled(playerUuid));
+
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.handleItemUse(
+                inspections, player, level, InteractionHand.MAIN_HAND).getResult());
+    }
+
+    @Test
+    void itemUsePassesAfterConsumedMarkerExpires() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        inspections.markInteractionConsumed(playerUuid, 0L);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.getGameTime()).thenReturn(InspectionService.CONSUMED_PACKET_WINDOW_TICKS + 1L);
+
+        assertEquals(InteractionResult.PASS, FabricNativeAuditEventListener.handleItemUse(
+                inspections, player, level, InteractionHand.MAIN_HAND).getResult());
     }
 
     private ServerPlayer playerWithPermission(UUID uuid, boolean permitted) {

@@ -754,6 +754,15 @@ ItemGraph JDBC connection.
 - NeoForge's `InspectionListener` handles `PlayerInteractEvent.RightClickBlock` at `HIGHEST`
   priority and left-click starts; Fabric's `FabricNativeAuditEventListener` applies the same
   selection through `UseBlockCallback` and `AttackBlockCallback`.
+- A consumed right-click produces more packets than the block-use itself: the client also
+  sends the off-hand `useItemOn` and, when its predicted result was not consuming, a
+  separate item-use packet. `InspectionListener` consumes `RightClickItem` and off-hand
+  `RightClickBlock` while inspection is on; Fabric does the same through `UseItemCallback`
+  and the off-hand half of `UseBlockCallback`, so a held bucket, ender pearl, or off-hand
+  item can never mutate the inspected scene. The revocation-detecting click clears the
+  mode before its twin packets arrive, so every consume path calls
+  `InspectionService.markInteractionConsumed` — a five-tick marker that keeps the twins
+  consumable after the mode is already off.
 - A right-click whose target block entity implements `Container` calls the shared
   `FlowBrowserService.openContainer` with the exact dimension and coordinates. Either half
   of a valid double chest resolves to the canonical anchor used by container capture. An
