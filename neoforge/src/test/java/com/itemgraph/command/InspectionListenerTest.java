@@ -11,9 +11,11 @@ import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.fml.loading.LoadingModList;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.minecraft.server.Bootstrap;
@@ -621,6 +623,125 @@ class InspectionListenerTest {
         Field pendingClicks = ContainerSessionListener.class.getDeclaredField("pendingClicks");
         pendingClicks.setAccessible(true);
         assertTrue(((Map<?, ?>) pendingClicks.get(sessionListener)).isEmpty());
+    }
+
+    @Test
+    void entityInteractIsConsumedWhileInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        PlayerInteractEvent.EntityInteract event =
+                new PlayerInteractEvent.EntityInteract(player, InteractionHand.MAIN_HAND, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onEntityInteract(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(InteractionResult.FAIL, event.getCancellationResult());
+        verify(player.containerMenu).sendAllDataToRemote();
+        verify(player.connection, atLeastOnce())
+                .send(any(net.minecraft.network.protocol.Packet.class));
+    }
+
+    @Test
+    void entityInteractDenialSkipsEntityDataPacketWhenDataIsAllDefault() {
+        // getNonDefaultValues() is null when every data value is at its default
+        // (item frames, minecarts); the packet must not be constructed.
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        Entity target = entityTarget();
+        when(target.getEntityData().getNonDefaultValues()).thenReturn(null);
+        PlayerInteractEvent.EntityInteract event =
+                new PlayerInteractEvent.EntityInteract(player, InteractionHand.MAIN_HAND, target);
+
+        listener(service, (p, l, pos) -> 1).onEntityInteract(event);
+
+        assertTrue(event.isCanceled());
+        verify(player.connection, never())
+                .send(any(net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket.class));
+        verify(player.connection)
+                .send(any(net.minecraft.network.protocol.game.ClientboundSetPassengersPacket.class));
+    }
+
+    @Test
+    void entityInteractPassesWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.EntityInteract event =
+                new PlayerInteractEvent.EntityInteract(player, InteractionHand.MAIN_HAND, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onEntityInteract(event);
+
+        assertFalse(event.isCanceled());
+    }
+
+    @Test
+    void entityInteractSpecificOffHandIsConsumedWhileInspecting() {
+        // Armor-stand equipping arrives as INTERACT_AT and can target the off
+        // hand; both must be consumed.
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        PlayerInteractEvent.EntityInteractSpecific event =
+                new PlayerInteractEvent.EntityInteractSpecific(
+                        player, InteractionHand.OFF_HAND, entityTarget(), Vec3.ZERO);
+
+        listener(service, (p, l, pos) -> 1).onEntityInteractSpecific(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(InteractionResult.FAIL, event.getCancellationResult());
+    }
+
+    @Test
+    void entityInteractTwinIsConsumedAfterRevocationClearedTheMode() {
+        // A revocation-detecting block click clears the mode before a paired
+        // entity packet arrives; the consumed-interaction marker must still
+        // consume it.
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getGameTime()).thenReturn(100L);
+        when(player.level()).thenReturn(level);
+        service.markInteractionConsumed(playerUuid, 100L);
+        assertFalse(service.isEnabled(playerUuid));
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        PlayerInteractEvent.EntityInteract event =
+                new PlayerInteractEvent.EntityInteract(player, InteractionHand.MAIN_HAND, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onEntityInteract(event);
+
+        assertTrue(event.isCanceled());
+    }
+
+    private Entity entityTarget() {
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(CONTAINER_POS);
+        net.minecraft.network.syncher.SynchedEntityData data =
+                mock(net.minecraft.network.syncher.SynchedEntityData.class);
+        when(data.getNonDefaultValues()).thenReturn(java.util.List.of());
+        when(target.getEntityData()).thenReturn(data);
+        when(target.getPassengers()).thenReturn(java.util.List.of());
+        return target;
     }
 
     private InspectionListener listener(InspectionService inspections, InspectionListener.BlockHistoryOpener opener) {

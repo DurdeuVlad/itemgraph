@@ -18,8 +18,9 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -63,6 +64,10 @@ class FabricNativeAuditEventListenerTest {
     void clearInspectionState() {
         inspections.clear();
         ItemGraphPermissions.setChecker(null);
+        // A denied handleEntityUse leaves denialRecordedByListener set until the
+        // next aggregate callback drains it — drain so no later test loses a row.
+        com.itemgraph.ingest.EntityInteractionEvidence.recordFabricCallbackResult(
+                null, InteractionResult.PASS);
     }
 
     @Test
@@ -701,6 +706,130 @@ class FabricNativeAuditEventListenerTest {
 
         assertEquals(InteractionResult.PASS, FabricNativeAuditEventListener.handleItemUse(
                 inspections, player, level, InteractionHand.MAIN_HAND).getResult());
+    }
+
+    @Test
+    void entityUseIsDeniedWhileInspectingAndRecordsDeniedEvidence() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(new BlockPos(3, 70, 4));
+        when(target.getUUID()).thenReturn(targetUuid);
+        doReturn(EntityType.PIG).when(target).getType();
+        {
+            net.minecraft.network.syncher.SynchedEntityData data =
+                    mock(net.minecraft.network.syncher.SynchedEntityData.class);
+            when(data.getNonDefaultValues()).thenReturn(java.util.List.of());
+            when(target.getEntityData()).thenReturn(data);
+        }
+        when(target.getPassengers()).thenReturn(java.util.List.of());
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityUse(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.FAIL, result);
+        verify(player.containerMenu).sendAllDataToRemote();
+        verify(player.connection, org.mockito.Mockito.atLeastOnce())
+                .send(any(net.minecraft.network.protocol.Packet.class));
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        var event = captured.getValue();
+        assertEquals("INTERACT_ENTITY_DENIED", event.eventType());
+        assertEquals("minecraft:pig", event.subjectId());
+        assertEquals("outcome=canceled hand=main_hand target_uuid=" + targetUuid
+                + " target_support=callback_only target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT"
+                + " completion=callback=use_entity reason=INSPECTION_MODE"
+                + " held_item=minecraft:air held_count=0"
+                + " held_fingerprint=26e56ae8962a68034262aa43a61146e23dba92566718b4880f921a0c006748d6",
+                event.detail());
+    }
+
+    @Test
+    void entityUsePassesWhenNotInspecting() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(new BlockPos(3, 70, 4));
+        when(target.getUUID()).thenReturn(UUID.randomUUID());
+        doReturn(EntityType.PIG).when(target).getType();
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityUse(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.PASS, result);
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY", captured.getValue().eventType());
+    }
+
+    @Test
+    void entityUseTwinIsDeniedAfterRevocationClearedTheMode() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(level.getGameTime()).thenReturn(100L);
+        inspections.markInteractionConsumed(playerUuid, 100L);
+        assertFalse(inspections.isEnabled(playerUuid));
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(new BlockPos(3, 70, 4));
+        when(target.getUUID()).thenReturn(UUID.randomUUID());
+        doReturn(EntityType.PIG).when(target).getType();
+        {
+            net.minecraft.network.syncher.SynchedEntityData data =
+                    mock(net.minecraft.network.syncher.SynchedEntityData.class);
+            when(data.getNonDefaultValues()).thenReturn(java.util.List.of());
+            when(target.getEntityData()).thenReturn(data);
+        }
+        when(target.getPassengers()).thenReturn(java.util.List.of());
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityUse(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.FAIL, result);
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertTrue(captured.getValue().detail().contains("reason=INSPECTION_WINDOW"));
     }
 
     private ServerPlayer playerWithPermission(UUID uuid, boolean permitted) {

@@ -519,4 +519,45 @@ class NativeAuditEventListenerTest {
         event.setCanceled(canceled);
         return event;
     }
+
+    @Test
+    void inspectionCanceledSpecificCallbackRecordsInspectionModeReason() {
+        // A denial caused by ItemGraph's inspection gate is distinguishable
+        // from a foreign mod cancellation: the marker/enabled state adds
+        // reason=INSPECTION_MODE to the completion detail.
+        PlayerInteractEvent.EntityInteractSpecific event = mock(PlayerInteractEvent.EntityInteractSpecific.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        Entity target = mock(Entity.class);
+        UUID playerUuid = UUID.randomUUID();
+        when(event.isCanceled()).thenReturn(true);
+        when(event.getEntity()).thenReturn(player);
+        when(event.getLevel()).thenReturn(level);
+        when(event.getTarget()).thenReturn(target);
+        when(event.getHand()).thenReturn(InteractionHand.MAIN_HAND);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.getUUID()).thenReturn(UUID.randomUUID());
+        when(target.blockPosition()).thenReturn(new BlockPos(2, 64, 3));
+        doReturn(EntityType.ZOMBIE).when(target).getType();
+
+        com.itemgraph.command.InspectionService.getInstance().setEnabled(playerUuid, true);
+        try {
+            InternalObservationService service = mock(InternalObservationService.class);
+            try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+                mocked.when(InternalObservationService::getInstance).thenReturn(service);
+                new NativeAuditEventListener().onEntityInteractSpecific(event);
+            }
+
+            ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                    ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+            verify(service).submitAuditEvent(captured.capture());
+            assertEquals("INTERACT_ENTITY_DENIED", captured.getValue().eventType());
+            org.junit.jupiter.api.Assertions.assertTrue(captured.getValue().detail()
+                    .contains("completion=callback_canceled reason=INSPECTION_MODE"));
+        } finally {
+            com.itemgraph.command.InspectionService.getInstance().clear(playerUuid);
+        }
+    }
 }

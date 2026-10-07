@@ -763,6 +763,24 @@ ItemGraph JDBC connection.
   mode before its twin packets arrive, so every consume path calls
   `InspectionService.markInteractionConsumed` — a five-tick marker that keeps the twins
   consumable after the mode is already off.
+- Entity right-clicks are consumed under the same enabled-or-marker rule:
+  `InspectionListener` cancels `EntityInteract` and `EntityInteractSpecific` (with
+  `InteractionResult.FAIL`, not the default `PASS`, so the client does not retry
+  further interactions) at `HIGHEST` priority, and Fabric returns `FAIL` from
+  `UseEntityCallback`. The denial remains audit evidence — NeoForge's LOWEST
+  entity handlers record `INTERACT_ENTITY_DENIED` for the canceled event and
+  Fabric records the same row from the callback — so armor-stand equipping,
+  shearing, milking, leashing, and name tags cannot mutate the scene. On Fabric
+  the listener-recorded denial also sets
+  `EntityInteractionEvidence.markListenerRecordedDenial`, which suppresses the
+  `FabricUseEntityCallbackAudit` decorator's second, misattributed denial row
+  for the same packet. Consumed entity interactions resync `containerMenu` plus
+  the target's pairing state — `ClientboundSetEntityDataPacket` (skipped when
+  all values are default), `ClientboundSetEquipmentPacket` for living entities,
+  `ClientboundSetEntityLinkPacket` for leashables, and
+  `ClientboundSetPassengersPacket` — so predicted armor-stand equipment,
+  shearing, leashes, and mounts revert to server truth. Entity left-click
+  attacks are not yet gated — tracked as issue #187.
 - A right-click whose target block entity implements `Container` calls the shared
   `FlowBrowserService.openContainer` with the exact dimension and coordinates. Either half
   of a valid double chest resolves to the canonical anchor used by container capture. An

@@ -14,6 +14,19 @@ The project follows a simple pre-1.0 development changelog model.
   Fabric) can no longer place blocks, throw pearls, or use food on the
   inspected scene — including the revocation-detecting click whose twin
   arrives after the mode cleared (`InspectionService.markInteractionConsumed`).
+- **Entity interactions are consumed in inspection mode** (issue #185). While
+  `/ig inspect` is active, entity right-clicks — armor-stand equipping,
+  shearing, milking, leashing, name tags — are denied and consumed instead of
+  mutating the scene. The denied attempt is still audit evidence:
+  `INTERACT_ENTITY_DENIED` records carry the target UUID, hand, and held-item
+  fingerprint on both loaders. NeoForge cancels `EntityInteract` /
+  `EntityInteractSpecific` at `HIGHEST` priority with `InteractionResult.FAIL`;
+  Fabric returns `FAIL` from `UseEntityCallback`, which covers both `interact`
+  and `interactAt` packets; the listener-recorded denial suppresses the
+  aggregate callback decorator's duplicate denial row. The same five-tick
+  consumed-interaction marker covers entity packets that arrive just after the
+  mode cleared, and consumed interactions resync the held stacks plus the
+  target's entity data so client-predicted state reverts to server truth.
 - **Copy and affordance polish** (UX audit F6+F7+F10). `/ig inspect on` now
   repeats the disable hint from the toggle path; `[Go to ...]` links disclose
   their teleport consequence on hover; result sets past the eight-link cap
