@@ -376,6 +376,9 @@ public final class FabricNativeAuditEventListener {
                         && !inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()))) {
             return InteractionResultHolder.pass(stack);
         }
+        // A FAIL result sends nothing by itself; resync so a client that already
+        // predicted the use (pearl thrown, bucket swapped) reverts to server truth.
+        player.containerMenu.sendAllDataToRemote();
         return InteractionResultHolder.fail(stack);
     }
 

@@ -423,6 +423,7 @@ class InspectionListenerTest {
         when(level.isClientSide()).thenReturn(false);
         when(player.level()).thenReturn(level);
         when(player.blockPosition()).thenReturn(CONTAINER_POS);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
         PlayerInteractEvent.RightClickItem event =
                 new PlayerInteractEvent.RightClickItem(player, InteractionHand.MAIN_HAND);
 
@@ -430,6 +431,7 @@ class InspectionListenerTest {
 
         assertTrue(event.isCanceled());
         assertEquals(InteractionResult.FAIL, event.getCancellationResult());
+        verify(player.containerMenu).sendAllDataToRemote();
     }
 
     @Test
@@ -465,6 +467,7 @@ class InspectionListenerTest {
         inspector.onRightClickBlock(rightClick(player, CONTAINER_POS));
 
         when(player.blockPosition()).thenReturn(CONTAINER_POS);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
         PlayerInteractEvent.RightClickItem twin =
                 new PlayerInteractEvent.RightClickItem(player, InteractionHand.MAIN_HAND);
         inspector.onRightClickItem(twin);

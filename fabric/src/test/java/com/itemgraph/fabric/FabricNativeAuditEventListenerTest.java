@@ -651,9 +651,11 @@ class FabricNativeAuditEventListenerTest {
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
         when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
 
         assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.handleItemUse(
                 inspections, player, mock(ServerLevel.class), InteractionHand.MAIN_HAND).getResult());
+        verify(player.containerMenu).sendAllDataToRemote();
     }
 
     @Test
@@ -683,6 +685,7 @@ class FabricNativeAuditEventListenerTest {
         assertFalse(inspections.isEnabled(playerUuid));
 
         when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
         assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.handleItemUse(
                 inspections, player, level, InteractionHand.MAIN_HAND).getResult());
     }
