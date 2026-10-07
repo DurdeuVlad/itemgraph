@@ -152,6 +152,7 @@ public final class FlowBrowserService {
         }
         AbstractContainerMenu expectedMenu = requester.containerMenu;
         session.loading = true;
+        markMenuLoading(requester);
         int accepted = QueryDispatcher.dispatchData(source, List.of(ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT), "gui flow",
                 conn -> session.target.load(conn, session.window, cursor, direction),
                 (returnedSource, page) -> {
@@ -170,11 +171,24 @@ public final class FlowBrowserService {
                     session.page = page;
                     session.target = session.target.resolved(page);
                     showPage(player, session);
-                }, () -> session.loading = false);
+                }, () -> restoreMenuAfterFailedLoad(requester, expectedMenu, session));
         if (accepted == 0) {
-            session.loading = false;
+            restoreMenuAfterFailedLoad(requester, expectedMenu, session);
         }
         return accepted;
+    }
+
+    /**
+     * A load that never produces a page (queue rejection, failure, revoked permission)
+     * must not leave the menu stuck in the "(loading)" state: reset the flag and
+     * re-render the still-current page, but only while the original menu is still open.
+     */
+    private static void restoreMenuAfterFailedLoad(ServerPlayer player, AbstractContainerMenu expectedMenu,
+                                                   BrowserSession session) {
+        session.loading = false;
+        if (session.page != null && player.containerMenu == expectedMenu) {
+            showPage(player, session);
+        }
     }
 
     static boolean isStaleEmptyContinuation(TraceCursor cursor, TracePage page) {
@@ -252,6 +266,33 @@ public final class FlowBrowserService {
         sendPageCompanion(player, page, candidateList ? session.candidatePageIndex : session.pageIndex);
         openMenu(player, menuTitle(page), items, actions,
                 (clickingPlayer, action) -> handlePageAction(clickingPlayer, session, action));
+    }
+
+    /**
+     * Shows the pending state inside the currently open menu: the page label gains the
+     * "(loading)" suffix and the paging controls are greyed out, matching the disabled
+     * controls `showPage` would render. Slots are mutated in place — a `SimpleContainer`
+     * update syncs to the client on the next tick — so `player.containerMenu` keeps its
+     * identity and the completion callback's `expectedMenu` check still passes.
+     */
+    static void markMenuLoading(ServerPlayer player) {
+        if (!(player.containerMenu instanceof FlowBrowserMenu menu)) {
+            return;
+        }
+        net.minecraft.world.Container container = menu.getContainer();
+        ItemStack label = container.getItem(PAGE_LABEL_SLOT);
+        if (!label.isEmpty()) {
+            net.minecraft.network.chat.Component name = label.get(DataComponents.CUSTOM_NAME);
+            ItemStack loadingLabel = label.copy();
+            loadingLabel.set(DataComponents.CUSTOM_NAME, Component.literal(
+                    (name == null ? "" : name.getString()) + t("browser.loading_suffix", " (loading)")));
+            container.setItem(PAGE_LABEL_SLOT, loadingLabel);
+        }
+        List<String> controlLore = List.of(t("browser.control_lore", "Flow browser control"));
+        container.setItem(PREVIOUS_SLOT, display(Items.GRAY_STAINED_GLASS_PANE,
+                localizeControl("Previous page unavailable"), controlLore));
+        container.setItem(NEXT_SLOT, display(Items.GRAY_STAINED_GLASS_PANE,
+                localizeControl("Next page unavailable"), controlLore));
     }
 
     /**
@@ -411,6 +452,7 @@ public final class FlowBrowserService {
             return;
         }
         browser.loading = true;
+        markMenuLoading(player);
         AbstractContainerMenu expectedMenu = player.containerMenu;
         int accepted = QueryDispatcher.dispatchData(player.createCommandSourceStack(), List.of(ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT), "gui detail",
                 conn -> detailLines(conn, hop),
@@ -423,9 +465,9 @@ public final class FlowBrowserService {
                         showDetails(viewer, detail);
                     }
                 },
-                () -> browser.loading = false);
+                () -> restoreMenuAfterFailedLoad(player, expectedMenu, browser));
         if (accepted == 0) {
-            browser.loading = false;
+            restoreMenuAfterFailedLoad(player, expectedMenu, browser);
         }
     }
 

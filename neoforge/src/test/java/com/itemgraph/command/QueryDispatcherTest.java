@@ -624,7 +624,7 @@ class QueryDispatcherTest {
     }
 
     @Test
-    void revokedTextQueryResultReportsRevocationInsteadOfSilentDrop(@TempDir Path tempDir) throws Exception {
+    void testTextQueryRechecksPermissionBeforeDelivery(@TempDir Path tempDir) throws Exception {
         DatabaseManager.getInstance().initialize(tempDir.resolve("permission-revoked-query.db"));
         CommandSourceStack source = mock(CommandSourceStack.class);
         MinecraftServer server = mock(MinecraftServer.class);
