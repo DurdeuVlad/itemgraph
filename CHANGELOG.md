@@ -6,6 +6,14 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+## [0.4.0-beta.2] — 2026-10-10
+
+Second public beta of the ItemGraph 0.4 line. Ships the inspection-mode
+consumption and async-query feedback fixes, the Fabric drop settle-position
+correction, the promised retirement of the `-grieflogger-compatible`
+artifacts (only the two standard jars are published), and the M11
+reader-facing documentation rewrite.
+
 ### Added
 
 - **Entity attacks are consumed in inspection mode** (issue #187). While
@@ -105,6 +113,20 @@ The project follows a simple pre-1.0 development changelog model.
   including silent acceptance/timeout/revocation gaps in the async query path
   and an inspect-mode revocation fall-through — plus a prioritized follow-up
   backlog. No behavior changes.
+
+### Changed
+
+- **Reader-facing documentation reorganized around audiences** (issues
+  #191–#195). `docs/WRITING.md` records the writing contract: named
+  audiences, define-before-use, validator-pinned literals, and the protected
+  evidence-ledger list. The README and admin quick start now lead with
+  install, capture verification, and incident-to-command routing for
+  first-time admins; the evidence, query, taxonomy, permission,
+  configuration, GriefLogger-migration, and API docs name their audience and
+  front-load reading maps or checklists; the contributor docs gain
+  navigation signposts; and `/ig help commands` labels each route with the
+  question it answers (`ITEM LOST?`, `CHEST?`, `NEARBY?`, `WHY LINKED?`).
+  No command, permission, event, or schema contract changed.
 
 ### Removed
 
