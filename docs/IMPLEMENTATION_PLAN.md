@@ -1,5 +1,11 @@
 # Implementation Plan
 
+**Audience:** contributors and maintainers. This file is a phase history:
+sections marked `COMPLETED`, `Delivered`, or with a milestone header are
+records of what shipped — do not read them as the roadmap. The live
+forward-looking work is tracked in GitHub issues and milestones; the sections
+below explain *why* the system is shaped the way it is.
+
 ## Phase 0 — Reconnaissance
 
 Do not begin significant implementation before this phase is complete.

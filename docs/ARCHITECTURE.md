@@ -1,8 +1,26 @@
 # Architecture
 
+**Audience:** contributors and maintainers. This is the implementation
+contract — every statement is load-bearing, and the doc is deliberately kept
+as a single source for rules other docs link to.
+
 ## Purpose
 
 ItemGraph reconstructs plausible movement of Minecraft items and stack quantities through inventories over time.
+
+## How to navigate this document
+
+| Question | Section |
+| --- | --- |
+| Which module owns what, and what may it not import? | [Loader boundary](#loader-boundary-032) |
+| What do nodes, observations, and inferred edges mean? | [Conceptual model](#conceptual-model) |
+| How are drops bridged to pickups, and what is scored? | [Correlation: ground bridging](#correlation-ground-bridging-phase-5) |
+| Why do commands not lag the server? | [Query execution](#query-execution-off-thread-reported-back-on-thread-phase-6) |
+| What do `[OBSERVED]`/`[INFERRED]` result lines mean? | [Query output: the labelling convention](#query-output-the-labelling-convention-phase-6) |
+| How is quantity conserved and its lifecycle tracked? | [Quantity-Flow Allocation Ledger](#quantity-flow-allocation-ledger-phase-7) |
+| What is captured natively today? | [Native Container & Ground Observation](#native-container--ground-observation-m5-020) through [Expanded Query UX](#expanded-query-ux) |
+| What must never run on the server thread? | [Threading model](#threading-model) and [Performance constraints](#performance-constraints) |
+| Which data does ItemGraph own vs. borrow read-only? | [Data ownership](#data-ownership) |
 
 ## Loader boundary (0.3.2)
 
