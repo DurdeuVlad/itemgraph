@@ -12,6 +12,13 @@ submit direct observed item evidence and query bounded, explainable flows. It is
 API shipped inside the main ItemGraph JAR; it is not a stable API, a database contract, a
 network API, or a GriefLogger API.
 
+**Audience:** mod developers integrating with ItemGraph. Reading order for a
+first integration: [goals and boundaries](#goals-and-boundaries) →
+[compile and runtime setup](#compile-and-runtime-setup) →
+[minimal consumer example](#minimal-consumer-example) → the specific
+signature sections you need. A compiling working fixture lives at
+[`examples/api-consumer`](../examples/api-consumer).
+
 ## Goals and boundaries
 
 The API exists so a consumer can:

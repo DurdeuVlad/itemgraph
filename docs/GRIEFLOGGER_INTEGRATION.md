@@ -1,5 +1,31 @@
 # GriefLogger Integration
 
+**Audience:** server operators migrating from GriefLogger, and maintainers
+checking the read-only boundary. If you only need the migration path, use the
+checklist below; the rest of the document is the design and evidence contract.
+
+## Migration checklist
+
+1. Confirm the source version. GriefLogger `1.2.10-1.21.1` is the tested
+   compatibility scope; other versions are rejected cleanly rather than
+   mis-imported.
+2. Stop the server. Remove the GriefLogger mod jar — the loaders declare the
+   conflict and a server with both jars refuses to boot. **Keep the
+   `database.db` file** (GriefLogger writes it to `config/grieflogger/`).
+3. Install the standard ItemGraph jar and start once so its config exists.
+4. Enable the bridge: NeoForge `general.grieflogger_integration_enabled=true`,
+   Fabric `grieflogger_integration_enabled=true`, plus
+   `grieflogger_database_path` pointing at the retained file.
+5. Restart, then run `/ig ingest history` to queue the historical import on
+   the background worker. The source database stays read-only; ItemGraph
+   writes only to its own `ig_grieflogger_*` tables.
+6. Verify with `/ig status`: check the latest import status and
+   imported/opaque row counts. `FAILED` means committed partial data exists,
+   not a clean zero-row import. Queries over imported rows need a completed
+   sync/import.
+7. Rollback note: disabling the bridge key stops new source reads; already
+   imported rows remain in ItemGraph's own database as provenance evidence.
+
 ## Purpose
 
 ItemGraph is the standalone product and native-only operation is the default.

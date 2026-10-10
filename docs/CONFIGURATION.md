@@ -1,5 +1,14 @@
 # ItemGraph configuration reference
 
+**Audience:** server operators. Every key below has its NeoForge TOML path,
+Fabric properties key, default, accepted range, and reload requirement in the
+tables; the prose sections explain the behavior behind groups of keys.
+
+**Most servers need no configuration at all** — the defaults use a local
+SQLite file, enable native capture, and keep raw evidence indefinitely. Touch
+these keys only when you need a network database, the GriefLogger migration
+bridge, a different message language, or non-default queue/index behavior.
+
 All ItemGraph settings are read while the server starts. Restart the server after
 editing either the NeoForge server config or Fabric's
 `config/itemgraph.properties`; `/reload` does not reload ItemGraph settings.
