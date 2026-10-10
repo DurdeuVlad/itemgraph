@@ -1,29 +1,52 @@
 # ItemGraph admin quick start
 
-This guide is for a server admin investigating an item incident for the first time. It
-uses the current ItemGraph command tree and behavior for Minecraft 1.21.1. ItemGraph is a
-server-side NeoForge or Fabric mod; players do not need a client mod for commands or the
-vanilla flow browser. Read section 0 before running commands; permission nodes and denial
-behavior are listed in [Security and permissions](SECURITY_AND_PERMISSIONS.md).
+**Audience:** a server admin or moderator investigating an item incident for
+the first time. No prior ItemGraph knowledge is assumed. It uses the current
+ItemGraph command tree and behavior for Minecraft 1.21.1. ItemGraph is a
+server-side NeoForge or Fabric mod; players do not need a client mod for
+commands or the vanilla flow browser.
+
+Read the sections in order — each one assumes the ones before it:
+
+0. Install the right jar and confirm access
+1. Confirm ItemGraph is capturing
+2. Grant the moderator only the permissions their task needs
+3. Match your incident question to the command that answers it
+4. Run a first read-only investigation
+5. Read a flow-browser result
+6. Read the evidence correctly
+7. Common failures and safe next steps
+
+Permission nodes and denial behavior are listed in
+[Security and permissions](SECURITY_AND_PERMISSIONS.md).
 
 ## 0. Choose the server file and confirm access
 
-ItemGraph targets Minecraft 1.21.1. Choose the file for the server's loader; NeoForge is
-the primary loader and Fabric is also supported. Install ItemGraph on the server only;
-players do not need the mod on their clients. ItemGraph replaces GriefLogger: remove the
-GriefLogger mod jar before installing — both loaders declare the conflict in metadata and
-the server will refuse to boot with both mods present. Keep the GriefLogger database file
-for the optional read-only history import described in the README. Download the approved
-release file, place it in the server's `mods/` folder, and restart. Current file names and compatibility targets are listed in the
-[README](../README.md).
+ItemGraph targets Minecraft 1.21.1. Install ItemGraph on the server only;
+players do not need the mod on their clients.
+
+1. Choose the release file for the server's loader — NeoForge is the primary
+   loader and Fabric is also supported. Current file names and compatibility
+   targets are listed in the [README](../README.md).
+2. **Remove the GriefLogger mod jar first.** ItemGraph replaces GriefLogger:
+   both loaders declare the conflict in metadata and the server will refuse to
+   boot with both mods present. Keep the GriefLogger database file for the
+   optional read-only history import described in the README.
+3. Place the downloaded release file in the server's `mods/` folder.
+4. Restart the server.
 
 Before running a command, make sure your permission provider has not explicitly denied
-its required node. An unset node falls back to vanilla permission level 2; exact named
-nodes do not inherit from dotted parents, and explicit `false` denies even an operator.
-The `/ig` root and `/ig help` require `itemgraph.command`. If you cannot run help, ask a
-server owner to check the provider directly or grant the exact node; the command cannot
-explain a denial that blocks the help command itself. `/ig audit` additionally requires
-`itemgraph.audit`. The complete command-to-node table is in
+its required node. The permission rules to remember:
+
+- An unset node falls back to vanilla permission level 2.
+- Exact named nodes do not inherit from dotted parents.
+- An explicit `false` denies even an operator.
+- The `/ig` root and `/ig help` require `itemgraph.command`; `/ig audit`
+  additionally requires `itemgraph.audit`.
+
+If you cannot run help, ask a server owner to check the provider directly or
+grant the exact node; the command cannot explain a denial that blocks the help
+command itself. The complete command-to-node table is in
 [Security and permissions](SECURITY_AND_PERMISSIONS.md).
 
 ## 1. Confirm that ItemGraph is ready
@@ -39,11 +62,18 @@ Run:
 database/capture problem, or says that no stop was reported while warning that capture
 coverage is still unproven. It then prints configuration and diagnostic counters,
 followed by stored row counts when the database is connected. The action line does not
-assign a health score. `RUNNING` means the
-source-ingestion worker started; it does not mean the database is healthy or that native
-capture is active. `/ig audit` runs a read-only database integrity and
-quantity-conservation check. Fix a reported database/queue problem before treating an
-empty search as evidence that nothing happened.
+assign a health score.
+
+`/ig audit` runs a read-only database integrity and quantity-conservation
+check. Fix a reported database/queue problem before treating an empty search
+as evidence that nothing happened.
+
+Two status values are easy to misread:
+
+- `RUNNING` means the source-ingestion worker started; it does not mean the
+  database is healthy or that native capture is active.
+- `captureState=ACTIVE` means the capture path is open; it does not prove a
+  particular event type is supported.
 
 If no events have been captured yet, use a disposable test world or staging server to
 perform one ordinary action and confirm a matching observation appears. Do not test by
@@ -54,9 +84,10 @@ For server setup and the exact database keys, see [Configuration](CONFIGURATION.
 ### Read `/ig status` without guessing
 
 Status values are operational facts, not a calibrated healthy/degraded score. No
-production-derived performance thresholds are available. Start with `captureState` and
-the database connection; then check queue/persistence counters and last operation results.
-The in-game `/ig help status` gives the short version.
+production-derived performance thresholds are available. Check three things
+first — `ACTION`, `db`, and `captureState` — and consult the tables below only
+when one of them needs explanation. The in-game `/ig help status` gives the
+short version.
 
 #### If status shows a problem
 
@@ -161,50 +192,69 @@ parent inheritance.
 | How do I run a filtered lookup from console? | `/ig lookup near <dimension> <x> <y> <z> <radius> <eventType> ...` | Coordinate-based nearby audit query; `/ig lookup <filters...>` is player-only because its radius uses the issuing player's position. |
 | Which filter syntax can I use today? | `/ig help lookup filters` or `/ig lookup filters action.break_block radius.32 time.24h` | Filters support action, user, include, exclude, relative time, and radius. Absolute `after`/`before`/`between` windows and enchantment/trim/component predicates are not implemented. Filter lookup is player-only because radius uses your position; console admins use `/ig lookup near` with explicit coordinates. |
 
+### Help topics, journeys, and paging
+
 `/ig` and `/itemgraph` are the same command root. `/ig help` gives task-first starting
 points; `/ig help commands` is a compact task hub that points to detailed topics. `/ig help
 lookup near`, `/ig help trace item`, and other topic forms give exact routes, syntax, and an example.
-For complete first-time routes, use `/ig help journeys inspect`,
+
+For complete first-time routes, use the journey topics: `/ig help journeys inspect`,
 `/ig help journeys trace`, `/ig help journeys near`, or
-`/ig help journeys filters`. The focused routes `/ig help lookup admin`,
-`/ig help lookup lifecycle`, and `/ig help lookup transformations` cover those event families.
-Each journey states the permission nodes, result meaning, next command, and checks for an empty result.
+`/ig help journeys filters`. Each journey states the permission nodes, result
+meaning, next command, and checks for an empty result. The focused routes
+`/ig help lookup admin`, `/ig help lookup lifecycle`, and
+`/ig help lookup transformations` cover those event families.
 `/ig help goto` explains that `[Go to ...]` is an in-game click action; do not type its token.
-`/ig page <page>` continues the issuing player's saved lookup session. By
-contrast, `/ig lookup page <page> <eventType> [limit] [sinceMinutes]` runs a direct page
-number query for that event type.
-Console `/ig lookup near` results do not save coordinates or radius for a later page.
-A direct event-type page query does not retain that nearby scope.
+
+Two different paging commands exist:
+
+- `/ig page <page>` continues the issuing player's saved lookup session.
+- `/ig lookup page <page> <eventType> [limit] [sinceMinutes]` runs a direct
+  page-number query for that event type — it does not retain a previous nearby
+  scope, and console `/ig lookup near` results do not save coordinates or
+  radius for a later page.
+
+### Filter grammar (what `/ig lookup` accepts today)
 
 The filtered lookup accepts `action`, `user`, `include`, `exclude`, `time`, and `radius` in
-`name.value` form. `include` and `exclude` match item registry IDs and cannot be combined.
-`time` is a relative whole-number duration with `m`, `h`, `d`, or `y`, such as `time.1h`.
-Radius is required, player-relative, and capped at 1,024 blocks. A request accepts at most
-five unique filters and at most 32 comma-separated values per list. Quote a comma-separated
-value so Brigadier passes it as one argument, for example:
+`name.value` form:
+
+- `include` and `exclude` match item registry IDs and cannot be combined.
+- `time` is a relative whole-number duration with `m`, `h`, `d`, or `y`, such as `time.1h`.
+- `radius` is required, player-relative, and capped at 1,024 blocks.
+- A request accepts at most five unique filters and at most 32 comma-separated
+  values per list. Quote a comma-separated value so Brigadier passes it as one
+  argument:
 
 ```text
 /ig lookup action.break_block "include.stone,diamond" radius.50 time.1h
 ```
 
-These filters do not select enchantments, trims, custom names, arbitrary components, or
-fingerprint hashes, and do not accept absolute UTC `after`, `before`, or `between`
-timestamps. In particular, `CAPABILITY_INSERT`/`CAPABILITY_EXTRACT` are not accepted by the
+**Not implemented:** these filters do not select enchantments, trims, custom
+names, arbitrary components, or fingerprint hashes, and do not accept absolute
+UTC `after`, `before`, or `between` timestamps. In particular,
+`CAPABILITY_INSERT`/`CAPABILITY_EXTRACT` are not accepted by the
 current filtered lookup action registry; use `/ig trace container` and read the recorded
 action instead. Use `/ig trace item` to resolve candidate fingerprints and hover for the full
 canonical metadata hash. Equal metadata does not identify one physical item. See the
 [Query model](QUERY_MODEL.md) for current behavior and planned extensions.
 
-Automated inventory coverage is loader-specific. NeoForge observes completed
-(`simulate=false`) `IItemHandler` calls on registered vanilla inventories, including
-hoppers, dispensers, droppers, furnaces, chests, and shulker boxes. Each row identifies the
-changed container; caller and remote endpoint remain `UNKNOWN`. Fabric observes before/after
-net deltas around successful vanilla hopper transfers, also with an unknown remote endpoint.
-The Fabric Transfer API adapter for modded inventories is not implemented. The planned
-`DISPENSER_EFFECT` taxonomy entry does not prove that a dispenser launched an item. Do not
-assume a backpack, pipe, or arbitrary modded inventory is covered; see
-[GriefLogger integration](GRIEFLOGGER_INTEGRATION.md) and
-[automated-container architecture](ARCHITECTURE.md#automated-container-transfers-issue-4).
+### Automated inventory coverage
+
+Automated inventory coverage is loader-specific:
+
+- **NeoForge** observes completed (`simulate=false`) `IItemHandler` calls on
+  registered vanilla inventories, including hoppers, dispensers, droppers,
+  furnaces, chests, and shulker boxes. Each row identifies the changed
+  container; caller and remote endpoint remain `UNKNOWN`.
+- **Fabric** observes before/after net deltas around successful vanilla hopper
+  transfers, also with an unknown remote endpoint. The Fabric Transfer API
+  adapter for modded inventories is not implemented.
+
+The planned `DISPENSER_EFFECT` taxonomy entry does not prove that a dispenser
+launched an item. Do not assume a backpack, pipe, or arbitrary modded
+inventory is covered; see [GriefLogger integration](GRIEFLOGGER_INTEGRATION.md)
+and [automated-container architecture](ARCHITECTURE.md#automated-container-transfers-issue-4).
 
 ## 4. Run a first read-only investigation
 
@@ -238,33 +288,43 @@ neither is part of this read-only first investigation.
 
 ## 5. Read a flow-browser result
 
-The flow browser is a vanilla menu. It has no ItemGraph-specific item, screen, packet, or
-client installation requirement. Each page has at most nine rows. A numbered chat companion
-shows each row's observed/inferred class and shortened safe item identity. Match its number
-to the menu slot in reading order: left-to-right, then top-to-bottom. Hover the menu slot to
-read the full amount, event kind, exact UTC time, endpoints, evidence ID, and detail text.
-Left-click that slot to open its details, then use the labeled Back control to return. On an
-ambiguous candidate page, select
-a candidate slot to open that candidate's timeline. Missing identity and unresolved history
-have explicit labels. Hover text and icons provide supplemental detail. Its entries are
-read-only; attempts to move inventory items through the menu are rejected. For a supported
-container,
-`/ig inspect on` and a
-right-click open the same kind of container flow browser. For a valid double chest, either
-half opens the canonical anchor used when its contents are recorded. Run `/ig inspect off`
-when finished; mode also clears on logout and server stop.
+The flow browser is a vanilla menu — no ItemGraph-specific item, screen,
+packet, or client installation is required.
 
-After you select a timeline row, the detail menu shows one paper icon per detail line.
-Hover an icon to read its full text; use the labeled next/previous controls when the
-details span more than one page, and Back to return to the timeline.
+Reading a timeline page:
 
-For `/ig event`, `/ig explain`, `/ig trace`, and paged history results, hover a chat row for
-evidence class, safe item identity, canonical fingerprint hash when available, event kind,
-UTC time, and recorded endpoints. Click `[Go to ...]` only when you want to move your own
-player to a recorded spatial endpoint — the link's hover says exactly that. It expires
-after two minutes, works once, and requires the same query permissions when clicked. At
-most eight links render per result; a closing line reports any recorded locations that
-were not shown. Console results remain plain text.
+- Each page has at most nine rows. A numbered chat companion shows each row's
+  observed/inferred class and shortened safe item identity.
+- Match a chat-companion number to its menu slot in reading order:
+  left-to-right, then top-to-bottom.
+- Hover the menu slot for the full amount, event kind, exact UTC time,
+  endpoints, evidence ID, and detail text. Hover text and icons provide
+  supplemental detail.
+- Left-click a slot to open its details. The detail menu shows one paper icon
+  per detail line — hover an icon to read its full text; use the labeled
+  next/previous controls when the details span more than one page, and Back to
+  return to the timeline.
+- On an ambiguous candidate page, select a candidate slot to open that
+  candidate's timeline. Missing identity and unresolved history have explicit
+  labels.
+- Entries are read-only; attempts to move inventory items through the menu are
+  rejected.
+
+Opening the same browser in-world: for a supported container, `/ig inspect on`
+and a right-click open the same kind of container flow browser. For a valid
+double chest, either half opens the canonical anchor used when its contents
+are recorded. Run `/ig inspect off` when finished; the mode also clears on
+logout and server stop.
+
+For `/ig event`, `/ig explain`, `/ig trace`, and paged history results, hover
+a chat row for evidence class, safe item identity, canonical fingerprint hash
+when available, event kind, UTC time, and recorded endpoints.
+
+Click `[Go to ...]` only when you want to move your own player to a recorded
+spatial endpoint — the link's hover says exactly that. It expires after two
+minutes, works once, and requires the same query permissions when clicked. At
+most eight links render per result; a closing line reports any recorded
+locations that were not shown. Console results remain plain text.
 
 ## 6. Read the evidence correctly
 
@@ -294,15 +354,19 @@ A confidence value is a deterministic score from documented evidence factors, no
 calibrated probability that the history is true. Use `/ig explain <edgeId>` to see the
 factors, candidate counts, and supporting observations behind a link.
 
-Unified lookup rows have source-prefixed IDs. For `observation#42`, pass only `42` to
-`/ig event 42`. An `audit#42` row is already inline evidence; transformation and imported
-IDs are source references, not `/ig event` arguments. Read their row detail or narrow and
-rerun the lookup. For an imported GriefLogger row, `/ig lookup provenance` requires its
-source SHA-256, table, and exact source key; use only values supplied by the import record.
-An unresolved row may not contain an event UUID, so use `/ig event event:<uuid>` only when
-that exact supported UUID is printed. `/ig explain <edgeId>` requires
-`itemgraph.explain` plus `itemgraph.audit`; item trace follow-ups require
-`itemgraph.trace` plus `itemgraph.audit`.
+Unified lookup rows have source-prefixed IDs — use the right ID form for each:
+
+- For `observation#42`, pass only `42` to `/ig event 42`.
+- An `audit#42` row is already inline evidence; transformation and imported
+  IDs are source references, not `/ig event` arguments. Read their row detail
+  or narrow and rerun the lookup.
+- For an imported GriefLogger row, `/ig lookup provenance` requires its
+  source SHA-256, table, and exact source key; use only values supplied by the
+  import record.
+- An unresolved row may not contain an event UUID, so use
+  `/ig event event:<uuid>` only when that exact supported UUID is printed.
+- `/ig explain <edgeId>` requires `itemgraph.explain` plus `itemgraph.audit`;
+  item trace follow-ups require `itemgraph.trace` plus `itemgraph.audit`.
 
 ### Coverage limits to check before trusting an empty result
 
@@ -318,19 +382,25 @@ are listed in [Feature parity inventory](FEATURE_PARITY_INVENTORY.md).
 
 ### Optional: import GriefLogger history
 
-Use this only when migrating a server with a supported GriefLogger database. Read the
-[GriefLogger integration guide](GRIEFLOGGER_INTEGRATION.md) first. In NeoForge, set
-`general.grieflogger_integration_enabled=true` and `general.grieflogger_database_path`;
-in Fabric, set `grieflogger_integration_enabled=true` and `grieflogger_database_path`.
-Use the source database path and the exact configuration file documented in
-[`Configuration`](CONFIGURATION.md), then restart. The GriefLogger database stays
-read-only; ItemGraph writes imported rows and reports only to its own database. Grant
-`itemgraph.command`, `itemgraph.ingest`, and `itemgraph.import` to the operator. Run
-`/ig ingest history` once to queue the historical import on the background worker, then
-run `/ig status` to check the latest import status and imported/opaque row counts. A
-`FAILED` or partial report means some rows were stored before the failure; it is not a
-complete import. Opaque or unresolved rows do not prove an item flow. Do not enable the
-bridge for normal standalone ItemGraph operation.
+Use this only when migrating a server with a supported GriefLogger database —
+do not enable the bridge for normal standalone ItemGraph operation. Read the
+[GriefLogger integration guide](GRIEFLOGGER_INTEGRATION.md) first, then:
+
+1. In NeoForge, set `general.grieflogger_integration_enabled=true` and
+   `general.grieflogger_database_path`; in Fabric, set
+   `grieflogger_integration_enabled=true` and `grieflogger_database_path`.
+   Use the source database path and the exact configuration file documented in
+   [`Configuration`](CONFIGURATION.md), then restart.
+2. The GriefLogger database stays read-only; ItemGraph writes imported rows
+   and reports only to its own database.
+3. Grant `itemgraph.command`, `itemgraph.ingest`, and `itemgraph.import` to
+   the operator.
+4. Run `/ig ingest history` once to queue the historical import on the
+   background worker.
+5. Run `/ig status` to check the latest import status and imported/opaque row
+   counts. A `FAILED` or partial report means some rows were stored before the
+   failure; it is not a complete import. Opaque or unresolved rows do not
+   prove an item flow.
 
 ### Optional: integrate another server mod
 
