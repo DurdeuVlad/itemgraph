@@ -79,6 +79,7 @@ public final class ItemGraphFabric implements ModInitializer {
         ItemGraphCommands.clearPageSessions();
         ItemGraphApiLifecycle.stop(server);
         FabricContainerSessionListener.flushAll();
+        FabricNativeAuditEventListener.clearPendingDrops();
         com.itemgraph.command.InspectionService.getInstance().clear();
         // Wait for the importer to terminate before closing the database it writes to.
         IngestionService.getInstance().stop();

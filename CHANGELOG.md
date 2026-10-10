@@ -69,6 +69,21 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Fixed
 
+- **Fabric drops record the entity's rest position, not its spawn position**
+  (issue #166). `finishItemDropCapture` read the `ItemEntity` coordinates at
+  `ServerPlayer.drop` return — eye height plus throw offset — so a dropped-
+  then-recovered stack produced `DROP_ITEM` and `PICKUP_ITEM` rows on GROUND
+  nodes one block apart and the correlation bridge's node-equality filter
+  could never pair them. Fabric now queues a bounded pending drop like the
+  NeoForge listener and emits at the settle position (`onGround`, near-zero
+  delta movement, removal at last known position, or TTL expiry); a pickup
+  that overtakes a still-pending drop emits it at the shared pickup position,
+  and death-drop replays and deferred `/give` ground outputs settle the same
+  way. Fabric drop/pickup rows now also feed `ItemEntityTracker` so the
+  entity-UUID continuity match that NeoForge already uses can rank Fabric
+  candidates. Evicted or requeued pending entries stay
+  `DROP_UNRESOLVED`/`DEATH_DROP_UNRESOLVED` to UNKNOWN with the eviction
+  reason — never a fabricated ground transfer.
 - **Inspection-mode denial and revocation handling** (`docs/UX_AUDIT.md` finding F3).
   On both NeoForge and Fabric, a click that detects a revoked
   `itemgraph.command.inspect` grant now disables inspection, reports "Inspection

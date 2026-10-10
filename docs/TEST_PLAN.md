@@ -231,8 +231,11 @@ Alice -> Ground -> Bob
 ```
 
 Where item entity identity is available, correlation should become stronger. A ground row is
-created only after the ItemEntity is confirmed in the level; a canceled toss is UNKNOWN-
-destination evidence and a canceled death drop has no ground endpoint.
+created only after the ItemEntity is confirmed in the level and reaches a resting state
+(on-ground, near-zero movement, removal, or TTL expiry), so the drop endpoint is the
+entity's rest position — the same GROUND node a same-position pickup records (issue #166,
+both loaders). A canceled toss is UNKNOWN-destination evidence and a canceled death drop
+has no ground endpoint.
 
 ### Cross-source copies
 
@@ -830,6 +833,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ContainerInteractionTrackerTest`, `ContainerSessionListenerTest` | open/close net deltas, timestamp intervals, multi-viewer ambiguity, capability-credit subtraction, and zero-net limitation (14 + 1 tests) |
 | `V9InternalObservationDedupTest`, `V10InternalDedupEntityUuidTest` | partial-index, UUID, destination-sensitive dedup, NULL-UUID preservation, and V11 idempotence (5 + 6 tests) |
 | `ItemEntityEventListenerPartialPickupTest` | pending-pickup resolution: emit on reduced count, drop on removal/expiry, keep while unchanged |
+| `ItemEntityEventListenerTest` pending-drop cases (NeoForge), `FabricNativeAuditEventListenerTest` pending-drop cases (Fabric) | settle-position drop endpoints on both loaders (issue #166): airborne entities wait for rest, removed entities confirm at last known position, TTL expiry emits at fallback position, a pickup overtaking a pending drop emits it at the shared pickup position, and a requeued entity UUID leaves `DROP_UNRESOLVED`/`DEATH_DROP_UNRESOLVED` with `pending_entity_reused` |
 | `FlowBrowserMenuTest` | vanilla six-row menu type, compact resolved-menu titles, textual provenance/confidence/evidence labels, numbered nine-row chat companion with UTC timestamps and safe identity fallbacks, every click category rejected or handled as navigation/detail only, and permission recheck |
 | `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container and `/ig inspect` command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
 | `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest`, `FabricNativeAuditEventListenerTest` | per-player inspect state, deterministic command forms, permission denial, block-history fallback, exact Container-to-flow-browser routing on both loaders, browser-queue rejection fallback, NeoForge logout and Fabric disconnect handlers, and canceled-click isolation from session tracking |
