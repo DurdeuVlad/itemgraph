@@ -25,6 +25,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.fml.loading.LoadingModList;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import com.mojang.authlib.GameProfile;
@@ -428,6 +429,89 @@ class NativeAuditEventListenerTest {
         org.junit.jupiter.api.Assertions.assertTrue(captured.getValue().detail()
                 .contains("completion=specific_result_unobserved"));
     }
+
+    @Test
+    void canceledAttackRecordsDeniedEvidenceWithGenericReasonWhenNoInspection() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        Entity target = mock(Entity.class);
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(player.level()).thenReturn(level);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.getUUID()).thenReturn(targetUuid);
+        when(target.blockPosition()).thenReturn(new BlockPos(2, 64, 3));
+        doReturn(EntityType.ZOMBIE).when(target).getType();
+        AttackEntityEvent event = new AttackEntityEvent(player, target);
+        event.setCanceled(true);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onAttackEntity(event);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("ATTACK_ENTITY_DENIED", captured.getValue().eventType());
+        assertEquals("minecraft:zombie", captured.getValue().subjectId());
+        assertTrue(captured.getValue().detail()
+                .contains("callback=attack_entity reason=LOADER_CALLBACK_CANCELED"));
+        assertTrue(captured.getValue().detail().contains("target_uuid=" + targetUuid));
+    }
+
+    @Test
+    void attackCanceledByInspectionRecordsInspectionModeReason() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        Entity target = mock(Entity.class);
+        UUID playerUuid = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(player.level()).thenReturn(level);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(target.getUUID()).thenReturn(UUID.randomUUID());
+        when(target.blockPosition()).thenReturn(new BlockPos(2, 64, 3));
+        doReturn(EntityType.ZOMBIE).when(target).getType();
+        com.itemgraph.command.InspectionService.getInstance().setEnabled(playerUuid, true);
+        AttackEntityEvent event = new AttackEntityEvent(player, target);
+        event.setCanceled(true);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onAttackEntity(event);
+        } finally {
+            com.itemgraph.command.InspectionService.getInstance().clear(playerUuid);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("ATTACK_ENTITY_DENIED", captured.getValue().eventType());
+        assertTrue(captured.getValue().detail()
+                .contains("callback=attack_entity reason=INSPECTION_MODE"));
+    }
+
+    @Test
+    void uncanceledAttackRecordsNoDenialEvidence() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        Entity target = mock(Entity.class);
+        when(player.level()).thenReturn(mock(ServerLevel.class));
+        AttackEntityEvent event = new AttackEntityEvent(player, target);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            new NativeAuditEventListener().onAttackEntity(event);
+        }
+
+        verifyNoInteractions(service);
+    }
+
     @Test
     void canceledArmorStandSpecificCallbackIsRetainedAsCanceledAttempt() {
         PlayerInteractEvent.EntityInteractSpecific event = mock(PlayerInteractEvent.EntityInteractSpecific.class);

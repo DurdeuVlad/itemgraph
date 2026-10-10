@@ -832,6 +832,116 @@ class FabricNativeAuditEventListenerTest {
         assertTrue(captured.getValue().detail().contains("reason=INSPECTION_WINDOW"));
     }
 
+    @Test
+    void entityAttackIsDeniedWhileInspectingAndRecordsDeniedEvidence() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        Entity target = attackTarget(targetUuid);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityAttack(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.FAIL, result);
+        verify(player.containerMenu).sendAllDataToRemote();
+        verify(player.connection, org.mockito.Mockito.atLeastOnce())
+                .send(any(net.minecraft.network.protocol.Packet.class));
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        var event = captured.getValue();
+        assertEquals("ATTACK_ENTITY_DENIED", event.eventType());
+        assertEquals("minecraft:pig", event.subjectId());
+        assertEquals("outcome=canceled hand=main_hand target_uuid=" + targetUuid
+                + " target_support=callback_only target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT"
+                + " completion=callback=attack_entity reason=INSPECTION_MODE"
+                + " held_item=minecraft:air held_count=0"
+                + " held_fingerprint=26e56ae8962a68034262aa43a61146e23dba92566718b4880f921a0c006748d6",
+                event.detail());
+    }
+
+    @Test
+    void entityAttackPassesWhenNotInspecting() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        ServerLevel level = mock(ServerLevel.class);
+        Entity target = attackTarget(UUID.randomUUID());
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityAttack(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.PASS, result);
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void entityAttackTwinIsDeniedAfterRevocationClearedTheMode() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(level.getGameTime()).thenReturn(100L);
+        inspections.markInteractionConsumed(playerUuid, 100L);
+        assertFalse(inspections.isEnabled(playerUuid));
+        Entity target = attackTarget(UUID.randomUUID());
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityAttack(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.FAIL, result);
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("ATTACK_ENTITY_DENIED", captured.getValue().eventType());
+        assertTrue(captured.getValue().detail().contains("reason=INSPECTION_WINDOW"));
+    }
+
+    private Entity attackTarget(UUID targetUuid) {
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(new BlockPos(3, 70, 4));
+        when(target.getUUID()).thenReturn(targetUuid);
+        doReturn(EntityType.PIG).when(target).getType();
+        net.minecraft.network.syncher.SynchedEntityData data =
+                mock(net.minecraft.network.syncher.SynchedEntityData.class);
+        when(data.getNonDefaultValues()).thenReturn(java.util.List.of());
+        when(target.getEntityData()).thenReturn(data);
+        when(target.getPassengers()).thenReturn(java.util.List.of());
+        return target;
+    }
+
     private ServerPlayer playerWithPermission(UUID uuid, boolean permitted) {
         ServerPlayer player = mock(ServerPlayer.class);
         CommandSourceStack source = mock(CommandSourceStack.class);

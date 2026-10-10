@@ -767,20 +767,29 @@ ItemGraph JDBC connection.
   `InspectionListener` cancels `EntityInteract` and `EntityInteractSpecific` (with
   `InteractionResult.FAIL`, not the default `PASS`, so the client does not retry
   further interactions) at `HIGHEST` priority, and Fabric returns `FAIL` from
-  `UseEntityCallback`. The denial remains audit evidence — NeoForge's LOWEST
-  entity handlers record `INTERACT_ENTITY_DENIED` for the canceled event and
-  Fabric records the same row from the callback — so armor-stand equipping,
-  shearing, milking, leashing, and name tags cannot mutate the scene. On Fabric
+  `UseEntityCallback`. Entity left-clicks (attacks) are consumed the same way —
+  NeoForge cancels `AttackEntityEvent` at `HIGHEST` and Fabric returns `FAIL`
+  from `AttackEntityCallback` at `ServerPlayer.attack` HEAD — so a predicted
+  hit cannot damage, knock back, or pop the inspected entity. The denial
+  remains audit evidence — NeoForge's LOWEST
+  entity handlers record `INTERACT_ENTITY_DENIED` for a canceled interact and
+  `ATTACK_ENTITY_DENIED` for a canceled attack, and Fabric records the same
+  rows from its callbacks — so armor-stand equipping, shearing, milking,
+  leashing, name tags, and attacks cannot mutate the scene. On Fabric
   the listener-recorded denial also sets
   `EntityInteractionEvidence.markListenerRecordedDenial`, which suppresses the
   `FabricUseEntityCallbackAudit` decorator's second, misattributed denial row
-  for the same packet. Consumed entity interactions resync `containerMenu` plus
+  for the same packet; `AttackEntityCallback` has no aggregate decorator, so
+  the listener records the attack denial exactly once. Consumed entity
+  interactions and attacks resync `containerMenu` plus
   the target's pairing state — `ClientboundSetEntityDataPacket` (skipped when
   all values are default), `ClientboundSetEquipmentPacket` for living entities,
   `ClientboundSetEntityLinkPacket` for leashables, and
   `ClientboundSetPassengersPacket` — so predicted armor-stand equipment,
-  shearing, leashes, and mounts revert to server truth. Entity left-click
-  attacks are not yet gated — tracked as issue #187.
+  shearing, leashes, mounts, damage, and knockback revert to server truth.
+  Accepted (non-denied) entity attacks record no separate event: `KILL_ENTITY`
+  covers kills only, and non-lethal damage evidence remains entity-lifecycle
+  extension scope tracked as issue #56.
 - A right-click whose target block entity implements `Container` calls the shared
   `FlowBrowserService.openContainer` with the exact dimension and coordinates. Either half
   of a valid double chest resolves to the canonical anchor used by container capture. An

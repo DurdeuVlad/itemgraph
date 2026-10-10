@@ -16,6 +16,7 @@ import com.itemgraph.command.FlowBrowserService;
 import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.query.AuditEventQueryService;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import com.mojang.brigadier.ParseResults;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -255,6 +256,12 @@ public final class FabricNativeAuditEventListener {
             }
             return InteractionResult.PASS;
         });
+        AttackEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
+            if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
+                return handleEntityAttack(InspectionService.getInstance(), serverPlayer, serverLevel, hand, entity);
+            }
+            return InteractionResult.PASS;
+        });
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof LivingEntity victim
                     && source.getEntity() instanceof ServerPlayer player) {
@@ -402,35 +409,7 @@ public final class FabricNativeAuditEventListener {
             // emit a useItem twin packet, which must stay covered if the mode
             // clears first.
             inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
-            // A denied interaction predicts client-side; resync the held stacks
-            // and the target's visible state so the prediction reverts to
-            // server truth. This mirrors ServerEntity's pairing resync: entity
-            // data is nullable when every value is default, equipment ships all
-            // slots (including empty ones to clear a predicted equip),
-            // link/passengers cover predicted leashes and mounts.
-            player.containerMenu.sendAllDataToRemote();
-            Entity resyncTarget = entity instanceof net.minecraft.world.entity.boss.EnderDragonPart part
-                    ? part.parentMob : entity;
-            java.util.List<net.minecraft.network.syncher.SynchedEntityData.DataValue<?>> dataValues =
-                    resyncTarget.getEntityData().getNonDefaultValues();
-            if (dataValues != null) {
-                player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket(
-                        resyncTarget.getId(), dataValues));
-            }
-            if (resyncTarget instanceof net.minecraft.world.entity.LivingEntity living) {
-                java.util.List<com.mojang.datafixers.util.Pair<net.minecraft.world.entity.EquipmentSlot, ItemStack>>
-                        equipment = new java.util.ArrayList<>();
-                for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values()) {
-                    equipment.add(com.mojang.datafixers.util.Pair.of(slot, living.getItemBySlot(slot)));
-                }
-                player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket(
-                        resyncTarget.getId(), equipment));
-            }
-            if (resyncTarget instanceof net.minecraft.world.entity.Leashable leashable) {
-                player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityLinkPacket(
-                        resyncTarget, leashable.getLeashHolder()));
-            }
-            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetPassengersPacket(resyncTarget));
+            resyncDeniedEntity(player, entity);
             // Set last: the aggregate UseEntityCallback decorator would otherwise
             // record a second, misattributed INTERACT_ENTITY_DENIED for this
             // same FAIL — and nothing below can throw between here and return.
@@ -439,6 +418,76 @@ public final class FabricNativeAuditEventListener {
         }
         recordEntityInteractionAttempt(player, level, hand, entity);
         return InteractionResult.PASS;
+    }
+
+    /**
+     * The Fabric equivalent of NeoForge's {@code AttackEntityEvent} gating:
+     * while inspection is active (or within the twin-packet window of a
+     * consumed click) the entity attack is denied so a predicted hit cannot
+     * damage, knock back, or pop the inspected entity. The denial stays audit
+     * evidence — recorded as {@code ATTACK_ENTITY_DENIED}. No aggregate
+     * decorator wraps {@code AttackEntityCallback} (the invoker mixin targets
+     * only {@code UseEntityCallback.<clinit>}), so this listener is the single
+     * denial recorder.
+     */
+    static InteractionResult handleEntityAttack(InspectionService inspections,
+                                                ServerPlayer player, ServerLevel level,
+                                                net.minecraft.world.InteractionHand hand, Entity entity) {
+        if (inspections == null || player == null || level == null || entity == null
+                || (!inspections.isEnabled(player.getUUID())
+                        && !inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()))) {
+            return InteractionResult.PASS;
+        }
+        recordEntityAttackDenied(player, level, hand, entity,
+                inspections.isEnabled(player.getUUID()) ? "INSPECTION_MODE" : "INSPECTION_WINDOW");
+        inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+        resyncDeniedEntity(player, entity);
+        return InteractionResult.FAIL;
+    }
+
+    /**
+     * Reverts the client-predicted interaction on a denied entity click. A
+     * denied interact or attack predicts client-side; resync the held stacks
+     * and the target's visible state so the prediction reverts to server truth.
+     * This mirrors ServerEntity's pairing resync: entity data is nullable when
+     * every value is default, equipment ships all slots (including empty ones
+     * to clear a predicted equip), link/passengers cover predicted leashes and
+     * mounts.
+     */
+    private static void resyncDeniedEntity(ServerPlayer player, Entity entity) {
+        player.containerMenu.sendAllDataToRemote();
+        Entity resyncTarget = entity instanceof net.minecraft.world.entity.boss.EnderDragonPart part
+                ? part.parentMob : entity;
+        java.util.List<net.minecraft.network.syncher.SynchedEntityData.DataValue<?>> dataValues =
+                resyncTarget.getEntityData().getNonDefaultValues();
+        if (dataValues != null) {
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket(
+                    resyncTarget.getId(), dataValues));
+        }
+        if (resyncTarget instanceof net.minecraft.world.entity.LivingEntity living) {
+            java.util.List<com.mojang.datafixers.util.Pair<net.minecraft.world.entity.EquipmentSlot, ItemStack>>
+                    equipment = new java.util.ArrayList<>();
+            for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values()) {
+                equipment.add(com.mojang.datafixers.util.Pair.of(slot, living.getItemBySlot(slot)));
+            }
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket(
+                    resyncTarget.getId(), equipment));
+        }
+        if (resyncTarget instanceof net.minecraft.world.entity.Leashable leashable) {
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityLinkPacket(
+                    resyncTarget, leashable.getLeashHolder()));
+        }
+        player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetPassengersPacket(resyncTarget));
+    }
+
+    static void recordEntityAttackDenied(ServerPlayer player, ServerLevel level,
+                                         net.minecraft.world.InteractionHand hand, Entity entity,
+                                         String reason) {
+        submit("ATTACK_ENTITY_DENIED", player, level, entity.blockPosition(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
+                EntityInteractionEvidence.canceledAttemptDetails(
+                        entity, hand, player.getItemInHand(hand),
+                        "callback=attack_entity reason=" + reason));
     }
 
     static void recordEntityInteractionDenied(ServerPlayer player, ServerLevel level,

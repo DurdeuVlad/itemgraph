@@ -43,7 +43,7 @@ ACTION_TABLES = {
     "CHAT_MESSAGE": {"chats"}, "COMMAND_ATTEMPT": {"commands"}, "SMELT": {"items"},
     "ANVIL_RENAME": {"items"}, "ANVIL_REPAIR": {"items"},
     "INTERACT_ENTITY_COMPLETED": {"blocks"}, "INTERACT_ENTITY_DENIED": {"blocks"},
-    "INTERACT_ENTITY_UNRESOLVED": {"blocks"},
+    "INTERACT_ENTITY_UNRESOLVED": {"blocks"}, "ATTACK_ENTITY_DENIED": {"blocks"},
     "HOPPER_INSERT": {"containers"}, "HOPPER_EXTRACT": {"containers"},
     "ADD_ITEM_ENDER": {"items"}, "REMOVE_ITEM_ENDER": {"items"},
 }
@@ -86,6 +86,7 @@ DIFFERENTIAL_EXCEPTION_ISSUES = {
     "INTERACT_ENTITY_COMPLETED": 75,
     "INTERACT_ENTITY_DENIED": 75,
     "INTERACT_ENTITY_UNRESOLVED": 75,
+    "ATTACK_ENTITY_DENIED": 187,
     "SMELT_OUTPUT_UNRESOLVED": 162,
     "ANVIL_RENAME": 57,
     "ANVIL_REPAIR": 57,

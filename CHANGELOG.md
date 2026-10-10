@@ -8,6 +8,18 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **Entity attacks are consumed in inspection mode** (issue #187). While
+  `/ig inspect` is active — or inside the five-tick consumed-packet window —
+  entity left-clicks are denied before damage runs, so a predicted hit can no
+  longer damage, knock back, or pop the inspected entity. The denial is audit
+  evidence: `ATTACK_ENTITY_DENIED` records carry the target UUID, hand, and
+  held-item fingerprint on both loaders. NeoForge cancels `AttackEntityEvent`
+  at `HIGHEST` priority and its LOWEST audit handler attributes the denial to
+  `INSPECTION_MODE`, `INSPECTION_WINDOW`, or `LOADER_CALLBACK_CANCELED`;
+  Fabric returns `FAIL` from `AttackEntityCallback` at `ServerPlayer.attack`
+  HEAD. Denied attacks resync the held stacks plus the target's pairing state
+  the same way denied interactions do. Accepted non-lethal attacks still
+  record no separate event; that evidence gap is issue #56's lifecycle scope.
 - **Inspection packet coverage** (issue #178). A consumed or denied inspection
   right-click now consumes its whole packet set: the off-hand `useItemOn` and
   the item-use twin (`RightClickItem` on NeoForge, `UseItemCallback` on

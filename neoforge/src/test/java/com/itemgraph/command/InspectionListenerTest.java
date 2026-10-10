@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.fml.loading.LoadingModList;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.minecraft.server.Bootstrap;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
@@ -729,6 +730,61 @@ class InspectionListenerTest {
                 new PlayerInteractEvent.EntityInteract(player, InteractionHand.MAIN_HAND, entityTarget());
 
         listener(service, (p, l, pos) -> 1).onEntityInteract(event);
+
+        assertTrue(event.isCanceled());
+    }
+
+    @Test
+    void entityAttackIsConsumedWhileInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        AttackEntityEvent event = new AttackEntityEvent(player, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onAttackEntity(event);
+
+        assertTrue(event.isCanceled());
+        verify(player.containerMenu).sendAllDataToRemote();
+        verify(player.connection, atLeastOnce())
+                .send(any(net.minecraft.network.protocol.Packet.class));
+    }
+
+    @Test
+    void entityAttackPassesWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        AttackEntityEvent event = new AttackEntityEvent(player, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onAttackEntity(event);
+
+        assertFalse(event.isCanceled());
+    }
+
+    @Test
+    void entityAttackTwinIsConsumedAfterRevocationClearedTheMode() {
+        // A revocation-detecting click clears the mode before a paired attack
+        // packet arrives; the consumed-interaction marker must still consume it.
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getGameTime()).thenReturn(100L);
+        when(player.level()).thenReturn(level);
+        service.markInteractionConsumed(playerUuid, 100L);
+        assertFalse(service.isEnabled(playerUuid));
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        AttackEntityEvent event = new AttackEntityEvent(player, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onAttackEntity(event);
 
         assertTrue(event.isCanceled());
     }
