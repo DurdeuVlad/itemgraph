@@ -1,5 +1,9 @@
 # Security and Permissions
 
+**Audience:** server owners granting moderator roles, and moderators checking
+why a command was denied. This is the authoritative permission contract; the
+[admin quick start](ADMIN_QUICK_START.md) has copyable role recipes.
+
 ## Threat model
 
 ItemGraph can expose highly sensitive server information:
@@ -21,11 +25,17 @@ A provider's explicit `false` denies that node even to a level-2 operator.
 
 ### Active command permission nodes
 
-The command root requires `itemgraph.command`; commands with a listed leaf node require
-both `itemgraph.command` and that leaf node. Permission nodes are exact strings; dots do not imply parent or wildcard inheritance.
+Three rules answer most "why was this denied" questions before the matrix:
+
+1. Every command needs `itemgraph.command` **plus** its own leaf node — the
+   root grant alone unlocks nothing beyond help and status.
+2. Anything that can show staff-private evidence also needs `itemgraph.audit`.
+3. Nodes are exact strings: `itemgraph.command` does **not** grant
+   `itemgraph.command.lookup`, a provider's explicit `false` denies even a
+   level-2 operator, and an unset node resolves to vanilla level 2.
+
 Thus a lookup-only moderator must receive both `itemgraph.command` and
-`itemgraph.command.lookup`. A provider's explicit `false` denies access even when
-the player has vanilla permission level 2. An unset node resolves to vanilla level 2.
+`itemgraph.command.lookup`. The full matrix:
 
 | Command or action | Required named node(s) | Rechecked at |
 | --- | --- | --- |

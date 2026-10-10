@@ -1,5 +1,8 @@
 # Query Model
 
+**Audience:** moderators and server admins. This is the command reference; for
+task-first recipes start with the [admin quick start](ADMIN_QUICK_START.md).
+
 ## Goals
 
 The ItemGraph query interface should let moderators answer:
@@ -11,6 +14,32 @@ The ItemGraph query interface should let moderators answer:
 - Why does ItemGraph think two observations are connected?
 
 The interface must be useful without dumping thousands of events into chat.
+
+## How to read this document
+
+- [Implemented surface](#implemented-surface-phases-610) is the exact command
+  grammar accepted today — nothing outside it parses.
+- [Arguments](#arguments) defines each placeholder once.
+- [Query design notes](#query-design-notes) documents per-command behavior;
+  entries explicitly labelled **Implemented** are live, and filters shown
+  without that label are design ideas.
+- [Time filters](#time-filters), [item matching modes](#item-matching-modes),
+  and [result representation](#result-representation) each list what is and is
+  not implemented — the "not implemented" lists are boundaries, not plans.
+
+A first incident usually follows this shape:
+
+```text
+/ig status                                   # confirm capture is active
+/ig trace item "minecraft:netherite_helmet" 20 1440   # follow one item type
+/ig event 8812                               # open one observation's detail
+/ig explain 9931                             # open one inferred edge's reasons
+```
+
+An empty result only means no stored row matched — check capture start time,
+event support, dimension, time range, and permissions before treating it as
+evidence that nothing happened. The `event`/`explain` arguments are the
+`observation#`/`edge#` IDs printed inside the query output.
 
 ## Command root
 

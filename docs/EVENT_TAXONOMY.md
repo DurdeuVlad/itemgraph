@@ -1,5 +1,10 @@
 # ItemGraph Event Taxonomy
 
+**Audience:** contributors and moderators checking which event types exist.
+The tables below answer two different questions — "what can I query today?"
+and "what is registered but not captured yet?" — and mixing them up produces
+false expectations about coverage.
+
 ## Purpose and authority
 
 `com.itemgraph.audit.EventTaxonomy` is the shared runtime catalog for stable
@@ -36,6 +41,15 @@ means the query surface may return preserved/imported rows but there is no
 current native writer. A planned definition is not evidence that a runtime
 listener exists; only `IMPLEMENTED` means the current loader adapter and its
 fixtures establish capture support.
+
+Support status legend — where each state appears in this document:
+
+| Status | Where it lives | What a reader may assume |
+| --- | --- | --- |
+| Implemented on both loaders | [Current native audit IDs](#current-native-audit-ids) table (except the two historical-only rows it names) | Queryable today; native writer exists |
+| `HISTORICAL_ONLY` | Same table, rows explicitly labelled | Past/imported rows may exist; no current capture |
+| `PLANNED` | [Planned child issue families](#planned-child-issue-families) table | A registered ID with no adapter; never proof of coverage |
+| `UNSUPPORTED` | Named inline (for example `CREATIVE_ITEM_TRANSFORM`) | Classifiable for compatibility; excluded from suggestions |
 
 ## Definition fields
 
