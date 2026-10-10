@@ -208,6 +208,9 @@ inspecting or within the same marker window (NeoForge `EntityInteract` /
 `EntityInteractSpecific` at `HIGHEST` priority, Fabric `UseEntityCallback`), and the
 denial is still recorded as `INTERACT_ENTITY_DENIED` evidence — armor-stand
 equipping, shearing, milking, leashing, and name tags cannot mutate the scene.
+Entity attacks (left-clicks) are consumed under the same rule and recorded as
+`ATTACK_ENTITY_DENIED` evidence, so a predicted hit cannot damage or pop the
+inspected entity either.
 The inspection-mode toggle, `on`, `off`, `status`, and supported-click recognition require
 `itemgraph.command.inspect`. A block-history request queries `eventType=all`, so it can
 include staff-private evidence and additionally requires `itemgraph.audit` before the

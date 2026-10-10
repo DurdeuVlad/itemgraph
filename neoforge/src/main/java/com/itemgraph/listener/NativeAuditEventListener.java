@@ -13,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.decoration.ArmorStand;
@@ -26,6 +27,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.CommandEvent;
 import net.neoforged.neoforge.event.ServerChatEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
@@ -244,6 +246,31 @@ public final class NativeAuditEventListener {
         submit(canceled ? "INTERACT_ENTITY_DENIED" : "INTERACT_ENTITY", player, level,
                 target.blockPosition(), BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(), detail);
     }
+
+    /**
+     * Records a canceled entity attack as denied evidence. Inspection mode
+     * cancels the attack at HIGHEST before vanilla damage runs; a foreign
+     * cancellation is retained with the generic loader-denial reason so the two
+     * stays distinguishable. Attacks always use the main hand.
+     */
+    @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
+    public void onAttackEntity(AttackEntityEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)
+                || !(player.level() instanceof ServerLevel level)
+                || !event.isCanceled()) {
+            return;
+        }
+        Entity target = event.getTarget();
+        String reason = entityInteractionDenialReason(player, level);
+        submit("ATTACK_ENTITY_DENIED", player, level, target.blockPosition(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString(),
+                EntityInteractionEvidence.canceledAttemptDetails(
+                        target, InteractionHand.MAIN_HAND,
+                        player.getItemInHand(InteractionHand.MAIN_HAND),
+                        "callback=attack_entity reason="
+                                + (reason != null ? reason : "LOADER_CALLBACK_CANCELED")));
+    }
+
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onLivingDeath(LivingDeathEvent event) {
         if (event.isCanceled()

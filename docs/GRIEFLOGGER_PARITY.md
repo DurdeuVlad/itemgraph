@@ -350,7 +350,9 @@ Consumed clicks also consume the off-hand `useItemOn` and item-use twin
 packets, so held or off-hand items cannot mutate the inspected scene.
 Entity right-clicks are also consumed (denied and recorded as
 `INTERACT_ENTITY_DENIED` evidence), so armor-stand equipping, shearing, milking,
-leashing, and name tags cannot mutate it either.
+leashing, and name tags cannot mutate it either. Entity left-clicks (attacks)
+are consumed under the same rule and recorded as `ATTACK_ENTITY_DENIED`
+evidence (#187), so a predicted hit cannot damage or pop the inspected entity.
 `InspectionListenerTest` and `FabricNativeAuditEventListenerTest` cover these
 branches locally. Those automated tests do not prove client rendering or packet
 transport. The MC Pilot runs below verify selected connected-client inspector

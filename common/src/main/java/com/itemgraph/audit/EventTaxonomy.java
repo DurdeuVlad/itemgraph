@@ -300,6 +300,8 @@ public final class EventTaxonomy {
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 75);
         audit(entries, "INTERACT_ENTITY_UNRESOLVED", "entity_interaction", EvidenceClass.UNRESOLVED,
                 SourceReliability.UNRESOLVED_CAUSE, ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 75);
+        audit(entries, "ATTACK_ENTITY_DENIED", "entity_interaction", SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 187);
         audit(entries, "KILL_ENTITY", "entity_lifecycle", SourceReliability.AUTHORITATIVE_GAME_RESULT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "THROW_ITEM", "projectile", SourceReliability.GAME_CALLBACK_ATTEMPT,

@@ -314,7 +314,9 @@ permission was revoked, and is consumed. Consumption covers the whole click: the
 ticks of a consumed click, so held or off-hand items are never used on the inspected
 scene. Entity right-clicks are consumed the same way and recorded as denied
 `INTERACT_ENTITY_DENIED` evidence, so armor-stand equipping, shearing, milking,
-and name tags cannot mutate the scene either. The mode is per player UUID, requires
+and name tags cannot mutate the scene either. Entity left-clicks (attacks) are
+likewise consumed and recorded as `ATTACK_ENTITY_DENIED` evidence, so a
+predicted hit cannot damage or pop the inspected entity. The mode is per player UUID, requires
 `itemgraph.command` and `itemgraph.command.inspect` on command and click, and clears on
 logout and server stop. An unset node falls back to vanilla permission level 2; an explicit
 provider denial blocks access. Opening ItemGraph's menu is not recorded as a

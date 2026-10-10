@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 
@@ -218,11 +219,31 @@ public class InspectionListener {
         event.setCanceled(true);
     }
 
+    /**
+     * Consumes entity left-clicks while inspection is active (or within the
+     * twin-packet window of a consumed click) so a predicted attack cannot
+     * damage, knock back, or pop the inspected entity. The denial remains audit
+     * evidence: {@code NativeAuditEventListener}'s LOWEST-priority attack
+     * handler records {@code ATTACK_ENTITY_DENIED} for the canceled event.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onAttackEntity(AttackEntityEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)
+                || !shouldConsumeEntityInteraction(player, player.level())) {
+            return;
+        }
+        denyEntityInteraction(player, player.level(), event.getTarget());
+        event.setCanceled(true);
+    }
+
     private boolean shouldConsumeEntityInteraction(PlayerInteractEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return false;
         }
-        Level level = event.getLevel();
+        return shouldConsumeEntityInteraction(player, event.getLevel());
+    }
+
+    private boolean shouldConsumeEntityInteraction(ServerPlayer player, Level level) {
         return !level.isClientSide()
                 && (inspections.isEnabled(player.getUUID())
                         || inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()));
