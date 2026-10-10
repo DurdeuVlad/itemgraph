@@ -118,12 +118,12 @@ public final class CommandHelp {
                 "[ItemGraph] Start with an admin question; use /ig help commands to find a command or /ig help <topic> for exact syntax.",
                 "[ItemGraph] Example: /ig help trace item"));
         topics.put("commands", List.of(
-                "[ItemGraph] ITEM: /ig trace item diamond; /ig help trace item.",
-                "[ItemGraph] GUI: /ig gui item stone; /ig help gui; /ig gui container.",
-                "[ItemGraph] PLAYER: /ig trace player <playerName>; /ig help trace player.",
-                "[ItemGraph] CONTAINER: /ig trace container; /ig help trace container.",
-                "[ItemGraph] AUDIT: /ig lookup near; /ig help lookup; /ig inspect.",
-                "[ItemGraph] EVIDENCE: /ig event <observationId>; /ig explain <edgeId>.",
+                "[ItemGraph] ITEM LOST? /ig trace item diamond; /ig help trace item.",
+                "[ItemGraph] BROWSE: /ig gui item stone; /ig help gui; /ig gui container.",
+                "[ItemGraph] PLAYER? /ig trace player <playerName>; /ig help trace player.",
+                "[ItemGraph] CHEST? /ig trace container; /ig help trace container.",
+                "[ItemGraph] NEARBY? /ig lookup near; /ig help lookup; /ig inspect.",
+                "[ItemGraph] WHY LINKED? /ig event <observationId>; /ig explain <edgeId>.",
                 "[ItemGraph] PAGES: /ig page <page>; /ig goto <token> is click-only.",
                 "[ItemGraph] OPS: /ig status; /ig audit; /ig ingest history; /ig ingest now.",
                 "[ItemGraph] Example: /ig help trace item; /ig help <topic>; /ig help guide."));
@@ -206,7 +206,7 @@ public final class CommandHelp {
                 "[ItemGraph] Radius needs player; console uses /ig lookup near; empty ≠ proof."));
         topics.put("guide", List.of(
                 "[ItemGraph] Admin quick start: https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md",
-                "[ItemGraph] Example: open the guide before configuring access or running the first capture check."));
+                "[ItemGraph] Example: read it before granting permissions or your first capture check."));
         topics.put("status", List.of(
                 "[ItemGraph] Syntax: /ig status",
                 "[ItemGraph] ACTION reports DB/capture state and a safe next step when known.",
