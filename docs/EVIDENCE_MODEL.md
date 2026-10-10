@@ -1,10 +1,31 @@
 # Evidence Model
 
+**Audience:** moderators learning to read ItemGraph results, and contributors
+implementing evidence capture. The first sections build the mental model; later
+sections are the implementation contract.
+
 ## Goal
 
 ItemGraph must make a strict distinction between what the server **knows** and what the system **infers**.
 
 This is necessary for trustworthy moderation.
+
+## The four evidence classes at a glance
+
+Every stored row and every line of query output carries exactly one of these
+labels. A moderator should know all four before trusting any result:
+
+| Class | What it means | One-line example |
+| --- | --- | --- |
+| `OBSERVED` | Directly recorded by the server — a fact, not a reconstruction. | Alice took 1 helmet out of Chest A at 14:31. |
+| `INFERRED` | Two or more observations linked by deterministic rules — an explanation, not a fact. | Alice's drop at 14:52 probably became Bob's pickup 60 s later. |
+| `AMBIGUOUS` | Several explanations fit; ItemGraph preserves all of them rather than guessing. | Alice lost a diamond; both Bob and Chris gained one — either could match. |
+| `UNRESOLVED` | The event is known but its cause or counterpart cannot be safely claimed. | Chest A lost 5 emeralds and no plausible destination was recorded. |
+
+The detailed contract for each class follows; readers who only need to
+interpret results can stop after the class sections and the
+[conservation](#conservation-rule) and [temporal validity](#temporal-validity)
+rules.
 
 Event IDs and their evidence, quantity, source-reliability, endpoint, actor,
 privacy, loader-support, and issue-ownership contracts are cataloged in the
