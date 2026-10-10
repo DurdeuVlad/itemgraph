@@ -64,6 +64,7 @@ class FabricNativeAuditEventListenerTest {
     void clearInspectionState() {
         inspections.clear();
         ItemGraphPermissions.setChecker(null);
+        FabricNativeAuditEventListener.clearPendingDrops();
         // A denied handleEntityUse leaves denialRecordedByListener set until the
         // next aggregate callback drains it — drain so no later test loses a row.
         com.itemgraph.ingest.EntityInteractionEvidence.recordFabricCallbackResult(
@@ -1379,6 +1380,7 @@ class FabricNativeAuditEventListenerTest {
         when(player.getY()).thenReturn(2.0);
         when(player.getZ()).thenReturn(3.0);
         when(itemEntity.isRemoved()).thenReturn(false);
+        when(itemEntity.onGround()).thenReturn(true);
         when(itemEntity.getItem()).thenReturn(stack);
         when(itemEntity.getX()).thenReturn(4.0);
         when(itemEntity.getY()).thenReturn(5.0);
@@ -1390,6 +1392,7 @@ class FabricNativeAuditEventListenerTest {
             FabricNativeAuditEventListener.beginPlayerDeathCapture(player);
             FabricNativeAuditEventListener.onItemEntityAdded(itemEntity, true);
             FabricNativeAuditEventListener.finishPlayerDeathCapture(player);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
         }
 
         ArgumentCaptor<InternalObservationService.InternalObservation> captured =
@@ -1398,5 +1401,190 @@ class FabricNativeAuditEventListenerTest {
         assertEquals("DEATH_DROP", captured.getValue().actionType());
         assertEquals(2, captured.getValue().amount());
         assertEquals(entityUuid.toString(), captured.getValue().itemEntityUuid());
+    }
+
+    private static ServerPlayer mockDropPlayer(UUID playerUuid) {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(player.level()).thenReturn(level);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(player.getX()).thenReturn(1.0);
+        when(player.getY()).thenReturn(2.0);
+        when(player.getZ()).thenReturn(3.0);
+        return player;
+    }
+
+    private static ItemEntity mockFallingDrop(UUID entityUuid, ItemStack stack,
+                                              double x, double y, double z) {
+        ItemEntity entity = mock(ItemEntity.class);
+        when(entity.getUUID()).thenReturn(entityUuid);
+        when(entity.getItem()).thenReturn(stack);
+        when(entity.isRemoved()).thenReturn(false);
+        when(entity.onGround()).thenReturn(false);
+        when(entity.getDeltaMovement()).thenReturn(new net.minecraft.world.phys.Vec3(0, -0.4, 0));
+        when(entity.getX()).thenReturn(x);
+        when(entity.getY()).thenReturn(y);
+        when(entity.getZ()).thenReturn(z);
+        return entity;
+    }
+
+    private static void queueServerPlayerDrop(ServerPlayer player, ItemEntity entity, ItemStack stack) {
+        FabricNativeAuditEventListener.beginItemDropCapture(player);
+        FabricNativeAuditEventListener.onItemEntityAdded(entity, true);
+        FabricNativeAuditEventListener.finishItemDropCapture(player, entity, stack);
+    }
+
+    private static ArgumentCaptor<InternalObservationService.InternalObservation> submitCaptor() {
+        return ArgumentCaptor.forClass(InternalObservationService.InternalObservation.class);
+    }
+
+    @Test
+    void airborneDropWaitsForSettleBeforeRecordingGroundMovement() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = mockDropPlayer(playerUuid);
+        UUID entityUuid = UUID.randomUUID();
+        ItemStack stack = new ItemStack(Items.DIAMOND, 5);
+        ItemEntity entity = mockFallingDrop(entityUuid, stack, 15.0, 65.0, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, entity, stack);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
+            verifyNoInteractions(service);
+
+            when(entity.onGround()).thenReturn(true);
+            when(entity.getY()).thenReturn(64.0);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service).submit(captured.capture());
+        assertEquals("DROP_ITEM", captured.getValue().actionType());
+        assertEquals("GROUND", captured.getValue().targetType());
+        assertEquals(64.0, captured.getValue().targetY(),
+                "a settled drop must record the rest position, not the spawn position");
+        assertEquals(entityUuid.toString(), captured.getValue().itemEntityUuid());
+    }
+
+    @Test
+    void removedPendingDropEmitsConfirmedAtLastPosition() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mockDropPlayer(UUID.randomUUID());
+        ItemStack stack = new ItemStack(Items.DIAMOND, 5);
+        ItemEntity entity = mockFallingDrop(UUID.randomUUID(), stack, 15.0, 65.0, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, entity, stack);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
+            verifyNoInteractions(service);
+
+            when(entity.isRemoved()).thenReturn(true);
+            when(entity.getY()).thenReturn(64.0);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service).submit(captured.capture());
+        assertEquals("DROP_ITEM", captured.getValue().actionType());
+        assertEquals(64.0, captured.getValue().targetY(),
+                "an absorbed or merged drop must confirm at its last known position");
+    }
+
+    @Test
+    void pendingDropTtlExpiryEmitsConfirmedAtFallbackPosition() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mockDropPlayer(UUID.randomUUID());
+        ItemStack stack = new ItemStack(Items.DIAMOND, 5);
+        ItemEntity entity = mockFallingDrop(UUID.randomUUID(), stack, 15.0, 65.0, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, entity, stack);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis() + 6000);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service).submit(captured.capture());
+        assertEquals("DROP_ITEM", captured.getValue().actionType(),
+                "a drop that never reports a resting state must still confirm at TTL fallback");
+        assertEquals(65.0, captured.getValue().targetY());
+    }
+
+    @Test
+    void pickupOvertakingPendingDropEmitsDropAndPickupAtSameGroundPosition() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mockDropPlayer(UUID.randomUUID());
+        ItemStack stack = new ItemStack(Items.DIAMOND, 4);
+        ItemEntity entity = mockFallingDrop(UUID.randomUUID(), stack, 15.0, 64.7, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, entity, stack);
+            FabricNativeAuditEventListener.onItemPickedUp(player, entity, stack, 0);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service, times(2)).submit(captured.capture());
+        assertEquals(List.of("DROP_ITEM", "PICKUP_ITEM"),
+                captured.getAllValues().stream()
+                        .map(InternalObservationService.InternalObservation::actionType).toList(),
+                "the overtaken drop must emit before its pickup at the shared rest position");
+        assertEquals(captured.getAllValues().get(0).targetX(), captured.getAllValues().get(1).x());
+        assertEquals(captured.getAllValues().get(0).targetY(), captured.getAllValues().get(1).y());
+        assertEquals(captured.getAllValues().get(0).targetZ(), captured.getAllValues().get(1).z());
+    }
+
+    @Test
+    void requeuedEntityUuidEmitsUnresolvedForReplacedPendingDrop() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mockDropPlayer(UUID.randomUUID());
+        ItemStack stack = new ItemStack(Items.DIAMOND, 5);
+        UUID sharedUuid = UUID.randomUUID();
+        ItemEntity first = mockFallingDrop(sharedUuid, stack, 15.0, 65.0, -20.0);
+        ItemEntity second = mockFallingDrop(sharedUuid, stack, 15.0, 65.0, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, first, stack);
+            queueServerPlayerDrop(player, second, stack);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service).submit(captured.capture());
+        assertEquals("DROP_UNRESOLVED", captured.getValue().actionType());
+        assertEquals("UNKNOWN", captured.getValue().targetType());
+        assertTrue(new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                        .contains("pending_entity_reused"),
+                "the replaced pending drop must record why its ground endpoint stayed unknown");
     }
 }

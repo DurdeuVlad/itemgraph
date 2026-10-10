@@ -537,7 +537,7 @@ Every allocation is strictly bounded by evidenced capacity, enforcing quantity c
 
 ### ItemEntity Continuity Tracking
 Authoritative Minecraft `ItemEntity` UUIDs are tracked only after the entity is confirmed in the level.
-- `ItemEntityEventListener` records successful toss/death drops after `ItemEntity.isAddedToLevel()` becomes true, and records pickups from `ItemEntityPickupEvent.Post` or a verified partial stack delta.
+- `ItemEntityEventListener` records successful toss/death drops once a world-accepted `ItemEntity` settles — `onGround()`, near-zero delta movement, removal (last known position), or TTL expiry — so the `DROP_ITEM`/`DEATH_DROP` GROUND endpoint is the entity's rest position, not its eye-height spawn position (issue #166). Pickups record from `ItemEntityPickupEvent.Post` or a verified partial stack delta; a pickup that overtakes a still-pending drop emits the drop at the pickup position, which is the same GROUND node the pickup records.
 - A canceled toss is `DROP_CANCELLED` to UNKNOWN; canceled death drops are `DEATH_DROP_CANCELLED` attempt evidence with no destination. Neither is a ground transfer.
 - `ItemEntityTracker.findMatchingDropEntity` returns an exact UUID only when one candidate fits the spatial/time query.
 - Persisted in `ig_observations.item_entity_uuid` (schema V8).
@@ -623,12 +623,18 @@ ItemGraph JDBC connection.
 
 ### Ground movement
 - `ItemTossEvent` and `LivingDropsEvent` create bounded pending-drop entries. The
-  listener records `DROP_ITEM`/`DEATH_DROP` as player → GROUND only after the
-  `ItemEntity` reports `isAddedToLevel()`. A canceled toss is `DROP_CANCELLED` to UNKNOWN;
+  listener records `DROP_ITEM`/`DEATH_DROP` as player → GROUND once the `ItemEntity`
+  has joined the level and settles — `onGround()`, near-zero delta movement, removal
+  (last known position), or TTL expiry — so the drop endpoint is the entity's rest
+  position, matching the GROUND node its later pickup records (issue #166). An
+  entity removed before ever joining the level stays `DROP_UNRESOLVED`/
+  `DEATH_DROP_UNRESOLVED` to UNKNOWN. A canceled toss is `DROP_CANCELLED` to UNKNOWN;
   a canceled death-drop is `DEATH_DROP_CANCELLED` with no destination. Neither claims
   ground movement or receives an `item_entity_uuid`.
 - `ItemEntityPickupEvent.Post` → `PICKUP_ITEM` (GROUND → player) with the *actually picked
   up* quantity (`originalStack - currentStack`, so partial pickups never inflate quantity).
+  A pickup that overtakes a still-pending drop emits the drop at the pickup position
+  first — the same GROUND node the pickup row records.
   The `ItemEntityTracker` returns an exact UUID only when the spatial/time match is unique.
 - **Partial-pickup gap (NeoForge 21.1.248)**: `ItemEntity.playerTouch` gates `Post`
   on `Inventory.add()` returning true, but `Inventory.addItem` returns false when
@@ -643,10 +649,15 @@ ItemGraph JDBC connection.
   absorb) and all entries expire after 1s under a 512-entry bound.
 - Fabric normal player drops and pickups use server-only hooks in
   `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin`. A returned
-  drop entity is recorded only when `ServerLevel.addFreshEntity` returns true,
-  with its returned stack count and UUID. Pickup records the exact before/after
-  stack-count delta, including partial absorption, and maps the ground endpoint
-  through the same `GROUND` persistence branch. Drops observed while
+  drop entity is queued only when `ServerLevel.addFreshEntity` returns true,
+  with its returned stack count and UUID; an `END_SERVER_TICK` resolver then
+  emits `DROP_ITEM`/`DEATH_DROP` at the settle position — `onGround()`,
+  near-zero delta movement, removal (last known position), or TTL expiry —
+  matching the NeoForge pending-drop contract and the GROUND node a later
+  pickup records (issue #166). A pickup that overtakes a still-pending drop
+  emits the drop at the pickup position first. Pickup records the exact
+  before/after stack-count delta, including partial absorption, and maps the
+  ground endpoint through the same `GROUND` persistence branch. Drops observed while
   `ServerPlayer.isDeadOrDying()` are labeled `DEATH_DROP`; custom death-event
   additions and automated non-player item movement remain unimplemented until a
   loader-native hook can prove their source and destination.

@@ -23,6 +23,7 @@ import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.commands.CommandSourceStack;
@@ -60,6 +61,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -74,6 +77,14 @@ public final class FabricNativeAuditEventListener {
     private static final int MAX_DETAIL_LENGTH = 16_384;
     private static final int MAX_DROP_CAPTURE_DEPTH = 32;
     private static final ThreadLocal<Deque<DropCapture>> PENDING_PLAYER_DROPS = new ThreadLocal<>();
+    private static final long PENDING_DROP_TTL_MS = 5000;
+    private static final int PENDING_DROP_MAX = 512;
+    private static final double DROP_SETTLE_SPEED_SQR = 0.0025;
+    // Server-thread only: queued from player drop callbacks, resolved from the
+    // END_SERVER_TICK hook. Every enqueue site already proved addFreshEntity
+    // acceptance, so unlike the NeoForge listener no added-to-level wait phase
+    // is needed — the entity is airborne-and-added or already settled.
+    private static final Map<UUID, PendingDrop> PENDING_DROPS = new LinkedHashMap<>();
     private static final int MAX_HOPPER_CAPTURE_DEPTH = 16;
     private static final StackWalker HOPPER_STACK_WALKER = StackWalker.getInstance();
     private static final ThreadLocal<Deque<HopperCapture>> PENDING_HOPPER_TRANSFERS = new ThreadLocal<>();
@@ -85,6 +96,19 @@ public final class FabricNativeAuditEventListener {
     private record ContainerBreakAttempt(ContainerBreakCapture.Snapshot snapshot) { }
 
     private record DropCapture(Set<ItemEntity> addedEntities, String actionType) {
+    }
+
+    /**
+     * A world-accepted item drop whose GROUND endpoint must be recorded where
+     * the entity settles — not at the spawn position the drop call returns —
+     * so a same-position pickup shares its ground node. Mirrors the NeoForge
+     * ItemEntityEventListener contract (issue #166).
+     */
+    private record PendingDrop(ItemEntity entity, String actionType, UUID playerUuid,
+                               String playerName, String level,
+                               double playerX, double playerY, double playerZ,
+                               int amount, CanonicalItem canonical,
+                               long timestampMs, long expiresAtMs) {
     }
 
     private record HopperSite(StackTraceElement caller, int stackDepth) {
@@ -262,6 +286,8 @@ public final class FabricNativeAuditEventListener {
             }
             return InteractionResult.PASS;
         });
+        ServerTickEvents.END_SERVER_TICK.register(server ->
+                resolvePendingDrops(System.currentTimeMillis()));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof LivingEntity victim
                     && source.getEntity() instanceof ServerPlayer player) {
@@ -768,7 +794,7 @@ public final class FabricNativeAuditEventListener {
                 continue;
             }
             ItemStack stack = itemEntity.getItem();
-            onItemDropped(capture.player, itemEntity,
+            queuePendingDrop(capture.player, itemEntity,
                     stack == null ? ItemStack.EMPTY : stack.copy(), "DEATH_DROP");
         }
     }
@@ -833,46 +859,153 @@ public final class FabricNativeAuditEventListener {
         if (capture == null || !capture.addedEntities().contains(itemEntity)) {
             return null;
         }
-        onItemDropped(player, itemEntity, originalStack, capture.actionType());
+        queuePendingDrop(player, itemEntity, originalStack, capture.actionType());
         return capture.actionType();
     }
 
-    /** Records a drop only after ServerPlayer.drop and addFreshEntity both succeed. */
+    /**
+     * Records a drop immediately, bypassing settle deferral. Only test and
+     * admin-replay paths call this directly; every production drop site
+     * (ServerPlayer.drop finish, player-death capture, deferred /give replay)
+     * queues through {@link #queuePendingDrop} so the GROUND endpoint records
+     * where the entity settles, matching the pickup endpoint (issue #166).
+     */
     public static void onItemDropped(ServerPlayer player, ItemEntity itemEntity, ItemStack originalStack) {
-        onItemDropped(player, itemEntity, originalStack, "DROP_ITEM");
+        PendingDrop pending = capturePendingDrop(player, itemEntity, originalStack, "DROP_ITEM");
+        if (pending != null) {
+            emitConfirmedDrop(pending);
+        }
     }
 
-    private static void onItemDropped(ServerPlayer player, ItemEntity itemEntity,
-                                      ItemStack originalStack, String actionType) {
+    /**
+     * Captures the immutable drop record. Death drops mark the open death
+     * capture at capture time (not emit time) so a ServerPlayer.drop queue
+     * cannot be re-queued by finishPlayerDeathCapture at the die() return.
+     */
+    private static PendingDrop capturePendingDrop(ServerPlayer player, ItemEntity itemEntity,
+                                                  ItemStack originalStack, String actionType) {
         if (AdminMutationCapture.captureCreativeDrop(player, itemEntity, true)) {
-            return;
+            return null;
         }
         // Defer same-player drops until the wrapped GiveCommand call returns its
         // entity identity; reentrant drops are replayed as ordinary evidence.
         if (AdminMutationCapture.deferGiveDropSafely(player, itemEntity, originalStack)) {
-            return;
+            return null;
         }
         if (player == null || itemEntity == null || originalStack == null || originalStack.isEmpty()
                 || actionType == null || player.level().isClientSide() || itemEntity.isRemoved()) {
-            return;
+            return null;
         }
         ItemStack entityStack = itemEntity.getItem();
         if (entityStack == null || entityStack.isEmpty()) {
-            return;
+            return null;
         }
         int amount = entityStack.getCount();
         if (amount <= 0) {
-            return;
+            return null;
         }
         CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(originalStack);
-        boolean submitted = recordItemObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
-                player.level().dimension().location().toString(),
-                player.getX(), player.getY(), player.getZ(),
-                itemEntity.getX(), itemEntity.getY(), itemEntity.getZ(),
-                "GROUND", canonical, amount, itemEntity.getUUID().toString());
-        if (submitted && "DEATH_DROP".equals(actionType)) {
+        long now = System.currentTimeMillis();
+        if ("DEATH_DROP".equals(actionType)) {
             markDeathEntityRecorded(itemEntity);
         }
+        return new PendingDrop(itemEntity, actionType, player.getUUID(),
+                player.getGameProfile().getName(),
+                player.level().dimension().location().toString(),
+                player.getX(), player.getY(), player.getZ(),
+                amount, canonical, now, now + PENDING_DROP_TTL_MS);
+    }
+
+    /**
+     * Defers the drop's GROUND endpoint until the entity settles. A drop read
+     * at ServerPlayer.drop's return still carries the eye-height spawn offset,
+     * which lands the same entity one block above the GROUND node its pickup
+     * records — and CorrelationEngine's pickup bridge hard-filters on node
+     * equality, so the spawn-position read could never bridge (issue #166).
+     */
+    private static void queuePendingDrop(ServerPlayer player, ItemEntity itemEntity,
+                                         ItemStack originalStack, String actionType) {
+        PendingDrop pending = capturePendingDrop(player, itemEntity, originalStack, actionType);
+        if (pending == null) {
+            return;
+        }
+        PendingDrop replaced = PENDING_DROPS.remove(itemEntity.getUUID());
+        if (replaced != null) {
+            emitUnresolvedDrop(replaced, "pending_entity_reused");
+        }
+        if (PENDING_DROPS.size() >= PENDING_DROP_MAX) {
+            PendingDrop evicted = PENDING_DROPS.remove(PENDING_DROPS.keySet().iterator().next());
+            if (evicted != null) {
+                emitUnresolvedDrop(evicted, "pending_capacity");
+            }
+        }
+        PENDING_DROPS.put(itemEntity.getUUID(), pending);
+    }
+
+    /**
+     * Emits the confirmed drop once per server tick the entity reaches a
+     * resting state — onGround, near-zero delta movement, removed
+     * (absorbed/merged/picked before settling; last known position), or TTL
+     * expiry. Mirrors ItemEntityEventListener.resolvePendingDrops on NeoForge.
+     */
+    static void resolvePendingDrops(long nowMs) {
+        if (PENDING_DROPS.isEmpty()) {
+            return;
+        }
+        Iterator<Map.Entry<UUID, PendingDrop>> it = PENDING_DROPS.entrySet().iterator();
+        while (it.hasNext()) {
+            PendingDrop pending = it.next().getValue();
+            ItemEntity entity = pending.entity();
+            if (entity.isRemoved()
+                    || entity.onGround()
+                    || entity.getDeltaMovement().lengthSqr() <= DROP_SETTLE_SPEED_SQR
+                    || nowMs >= pending.expiresAtMs()) {
+                emitConfirmedDrop(pending);
+                it.remove();
+            }
+        }
+    }
+
+    /**
+     * A pickup that overtakes a still-pending drop emits it at the pickup
+     * position — the entity's actual rest endpoint and the same GROUND node
+     * the pickup observation records (issue #166).
+     */
+    static void confirmPendingDrop(UUID entityUuid) {
+        PendingDrop pending = PENDING_DROPS.remove(entityUuid);
+        if (pending != null) {
+            emitConfirmedDrop(pending);
+        }
+    }
+
+    private static void emitConfirmedDrop(PendingDrop pending) {
+        ItemEntity entity = pending.entity();
+        com.itemgraph.tracker.ItemEntityTracker.getInstance().recordDrop(
+                entity.getUUID(), pending.playerUuid(), pending.level(),
+                (int) Math.floor(entity.getX()), (int) Math.floor(entity.getY()),
+                (int) Math.floor(entity.getZ()),
+                pending.canonical().itemId(), pending.amount(), pending.timestampMs());
+        recordItemObservation(pending.actionType(), pending.playerUuid().toString(), pending.playerName(),
+                pending.level(), pending.playerX(), pending.playerY(), pending.playerZ(),
+                entity.getX(), entity.getY(), entity.getZ(),
+                "GROUND", pending.canonical(), pending.amount(), entity.getUUID().toString());
+    }
+
+    private static void emitUnresolvedDrop(PendingDrop pending, String reason) {
+        String actionType = "DEATH_DROP".equals(pending.actionType())
+                ? "DEATH_DROP_UNRESOLVED" : "DROP_UNRESOLVED";
+        byte[] rawData = ("{\"capture\":\"drop_attempt\",\"resolution\":\"unknown_destination\",\"reason\":\""
+                + reason + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+                pending.timestampMs(), actionType, pending.playerUuid().toString(), pending.playerName(),
+                pending.level(), pending.playerX(), pending.playerY(), pending.playerZ(),
+                pending.level(), null, null, null, "UNKNOWN",
+                pending.canonical().itemId(), rawData, pending.canonical(), pending.amount(), null));
+    }
+
+    /** Drops all queued drops; test isolation and server-stop hygiene only. */
+    static void clearPendingDrops() {
+        PENDING_DROPS.clear();
     }
 
     /** Replays non-command item entities deferred until the wrapped /give drop returned. */
@@ -881,7 +1014,7 @@ public final class FabricNativeAuditEventListener {
         if (deferredDrops == null) return;
         for (AdminMutationCapture.DeferredGiveDrop deferred : deferredDrops) {
             if (!deferred.accepted()) continue;
-            onItemDropped(deferred.player(), deferred.entity(), deferred.stack(), "DROP_ITEM");
+            queuePendingDrop(deferred.player(), deferred.entity(), deferred.stack(), "DROP_ITEM");
         }
     }
 
@@ -909,9 +1042,18 @@ public final class FabricNativeAuditEventListener {
         if (amount <= 0) {
             return;
         }
+        // A pickup that overtakes a still-pending drop emits it here, at the
+        // entity's rest position, so the pair shares one GROUND node.
+        confirmPendingDrop(itemEntity.getUUID());
         CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(originalStack);
+        String level = player.level().dimension().location().toString();
+        com.itemgraph.tracker.ItemEntityTracker.getInstance().recordPickup(
+                itemEntity.getUUID(), player.getUUID(), level,
+                (int) Math.floor(itemEntity.getX()), (int) Math.floor(itemEntity.getY()),
+                (int) Math.floor(itemEntity.getZ()),
+                canonical.itemId(), amount, System.currentTimeMillis());
         recordItemObservation("PICKUP_ITEM", player.getUUID().toString(), player.getGameProfile().getName(),
-                player.level().dimension().location().toString(),
+                level,
                 itemEntity.getX(), itemEntity.getY(), itemEntity.getZ(),
                 player.getX(), player.getY(), player.getZ(),
                 "GROUND", canonical, amount, itemEntity.getUUID().toString());
