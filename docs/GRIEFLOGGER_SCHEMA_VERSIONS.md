@@ -1,5 +1,8 @@
 # GriefLogger database schema across versions
 
+**Audience:** maintainers of the read-only import path. This is a research
+record — the schema facts below are evidence, not prose to restate elsewhere.
+
 Research for the automatic read-only import path: which GriefLogger versions
 can ItemGraph safely detect and import without crashing or spamming the
 server log. Sources are the upstream repository `DAQEM/GriefLogger` (per-tag

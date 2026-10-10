@@ -1,5 +1,27 @@
 # Test Plan
 
+**Audience:** contributors verifying a change and maintainers reviewing
+evidence. Sections dated like `(2026-10-01)` are executed-run records — read
+them as evidence, not as living documentation. The undated sections are the
+standing contract.
+
+## How to run the suite
+
+```text
+./gradlew build                          # all modules, unit tests, boundary verifiers, jar checks
+./gradlew :neoforge:runGameTestServer    # NeoForge in-game GameTests
+./gradlew :fabric:runGameTest            # Fabric in-game GameTests
+python3 tools/validate_admin_ux_docs.py  # docs/help/permission-contract alignment
+python3 tools/validate_grieflogger_profile.py  # compatibility registry vs. pinned profile
+```
+
+The sections below are organized roughly chronologically by milestone; the
+[core correctness tests](#core-correctness-tests) and [invariants](#invariants)
+are the standing behavioral contract, and [measured local performance
+profile](#measured-local-performance-profile) is the enforced performance
+boundary. Use the headings to jump to a feature's proof rather than reading
+front-to-back.
+
 ## Locale startup and message checks
 
 Focused unit checks validate supported locale normalization, reject `zh_cn` and
