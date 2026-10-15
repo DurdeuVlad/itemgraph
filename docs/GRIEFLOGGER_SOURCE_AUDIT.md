@@ -261,3 +261,139 @@ live world state on the server thread first. ItemGraph follows the same separati
 between typed query results and game-thread capture, while enforcing its own bounded
 asynchronous query worker rather than relying on every caller to schedule correctly:
 [CoreProtect API v13](https://docs.coreprotect.net/api/version/v13/).
+
+## Line-by-line verification delta — 2026-10-15
+
+Every Java file in the pinned tree (129 files under `common`, `fabric`,
+`neoforge`, `buildSrc`) was read and cross-checked against this audit, the
+feature inventory, and the exact `1.2.10-1.21.1` release fixture. The items
+below are newly verified details, not restatements of earlier sections.
+
+### Query and lookup
+
+- Filtered history queries cap each source table at `LIMIT 1000`
+  (`BlockRepository.getFilteredBlockHistory`, `ItemRepository.getFilteredItemHistory`,
+  `ContainerRepository.getFilteredContainerHistory`,
+  `SessionRepository.getFilteredSessionHistory`). A merged lookup can therefore
+  return at most about 4,000 rows regardless of how many pages `/gl page` later
+  navigates.
+- The `radius` filter is optional in code. Each filtered query guards the
+  coordinate predicates with `? IS NULL OR`, and `FilterList` substitutes `0`
+  bounds only when the filter is absent — the official "a radius is required"
+  wording is documentation, not enforcement. `RadiusFilter.parse` accepts any
+  integer; the 1–100 range exists only in suggestions.
+- Inspect mode can never display `KILL_ENTITY` rows. Left-click history uses
+  `action IN (0,1)`; right-click/container history uses `action IN (2,4)`; the
+  `KILL_ENTITY` id `3` matches neither inspect query and appears only through
+  `/gl lookup`.
+- Item rows record the player's position at flush time, not at the event:
+  `MixinServerPlayer.grieflogger$tick` drains the per-tick queue with
+  `blockPosition()`. A player who drops an item and walks before the next tick
+  logs the drop at their later position.
+- `blocks.type` is dual-purpose: it joins `materials` for actions `0-2` and
+  `entities` for actions `3-4`, discriminated by the action id inside each
+  query (`LEFT JOIN ... AND blocks.action = ...`).
+- Material and entity names are stored with the `minecraft:` namespace stripped
+  (`BlockService`/`ItemService`/`ContainerService` apply
+  `.replace("minecraft:","")`); modded identifiers keep `modid:name`.
+  ItemGraph's `ItemCanonicalizer.normalizeItemId` maps bare names back to the
+  `minecraft` namespace, so imported rows remain compatible — verified.
+- Filter quirks confirmed: filter names resolve only as a single character
+  (`a.`, `e.`, `i.`, `r.`, `t.`, `u.`) or a lowercase name prefix;
+  `Actions.getActions` drops non-lowercase tokens silently; `TimeFilter` parses
+  its trailing character against *translated* unit abbreviations (`m/h/d/y`
+  under `en_us`), so the accepted suffix alphabet changes with the configured
+  language; `RadiusFilter` is an unbounded integer; and `FilterArgument`'s
+  `filter1`-`filter5` argument path is dead code behind the greedy `filters`
+  argument actually registered.
+- Time filtering is a strict `time > ?` comparison against
+  `now - n * unit`, not a window.
+
+### Capture and storage
+
+- Breaking an interactable block queues
+  `DELETE FROM blocks WHERE level/x/y/z AND action = 2`
+  (`RemoveBlockInteractionsEvent`, `RemoveDoorInteractionsEvent`,
+  `BlockRepository.removeInteractionsForPosition`). The mutable-ledger contract
+  is confirmed in code: interaction rows at a broken position are deleted, not
+  superseded.
+- `BreakContainerEvent.breakContainer` writes every removed stack as a
+  `containers` `REMOVE_ITEM` row attributed to the breaking player's UUID.
+  ItemGraph intentionally records the container as source with `UNKNOWN`
+  destination and does not attribute the drop to the player — an intentional
+  semantic difference, not a coverage gap.
+- Container session detection is broader than "vanilla containers":
+  `ContainerHandler.getContainers(MenuProvider)` reflectively scans declared
+  fields and tracks every `BaseContainerBlockEntity` it finds, so modded menus
+  exposing those fields are captured too. The single-container path requires
+  the provider itself to be a `BaseContainerBlockEntity`.
+- `MixinServerPlayer.openMenu` starts the transaction manager on any menu open;
+  `doCloseContainer` finalizes it — delta is computed at close, exactly the
+  zero-net-invisible session model already documented.
+- The per-player item queue merges stacks by `SimpleItemStack.equals`, which
+  compares item and `DataComponentPatch` only — count is intentionally
+  excluded; totals accumulate per tick per action.
+- `queue.hello()` is a `SELECT 1` keepalive queued every `helloFrequency`
+  server ticks (default 600, i.e. every 30 s), not telemetry. Write queues are
+  unbounded `ConcurrentLinkedQueue`s; workers are a fixed pool of
+  `availableProcessors` threads; `ThreadManager.shutdown` awaits at most five
+  seconds then calls `shutdownNow`.
+- GriefLogger ships a neutered `org.sqlite.util.ProcessRunner` whose
+  `runAndWaitFor` methods return `""`, preventing the embedded sqlite-jdbc
+  native loader from spawning detection processes.
+- Chat capture uses `component.getString()` (plain text), command capture
+  stores the raw reader string at the command event — attempts, not proven
+  effects. Both tables stay outside the lookup merge.
+- `users` rows upsert `name` on `uuid` conflict and `usernames` keeps an
+  insert-only `(uuid,name)` history; `UserRepository.insertNonPlayer` permits
+  name-only actor rows (no caller in this tree).
+- The 26.2 SQLite path is `<config>/grieflogger/database.db`
+  (`Platform.INFO.getConfigFolder().resolve(MOD_ID)`); config is YAML
+  (`grieflogger-server.yaml` via `yamlconfig`, depending on `knot` +
+  `yamlconfig` mods). The exact `1.2.10-1.21.1` release instead uses TOML
+  `config/grieflogger/grieflogger-server.toml` with `serverSideOnlyMode=true`
+  — a config-system change between the release and this source, not a new
+  feature.
+
+### Non-player and entity actors (26.2 source only — absent from the release)
+
+- `EntityUtils.logBlockAction` writes block actions caused by non-player
+  entities under synthetic name-based UUIDs: `entity:<entityTypeId>` for pure
+  mobs, `link:<playerUUID>:<entityTypeId>` when a player is responsible. The
+  `users` row then carries names such as `Steve (Creeper)`. These UUIDs are
+  deterministic `UUID.nameUUIDFromBytes` values, not real entity UUIDs.
+- `resolveLogicalActor` attributes an action to: the player, else the
+  `OwnableEntity` owner, else the `Projectile` owner, else a `Mob`'s current
+  attack target. A creeper's explosion therefore blames the player it was
+  targeting — the victim, not a cause.
+- `MixinServerExplosion.interactWithBlocks` logs `BREAK_BLOCK` for every
+  non-air target block with actor = `getIndirectSourceEntity()` falling back to
+  `source`; `MixinEnderManTakeBlockGoal`/`MixinEnderManLeaveBlockGoal` log
+  `BREAK_BLOCK`/`PLACE_BLOCK` for Enderman; `MixinArmorStand.interact` logs
+  `INTERACT_ENTITY` only on `SUCCESS`/`SUCCESS_SERVER` into the `blocks` table.
+- The fixture `action_writer_audit` proves none of these writers exist in the
+  exact `1.2.10-1.21.1` jars: `BREAK_BLOCK`/`PLACE_BLOCK` are written only by
+  `BreakBlockEvent`/`PlaceBlockEvent`, and `INTERACT_ENTITY` has neither an
+  action id nor a writer. They remain 26.2-source behavior and must not be
+  claimed as release-target coverage.
+
+### Presentation
+
+- `LanguageManager` performs network egress at server start: it downloads
+  Mojang's `version_manifest_v2.json`, resolves the asset index, fetches the
+  selected Minecraft language file into `config/grieflogger/lang_cache/`, and
+  verifies its SHA-1. It additionally loads every installed mod's
+  `/assets/<modid>/lang/<locale>.json` so item names can be translated
+  server-side. `language` accepts `en_us`, `nl_nl`, `zh_tw` (`zh_cn` ships but
+  is not selectable).
+- History rows render `<unit> ago`, a colored `+`/`-` action prefix, the user
+  name, the past-tense verb, and the material; positions render as clickable
+  text that runs vanilla `/tp x y z`, and page arrows run
+  `/grieflogger page <n>`.
+- Inspect right-click on a non-interactable position reports the history of
+  the *adjacent* face block (`pos.relative(direction)` after a 5-block
+  raycast), not the clicked block — the lookup answers "what happened where
+  this placement would land".
+
+No additional release-target feature gap was found beyond the issues already
+tracked for M9/M10.
