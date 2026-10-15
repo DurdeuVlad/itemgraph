@@ -12,8 +12,10 @@ dependencies {
     modImplementation "net.fabricmc:fabric-loader:${rootProject.fabric_loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.fabric_api_version}"
     include(modImplementation('me.lucko:fabric-permissions-api:0.3.1'))
-    implementation 'org.xerial:sqlite-jdbc:3.46.1.0'
-    include 'org.xerial:sqlite-jdbc:3.46.1.0'
+    // sqlite-jdbc ships as a META-INF/iglibs/ resource from the common project
+    // and loads in a private classloader (com.itemgraph.db.SqliteJdbc); JiJ
+    // would put org.sqlite.* on the shared classpath where GriefLogger's own
+    // embedded copy could shadow it.
     implementation "org.mariadb.jdbc:mariadb-java-client:${rootProject.mariadb_connector_version}"
     include "org.mariadb.jdbc:mariadb-java-client:${rootProject.mariadb_connector_version}"
     implementation project(':core')
@@ -25,6 +27,7 @@ dependencies {
     testImplementation 'org.mockito:mockito-junit-jupiter:5.12.0'
     testImplementation files(sourceSets.main.compileClasspath)
     testRuntimeOnly files(sourceSets.main.runtimeClasspath)
+    testImplementation "org.xerial:sqlite-jdbc:${rootProject.sqlite_jdbc_version}"
 }
 
 loom {
@@ -76,7 +79,12 @@ tasks.named('processResources', ProcessResources) {
     filesMatching('fabric.mod.json') {
         expand(inputs.properties)
     }
-    from project(':common').sourceSets.main.resources
+    from(project(':common').sourceSets.main.resources) {
+        // The processed iglibs output (expanded index + bundled jar) arrives via
+        // the jar task's common output copy; copying the raw template would risk
+        // an unexpanded libs.properties shadowing it.
+        exclude 'META-INF/iglibs/**'
+    }
 }
 
 tasks.named('jar') {
@@ -111,7 +119,12 @@ tasks.register('verifyFabricJar') {
         def archive = new java.util.zip.ZipFile(artifact)
         try {
             def names = java.util.Collections.list(archive.entries()).collect { it.name }
+            def isolatedSqlite = names.any { it ==~ /META-INF\/iglibs\/sqlite-jdbc-.*\.jar/ }
             def nestedSqlite = names.any { it.startsWith('META-INF/jars/sqlite-jdbc-') }
+            def sqliteIndex = names.contains('META-INF/iglibs/libs.properties')
+            def sqliteIndexExpanded = sqliteIndex && archive.getInputStream(
+                    archive.getEntry('META-INF/iglibs/libs.properties')).getText('UTF-8')
+                    .contains('sqlite-jdbc-')
             def nestedMariaDb = names.any { it.startsWith('META-INF/jars/mariadb-java-client-') }
             if (!names.contains('fabric.mod.json')
                     || !names.contains('itemgraph.mixins.json')
@@ -132,7 +145,10 @@ tasks.register('verifyFabricJar') {
                     || !names.contains('com/itemgraph/fabric/mixin/AnvilMenuMixin.class')
                     || !names.contains('com/itemgraph/fabric/mixin/ItemCombinerMenuAccessor.class')
                     || !names.contains('com/itemgraph/query/TraceQueryService.class')
-                    || !nestedSqlite
+                    || !names.contains('com/itemgraph/db/SqliteJdbc.class')
+                    || !isolatedSqlite
+                    || !sqliteIndexExpanded
+                    || nestedSqlite
                     || !nestedMariaDb) {
                 throw new GradleException("${artifact.name} is missing Fabric/shared classes or has incorrect JDBC driver bundling")
             }
@@ -145,8 +161,9 @@ tasks.register('verifyFabricJar') {
                 throw new GradleException("${artifact.name} has incorrect Fabric release metadata")
             }
             if (metadata.depends.grieflogger != null
-                    || metadata.breaks?.grieflogger == null) {
-                throw new GradleException("${artifact.name} must declare GriefLogger a hard conflict, not a dependency")
+                    || metadata.breaks?.grieflogger != null
+                    || metadata.suggests?.grieflogger == null) {
+                throw new GradleException("${artifact.name} must declare GriefLogger an advisory suggestion, never a conflict or dependency")
             }
         } finally {
             archive.close()

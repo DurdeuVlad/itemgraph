@@ -73,15 +73,17 @@ file state, and file discovery — not the table layout.
    MySQL/MariaDB — no local `database.db` exists at all. Discovery must report
    "no SQLite source" cleanly rather than fail.
 5. **File location.** GL writes `config/grieflogger/database.db` on every
-   version (`Platform.getConfigFolder()/grieflogger`). ItemGraph's
-   `grieflogger_database_path` default `database.db` resolves elsewhere and
-   misses it — discovery should probe `config/grieflogger/database.db` first.
+   version (`Platform.getConfigFolder()/grieflogger`). ItemGraph's default
+   `grieflogger_database_path` (`database.db`) resolves there automatically
+   whenever the mod is detected or the file exists; an explicit path is only
+   needed for relocated sources.
 6. **WAL state.** A `database.db` copied while the source server was running
    may have uncheckpointed rows in `database.db-wal`. `?mode=ro` needs the
    `-wal`/`-shm` files alongside, and `?immutable=1` on a hot copy silently
-   reads stale data. Import a post-shutdown checkpoint or copy all three
-   files. Since the GL mod is now declared incompatible with ItemGraph, the
-   source file is always cold — but possibly still WAL-formatted.
+   reads stale data. With coexistence the source can be *live*: ItemGraph's
+   plain `?mode=ro` connection reads through the WAL correctly because it does
+   not pass `immutable=1`, but a *manual file copy* for migration must either
+   capture all three files or be taken post-shutdown.
 7. **No version marker.** GriefLogger writes no `user_version` or settings
    table, so the producing version cannot be sniffed from the file.
    Capability detection (`PRAGMA table_info`) is the only correct gate — which

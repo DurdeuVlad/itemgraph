@@ -14,8 +14,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import org.sqlite.ProgressHandler;
-import org.sqlite.SQLiteConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -483,21 +481,11 @@ public final class QueryDispatcher {
         try {
             T result;
             try (Connection conn = DatabaseManager.getInstance().openReadOnlyConnection()) {
-                SQLiteConnection sqliteConnection = cancellation.attach(conn);
+                cancellation.attach(conn);
                 if (cancellation.isCancelled()) {
                     throw new SQLException("query cancelled before execution began");
                 }
-                boolean progressHandlerSet = false;
                 try {
-                    if (sqliteConnection != null) {
-                        ProgressHandler.setHandler(sqliteConnection, 10_000, new ProgressHandler() {
-                            @Override
-                            protected int progress() {
-                                return cancellation.isCancelled() ? 1 : 0;
-                            }
-                        });
-                        progressHandlerSet = true;
-                    }
                     if (cancellation.isCancelled()) {
                         throw new SQLException("query cancelled before execution began");
                     }
@@ -507,13 +495,7 @@ public final class QueryDispatcher {
                         throw new SQLException("query cancelled before completion");
                     }
                 } finally {
-                    try {
-                        if (progressHandlerSet) {
-                            ProgressHandler.clearHandler(conn);
-                        }
-                    } finally {
-                        cancellation.detach(conn);
-                    }
+                    cancellation.detach(conn);
                 }
             }
             succeeded = true;
@@ -830,7 +812,7 @@ public final class QueryDispatcher {
     }
 
     static final class QueryCancellation {
-        private SQLiteConnection activeConnection;
+        private Connection activeConnection;
         private volatile boolean cancelled;
         private boolean finished;
         private volatile boolean started;
@@ -864,16 +846,14 @@ public final class QueryDispatcher {
             return true;
         }
 
-        synchronized SQLiteConnection attach(Connection connection) {
+        synchronized void attach(Connection connection) {
             if (cancelled) {
-                return null;
+                return;
             }
-            if (connection instanceof SQLiteConnection sqliteConnection) {
-                activeConnection = sqliteConnection;
-                return sqliteConnection;
+            if (connection.getClass().getName().startsWith("org.sqlite.")) {
+                activeConnection = connection;
             }
             // Non-SQLite JDBC drivers enforce statement timeouts at the JDBC layer.
-            return null;
         }
 
         Connection instrument(Connection connection) {
@@ -959,8 +939,10 @@ public final class QueryDispatcher {
             }
             if (activeConnection != null) {
                 try {
-                    activeConnection.getDatabase().interrupt();
-                } catch (SQLException | RuntimeException e) {
+                    Object database = activeConnection.getClass()
+                            .getMethod("getDatabase").invoke(activeConnection);
+                    database.getClass().getMethod("interrupt").invoke(database);
+                } catch (ReflectiveOperationException | RuntimeException e) {
                     LOGGER.warn("Unable to interrupt a timed-out ItemGraph SQLite query", e);
                 }
             }

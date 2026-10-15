@@ -13,7 +13,8 @@ import java.util.Properties;
 
 /** Simple editable properties file; Fabric does not provide a server config system. */
 record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLoggerDatabasePath,
-                             boolean griefLoggerIntegrationEnabled,
+                             boolean griefLoggerIntegrationEnabled, boolean griefLoggerAutoMigrate,
+                             String griefLoggerDatabasePathRaw,
                              int groundBridgeMaxSeconds, ItemGraphOperationalSettings operationalSettings,
                              String language) {
     static FabricItemGraphConfig load(Path gameDirectory, Path configDirectory) throws IOException {
@@ -37,6 +38,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             properties.setProperty("database_connection_timeout_ms", "5000");
             properties.setProperty("use_indexes", "true");
             properties.setProperty("grieflogger_integration_enabled", "false");
+            properties.setProperty("grieflogger_auto_migrate", "true");
             properties.setProperty("grieflogger_database_path", "database.db");
             properties.setProperty("ground_bridge_max_seconds", "300");
             properties.setProperty("max_page_size", Integer.toString(ItemGraphOperationalSettings.DEFAULT_MAX_PAGE_SIZE));
@@ -115,8 +117,11 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
 
         boolean griefLoggerIntegrationEnabled = parseBoolean(
                 properties, "grieflogger_integration_enabled", false, configFile);
+        boolean griefLoggerAutoMigrate = parseBoolean(
+                properties, "grieflogger_auto_migrate", true, configFile);
+        String griefLoggerDatabasePathRaw = properties.getProperty("grieflogger_database_path", "database.db");
         Path griefLoggerDatabasePath = griefLoggerIntegrationEnabled
-                ? resolve(gameDirectory, properties.getProperty("grieflogger_database_path", "database.db"),
+                ? resolve(gameDirectory, griefLoggerDatabasePathRaw,
                         "general.grieflogger_database_path", configFile)
                 : gameDirectory.resolve("database.db");
 
@@ -124,6 +129,8 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
                 databaseSettings,
                 griefLoggerDatabasePath,
                 griefLoggerIntegrationEnabled,
+                griefLoggerAutoMigrate,
+                griefLoggerDatabasePathRaw,
                 groundBridgeMaxSeconds,
                 operationalSettings,
                 language);
@@ -160,6 +167,7 @@ record FabricItemGraphConfig(DatabaseSettings databaseSettings, Path griefLogger
             case "database_connection_timeout_ms" -> "general.database_connection_timeout_ms";
             case "use_indexes" -> "storage.use_indexes";
             case "grieflogger_integration_enabled" -> "general.grieflogger_integration_enabled";
+            case "grieflogger_auto_migrate" -> "general.grieflogger_auto_migrate";
             case "ground_bridge_max_seconds" -> "correlation.ground_bridge_max_seconds";
             case "max_page_size" -> "query.max_page_size";
             case "poll_interval_ms" -> "ingestion.poll_interval_ms";

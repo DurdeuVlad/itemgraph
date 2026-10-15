@@ -33,16 +33,15 @@ config="itemgraph-neoforge.mixins.json"
     ordering="NONE"
     side="BOTH"
 
-# ItemGraph REPLACES GriefLogger; the two mods must never be installed
-# together. ItemGraph bundles sqlite-jdbc via JarJar while GriefLogger embeds
-# org.sqlite.* in its main mod module, so the pair crashes Java module
-# resolution at startup even before product-level conflicts are considered.
-# Marking the dependency incompatible makes that failure an explicit, clean
-# refusal instead of a module-resolution error. Migrating servers keep their
-# GriefLogger database file: the read-only import bridge opens it through
-# grieflogger_database_path once the GriefLogger mod jar itself is removed.
+# ItemGraph coexists with GriefLogger: its SQLite driver is embedded at
+# META-INF/iglibs/ and loaded in a private classloader, so it never collides
+# with the org.sqlite.* copy inside the GriefLogger mod jar. Ordering AFTER
+# lets GriefLogger create config/grieflogger/database.db before ItemGraph's
+# server-start migration check reads it. The GriefLogger database is opened
+# strictly read-only; ItemGraph never writes to it.
 [[dependencies.${mod_id}]]
     modId="grieflogger"
     type="${grieflogger_dependency_type}"
     reason="${grieflogger_dependency_reason}"
     versionRange="${grieflogger_version_range}"
+    ordering="${grieflogger_ordering}"

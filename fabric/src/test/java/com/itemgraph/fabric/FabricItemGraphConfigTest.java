@@ -78,6 +78,8 @@ class FabricItemGraphConfigTest {
         assertEquals(30_000, loaded.operationalSettings().databaseHeartbeatIntervalMs());
         assertTrue(loaded.operationalSettings().captureEnabled());
         assertFalse(loaded.griefLoggerIntegrationEnabled());
+        assertTrue(loaded.griefLoggerAutoMigrate());
+        assertEquals("database.db", loaded.griefLoggerDatabasePathRaw());
         assertEquals("indefinite", loaded.operationalSettings().rawEvidenceRetention());
         assertEquals("en_us", loaded.language());
     }
@@ -208,7 +210,9 @@ class FabricItemGraphConfigTest {
                 new InvalidSetting("server_side_only=1\n", "operations.server_side_only", "must be true or false"),
                 new InvalidSetting("capture_enabled=yes\n", "capture.enabled", "must be true or false"),
                 new InvalidSetting("grieflogger_integration_enabled=enabled\n",
-                        "general.grieflogger_integration_enabled", "must be true or false"));
+                        "general.grieflogger_integration_enabled", "must be true or false"),
+                new InvalidSetting("grieflogger_auto_migrate=enabled\n",
+                        "general.grieflogger_auto_migrate", "must be true or false"));
 
         for (InvalidSetting invalid : invalidSettings) {
             Files.writeString(file, invalid.properties());

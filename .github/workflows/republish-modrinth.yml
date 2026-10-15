@@ -194,7 +194,7 @@ jobs:
           modrinth-java: |
             21
           modrinth-dependencies: |
-            grieflogger(incompatible){modrinth:grieflogger}
+            grieflogger(optional){modrinth:grieflogger}
 
       - name: Publish NeoForge standard build to Modrinth
         id: publish_neoforge
@@ -216,7 +216,7 @@ jobs:
           modrinth-java: |
             21
           modrinth-dependencies: |
-            grieflogger(incompatible){modrinth:grieflogger}
+            grieflogger(optional){modrinth:grieflogger}
 
       - name: Write publication summary
         if: ${{ always() }}
