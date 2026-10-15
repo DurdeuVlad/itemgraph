@@ -51,7 +51,7 @@ class EventTaxonomyTest {
                     definition.neoForge().reasonCode() == null, definition.id() + " NeoForge support");
         }
         assertTrue(EventTaxonomy.VERSION.matches("\\d+\\.\\d+\\.\\d+"));
-        assertEquals("4.1.0", EventTaxonomy.VERSION,
+        assertEquals("4.2.0", EventTaxonomy.VERSION,
                 "registry extensions increment the event-contract version");
 
         Set<String> reasons = new HashSet<>();
@@ -181,6 +181,37 @@ class EventTaxonomyTest {
                         && definition.fabric().status() == LoaderStatus.PLANNED)
                 .allMatch(definition -> definition.evidenceClass() == EvidenceClass.UNRESOLVED
                         && definition.quantity() == QuantitySemantics.NONE));
+
+        for (String id : java.util.List.of("ENTITY_SPAWN", "ENTITY_DESPAWN", "ENTITY_KILL",
+                "PROJECTILE_LAUNCH", "PROJECTILE_IMPACT")) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(id, Surface.AUDIT_EVENT).orElseThrow();
+            assertEquals(56, definition.ownerIssue(), id);
+            assertEquals(EvidenceClass.OBSERVED, definition.evidenceClass(), id);
+            assertEquals(QuantitySemantics.NONE, definition.quantity(), id);
+            assertEquals(EventTaxonomy.SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                    definition.sourceReliability(), id);
+            assertEquals(EventTaxonomy.ActorStatus.UNKNOWN, definition.actor(), id);
+            assertEquals(PrivacyClass.SENSITIVE_LOCATION, definition.privacy(), id);
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.fabric().status(), id);
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.neoForge().status(), id);
+        }
+        for (String id : java.util.List.of("ITEM_ENTITY_SPAWN", "ITEM_ENTITY_DESPAWN")) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(id, Surface.AUDIT_EVENT).orElseThrow();
+            assertEquals(56, definition.ownerIssue(), id);
+            assertEquals(EvidenceClass.OBSERVED, definition.evidenceClass(), id);
+            assertEquals(QuantitySemantics.SIGNED_DELTA, definition.quantity(), id);
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.fabric().status(), id);
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.neoForge().status(), id);
+        }
+        EventTaxonomy.Definition lifecycleUnresolved =
+                EventTaxonomy.find("ENTITY_LIFECYCLE_UNRESOLVED", Surface.AUDIT_EVENT).orElseThrow();
+        assertEquals(56, lifecycleUnresolved.ownerIssue());
+        assertEquals(EvidenceClass.UNRESOLVED, lifecycleUnresolved.evidenceClass());
+        assertEquals(EventTaxonomy.SourceReliability.UNRESOLVED_CAUSE,
+                lifecycleUnresolved.sourceReliability());
+        assertTrue(EventTaxonomy.unresolvedReasonCodes().stream()
+                .anyMatch(reason -> reason.id().equals("ENTITY_CAUSE_NOT_REPORTED")
+                        && reason.ownerIssue() == 56));
 
         assertTrue(EventTaxonomy.find("TRANSFORMATION_INPUTS_NOT_OBSERVED", Surface.AUDIT_EVENT).isEmpty());
         EventTaxonomy.Definition trade = EventTaxonomy.find("TRADE", Surface.TRANSFORMATION).orElseThrow();

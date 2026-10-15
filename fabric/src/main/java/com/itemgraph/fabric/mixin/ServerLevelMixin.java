@@ -21,5 +21,6 @@ public final class ServerLevelMixin {
                                              CallbackInfoReturnable<Boolean> callback) {
         FabricNativeAuditEventListener.onItemEntityAdded(entity, callback.getReturnValueZ());
         FabricNativeAuditEventListener.onProjectileAdded(entity, callback.getReturnValueZ());
+        FabricNativeAuditEventListener.onEntityLifecycleAdded(entity, callback.getReturnValueZ());
     }
 }
