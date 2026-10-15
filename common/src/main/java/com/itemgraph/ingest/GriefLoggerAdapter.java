@@ -1,15 +1,14 @@
 package com.itemgraph.ingest;
 
 import com.itemgraph.db.DatabaseManager;
+import com.itemgraph.db.SqliteJdbc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.sqlite.SQLiteConfig;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -32,6 +31,7 @@ public class GriefLoggerAdapter {
 
     private final Path databasePath;
     private final boolean integrationEnabled;
+    private final boolean autoDetected;
 
     public GriefLoggerAdapter() {
         this(resolveConfiguredPath(), false);
@@ -42,8 +42,13 @@ public class GriefLoggerAdapter {
     }
 
     public GriefLoggerAdapter(Path databasePath, boolean integrationEnabled) {
+        this(databasePath, integrationEnabled, false);
+    }
+
+    public GriefLoggerAdapter(Path databasePath, boolean integrationEnabled, boolean autoDetected) {
         this.databasePath = Objects.requireNonNull(databasePath, "databasePath must not be null");
         this.integrationEnabled = integrationEnabled;
+        this.autoDetected = autoDetected;
     }
 
     private static Path resolveConfiguredPath() {
@@ -56,6 +61,11 @@ public class GriefLoggerAdapter {
 
     public boolean isIntegrationEnabled() {
         return integrationEnabled;
+    }
+
+    /** True when the running GriefLogger mod, not an explicit config flag, enabled this source. */
+    public boolean isAutoDetected() {
+        return autoDetected;
     }
 
     public boolean isDatabaseAvailable() {
@@ -106,8 +116,9 @@ public class GriefLoggerAdapter {
 
     /**
      * Opens a strictly read-only JDBC connection to the GriefLogger database.
-     * Enforces read-only via JDBC URI parameter (?mode=ro), SQLiteConfig read-only flag,
-     * busy timeout, and PRAGMA query_only = true.
+     * Enforces read-only via the JDBC URI parameter (?mode=ro), a busy timeout,
+     * and PRAGMA query_only = true. The driver is loaded in isolation by
+     * {@link SqliteJdbc} so this mod never shares the org.sqlite.* namespace.
      */
     public Connection openReadOnlyConnection() throws SQLException {
         if (!integrationEnabled) {
@@ -117,19 +128,12 @@ public class GriefLoggerAdapter {
             throw new SQLException("GriefLogger database file not found or not readable: " + databasePath.toAbsolutePath());
         }
 
-        try {
-            Class.forName("org.sqlite.JDBC");
-        } catch (ClassNotFoundException e) {
-            throw new SQLException("SQLite JDBC driver not available", e);
-        }
-
         String url = "jdbc:sqlite:file:" + databasePath.toAbsolutePath() + "?mode=ro";
 
-        SQLiteConfig config = new SQLiteConfig();
-        config.setReadOnly(true);
-        config.setBusyTimeout(5000);
+        java.util.Properties properties = new java.util.Properties();
+        properties.setProperty("busy_timeout", "5000");
 
-        Connection conn = DriverManager.getConnection(url, config.toProperties());
+        Connection conn = SqliteJdbc.connect(url, properties);
 
         try (Statement stmt = conn.createStatement()) {
             stmt.execute("PRAGMA busy_timeout = 5000;");

@@ -1559,7 +1559,9 @@ public final class ItemGraphCommands {
         String glStatus = !sourceAdapter.isIntegrationEnabled()
                 ? ItemGraphLanguage.text("status.source_disabled", "DISABLED (native-only; enable the GriefLogger integration in ItemGraph config to opt in)")
                 : sourceAdapter.isSupportedSchemaAvailable()
-                    ? ItemGraphLanguage.text("status.source_available", "ENABLED (read-only source available)")
+                    ? sourceAdapter.isAutoDetected()
+                        ? ItemGraphLanguage.text("status.source_auto", "ENABLED (GriefLogger detected; read-only auto-migration)")
+                        : ItemGraphLanguage.text("status.source_available", "ENABLED (read-only source available)")
                     : ItemGraphLanguage.text("status.source_unavailable", "ENABLED (read-only source unavailable)");
 
         DatabaseManager db = DatabaseManager.getInstance();

@@ -516,10 +516,13 @@ This is a separate deployment procedure, not an M8 feature-parity test.
 ItemGraph feature conformance is researched and tested locally with ItemGraph
 alone. The operator decision has since been taken: ItemGraph replaces
 GriefLogger outright, so the `-grieflogger-compatible` artifacts were retired
-and both loaders declare the GriefLogger mod incompatible. The standard
-ItemGraph jar is the only supported runtime artifact; GriefLogger is not a
-runtime dependency. The read-only importer remains available for a
-checksummed historical database when an operator explicitly configures it.
+and the standard jar is the only supported runtime artifact. GriefLogger is
+not a runtime dependency, but the mods can coexist: ItemGraph isolates its
+SQLite driver (`META-INF/iglibs/`, private classloader) and declares the mod
+`optional`/`AFTER` on NeoForge and `suggests` on Fabric, then migrates the
+source database read-only when detected. The read-only importer also remains
+available for a checksummed historical database when an operator explicitly
+configures it.
 
 1. Before cutover, stop the staging server and make an immutable, checksummed
    copy of the GriefLogger database. ItemGraph may read the source during the
