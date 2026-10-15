@@ -17,6 +17,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -152,6 +153,7 @@ public final class FlowBrowserService {
         }
         AbstractContainerMenu expectedMenu = requester.containerMenu;
         session.loading = true;
+        markMenuLoading(requester);
         int accepted = QueryDispatcher.dispatchData(source, List.of(ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT), "gui flow",
                 conn -> session.target.load(conn, session.window, cursor, direction),
                 (returnedSource, page) -> {
@@ -162,6 +164,7 @@ public final class FlowBrowserService {
                         return;
                     }
                     if (isStaleEmptyContinuation(cursor, page)) {
+                        showPage(player, session);
                         returnedSource.sendFailure(Component.literal(
                                 ItemGraphLanguage.text("browser.timeline_stale", "[ItemGraph] The timeline changed while browsing; reopen the flow to refresh.")));
                         return;
@@ -170,11 +173,53 @@ public final class FlowBrowserService {
                     session.page = page;
                     session.target = session.target.resolved(page);
                     showPage(player, session);
-                }, () -> session.loading = false);
+                }, () -> restoreMenuAfterFailedLoad(requester, expectedMenu, session));
         if (accepted == 0) {
-            session.loading = false;
+            restoreMenuAfterFailedLoad(requester, expectedMenu, session);
         }
         return accepted;
+    }
+
+    /**
+     * A load that never produces a page (queue rejection, failure, revoked permission)
+     * must not leave the menu stuck in the "(loading)" state: reset the flag and
+     * re-render the still-current page, but only while the original menu is still open.
+     *
+     * <p>The failure consumer can run off the server thread when the delivery executor
+     * runs inline during shutdown, so the flag reset stays thread-safe and the menu
+     * re-render is gated on the server thread. When the flag was already cleared —
+     * e.g. a success consumer that failed mid-render — the restore still runs if the
+     * open menu still shows the loading state; the permission-denied dispatch path,
+     * which invokes the failure consumer and still returns 0, restores only once.
+     */
+    private static void restoreMenuAfterFailedLoad(ServerPlayer player, AbstractContainerMenu expectedMenu,
+                                                   BrowserSession session) {
+        boolean wasLoading = session.loading;
+        session.loading = false;
+        MinecraftServer server = player.getServer();
+        if (server == null || !server.isSameThread()
+                || session.page == null || player.containerMenu != expectedMenu) {
+            return;
+        }
+        if (!wasLoading && !menuShowsLoading(player)) {
+            // Second invocation from the permission-denied dispatch path, which runs the
+            // failure consumer and still returns 0 — nothing left to restore.
+            return;
+        }
+        showPage(player, session);
+    }
+
+    /** The page label carries `browser.loading_suffix` while a load is in flight. */
+    private static boolean menuShowsLoading(ServerPlayer player) {
+        if (!(player.containerMenu instanceof FlowBrowserMenu menu)) {
+            return false;
+        }
+        ItemStack label = menu.getContainer().getItem(PAGE_LABEL_SLOT);
+        if (label.isEmpty()) {
+            return false;
+        }
+        Component name = label.get(DataComponents.CUSTOM_NAME);
+        return name != null && name.getString().endsWith(t("browser.loading_suffix", " (loading)"));
     }
 
     static boolean isStaleEmptyContinuation(TraceCursor cursor, TracePage page) {
@@ -195,7 +240,7 @@ public final class FlowBrowserService {
                 for (int i = 0; i < count; i++) {
                     int candidateIndex = start + i;
                     FingerprintRef candidate = page.candidates().get(candidateIndex);
-                    items.set(i, fingerprintItem(candidate));
+                    items.set(i, withMenuSlotLabel(fingerprintItem(candidate), i + 1));
                     actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.FINGERPRINT_CANDIDATE, candidateIndex));
                 }
             } else {
@@ -204,7 +249,7 @@ public final class FlowBrowserService {
                 for (int i = 0; i < count; i++) {
                     int candidateIndex = start + i;
                     NodeRef candidate = page.nodeCandidates().get(candidateIndex);
-                    items.set(i, nodeCandidateItem(candidate));
+                    items.set(i, withMenuSlotLabel(nodeCandidateItem(candidate), i + 1));
                     actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.NODE_CANDIDATE, candidateIndex));
                 }
             }
@@ -213,7 +258,7 @@ public final class FlowBrowserService {
                     page.targetDescription(), t("browser.no_movement_lore", "No observed or inferred movement was recorded in this time window."))));
         } else {
             for (int i = 0; i < Math.min(page.pageSize(), page.hops().size()); i++) {
-                items.set(i, hopItem(page.hops().get(i)));
+                items.set(i, withMenuSlotLabel(hopItem(page.hops().get(i)), i + 1));
                 actions.put(i, new FlowBrowserMenu.Action(FlowBrowserMenu.ActionType.ENTRY, i));
             }
         }
@@ -255,6 +300,36 @@ public final class FlowBrowserService {
     }
 
     /**
+     * Shows the pending state inside the currently open menu: the page label gains the
+     * "(loading)" suffix and the paging controls are greyed out, matching the disabled
+     * controls `showPage` would render. Slots are mutated in place — a `SimpleContainer`
+     * update syncs to the client on the next tick — so `player.containerMenu` keeps its
+     * identity and the completion callback's `expectedMenu` check still passes.
+     */
+    static void markMenuLoading(ServerPlayer player) {
+        if (!(player.containerMenu instanceof FlowBrowserMenu menu)) {
+            return;
+        }
+        net.minecraft.world.Container container = menu.getContainer();
+        ItemStack label = container.getItem(PAGE_LABEL_SLOT);
+        if (!label.isEmpty()) {
+            net.minecraft.network.chat.Component name = label.get(DataComponents.CUSTOM_NAME);
+            String base = name == null ? "" : name.getString();
+            String suffix = t("browser.loading_suffix", " (loading)");
+            if (!base.endsWith(suffix)) {
+                ItemStack loadingLabel = label.copy();
+                loadingLabel.set(DataComponents.CUSTOM_NAME, Component.literal(base + suffix));
+                container.setItem(PAGE_LABEL_SLOT, loadingLabel);
+            }
+        }
+        List<String> controlLore = List.of(t("browser.control_lore", "Flow browser control"));
+        container.setItem(PREVIOUS_SLOT, display(Items.GRAY_STAINED_GLASS_PANE,
+                localizeControl("Previous page unavailable"), controlLore));
+        container.setItem(NEXT_SLOT, display(Items.GRAY_STAINED_GLASS_PANE,
+                localizeControl("Next page unavailable"), controlLore));
+    }
+
+    /**
      * A vanilla chest menu renders item names only on hover. Send the current page rows
      * as numbered chat lines so each slot has a persistent, readable label at normal
      * scale. The row number is also the one-based menu slot number.
@@ -265,7 +340,7 @@ public final class FlowBrowserService {
 
     static List<String> pageCompanionLines(TracePage page, int pageIndex, int candidatePageIndex) {
         List<String> lines = new ArrayList<>();
-        String pagePrefix = t("browser.page_prefix", "[ItemGraph] Flow browser {0} {1} —",
+        String pagePrefix = t("browser.page_prefix", "[ItemGraph] {0} {1}:",
                 page.resolution() == TracePage.Resolution.AMBIGUOUS
                         ? t("browser.candidate_page", "candidate page") : t("browser.page", "page"), pageIndex + 1) + " ";
         if (page.resolution() == TracePage.Resolution.AMBIGUOUS) {
@@ -273,15 +348,25 @@ public final class FlowBrowserService {
                 int start = candidatePageIndex * page.pageSize();
                 for (int i = start; i < Math.min(start + page.pageSize(), page.candidates().size()); i++) {
                     FingerprintRef candidate = page.candidates().get(i);
-                    lines.add((i == start ? pagePrefix : "[ItemGraph] ") + t("browser.ambiguous_candidate",
-                            "{0}. AMBIGUOUS candidate — {1}", i - start + 1, safeIdentity(candidate)));
+                    String prefix = i == start ? pagePrefix : "[ItemGraph] ";
+                    int ordinal = i - start + 1;
+                    String label = t("browser.ambiguous_candidate", "{0}. AMBIGUOUS candidate — {1}", ordinal, "");
+                    int identityLimit = Math.max(1, 80 - prefix.length() - label.length());
+                    lines.add(prefix + t("browser.ambiguous_candidate", "{0}. AMBIGUOUS candidate — {1}",
+                            ordinal, safeSummary(safeIdentity(candidate), identityLimit)));
                 }
             } else {
                 int start = candidatePageIndex * page.pageSize();
                 for (int i = start; i < Math.min(start + page.pageSize(), page.nodeCandidates().size()); i++) {
                     NodeRef candidate = page.nodeCandidates().get(i);
-                    lines.add((i == start ? pagePrefix : "[ItemGraph] ") + t("browser.ambiguous_node_candidate",
-                            "{0}. AMBIGUOUS node candidate — {1}", i - start + 1, candidate.describeShort()));
+                    String prefix = i == start ? pagePrefix : "[ItemGraph] ";
+                    int ordinal = i - start + 1;
+                    String label = t("browser.ambiguous_node_candidate",
+                            "{0}. AMBIGUOUS node candidate — {1}", ordinal, "");
+                    int descriptionLimit = Math.max(1, 80 - prefix.length() - label.length());
+                    lines.add(prefix + t("browser.ambiguous_node_candidate",
+                            "{0}. AMBIGUOUS node candidate — {1}", ordinal,
+                            safeSummary(candidate.describeShort(), descriptionLimit)));
                 }
             }
             if (lines.isEmpty()) lines.add(pagePrefix + t("browser.ambiguous_empty", "AMBIGUOUS — no candidate details were recorded."));
@@ -293,37 +378,13 @@ public final class FlowBrowserService {
             for (int i = 0; i < Math.min(page.pageSize(), page.hops().size()); i++) {
                 TraceHop hop = page.hops().get(i);
                 String evidence = companionEvidenceClass(hop);
-                String eventKind = isAmbiguousSourceGroup(hop)
-                        ? "ambiguous source group; no independent quantity capacity"
-                        : companionEventKind(hop);
-                String interval = hop.endMs() > hop.timestampMs()
-                        ? QueryFormatter.formatTime(hop.timestampMs()) + " to " + QueryFormatter.formatTime(hop.endMs())
-                        : QueryFormatter.formatTime(hop.timestampMs());
-                lines.add((i == 0 ? pagePrefix : "[ItemGraph] ") + t("browser.row",
-                        "{0}. {1} — {2} — {3} — {4}", i + 1, evidence, safeIdentity(hop.item()), eventKind, interval));
+                String rowPrefix = "[ItemGraph] " + (i + 1) + ". " + evidence + " — ";
+                int identityLimit = Math.max(1, Math.min(40, 80 - rowPrefix.length()));
+                lines.add("[ItemGraph] " + t("browser.row", "{0}. {1} — {2}",
+                        i + 1, evidence, safeSummary(safeIdentity(hop.item()), identityLimit)));
             }
         }
         return List.copyOf(lines);
-    }
-
-    private static String companionEventKind(TraceHop hop) {
-        if (hop.source() == TraceHop.Source.TRANSFORMATION) {
-            String detail = hop.detail() == null ? "" : hop.detail();
-            java.util.regex.Matcher matcher = java.util.regex.Pattern
-                    .compile("^\\[TRANSFORMATION ([A-Z0-9_]+)(?:\\s|\\])")
-                    .matcher(detail);
-            return matcher.find() ? "TRANSFORMATION " + matcher.group(1) : "TRANSFORMATION";
-        }
-        if (hop.kind() == TraceHop.Kind.INFERRED) {
-            return safeSummary(hop.detail(), 48);
-        }
-        String detail = hop.detail() == null ? "" : hop.detail().trim();
-        int metadata = detail.indexOf(" [");
-        int corroboration = detail.indexOf(" corroborates observation#");
-        int end = metadata < 0 ? detail.length() : metadata;
-        if (corroboration >= 0) end = Math.min(end, corroboration);
-        String eventKind = detail.substring(0, end).trim();
-        return eventKind.isEmpty() ? "event kind unavailable" : safeSummary(eventKind, 48);
     }
 
     static String companionEvidenceClass(TraceHop hop) {
@@ -426,6 +487,7 @@ public final class FlowBrowserService {
         }
         browser.loading = true;
         AbstractContainerMenu expectedMenu = player.containerMenu;
+        markMenuLoading(player);
         int accepted = QueryDispatcher.dispatchData(player.createCommandSourceStack(), List.of(ItemGraphPermissions.GUI, ItemGraphPermissions.AUDIT), "gui detail",
                 conn -> detailLines(conn, hop),
                 (source, lines) -> {
@@ -437,9 +499,9 @@ public final class FlowBrowserService {
                         showDetails(viewer, detail);
                     }
                 },
-                () -> browser.loading = false);
+                () -> restoreMenuAfterFailedLoad(player, expectedMenu, browser));
         if (accepted == 0) {
-            browser.loading = false;
+            restoreMenuAfterFailedLoad(player, expectedMenu, browser);
         }
     }
 
@@ -566,8 +628,15 @@ public final class FlowBrowserService {
             lore.add(t("browser.related_fingerprint", "Related fingerprint: {0}", hop.item().describeFull()));
         }
         lore.add(t("browser.details", "Details: {0}", hop.detail()));
-        ItemStack icon = transformation ? new ItemStack(Items.PAPER) : icon(hop.item());
+        ItemStack icon = icon(hop.item());
         return display(icon, title, lore);
+    }
+
+    static ItemStack withMenuSlotLabel(ItemStack stack, int oneBasedSlot) {
+        String name = stack.get(DataComponents.CUSTOM_NAME).getString();
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal(t("browser.menu_slot",
+                "Slot {0}: {1}", oneBasedSlot, name)));
+        return stack;
     }
 
     private static ItemStack fingerprintItem(FingerprintRef fingerprint) {

@@ -1,6 +1,7 @@
 package com.itemgraph.command;
 
 import com.itemgraph.audit.AuditReport;
+import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.audit.AuditService;
 import com.itemgraph.audit.EventTaxonomy;
@@ -281,7 +282,7 @@ public final class ItemGraphCommands {
                 .filter(node -> node.levelId() != null && node.x() != null && node.y() != null && node.z() != null)
                 .filter(node -> Double.isFinite(node.x()) && Double.isFinite(node.y()) && Double.isFinite(node.z()))
                 .map(node -> new QueryDispatcher.LocationAction(node.levelId(), node.x(), node.y(), node.z()))
-                .distinct().limit(8).toList();
+                .distinct().toList();
     }
 
     private static List<QueryDispatcher.LocationAction> locationsForHops(TraceResult result) {
@@ -620,8 +621,13 @@ public final class ItemGraphCommands {
         String topic = StringArgumentType.getString(ctx, "topic");
         List<String> lines = CommandHelp.topicLines(topic);
         if (lines == null) {
+            String closest = CommandHelp.closestTopicsText(topic);
+            if (closest.isEmpty()) {
+                closest = ItemGraphLanguage.text("help.no_close_topics", "none");
+            }
             source.sendFailure(Component.literal(ItemGraphLanguage.text("help.unknown_topic",
-                    "[ItemGraph] Unknown help topic ''{0}''. Valid topics: {1}", topic, CommandHelp.validTopicsText())));
+                    "[ItemGraph] Unknown help topic '{0}'. Closest topics: {1}. Use /ig help commands to list every topic.",
+                    topic, closest)));
             return 0;
         }
         lines.forEach(line -> source.sendSuccess(() -> Component.literal(ItemGraphLanguage.sourceText(line)), false));
@@ -974,7 +980,7 @@ public final class ItemGraphCommands {
         boolean changed = InspectionService.getInstance().setEnabled(player.getUUID(), enabled);
         ctx.getSource().sendSuccess(() -> Component.literal(enabled
                 ? changed
-                        ? ItemGraphLanguage.text("inspect.enabled", "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history.")
+                        ? ItemGraphLanguage.text("inspect.enabled", "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable.")
                         : ItemGraphLanguage.text("inspect.already_enabled", "[ItemGraph] Inspection is already enabled.")
                 : changed
                         ? ItemGraphLanguage.text("inspect.disabled", "[ItemGraph] Inspection disabled.")
@@ -1347,18 +1353,40 @@ public final class ItemGraphCommands {
             return true;
         }
         String normalized = eventType.toUpperCase(java.util.Locale.ROOT);
-        return AUDIT_ONLY_LOOKUP_TYPES.contains(normalized)
+        if (AUDIT_ONLY_LOOKUP_TYPES.contains(normalized)
                 || TAXONOMY_SENSITIVE_LOOKUP_TYPES.contains(normalized)
                 || normalized.startsWith("ADMIN_ITEM_COMMAND_")
                 || normalized.startsWith("CREATIVE_SLOT_")
                 || normalized.startsWith("CREATIVE_BLOCK_")
                 || normalized.startsWith("ADMIN_ITEM_")
-                || normalized.startsWith("CREATIVE_ITEM_");
+                || normalized.startsWith("CREATIVE_ITEM_")) {
+            return true;
+        }
+        EventTaxonomy.Definition definition = EventTaxonomy.find(normalized,
+                EventTaxonomy.Surface.AUDIT_EVENT).orElse(null);
+        return definition != null && requiresAuditPrivacy(definition);
     }
 
     static boolean requiresAuditPermission(List<String> eventTypes) {
         return eventTypes == null || eventTypes.isEmpty()
-                || eventTypes.stream().anyMatch(ItemGraphCommands::requiresAuditPermission);
+                || eventTypes.stream().anyMatch(eventType -> requiresAuditPermission(eventType)
+                        || hasSensitiveUnifiedEvidence(eventType));
+    }
+
+    private static boolean hasSensitiveUnifiedEvidence(String eventType) {
+        if (eventType == null || eventType.isBlank()) return true;
+        String normalized = eventType.toUpperCase(java.util.Locale.ROOT);
+        for (EventTaxonomy.Surface surface : List.of(
+                EventTaxonomy.Surface.ITEM_OBSERVATION, EventTaxonomy.Surface.TRANSFORMATION)) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(normalized, surface).orElse(null);
+            if (definition != null && requiresAuditPrivacy(definition)) return true;
+        }
+        return false;
+    }
+
+    private static boolean requiresAuditPrivacy(EventTaxonomy.Definition definition) {
+        return definition.privacy() == EventTaxonomy.PrivacyClass.SENSITIVE_LOCATION
+                || definition.privacy() == EventTaxonomy.PrivacyClass.STAFF_ACTIVITY;
     }
 
     static List<String> lookupPermissionsForType(String eventType) {
@@ -1554,6 +1582,7 @@ public final class ItemGraphCommands {
                 QueryLimits.getConfiguredMaxPageSize(), dbSettings == null
                         ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.connectionTimeoutMs(),
                 dbSettings == null ? ItemGraphLanguage.text("status.not_configured", "not configured") : dbSettings.useIndexes())), false);
+
         runtimeStatusLines(ingestion, lastResult, lastCorrelation, internalObs, entityTracker,
                 capabilityQueueRejections).forEach(line -> source.sendSuccess(() -> Component.literal(line), false));
         if (!dbConnected) {
@@ -1614,31 +1643,31 @@ public final class ItemGraphCommands {
         String fallback;
         if (captureState == InternalObservationService.CaptureState.RECOVERY_BLOCKED) {
             key = "status.action.recovery_blocked";
-            fallback = "[ItemGraph] ACTION: Preserve pending-evidence recovery files and logs; follow the recovery guide.";
+            fallback = "[ItemGraph] ACTION: Preserve recovery files and logs; follow the recovery guide.";
         } else if (captureState == InternalObservationService.CaptureState.DISABLED_BY_CONFIG) {
             key = "status.action.capture_disabled";
-            fallback = "[ItemGraph] ACTION: Native capture is off; enable it only if you intend to record new events.";
+            fallback = "[ItemGraph] ACTION: Native capture is off; enable it to record new events.";
         } else if (captureState == InternalObservationService.CaptureState.STOPPED) {
             key = "status.action.capture_stopped";
-            fallback = "[ItemGraph] ACTION: Check startup errors and restore the capture worker before relying on new evidence.";
+            fallback = "[ItemGraph] ACTION: Check startup errors; restore the capture worker first.";
         } else if (captureState == InternalObservationService.CaptureState.RECOVERY_LOADING) {
             key = "status.action.recovery_loading";
-            fallback = "[ItemGraph] ACTION: Wait for recovery loading to finish before interpreting queue totals.";
+            fallback = "[ItemGraph] ACTION: Wait for recovery loading before reading queue totals.";
         } else if (!dbConnected) {
             key = "status.action.database_disconnected";
-            fallback = "[ItemGraph] ACTION: Check database settings and logs; preserve database and recovery files.";
+            fallback = "[ItemGraph] ACTION: Check database settings and logs; preserve recovery files.";
         } else if (dropped > 0) {
             key = "status.action.dropped";
-            fallback = "[ItemGraph] ACTION: Evidence was rejected or lost; preserve logs and investigate before trusting empty results.";
+            fallback = "[ItemGraph] ACTION: Evidence was rejected or lost; preserve logs; investigate.";
         } else if (ingestionFailed) {
             key = "status.action.ingestion_failed";
-            fallback = "[ItemGraph] ACTION: Review the failed source-ingestion cycle in logs; native capture has a separate status.";
+            fallback = "[ItemGraph] ACTION: Review the failed source-ingestion cycle in the logs.";
         } else if (correlationFailed) {
             key = "status.action.correlation_failed";
-            fallback = "[ItemGraph] ACTION: Review the failed correlation pass; do not treat missing inferred paths as proof.";
+            fallback = "[ItemGraph] ACTION: Review the failed correlation pass; paths may be missing.";
         } else {
             key = "status.action.verify_coverage";
-            fallback = "[ItemGraph] ACTION: No stop condition is reported; confirm capture was active and the event type is supported before trusting an empty query.";
+            fallback = "[ItemGraph] ACTION: No stop reported; confirm capture was active and supported.";
         }
         return ItemGraphLanguage.text(key, fallback);
     }
@@ -1652,18 +1681,18 @@ public final class ItemGraphCommands {
             long capabilityQueueRejections) {
         OperationalMetrics.Snapshot metrics = OperationalMetrics.getInstance().snapshot();
         return List.of(
-                    "[ItemGraph] correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s"
+                    "[ItemGraph] DIAGNOSTIC correlation: groundBridgeWindow=" + ingestion.getCorrelationEngine().getWindowSeconds() + "s"
                             + " lastPass=" + (lastCorrelation == null ? "never run yet"
                             : (lastCorrelation.success() ? "OK" : "ERROR")
                             + " (" + lastCorrelation.observationsFinalised() + " evaluated, "
                             + lastCorrelation.edgesCreated() + " bridges inferred, " + lastCorrelation.deferred()
                             + " deferred, " + lastCorrelation.durationMs() + "ms)"),
-                    "[ItemGraph] ingestion worker: running=" + ingestion.isRunning()
+                    "[ItemGraph] DIAGNOSTIC ingestion worker: running=" + ingestion.isRunning()
                             + " lastCycle=" + (lastResult == null ? "never run yet"
                             : (lastResult.success() ? "OK" : "ERROR")
                             + " (" + lastResult.itemsIngested() + " items, " + lastResult.containersIngested()
                             + " containers, " + lastResult.durationMs() + "ms)"),
-                    "[ItemGraph] internal queue: size=" + internalObs.getQueueSize()
+                    "[ItemGraph] DIAGNOSTIC capture/queue: size=" + internalObs.getQueueSize()
                             + " capacityPerQueue=10000"
                             + " idlePollMs=" + internalObs.getQueuePollIntervalMs()
                             + " flushEveryTicks=" + internalObs.getQueueFrequencyTicks()
@@ -1681,7 +1710,7 @@ public final class ItemGraphCommands {
                             + " capabilityQueueRejections=" + capabilityQueueRejections
                             + " transformations=" + internalObs.getTotalTransformations()
                             + " auditEvents=" + internalObs.getTotalAuditEvents(),
-                    "[ItemGraph] performance: enqueueCount=" + metrics.enqueue().count()
+                    "[ItemGraph] DIAGNOSTIC performance counters: enqueueCount=" + metrics.enqueue().count()
                             + " enqueueP95=" + latencyP95(metrics.enqueue())
                             + " enqueueFailed=" + metrics.enqueue().failed()
                             + " persistBatches=" + metrics.persistenceCommit().count()
@@ -1703,7 +1732,7 @@ public final class ItemGraphCommands {
                             + " decodeCacheHits=" + metrics.decodeCacheHits()
                             + " heapUsedBytes=" + metrics.heapUsedBytes()
                             + " heapMaxBytes=" + metrics.heapMaxBytes(),
-                    "[ItemGraph] entity tracking: active=" + entityTracker.getActiveEntityCount()
+                    "[ItemGraph] DIAGNOSTIC entity tracking: active=" + entityTracker.getActiveEntityCount()
                             + " drops=" + entityTracker.getDropCount()
                             + " pickups=" + entityTracker.getPickupCount()
                             + " continuityMatches=" + entityTracker.getContinuityMatchCount()

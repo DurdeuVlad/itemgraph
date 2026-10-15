@@ -1,5 +1,27 @@
 # Test Plan
 
+**Audience:** contributors verifying a change and maintainers reviewing
+evidence. Sections dated like `(2026-10-01)` are executed-run records — read
+them as evidence, not as living documentation. The undated sections are the
+standing contract.
+
+## How to run the suite
+
+```text
+./gradlew build                          # all modules, unit tests, boundary verifiers, jar checks
+./gradlew :neoforge:runGameTestServer    # NeoForge in-game GameTests
+./gradlew :fabric:runGameTest            # Fabric in-game GameTests
+python3 tools/validate_admin_ux_docs.py  # docs/help/permission-contract alignment
+python3 tools/validate_grieflogger_profile.py  # compatibility registry vs. pinned profile
+```
+
+The sections below are organized roughly chronologically by milestone; the
+[core correctness tests](#core-correctness-tests) and [invariants](#invariants)
+are the standing behavioral contract, and [measured local performance
+profile](#measured-local-performance-profile) is the enforced performance
+boundary. Use the headings to jump to a feature's proof rather than reading
+front-to-back.
+
 ## Locale startup and message checks
 
 Focused unit checks validate supported locale normalization, reject `zh_cn` and
@@ -279,8 +301,11 @@ Alice -> Ground -> Bob
 ```
 
 Where item entity identity is available, correlation should become stronger. A ground row is
-created only after the ItemEntity is confirmed in the level; a canceled toss is UNKNOWN-
-destination evidence and a canceled death drop has no ground endpoint.
+created only after the ItemEntity is confirmed in the level and reaches a resting state
+(on-ground, near-zero movement, removal, or TTL expiry), so the drop endpoint is the
+entity's rest position — the same GROUND node a same-position pickup records (issue #166,
+both loaders). A canceled toss is UNKNOWN-destination evidence and a canceled death drop
+has no ground endpoint.
 
 ### Cross-source copies
 
@@ -567,8 +592,9 @@ schema-v2 redacted sidecar for every compatibility-registry action. It records
 the exact-release writer disposition, ItemGraph implementation classification,
 profile source table, and count found in the selected replay. The sidecar
 explicitly separates a feature absent from a replay from an action that the
-verified release has no writer for; unobserved actions remain open under #31.
-It also emits unresolved rows for open issues #136, #137, #138, and #140, plus
+verified release has no writer for; unobserved actions were tracked under #31
+(closed 2026-10-05). It also emits unresolved rows for issues #136, #137,
+#138, and #140 (all closed 2026-10-05), plus
 five durability categories. Exact 1.2.10-1.21.1 fixture facts remain separate
 from pinned 26.2 source-only research: the fixture confirms the REMOVE_ITEM
 BreakContainerEvent writer class for both loaders but not its timing details;
@@ -853,7 +879,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `EntityInteractionEvidenceTest` | Armor stand method outcomes, target UUID, actor/position/dimension, and client-side suppression; interaction attempts are queried separately from completed results |
 | `InternalObservationServiceTest` | bounded queue/backpressure, concurrent enqueue/stop admission race, 2,000-record worker persistence, shutdown flush, confirmed-loss and unknown-commit accounting, persistence, endpoint mapping, canceled-drop provenance, fingerprint dedup, UUID projection collision preservation, paired-ledger remapping, post-commit lost-ack replay idempotency for all three native ledgers, and failed network heartbeat accounting |
 | `LegacyObservationArchiveTest` | migrations V3–V5 copy source identifiers and raw payload bytes before clearing obsolete active observation rows |
-| `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (23 tests) |
+| `QueryDispatcherTest` | text/data async marshalling, entity-less RCON delivery and interrupt restoration, delivery-time permission checks, inline shutdown guards, read-only connections, bounded-queue rejection, failure callbacks, active SQLite interruption, pre-statement cancellation, server-thread RCON acknowledgement, and wrapper-free RCON errors (40 tests; the count in earlier revisions of this line tracked the suite at the time) |
 | `ItemGraphCommandsHelpTest`, `FabricItemGraphCommandsParityTest` | provider-absent level-2 fallback on each loader; root plus lookup grants for a level-1 user; explicit denials for inspect, page, trace, event, explain, audit, GUI, ingest, and import; help topic exposes exact lookup delegation nodes |
 | `QueryDispatcherTest` | named trace permission is revoked after query submission and before server-thread delivery; level-1 lookup without audit permission cannot run a broad/protected query or reveal rows/has-next metadata; entity-less off-thread delivery drops results and actions when audit permission is revoked during the wait |
 | `FlowBrowserMenuTest`, `InspectionListenerTest`, `FabricNativeAuditEventListenerTest` | explicit GUI denial blocks menu navigation and closes the menu; explicit inspect denial clears inspection mode and prevents lookup on both loaders |
@@ -877,6 +903,7 @@ Run with `./gradlew test` (or `java -classpath "gradle/wrapper/gradle-wrapper.ja
 | `ContainerInteractionTrackerTest`, `ContainerSessionListenerTest` | open/close net deltas, timestamp intervals, multi-viewer ambiguity, capability-credit subtraction, and zero-net limitation (14 + 1 tests) |
 | `V9InternalObservationDedupTest`, `V10InternalDedupEntityUuidTest` | partial-index, UUID, destination-sensitive dedup, NULL-UUID preservation, and V11 idempotence (5 + 6 tests) |
 | `ItemEntityEventListenerPartialPickupTest` | pending-pickup resolution: emit on reduced count, drop on removal/expiry, keep while unchanged |
+| `ItemEntityEventListenerTest` pending-drop cases (NeoForge), `FabricNativeAuditEventListenerTest` pending-drop cases (Fabric) | settle-position drop endpoints on both loaders (issue #166): airborne entities wait for rest, removed entities confirm at last known position, TTL expiry emits at fallback position, a pickup overtaking a pending drop emits it at the shared pickup position, and a requeued entity UUID leaves `DROP_UNRESOLVED`/`DEATH_DROP_UNRESOLVED` with `pending_entity_reused` |
 | `FlowBrowserMenuTest` | vanilla six-row menu type, compact resolved-menu titles, textual provenance/confidence/evidence labels, numbered nine-row chat companion with UTC timestamps and safe identity fallbacks, every click category rejected or handled as navigation/detail only, and permission recheck |
 | `ItemGraphCommandsGuiTest` | `/ig gui` item/player/container and `/ig inspect` command shape, explicit dimension argument, quoted `"id:<id>"` parsing, and stale empty-cursor handling (3 tests) |
 | `InspectionServiceTest`, `InspectionListenerTest`, `ItemGraphCommandsInspectTest`, `FabricNativeAuditEventListenerTest` | per-player inspect state, deterministic command forms, permission denial, block-history fallback, exact Container-to-flow-browser routing on both loaders, browser-queue rejection fallback, NeoForge logout and Fabric disconnect handlers, and canceled-click isolation from session tracking |
@@ -893,7 +920,7 @@ Latest full loader test run: **510 NeoForge tests (0 failures, 6 skipped) and 75
 
 - The official [lookup command](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/lookup-command), [filter reference](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/filters), [page reference](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/pages), and [inspect reference](https://daqem.com/projects/grieflogger/wiki/inspecting-lookup/inspect-command) define the documented command contract. The published pages require radius and permission level 2; the pinned 26.2 source accepts a no-radius lookup. ItemGraph follows the published operator-safety requirement and records the source discrepancy in `docs/GRIEFLOGGER_PARITY.md`.
 - `ItemGraphCommandsHelpTest.allPublishedLookupExamplesParseForBothItemGraphRoots` and `FabricItemGraphCommandsParityTest.allPublishedLookupExamplesParseForBothItemGraphRootsOnFabric` check all 15 published lookup examples through both `/ig` and `/itemgraph`. Each example asserts complete Brigadier parsing, retention of the `lookupFilters` argument, and normalized `AuditLookupFilters` action IDs, player names, item registry IDs, radius, and time window against a fixed clock. Separate tests verify aliases, comma values, required radius, five-filter bounds, suggestions, permissions, invalid pages, and inspect/page syntax. Existing query tests cover deterministic empty-result errors and previous/next action generation.
-- `ItemGraphCommandsInspectTest.inspectCommandTogglesAndExplicitFormsAreDeterministic` and `FabricItemGraphCommandsParityTest.inspectCommandExecutesBothRootsWithDeterministicStateAndMessagesOnFabric` now execute the same toggle, explicit `on`/`off`, and `status` sequence through both roots on both loaders. They assert player-scoped state and the same seven exact success receipts. Both permission-denial tests verify denied callers cannot change state or emit a success receipt, and assert the command body does not send a failure message when Brigadier rejects permission. Dispatcher tests still do not prove vanilla-client transport.
+- `ItemGraphCommandsInspectTest.inspectCommandTogglesAndExplicitFormsAreDeterministic` and `FabricItemGraphCommandsParityTest.inspectCommandExecutesBothRootsWithDeterministicStateAndMessagesOnFabric` now execute the same toggle, explicit `on`/`off`, and `status` sequence through both roots on both loaders. They assert player-scoped state and exact success receipts (nine on NeoForge since the `ig inspect on`-from-disabled disable-hint assertion was added; seven on Fabric). Both permission-denial tests verify denied callers cannot change state or emit a success receipt, and assert the command body does not send a failure message when Brigadier rejects permission. Dispatcher tests still do not prove vanilla-client transport.
 - `CommandPacketGameTests.inspectCommandsExecuteFromClientPacketsAndPersistAttempts` in both loader GameTest suites sends `ServerboundChatCommandPacket` instances through the server's `handleChatCommand` handler for `itemgraph inspect on`, `ig inspect status`, and `ig inspect off`. It checks permission-level-2 execution, enabled/status/disabled state transitions, exactly one durable `COMMAND_ATTEMPT` row per command with player attribution and timestamp, and an unchanged snapshot of each `ig_observations` cell's JDBC value and Java type. The shared fixture queries ItemGraph's database read-only after the audit watermark. The test uses an embedded mock player and calls the packet handler directly; it proves packet-handler-to-audit persistence on each loader, not socket transport, rendered client output, or GriefLogger differential behavior.
 - The command packet GameTest's outer timeout is 4,000 ticks on both loaders. Its persistence probe retains a 10-second wall-clock deadline; this avoids a fast headless server reaching the tick limit before the asynchronous durability deadline can report success or failure. Hosted CI initially exposed the old 400-tick limit in Fabric; both loader GameTests passed after aligning the limits.
 - `ItemGraphCommandsHelpTest.vanillaCommandTreePacketCodecRoundTripsBothCommandRoots` and `FabricItemGraphCommandsParityTest.vanillaCommandTreePacketCodecRoundTripsBothCommandRootsOnFabric` encode and decode the complete registered command tree with Minecraft 1.21.1's `ClientboundCommandsPacket.STREAM_CODEC`. Each asserts the `/ig` redirect targets `/itemgraph`, the lookup/page/inspect children survive decode, `/gl` and `/grieflogger` stay absent, and the packet is fully consumed. This catches unsupported Brigadier argument serializers in both loader test suites, but does not prove a live server/client connection or rendered output.
@@ -1036,7 +1063,9 @@ Observed checks:
 - `deop IGBotGui` while inspection was enabled cleared the mode on the next click: the
   chest opened vanilla `minecraft:generic_9x3`, `/ig inspect status` was rejected as a
   permission-gated command, and after re-op status reported disabled
-  (`27-deopped-chest-vanilla.png`).
+  (`27-deopped-chest-vanilla.png`). *Note (#173): under current semantics the
+  revocation-detecting click itself is consumed with an "inspection disabled —
+  permission revoked" notice; the vanilla chest opens on the following click.*
 - Reconnect cleanup was verified by enabling inspection, running `client reconnect`, and
   receiving `Container inspection is disabled` from `/ig inspect status` after rejoin.
 - Server-stop cleanup was verified by enabling inspection, stopping with RCON `stop`,
@@ -1133,7 +1162,12 @@ was present after stop, but no pre-start hash was captured; this is not a hash-v
 no-write claim. Standalone live movement scenarios remain blocked until GriefLogger can be
 isolated without modifying its existing database.
 
-## GriefLogger-compatible artifact smoke test (isolated RustiCraft clone)
+## GriefLogger-compatible artifact smoke test (isolated RustiCraft clone) — superseded
+
+> Superseded: the `-grieflogger-compatible` artifacts were retired after
+> `0.4.0-beta.1`; ItemGraph now declares the GriefLogger mod incompatible on
+> both loaders. This section is retained as the historical record of the
+> 0.3.x coexistence variant and no longer describes a shipping artifact.
 
 On 2026-09-28, `java -classpath gradle/wrapper/gradle-wrapper.jar
 org.gradle.wrapper.GradleWrapperMain clean build verifyGriefLoggerCompatibleJar`
@@ -1203,8 +1237,10 @@ shutdown, the isolated SQLite database contained rows for every exercised event,
 and the bot received results from both generic and filtered `/ig lookup` commands.
 The same staging checkout persisted `CRAFT`, `SMELT`, and `ANVIL_RENAME` rows,
 and `/ig inspect on` opened a read-only `minecraft:generic_9x6` flow browser for
-the populated chest. The remaining cutover work is the documented migration and
-retention procedure; no production change is authorized by this test.
+the populated chest. Those craft/smelt rows predate #162 and are historical
+evidence only; current capture stores unresolved output evidence without lineage.
+The remaining cutover work is the documented migration and retention procedure;
+no production change is authorized by this test.
 
 The 2026-09-30 NeoForge staging startup additionally ran `:neoforge:runServer`
 with the shared `common` and `core` source sets attached to the ModDev run. It
@@ -1349,16 +1385,18 @@ player interaction, queue saturation, conservation, or live supersession matrix.
 
 The implementation follows the observed GriefLogger cleanup behavior at the presentation boundary while keeping evidence immutable: GriefLogger removes old interaction rows after an interactable block/door break; ItemGraph records `BLOCK_REMOVED_AT_TARGET` links in its own schema V19 tables and retains the native row, imported projection, and immutable provenance. Source reference: [`RemoveBlockInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveBlockInteractionsEvent.java) and [`RemoveDoorInteractionsEvent`](https://github.com/DAQEM/GriefLogger/blob/d315098b3f37317a5cddfbd75086f4f912f16a83/common/src/main/java/com/daqem/grieflogger/event/block/RemoveDoorInteractionsEvent.java).
 
-**Visible-client matrix status:** skipped by the maintainer. No connected-client clicks were run for ordinary/function blocks, single/double chests, doors, empty/missing history, block removal, door removal, repeated clicks, or query-queue saturation. Issue #26 is closed, but this client evidence remains unverified; its closure is not proof that the matrix ran. Automated adapter/query tests and the dedicated-server startup/migration smoke above remain the available evidence. No production or staging instance is involved.
+**Visible-client matrix status:** skipped under the maintainer's instruction at the time (later superseded by authorized local MCPilot testing; see issue #153). No connected-client clicks were run for ordinary/function blocks, single/double chests, doors, empty/missing history, block removal, door removal, repeated clicks, or query-queue saturation. Issue #26 is closed, but this client evidence remains unverified; its closure is not proof that the matrix ran. Automated adapter/query tests and the dedicated-server startup/migration smoke above remain the available evidence. No production or staging instance is involved.
 
 ## M8 issue #75: entity interaction outcomes
 
 Automated tests cover these server-side boundaries:
 
 - `EntityInteractionEvidenceTest` verifies consuming results become `INTERACT_ENTITY_COMPLETED`, `FAIL` becomes `INTERACT_ENTITY_DENIED`, the fallback `Entity.interact` `PASS` becomes `INTERACT_ENTITY_UNRESOLVED` because later entity-use steps may still run; the intermediate `ArmorStand.interactAt` `PASS` does not create a second method-result row, missing target UUIDs are omitted, attempt metadata contains only held item ID/count/fingerprint, non-armor targets are rejected by the armor-stand result recorder, and client-side calls do not emit evidence.
-- `NativeAuditEventListenerTest` verifies the NeoForge armor-stand specific callback records one normalized attempt, canceled specific and generic callbacks are retained, canceled non-armor specifics are retained, missing target UUIDs are omitted, and the non-canceled generic armor-stand event path does not duplicate the attempt.
+- `NativeAuditEventListenerTest` verifies the NeoForge armor-stand specific callback records one normalized attempt, canceled specific and generic callbacks are retained, canceled non-armor specifics are retained, missing target UUIDs are omitted, and the non-canceled generic armor-stand event path does not duplicate the attempt. It also verifies a canceled `AttackEntityEvent` persists one `ATTACK_ENTITY_DENIED` row attributed to `INSPECTION_MODE` when the inspection listener canceled it or to `LOADER_CALLBACK_CANCELED` otherwise, and that an uncanceled attack records nothing.
+- `InspectionListenerTest` verifies the NeoForge `AttackEntityEvent` consume path: the attack is canceled and resynced while inspection is enabled or inside the consumed-packet marker window after revocation cleared the mode, and passes through untouched while inspection is off.
+- `FabricNativeAuditEventListenerTest` verifies `handleEntityAttack` returns `FAIL`, resyncs the denied entity, and persists one `ATTACK_ENTITY_DENIED` row (`callback=attack_entity`, `reason=INSPECTION_MODE` or `INSPECTION_WINDOW`) under the same enabled-or-marker rule, and `PASS`es without evidence while inspection is off. No aggregate decorator wraps `AttackEntityCallback`, so the listener is the single denial recorder.
 - `FabricNativeAuditEventListenerTest` verifies Fabric attempt detail uses the target UUID when available, hand, target type, position, held item metadata, and completion coverage fields. `FabricUseEntityCallbackAuditTest` verifies aggregate callback order and one final non-`PASS` result when an earlier callback short-circuits before ItemGraph or a later callback returns a handled result after ItemGraph returns `PASS`.
-- NeoForge `:neoforge:runGameTestServer` and Fabric `:fabric:runGameTest` run equivalent isolated server GameTests with the ItemGraph loader integration enabled. Each creates a mock server player, records the full read-only `ig_observations` row snapshot, sends `ServerboundInteractPacket` instances through `ServerGamePacketListenerImpl.handleInteract` for an unsupported cow and an armor stand, equips diamond boots, then removes them with an empty hand. Each test separately calls inherited `ArmorStand.interact` directly and checks its `PASS` result to exercise the method return hook; that call is not attributed to a packet. Each test verifies the resulting armor-stand equipment state, stops and joins the ItemGraph worker to flush pending writes, opens ItemGraph's audit database read-only, and requires one cow attempt plus exactly two armor-stand packet attempts, two handled `interactAt` results, and one unresolved direct `interact` method result, with no duplicate rows. It requires every `ig_observations` row and column to remain identical before and after. The tests assert held-stack details and hand on attempts, `target_support=callback_only` plus `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT` for cow evidence, and `target_support=armor_stand_method_result` for armor-stand evidence. The shared fixture verifies the same normalized query rows and formatter output in both loader runs. NeoForge test classes and structure data are excluded from both NeoForge jar tasks; Fabric tests use Loom's separate `gametest` source set and test mod. CI runs both server GameTests beside both loader unit suites without packaging distributable mod jars. This validates both local packet-to-callback-to-durable-ledger paths and the direct return-hook boundary; it does not validate a live client's socket transport.
+- NeoForge `:neoforge:runGameTestServer` and Fabric `:fabric:runGameTest` run equivalent isolated server GameTests with the ItemGraph loader integration enabled. Each creates a mock server player, records the full read-only `ig_observations` row snapshot, sends `ServerboundInteractPacket` instances through `ServerGamePacketListenerImpl.handleInteract` for an unsupported cow and an armor stand, equips diamond boots, then removes them with an empty hand. Each test separately calls inherited `ArmorStand.interact` directly and checks its `PASS` result to exercise the method return hook; that call is not attributed to a packet. Each test then enables inspection for a fourth mock player, sends `ServerboundInteractPacket.createAttackPacket` at the armor stand through the real server packet handler, asserts the stand survives undamaged, and requires exactly one `ATTACK_ENTITY_DENIED` row carrying `reason=INSPECTION_MODE` for that inspector. Each test verifies the resulting armor-stand equipment state, stops and joins the ItemGraph worker to flush pending writes, opens ItemGraph's audit database read-only, and requires one cow attempt plus exactly two armor-stand packet attempts, two handled `interactAt` results, and one unresolved direct `interact` method result, with no duplicate rows. It requires every `ig_observations` row and column to remain identical before and after. The tests assert held-stack details and hand on attempts, `target_support=callback_only` plus `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT` for cow evidence, and `target_support=armor_stand_method_result` for armor-stand evidence. The shared fixture verifies the same normalized query rows and formatter output in both loader runs. NeoForge test classes and structure data are excluded from both NeoForge jar tasks; Fabric tests use Loom's separate `gametest` source set and test mod. CI runs both server GameTests beside both loader unit suites without packaging distributable mod jars. This validates both local packet-to-callback-to-durable-ledger paths and the direct return-hook boundary; it does not validate a live client's socket transport.
 - `InternalObservationServiceTest.entityInteractionOutcomeSurvivesDatabaseRestartWithoutQuantityObservation` submits the denied result through the bounded audit queue, calls `stop()` without starting a worker (covering its synchronous shutdown-flush path), closes and reopens the ItemGraph SQLite database, verifies the immutable row and held fingerprint remain queryable, and asserts that no `ig_observations` quantity row was written. This does not cover worker-thread interrupt/join or a server restart.
 - `V20UnverifiedArmorStandInteractionEvidenceTest` upgrades a simulated v19 database, retains raw legacy callbacks with a disposition, supersedes linked active edges, hides disposed evidence from current flow queries, keeps `/ig event` explicit, remains idempotent, and leaves `/ig audit` healthy. The MariaDB/MySQL contract seeds equivalent legacy evidence for hosted CI.
 
@@ -1374,8 +1412,13 @@ that each shared query choice is implemented or historical-queryable on both
 loaders, and that implemented #55 definitions match their writers and planned
 #56–#57 definitions do not claim runtime support.
 They validate the shared taxonomy contract; they do not prove loader event capture,
-database persistence of new event families, or runtime parity. Those checks
-belong to the child issue fixtures and the consolidated M9 acceptance pass.
+database persistence of new event families, or runtime parity. #162 additionally
+requires focused fixtures proving result-only craft/smelt rows preserve observed
+output metadata, carry the unresolved reason and event ID, and never appear as
+trace hops. The consolidated M9 acceptance pass must persist and replay both
+`CRAFT_OUTPUT_UNRESOLVED` and `SMELT_OUTPUT_UNRESOLVED` on NeoForge and Fabric,
+then assert neither event creates a trace hop. Those checks belong to the child
+issue fixtures and the consolidated M9 acceptance pass.
 
 # Issue #33 administrative item capture batch
 
@@ -1484,9 +1527,20 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
   non-container inspection tests continue to cover block-history behavior.
 - `ItemGraphCommandsHelpTest.helpListsEveryRegisteredCommandPath` (the registered-path
   assertion in the current suite) checks `lookup near`, `lookup page`, `lookup player`,
-  `lookup filters`, and `lookup provenance` help topics. The quick-start's executable
-  commands are parsed against the registered Brigadier tree by
-  `documentedQuickStartExamplesParseAgainstRegisteredCommandTree`.
+  `lookup filters`, and `lookup provenance` help topics. Both loader suites parse the
+  short read-only quick-start commands and the shared
+  `docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt` against their registered
+  Brigadier trees. The broad corpus is syntax-only test input: parsing does not execute
+  commands or verify permissions, stored IDs, capture state, query results, or safety.
+- `ItemGraphCommandsHelpTest.lookupOnlyGrantCannotReachSensitiveEventAliasesOrSavedPages`
+  attempts direct, coordinate, and filtered queries for sensitive location/lifecycle data
+  without `itemgraph.audit`, then checks protected pages retain the audit grant.
+  `sensitiveLookupAliasesAndBroadFiltersRetainAuditPermissionAcrossPages` verifies audit
+  event privacy comes from the `AUDIT_EVENT` taxonomy surface while unified filters also
+  include sensitive observation/transformation surfaces (`THROW_ITEM` is the regression
+  case). Fabric runs the same direct/near/filter denial cases through its shared command
+  registration. The help tests check the source-prefixed observation-ID route and exact
+  lookup, GUI, page, trace, and explain grants.
 - Before issue #145 expanded M11, the #142/#143 implementation had a grouped baseline.
   The final milestone-end batch, after all three issues were implemented, ran:
   `./gradlew :neoforge:test :neoforge:runGameTestServer :fabric:test :fabric:runGameTest`.
@@ -1559,8 +1613,10 @@ complete. Do not build distributable artifacts unless the mod version is bumped.
 - The M8 milestone-end loader batch and both loader GameTest suites passed on 2026-10-05; see
   “M8 milestone batch, 2026-10-05” above. The earlier M11 connected-client replay documented
   above covers the older menu path, not this new chat companion. A refreshed 2026-10-05
-  connected-client capture for #146 is recorded below; its PR CI/review remain pending. The
-  operator's explicit decision to skip live clicks for #26 remains in effect.
+  connected-client capture for #146 is recorded below; #146 closed on
+  2026-10-05 after PR CI and review. The operator's earlier decision to skip
+  live clicks for #26 was later superseded by authorized local MCPilot testing
+  (see #153).
 ## M8 issue #140: contents of player-broken containers
 
 Both loader GameTest suites run `ContainerBreakConformanceFixture` through the
@@ -1678,6 +1734,6 @@ This supplements `FlowBrowserMenuTest`'s cross-loader observed, inferred,
 ambiguous-source-group, transformation, missing-fingerprint, unresolved-state,
 page-boundary, and item-movement rejection assertions. The isolated server,
 world, and database were in the temporary QA directory; the server was stopped
-after capture and the client disconnected. No production server or GriefLogger jar/database was used. PR CI and
-independent review of the attached screenshot remain pending before #146 closes.
+after capture and the client disconnected. No production server or GriefLogger jar/database was used. #146 closed
+on 2026-10-05 after PR CI and review of the attached screenshots.
 

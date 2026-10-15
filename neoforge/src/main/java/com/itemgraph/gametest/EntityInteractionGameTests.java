@@ -156,6 +156,17 @@ public final class EntityInteractionGameTests {
                 armorStand.interact(player, InteractionHand.MAIN_HAND),
                 "inherited Entity.interact fallback must return PASS for an ordinary armor stand");
 
+        // An inspector's entity attack packet must not damage or pop the
+        // inspected entity; the denial persists as ATTACK_ENTITY_DENIED.
+        ServerPlayer inspectorPlayer = helper.makeMockServerPlayerInLevel();
+        inspectorPlayer.teleportTo(armorStandPos.getX() + 1.0, armorStandPos.getY(), armorStandPos.getZ() + 0.5);
+        com.itemgraph.command.InspectionService.getInstance().setEnabled(inspectorPlayer.getUUID(), true);
+        inspectorPlayer.connection.handleInteract(ServerboundInteractPacket.createAttackPacket(
+                armorStand, inspectorPlayer.isShiftKeyDown()));
+        com.itemgraph.command.InspectionService.getInstance().clear(inspectorPlayer.getUUID());
+        helper.assertTrue(armorStand.isAlive(),
+                "inspection-mode attack packet damaged or removed the inspected armor stand");
+
         BlockPos waterPos = helper.absolutePos(new BlockPos(6, 1, 2));
         BlockPos emptyResultPos = helper.absolutePos(new BlockPos(7, 1, 2));
         BlockPos alternateFluidPos = helper.absolutePos(new BlockPos(8, 1, 2));
@@ -351,6 +362,29 @@ public final class EntityInteractionGameTests {
                         "the direct inherited Entity.interact call must produce one PASS result");
             } catch (SQLException e) {
                 throw new IllegalStateException("Could not read ItemGraph's armor stand evidence", e);
+            }
+
+            try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+                 var statement = connection.prepareStatement("""
+                         SELECT event_type, detail
+                         FROM ig_audit_events
+                         WHERE player_uuid = ?
+                           AND event_type = 'ATTACK_ENTITY_DENIED'
+                           AND detail LIKE ?
+                         """)) {
+                statement.setString(1, inspectorPlayer.getUUID().toString());
+                statement.setString(2, "%target_uuid=" + armorStandUuid + "%");
+                try (var rows = statement.executeQuery()) {
+                    helper.assertTrue(rows.next(),
+                            "inspection-mode attack packet did not persist its denied evidence");
+                    String detail = rows.getString("detail");
+                    helper.assertTrue(detail.contains("reason=INSPECTION_MODE"),
+                            "inspection-mode attack denial must attribute the inspection reason");
+                    helper.assertFalse(rows.next(),
+                            "one denied attack packet must not produce duplicate denial rows");
+                }
+            } catch (SQLException e) {
+                throw new IllegalStateException("Could not read ItemGraph's attack denial evidence", e);
             }
 
             EntityInteractionConformanceFixture.assertCow(helper, playerUuid, playerName, targetPos, targetUuid);

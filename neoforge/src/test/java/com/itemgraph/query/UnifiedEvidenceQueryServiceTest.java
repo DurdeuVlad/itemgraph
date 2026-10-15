@@ -125,6 +125,25 @@ class UnifiedEvidenceQueryServiceTest {
     }
 
     @Test
+    void legacyCraftAndSmeltRowsNeverRenderAsVerifiedSourceToResultArrows() throws Exception {
+        transformation("CRAFT", 2_000L);
+        transformation("SMELT", 1_000L);
+
+        List<UnifiedEvidenceDetail> rows = service.findFiltered(conn,
+                AuditLookupFilters.parse("action.craft,smelt radius.100", 10_000L),
+                "minecraft:overworld", 10, 64, 10, 100, 0);
+
+        assertEquals(2, rows.size());
+        for (UnifiedEvidenceDetail row : rows) {
+            assertEquals("UNRESOLVED", row.evidenceClass());
+            assertNull(row.quantity());
+            assertFalse(row.subjectId().contains(" -> "), row.subjectId());
+            assertTrue(row.subjectId().contains("historical result (unverified)="), row.subjectId());
+            assertTrue(row.detail().contains("legacy_details=OMITTED"), row.detail());
+        }
+    }
+
+    @Test
     void appliesUserSubjectTimeRadiusAndGlobalPagingAcrossSources() throws Exception {
         audit("BREAK_BLOCK", 7_000L, "minecraft:stone");
         observation("ITEMGRAPH_INTERNAL", 6_000L, "DROP_ITEM", stoneFingerprint, 2);

@@ -49,9 +49,9 @@ public final class EntityInteractionEvidence {
     /** Records a callback rejection, which is distinct from a game-method result. */
     public static void recordArmorStandCallbackCanceled(ServerPlayer player, ArmorStand target,
                                                          InteractionHand hand, ItemStack heldStack,
-                                                         String callback) {
+                                                         String callback, String reason) {
         StringBuilder detail = new StringBuilder("outcome=canceled callback=").append(callback)
-                .append(" reason=LOADER_CALLBACK_CANCELED");
+                .append(" reason=").append(reason);
         appendHeldStack(detail, heldStack);
         record(player, target, hand, "INTERACT_ENTITY_DENIED", detail.toString());
     }
@@ -77,11 +77,27 @@ public final class EntityInteractionEvidence {
                 fields.toString());
     }
 
+    /**
+     * Set when an ItemGraph listener already recorded the denied callback row,
+     * so the aggregate decorator does not record a second, misattributed one.
+     * Server packets run on one thread; the flag is consumed by the next
+     * {@link #recordFabricCallbackResult} call regardless of its result.
+     */
+    private static final ThreadLocal<Boolean> denialRecordedByListener =
+            ThreadLocal.withInitial(() -> false);
+
+    /** Marks that an ItemGraph listener recorded this packet's denial itself. */
+    public static void markListenerRecordedDenial() {
+        denialRecordedByListener.set(true);
+    }
+
     /** Records the aggregate Fabric callback result using the pre-callback context snapshot. */
     public static void recordFabricCallbackResult(FabricCallbackContext context,
                                                   InteractionResult callbackResult) {
+        boolean alreadyRecordedByListener = denialRecordedByListener.get();
+        denialRecordedByListener.remove();
         if (context == null || callbackResult == null
-                || callbackResult == InteractionResult.PASS) {
+                || callbackResult == InteractionResult.PASS || alreadyRecordedByListener) {
             return;
         }
 

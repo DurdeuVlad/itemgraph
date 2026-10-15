@@ -44,8 +44,6 @@ def expected_events() -> list[dict]:
         raw_event("SHOOT_ITEM", sequence=5, quantity=1, item_id="minecraft:arrow", compatibility_table="items"),
         raw_event("CONSUME_ITEM", sequence=6, quantity=1, item_id="minecraft:apple", compatibility_table="items"),
         raw_event("BREAK_ITEM", sequence=7, quantity=1, item_id="minecraft:wooden_sword", compatibility_table="items"),
-        raw_event("CRAFT", sequence=8, quantity=1, item_id="minecraft:book",
-                  source_table="ig_item_transformations", compatibility_table="items"),
     ]
     audit_actions = [
         ("PLAYER_JOIN", None), ("PLAYER_JOIN", None), ("PLAYER_JOIN", None),
@@ -80,6 +78,12 @@ def expected_events() -> list[dict]:
         events.append(raw_event(action, sequence=len(events), quantity=None, item_id=None,
                                 source_table="ig_audit_events", compatibility_table=compatibility_table,
                                 occurrence=occurrence))
+    craft = raw_event("CRAFT_OUTPUT_UNRESOLVED", sequence=len(events), quantity=1,
+                      item_id="minecraft:book", source_table="ig_audit_events",
+                      compatibility_table="items", subject_id="minecraft:book")
+    craft["evidence_class"] = "unresolved"
+    craft["unresolved_reason"] = "TRANSFORMATION_INPUTS_NOT_OBSERVED"
+    events.append(craft)
     return events
 
 
@@ -96,7 +100,7 @@ class ItemGraphReplayNormalizerTests(unittest.TestCase):
                 "total_observations": 8,
                 "total_edges": 0,
                 "total_allocations": 0,
-                "total_transformations": 1,
+                "total_transformations": 0,
                 "over_allocated_observations": 0,
                 "invalid_edge_allocations": 0,
                 "invalid_edge_temporal": 0,

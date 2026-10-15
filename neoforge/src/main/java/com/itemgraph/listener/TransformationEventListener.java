@@ -1,5 +1,6 @@
 package com.itemgraph.listener;
 
+import com.itemgraph.audit.TransformationOutputEvidence;
 import com.itemgraph.canon.CanonicalItem;
 import com.itemgraph.canon.ItemCanonicalizer;
 import com.itemgraph.ingest.InternalObservationService;
@@ -13,8 +14,9 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 /**
  * NeoForge event listener for item transformations (Phase 9).
  *
- * <p>Captures anvil renaming/repairs, crafting operations, and smelting, linking source
- * items and result items in {@code ig_item_transformations}.
+ * <p>Captures anvil renaming/repairs as source/result transformations. Crafting and
+ * smelting record only the observed output as unresolved audit evidence because their
+ * complete input sets are unavailable at the event boundary.
  */
 public class TransformationEventListener {
 
@@ -90,41 +92,14 @@ public class TransformationEventListener {
         if (output == null || output.isEmpty()) {
             return;
         }
-        CanonicalItem primaryIngredient = null;
-        if (matrix != null) {
-            for (int i = 0; i < matrix.getContainerSize(); i++) {
-                ItemStack slotStack = matrix.getItem(i);
-                if (slotStack != null && !slotStack.isEmpty()) {
-                    primaryIngredient = ItemCanonicalizer.canonicalizeStack(slotStack);
-                    break;
-                }
-            }
-        }
-
         CanonicalItem resultItem = ItemCanonicalizer.canonicalizeStack(output);
-        if (primaryIngredient == null) {
-            primaryIngredient = new CanonicalItem("minecraft:ingredient",
-                    ItemCanonicalizer.sha256Hex("id=minecraft:ingredient"), null, null, null);
-        }
-
-        long now = System.currentTimeMillis();
-        String level = player.level().dimension().location().toString();
-        String details = "Crafted " + output.getCount() + "x " + resultItem.itemId() + " from " + primaryIngredient.itemId();
-
-        this.observationService.submitTransformation(
-                new InternalObservationService.InternalTransformation(
-                        now,
-                        "CRAFT",
-                        player.getUUID().toString(),
-                        player.getGameProfile().getName(),
-                        level,
-                        player.getX(), player.getY(), player.getZ(),
-                        primaryIngredient,
-                        resultItem,
-                        output.getCount(),
-                        details
-                )
-        );
+        // ItemCraftedEvent may run after the matrix is consumed. A remaining
+        // stack is still only a partial recipe, so preserve result-only evidence.
+        this.observationService.submitAuditEvent(TransformationOutputEvidence.create(
+                "CRAFT_OUTPUT_UNRESOLVED", System.currentTimeMillis(),
+                player.getUUID().toString(), player.getGameProfile().getName(),
+                player.level().dimension().location().toString(), player.getX(), player.getY(), player.getZ(),
+                resultItem, output.getCount(), "NeoForge PlayerEvent.ItemCraftedEvent"));
     }
 
     @SubscribeEvent
@@ -140,26 +115,10 @@ public class TransformationEventListener {
         }
 
         CanonicalItem resultItem = ItemCanonicalizer.canonicalizeStack(output);
-        CanonicalItem sourceItem = new CanonicalItem("minecraft:smelt_ingredient",
-                ItemCanonicalizer.sha256Hex("id=minecraft:smelt_ingredient"), null, null, null);
-
-        long now = System.currentTimeMillis();
-        String level = player.level().dimension().location().toString();
-        String details = "Smelted " + output.getCount() + "x " + resultItem.itemId();
-
-        this.observationService.submitTransformation(
-                new InternalObservationService.InternalTransformation(
-                        now,
-                        "SMELT",
-                        player.getUUID().toString(),
-                        player.getGameProfile().getName(),
-                        level,
-                        player.getX(), player.getY(), player.getZ(),
-                        sourceItem,
-                        resultItem,
-                        output.getCount(),
-                        details
-                )
-        );
+        this.observationService.submitAuditEvent(TransformationOutputEvidence.create(
+                "SMELT_OUTPUT_UNRESOLVED", System.currentTimeMillis(),
+                player.getUUID().toString(), player.getGameProfile().getName(),
+                player.level().dimension().location().toString(), player.getX(), player.getY(), player.getZ(),
+                resultItem, output.getCount(), "NeoForge PlayerEvent.ItemSmeltedEvent"));
     }
 }

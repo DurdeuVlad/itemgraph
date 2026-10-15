@@ -1,5 +1,9 @@
 # Security and Permissions
 
+**Audience:** server owners granting moderator roles, and moderators checking
+why a command was denied. This is the authoritative permission contract; the
+[admin quick start](ADMIN_QUICK_START.md) has copyable role recipes.
+
 ## Threat model
 
 ItemGraph can expose highly sensitive server information:
@@ -21,11 +25,17 @@ A provider's explicit `false` denies that node even to a level-2 operator.
 
 ### Active command permission nodes
 
-The command root requires `itemgraph.command`; commands with a listed leaf node require
-both `itemgraph.command` and that leaf node. Permission nodes are exact strings; dots do not imply parent or wildcard inheritance.
+Three rules answer most "why was this denied" questions before the matrix:
+
+1. Every command needs `itemgraph.command` **plus** its own leaf node — the
+   root grant alone unlocks nothing beyond help and status.
+2. Anything that can show staff-private evidence also needs `itemgraph.audit`.
+3. Nodes are exact strings: `itemgraph.command` does **not** grant
+   `itemgraph.command.lookup`, a provider's explicit `false` denies even a
+   level-2 operator, and an unset node resolves to vanilla level 2.
+
 Thus a lookup-only moderator must receive both `itemgraph.command` and
-`itemgraph.command.lookup`. A provider's explicit `false` denies access even when
-the player has vanilla permission level 2. An unset node resolves to vanilla level 2.
+`itemgraph.command.lookup`. The full matrix:
 
 | Command or action | Required named node(s) | Rechecked at |
 | --- | --- | --- |
@@ -54,11 +64,12 @@ sensitive coordinates and require `itemgraph.command.lookup` plus `itemgraph.aud
 Their direct, filtered, nearby, saved-page, and one-use location paths retain the audit
 requirement.
 
-Unified transformation lookups for `CRAFT`, `SMELT`, `ANVIL_RENAME`, and
-`ANVIL_REPAIR` expose actor, item-fingerprint, and coordinate details. They require
-`itemgraph.command.lookup` plus `itemgraph.audit`; saved pages and one-use location
-actions retain that audit requirement. Item traces of those transformations require
-`itemgraph.trace` plus `itemgraph.audit`.
+Craft and smelt output lookups (`CRAFT_OUTPUT_UNRESOLVED` and
+`SMELT_OUTPUT_UNRESOLVED`) expose item fingerprints, actor, and position. They
+require `itemgraph.command.lookup` and `itemgraph.audit`; saved pages and
+one-use location actions retain both grants. Raw event details additionally
+require `itemgraph.event` and `itemgraph.audit`. The output-only records do not
+create trace lineage.
 
 The browser opened by right-clicking a container in inspection mode additionally
 requires `itemgraph.gui`; the inspection click itself requires `itemgraph.command.inspect`.
@@ -204,12 +215,33 @@ time where available; the number maps to the corresponding menu slot. It does no
 expose raw NBT/component payloads, unrelated players, or hidden inventories.
 
 `/ig inspect` requires both `itemgraph.command` and `itemgraph.command.inspect`.
-`InspectionListener` rechecks permission on every supported-container click, and permission
-loss clears that player's inspection mode without suppressing the ordinary block interaction.
-Inspection block-history requests return bounded chat history. Right-clicking a supported
-container opens the read-only flow browser, which additionally checks `itemgraph.gui` and
-`itemgraph.audit`;
+`InspectionListener` (NeoForge) and `FabricNativeAuditEventListener` (Fabric) recheck
+permission on every main-hand inspection click. Permission
+loss disables that player's inspection mode: the click that detects the revocation is
+consumed and the player is told the mode was disabled, so a denied click never breaks or
+toggles the inspected scene. Inspection block-history requests return bounded chat
+history. Right-clicking a supported container opens the read-only flow browser, which
+additionally checks `itemgraph.gui` and `itemgraph.audit`;
 inspection does not grant access to the live container inventory or relax any GUI check.
+When an inspection click's request is not accepted, the outcome depends on the cause and
+the target: a missing downstream grant (`itemgraph.audit` for block history,
+`itemgraph.gui` for containers) is a stable denial already reported in chat, so the click
+is consumed — except container right-clicks, which always fall through so a denied flow
+request still opens the chest normally. Transient rejections such as a full query queue or
+an unavailable database preserve vanilla interaction for every target. Consumption covers
+the click's whole packet set, not only the block-use event: the off-hand `useItemOn` and
+the item-use twin packet (`ServerboundUseItemPacket`, NeoForge `RightClickItem` / Fabric
+`UseItemCallback`) are consumed while the mode is on or within five game ticks of a
+consumed click (`InspectionService.markInteractionConsumed`), so held or off-hand items
+cannot mutate the scene even on the revocation-detecting click whose twin arrives after
+the mode was already cleared. Entity right-clicks are likewise consumed while
+inspecting or within the same marker window (NeoForge `EntityInteract` /
+`EntityInteractSpecific` at `HIGHEST` priority, Fabric `UseEntityCallback`), and the
+denial is still recorded as `INTERACT_ENTITY_DENIED` evidence — armor-stand
+equipping, shearing, milking, leashing, and name tags cannot mutate the scene.
+Entity attacks (left-clicks) are consumed under the same rule and recorded as
+`ATTACK_ENTITY_DENIED` evidence, so a predicted hit cannot damage or pop the
+inspected entity either.
 The inspection-mode toggle, `on`, `off`, `status`, and supported-click recognition require
 `itemgraph.command.inspect`. A block-history request queries `eventType=all`, so it can
 include staff-private evidence and additionally requires `itemgraph.audit` before the

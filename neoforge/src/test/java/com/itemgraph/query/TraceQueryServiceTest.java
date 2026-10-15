@@ -87,16 +87,30 @@ class TraceQueryServiceTest extends QueryTestBase {
     }
 
     @Test
+    void legacyCraftAndSmeltRowsCannotBecomeObservedItemTraceHops() throws Exception {
+        long player = insertPlayerNode("LegacyTransformationOperator");
+        long source = insertFingerprint("minecraft:iron_ingot", "legacy-craft-source");
+        long result = insertFingerprint("minecraft:iron_sword", "legacy-craft-result");
+        insertTransformation("CRAFT", player, source, result, 1, now - 2_000);
+        insertTransformation("SMELT", player, source, result, 1, now - 1_000);
+
+        TraceResult trace = service.trace(conn, source, QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
+
+        assertTrue(trace.hops().isEmpty(),
+                "legacy input approximations remain queryable evidence but cannot claim item lineage");
+    }
+
+    @Test
     void implementedTransformationsRemainObservedTraceHops() throws Exception {
         long player = insertPlayerNode("TransformationOperator");
         long source = insertFingerprint("minecraft:diamond", "known-transform-source");
         long result = insertFingerprint("minecraft:emerald", "known-transform-result");
-        insertTransformation("CRAFT", player, source, result, 5, now - 2_000);
+        insertTransformation("ANVIL_RENAME", player, source, result, 5, now - 2_000);
         insertTransformation("ADMIN_ITEM_TRANSFORM", player, source, result, 7, now - 1_000);
 
         TraceResult trace = service.trace(conn, source, QueryLimits.DEFAULT_LIMIT, QueryWindow.unbounded());
 
-        assertTrue(trace.hops().get(0).detail().contains("TRANSFORMATION CRAFT ->"));
+        assertTrue(trace.hops().get(0).detail().contains("TRANSFORMATION ANVIL_RENAME ->"));
         assertTrue(trace.hops().get(1).detail().contains("TRANSFORMATION ADMIN_ITEM_TRANSFORM ->"));
         assertEquals(List.of(5, 7), trace.hops().stream().map(TraceHop::amount).toList());
     }
@@ -209,7 +223,7 @@ class TraceQueryServiceTest extends QueryTestBase {
         try (PreparedStatement pstmt = conn.prepareStatement("""
                 INSERT INTO ig_item_transformations (transformation_type, player_node_id,
                     source_fingerprint_id, result_fingerprint_id, quantity, timestamp_ms, details)
-                VALUES ('CRAFT', ?, ?, ?, 1, ?, 'same-time transform')
+                VALUES ('ANVIL_RENAME', ?, ?, ?, 1, ?, 'same-time transform')
                 """)) {
             for (int i = 0; i < 2; i++) {
                 pstmt.setLong(1, playerA);

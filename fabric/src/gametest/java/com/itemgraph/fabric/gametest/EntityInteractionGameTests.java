@@ -139,6 +139,17 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                 armorStand.interact(player, InteractionHand.MAIN_HAND),
                 "direct inherited Entity.interact call must return PASS for an ordinary armor stand");
 
+        // An inspector's entity attack packet must not damage or pop the
+        // inspected entity; the denial persists as ATTACK_ENTITY_DENIED.
+        ServerPlayer inspectorPlayer = helper.makeMockServerPlayerInLevel();
+        inspectorPlayer.teleportTo(armorStandPos.getX() + 1.0, armorStandPos.getY(), armorStandPos.getZ() + 0.5);
+        com.itemgraph.command.InspectionService.getInstance().setEnabled(inspectorPlayer.getUUID(), true);
+        inspectorPlayer.connection.handleInteract(ServerboundInteractPacket.createAttackPacket(
+                armorStand, inspectorPlayer.isShiftKeyDown()));
+        com.itemgraph.command.InspectionService.getInstance().clear(inspectorPlayer.getUUID());
+        helper.assertTrue(armorStand.isAlive(),
+                "inspection-mode attack packet damaged or removed the inspected armor stand");
+
         BlockPos waterPos = helper.absolutePos(new BlockPos(6, 1, 2));
         BlockPos emptyResultPos = helper.absolutePos(new BlockPos(7, 1, 2));
         BlockPos alternateFluidPos = helper.absolutePos(new BlockPos(8, 1, 2));
@@ -241,6 +252,7 @@ public final class EntityInteractionGameTests implements FabricGameTest {
                     fluidPlayer.getUUID().toString(), alternateFluidPos, "minecraft:lava");
             assertAttempt(helper, playerUuid, cowUuid);
             assertArmorStandOutcomes(helper, playerUuid, armorStandUuid);
+            assertAttackDenied(helper, inspectorPlayer.getUUID().toString(), armorStandUuid);
             EntityInteractionConformanceFixture.assertCow(helper, playerUuid, playerName, cowPos, cowUuid);
             EntityInteractionConformanceFixture.assertArmorStand(
                     helper, playerUuid, playerName, armorStandPos, armorStandUuid);
@@ -256,6 +268,28 @@ public final class EntityInteractionGameTests implements FabricGameTest {
             helper.assertValueEqual(droppedBefore, observations.getTotalDropped(),
                     "the interactions must not lose evidence to a full or failed queue");
         });
+    }
+
+    private static void assertAttackDenied(GameTestHelper helper, String inspectorUuid, String targetUuid) {
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement("""
+                     SELECT event_type, detail
+                     FROM ig_audit_events
+                     WHERE player_uuid = ? AND event_type = 'ATTACK_ENTITY_DENIED' AND detail LIKE ?
+                     """)) {
+            statement.setString(1, inspectorUuid);
+            statement.setString(2, "%target_uuid=" + targetUuid + "%");
+            try (var rows = statement.executeQuery()) {
+                helper.assertTrue(rows.next(),
+                        "inspection-mode attack packet did not persist its denied evidence");
+                helper.assertTrue(rows.getString("detail").contains("reason=INSPECTION_MODE"),
+                        "inspection-mode attack denial must attribute the inspection reason");
+                helper.assertFalse(rows.next(),
+                        "one denied attack packet must not produce duplicate denial rows");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Could not read ItemGraph's attack denial evidence", e);
+        }
     }
 
     private static void assertAttempt(GameTestHelper helper, String playerUuid, String targetUuid) {

@@ -1,6 +1,7 @@
 package com.itemgraph.listener;
 
 import com.itemgraph.ingest.InternalObservationService;
+import com.itemgraph.ingest.InternalObservationService.InternalAuditEvent;
 import com.itemgraph.ingest.InternalObservationService.InternalTransformation;
 import com.mojang.authlib.GameProfile;
 import net.minecraft.SharedConstants;
@@ -180,7 +181,7 @@ class TransformationEventListenerTest {
     }
 
     @Test
-    void testItemCraftedWithMatrixIngredients() {
+    void testItemCraftedWithMatrixIngredientsDoesNotClaimPartialRecipe() {
         Player player = createMockPlayer(false);
         ItemStack output = new ItemStack(Items.IRON_SWORD, 1);
 
@@ -194,19 +195,23 @@ class TransformationEventListenerTest {
 
         listener.onItemCrafted(event);
 
-        ArgumentCaptor<InternalTransformation> captor = ArgumentCaptor.forClass(InternalTransformation.class);
-        verify(mockObservationService).submitTransformation(captor.capture());
+        ArgumentCaptor<InternalAuditEvent> captor = ArgumentCaptor.forClass(InternalAuditEvent.class);
+        verify(mockObservationService).submitAuditEvent(captor.capture());
+        verify(mockObservationService, never()).submitTransformation(any());
 
-        InternalTransformation trans = captor.getValue();
-        assertEquals("CRAFT", trans.transformationType());
-        assertEquals("minecraft:iron_ingot", trans.sourceItem().itemId());
-        assertEquals("minecraft:iron_sword", trans.resultItem().itemId());
-        assertEquals(1, trans.quantity());
-        assertTrue(trans.details().contains("Crafted 1x minecraft:iron_sword from minecraft:iron_ingot"));
+        InternalAuditEvent auditEvent = captor.getValue();
+        assertEquals("CRAFT_OUTPUT_UNRESOLVED", auditEvent.eventType());
+        assertEquals("minecraft:iron_sword", auditEvent.subjectId());
+        assertTrue(auditEvent.detail().contains("quantity=1"));
+        assertTrue(auditEvent.detail().contains("input=UNKNOWN"));
+        assertTrue(auditEvent.detail().contains("TRANSFORMATION_INPUTS_NOT_OBSERVED"));
+        String rawData = new String(auditEvent.rawData(), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(rawData.contains("minecraft:iron_sword"));
+        assertFalse(rawData.contains("minecraft:iron_ingot"));
     }
 
     @Test
-    void testItemCraftedWithEmptyMatrixFallback() {
+    void testItemCraftedWithEmptyMatrixDoesNotInventIngredient() {
         Player player = createMockPlayer(false);
         ItemStack output = new ItemStack(Items.BREAD, 1);
 
@@ -219,13 +224,13 @@ class TransformationEventListenerTest {
 
         listener.onItemCrafted(event);
 
-        ArgumentCaptor<InternalTransformation> captor = ArgumentCaptor.forClass(InternalTransformation.class);
-        verify(mockObservationService).submitTransformation(captor.capture());
-
-        InternalTransformation trans = captor.getValue();
-        assertEquals("CRAFT", trans.transformationType());
-        assertEquals("minecraft:ingredient", trans.sourceItem().itemId());
-        assertEquals("minecraft:bread", trans.resultItem().itemId());
+        ArgumentCaptor<InternalAuditEvent> captor = ArgumentCaptor.forClass(InternalAuditEvent.class);
+        verify(mockObservationService).submitAuditEvent(captor.capture());
+        verify(mockObservationService, never()).submitTransformation(any());
+        assertEquals("CRAFT_OUTPUT_UNRESOLVED", captor.getValue().eventType());
+        assertEquals("minecraft:bread", captor.getValue().subjectId());
+        assertFalse(new String(captor.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("minecraft:ingredient"));
     }
 
     @Test
@@ -260,15 +265,17 @@ class TransformationEventListenerTest {
 
         listener.onItemSmelted(event);
 
-        ArgumentCaptor<InternalTransformation> captor = ArgumentCaptor.forClass(InternalTransformation.class);
-        verify(mockObservationService).submitTransformation(captor.capture());
+        ArgumentCaptor<InternalAuditEvent> captor = ArgumentCaptor.forClass(InternalAuditEvent.class);
+        verify(mockObservationService).submitAuditEvent(captor.capture());
+        verify(mockObservationService, never()).submitTransformation(any());
 
-        InternalTransformation trans = captor.getValue();
-        assertEquals("SMELT", trans.transformationType());
-        assertEquals("minecraft:smelt_ingredient", trans.sourceItem().itemId());
-        assertEquals("minecraft:iron_ingot", trans.resultItem().itemId());
-        assertEquals(1, trans.quantity());
-        assertTrue(trans.details().contains("Smelted 1x minecraft:iron_ingot"));
+        InternalAuditEvent auditEvent = captor.getValue();
+        assertEquals("SMELT_OUTPUT_UNRESOLVED", auditEvent.eventType());
+        assertEquals("minecraft:iron_ingot", auditEvent.subjectId());
+        assertTrue(auditEvent.detail().contains("quantity=1"));
+        assertTrue(auditEvent.detail().contains("input=UNKNOWN"));
+        assertFalse(new String(auditEvent.rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("minecraft:smelt_ingredient"));
     }
 
     @Test

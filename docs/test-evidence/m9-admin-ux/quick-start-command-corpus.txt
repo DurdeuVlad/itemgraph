@@ -1,12 +1,17 @@
-# Parser-only command syntax corpus
-# Regression fixture only. These lines are not a sequence to paste into a live server.
+# PARSER-ONLY TEST INPUT — NEVER paste or execute these lines on a server.
+# The loader tests parse syntax only. They do not check permissions, stored IDs,
+# capture state, query results, or safety of stateful/import commands.
 # `/ig ingest history` queues an import when configured; `/ig inspect on` changes your own inspection mode.
-
 /ig help journeys
+/ig help lookup admin
+/ig help lookup lifecycle
+/ig help lookup transformations
+/ig help lookup world
 /ig lookup BREAK_BLOCK 10 60
 /ig trace item "minecraft:stone" 10 60
 /ig inspect status
 /ig inspect on
+/ig inspect off
 /ig ingest history
 /ig event event:00000000-0000-0000-0000-000000000000
 /ig page 2
@@ -30,9 +35,6 @@
 /ig lookup action.smelt radius.32 time.24h
 /ig lookup action.anvil_rename radius.32 time.24h
 /ig lookup action.anvil_repair radius.32 time.24h
-/ig help lookup lifecycle
-/ig help lookup transformations
-/ig help lookup world
 /ig lookup near minecraft:overworld 120 64 -30 32 ADMIN_ITEM_COMMAND_EFFECT 50 1440
 /ig trace item "minecraft:diamond" 50 1440
 /ig trace item "id:123" 50 1440
@@ -44,7 +46,7 @@
 /ig lookup near minecraft:overworld 120 64 -30 16 CONTAINER_BREAK_UNRESOLVED 50 1440
 /ig trace container 120 64 -30 50 1440
 /ig trace item "minecraft:diamond" 20 1440
-/ig lookup action.break_block include.diamond_ore time.1h radius.50
+/ig lookup action.break_block include.diamond_ore radius.50 time.1h
 /ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 20 60
 /ig event 633
 /ig event event:123e4567-e89b-12d3-a456-426614174000

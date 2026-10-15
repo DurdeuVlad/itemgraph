@@ -49,7 +49,7 @@ canonical action names, accepted GriefLogger spellings, compatibility status,
 evidence and quantity semantics, loader/storage support, lookup filters,
 permission and paging controls, inspector behavior, configuration controls, and
 the GitHub issue responsible for incomplete mappings.
-The current registry compatibility version is `m8.12.0`.
+The current registry compatibility version is `m9.0.0`.
 
 The registry version changes when a mapping, status, evidence or quantity
 meaning, loader, or backend contract changes. Documentation-only clarifications
@@ -145,7 +145,7 @@ runtime is required or implied by that local conformance test.
 | `ItemAction` | 1 | `ADD_ITEM` | present | compatible |
 | `ItemAction` | 2 | `DROP_ITEM` | present | compatible |
 | `ItemAction` | 3 | `PICKUP_ITEM` | present | compatible |
-| `ItemAction` | 4 | `CRAFT_ITEM` | present | extended; preserves transformation lineage |
+| `ItemAction` | 4 | `CRAFT_ITEM` | present | compatible output evidence; recipe inputs remain unresolved |
 | `ItemAction` | 5 | `BREAK_ITEM` | present | compatible |
 | `ItemAction` | 6 | `CONSUME_ITEM` | present | compatible |
 | `ItemAction` | 7 | `THROW_ITEM` | present | compatible |
@@ -195,7 +195,9 @@ addition/removal rows; ItemGraph uses its own container session deltas and keeps
 that implementation separate from the external API's semantics. This fixture
 proves only these four ItemGraph persistence paths. It does not verify the
 remaining exact-release writers, connected clients, or differential replay
-against GriefLogger; those gates remain open under #27 and #31.
+against GriefLogger; those gates were tracked under #27 and #31, both now
+closed with bounded native-only evidence. No live GriefLogger differential
+replay is claimed.
 
 `CHAT` and `COMMAND` remain source features backed by their own tables, not
 members of these three action enums, so they have no enum ID. The complete
@@ -339,8 +341,18 @@ history, so ItemGraph deliberately keeps clicked-position behavior for its
 built-in functional blocks; this is a documented-contract extension to the
 release implementation. ItemGraph also keeps clicked-position support for
 modded `Container` block entities. Unlike GriefLogger,
-ItemGraph consumes a click only after its bounded asynchronous history request
-is accepted, so queue rejection leaves the normal game interaction available.
+ItemGraph consumes a click after its bounded asynchronous history request
+is accepted or when the request is denied for a missing grant — a denied
+inspection must not break or toggle blocks — while transient rejection
+(queue full, database unavailable) leaves the normal game interaction
+available and rejected container right-clicks keep vanilla chest access.
+Consumed clicks also consume the off-hand `useItemOn` and item-use twin
+packets, so held or off-hand items cannot mutate the inspected scene.
+Entity right-clicks are also consumed (denied and recorded as
+`INTERACT_ENTITY_DENIED` evidence), so armor-stand equipping, shearing, milking,
+leashing, and name tags cannot mutate it either. Entity left-clicks (attacks)
+are consumed under the same rule and recorded as `ATTACK_ENTITY_DENIED`
+evidence (#187), so a predicted hit cannot damage or pop the inspected entity.
 `InspectionListenerTest` and `FabricNativeAuditEventListenerTest` cover these
 branches locally. Those automated tests do not prove client rendering or packet
 transport. The MC Pilot runs below verify selected connected-client inspector
@@ -361,7 +373,7 @@ not an unmodified vanilla-client test.
 | Container add/remove net deltas and player-break contents | `ContainerSessionListener`, capability wrappers, `ContainerBreakCapture`, Fabric `PlayerBlockBreakEvents`, NeoForge `AdminCreativeBlockResultMixin` | `ig_observations`, `ig_audit_events` | `/ig trace`, `/ig gui`, `/ig lookup` | Session deltas remain interval evidence. The #140 boundary captures each non-empty slot as a `REMOVE_ITEM` sourced from the broken container and routed to `UNKNOWN`; player actor is not a destination. The completion event links its deterministic `break_event_id` to the standard `BREAK_BLOCK` row, and parent plus slot rows commit atomically. Item-entity outputs remain explicitly unlinked unless a later authoritative hook proves a relationship. Cross-loader GameTests cover empty, one-stack, full single chest, component variants, canceled breaks, and breaking one half of a double chest. |
 | Item drop/pickup/death drops | NeoForge `ItemEntityEventListener`; Fabric `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | NeoForge paths and Fabric normal, vanilla player-death, and custom death-event item additions are implemented; the Fabric replay persisted accepted `DROP_ITEM` and `PICKUP_ITEM` rows |
 | Hopper/mechanical automation (ItemGraph supplemental) | NeoForge capability wrappers; Fabric `HopperBlockEntityMixin` | `ig_observations` | `/ig trace` and `/ig gui` | GriefLogger's published feature surface has no hopper or mechanical-automation event; ItemGraph records successful vanilla hopper net deltas with unknown endpoints, while modded automation adapters remain an optional extension |
-| Crafting and smelting; anvil lineage extension | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_item_transformations` | Item lineage in trace | GriefLogger records crafting and furnace output under `CRAFT_ITEM`; both loaders preserve that source meaning and add ItemGraph `SMELT`, `ANVIL_RENAME`, and `ANVIL_REPAIR` lineage rows at server result-take boundaries. The profile-pinned local replay now persists one `CRAFT` transformation on each loader; smelting and anvil extensions remain issue-linked and are not claimed as observed by that replay. |
+| Crafting and smelting; anvil lineage extension (#162) | NeoForge `TransformationEventListener`; Fabric `ResultSlotMixin`, `FurnaceResultSlotMixin`, `AnvilMenuMixin` | `ig_audit_events` for unresolved craft/smelt outputs; `ig_item_transformations` for anvil lineage | `/ig lookup CRAFT_OUTPUT_UNRESOLVED` / `SMELT_OUTPUT_UNRESOLVED`; item trace for anvil | The GriefLogger source records crafting/furnace output under `CRAFT_ITEM`. ItemGraph does not claim hidden recipe inputs: both loaders retain result fingerprint/count as unresolved output audit evidence, with no source-to-result edge. Legacy ItemGraph `CRAFT`/`SMELT` rows are historical-only. `ANVIL_RENAME` and `ANVIL_REPAIR` remain separate ItemGraph lineage extensions. Earlier replay results remain historical test records and do not describe the current taxonomy contract. |
 | Player join/quit | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | The profile-pinned ItemGraph-only replay persists three redacted `PLAYER_JOIN` signals and one `PLAYER_QUIT` row per loader. Join signals are not asserted to equal a count of distinct username-history rows. |
 | Chat messages | `NativeAuditEventListener`, `FabricNativeAuditEventListener` | `ig_audit_events` | `/ig lookup` | The profile-pinned ItemGraph-only replay persists one `CHAT_MESSAGE` row on each loader. The machine-readable report omits chat text. |
 | Player commands | `NativeAuditEventListener`, Fabric `CommandsMixin` | `ig_audit_events` | `/ig lookup` | Both loaders record `COMMAND_ATTEMPT` at the pre-execution dispatch boundary, matching GriefLogger's documented behavior of recording attempts regardless of permission or command success; `COMMAND_EXECUTED` remains reserved for legacy rows and is never fabricated. The profile-pinned replay dispatches a vanilla command through the server packet handler and persists one command row on each loader; report output omits command text. |
@@ -413,7 +425,7 @@ transfers, while `inventoryLookup` normalizes transfers to addition/removal on
 the player's inventory and retains source/action IDs. ItemGraph keeps its
 current interval-based net-delta model and makes no claim that CoreProtect's
 behavior or code is part of the GriefLogger contract.
-| MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite or MySQL/MariaDB | Same migration/query contract; CI runs disposable MariaDB 10.11 and MySQL 8.0 services | Implemented in the shared JDBC dialect layer; issue #29 remains open until hosted CI proves clean setup, upgrade, restart, and read-only paths |
+| MySQL/MariaDB backend | SQLite only | ItemGraph-owned SQLite or MySQL/MariaDB | Same migration/query contract; CI runs disposable MariaDB 10.11 and MySQL 8.0 services | Implemented in the shared JDBC dialect layer; issue #29 is closed after hosted CI proved clean setup, upgrade, restart, and read-only paths |
 
 ## Data boundary
 
@@ -502,12 +514,11 @@ classified as a strict ItemGraph extension to preserve vanilla-client support.
 
 This is a separate deployment procedure, not an M8 feature-parity test.
 ItemGraph feature conformance is researched and tested locally with ItemGraph
-alone. Any later operator decision to retire the compatible artifacts requires
-the separate approval and deployment evidence below.
-Until then, the standard and compatible loader jars remain distinct so an
-operator can choose a dependency-safe migration path. After cutover, the
-standard ItemGraph jar is the only supported runtime artifact; GriefLogger is
-not a runtime dependency. The read-only importer remains available for a
+alone. The operator decision has since been taken: ItemGraph replaces
+GriefLogger outright, so the `-grieflogger-compatible` artifacts were retired
+and both loaders declare the GriefLogger mod incompatible. The standard
+ItemGraph jar is the only supported runtime artifact; GriefLogger is not a
+runtime dependency. The read-only importer remains available for a
 checksummed historical database when an operator explicitly configures it.
 
 1. Before cutover, stop the staging server and make an immutable, checksummed
@@ -836,7 +847,8 @@ and fixture hashes before writing the artifact.
   rejected block-history queries also keep the gameplay action canceled, and
   repeated left-click hold/abort packets are ignored. A valid double chest or
   door now expands to both physical positions in one ordered exact lookup; the
-  container flow-browser node merge remains open in [issue #26](https://github.com/DurdeuVlad/itemgraph/issues/26).
+  container flow-browser node merge was tracked under [issue #26](https://github.com/DurdeuVlad/itemgraph/issues/26)
+  (closed 2026-09-30).
 - **2026-09-29, Fabric container sessions:** server menu initialization and close
   hooks now reuse the shared interval tracker for block containers and double chests;
   an orderly server stop flushes active session deltas before ItemGraph closes its
@@ -844,10 +856,11 @@ and fixture hashes before writing the artifact.
   container cells, then records successful net deltas with unknown endpoints; it does
   not infer a player or a modded automation cause. This is supplemental coverage;
   GriefLogger does not provide an equivalent hopper event.
-- **2026-09-29, Fabric transformations:** result-slot hooks capture crafting,
-  furnace-family smelting, and anvil rename/repair outputs with source/result
-  canonical fingerprints. The isolated replay persisted one `CRAFT`, one
-  `SMELT`, and one `ANVIL_RENAME` row.
+- **2026-09-29, Fabric transformations:** result-slot hooks captured crafting,
+  furnace-family smelting, and anvil rename/repair. The earlier replay persisted
+  `CRAFT` and `SMELT` transformation rows; they are historical-only and do not
+  describe current capture. Craft/smelt outputs now remain unresolved audit
+  evidence; only anvil rename/repair create lineage.
 - **2026-09-29, Fabric inspector replay:** with `/ig inspect on` enabled for an
   operator-level bot, right-clicking the populated chest opened the shared
   read-only `minecraft:generic_9x6` flow browser. Display rows were present and
@@ -883,9 +896,10 @@ and fixture hashes before writing the artifact.
    the delivered native lookup/filter contract is tracked in [#25](https://github.com/DurdeuVlad/itemgraph/issues/25). Generic rows retained by the historical ledger are not returned by this query until the normalized projection in [#28](https://github.com/DurdeuVlad/itemgraph/issues/28) is complete.
 4. The existing item-flow tests remain green and the GriefLogger database is not
    opened by the native-only path.
-5. M8 is not complete while [#24](https://github.com/DurdeuVlad/itemgraph/issues/24)
-   or [#31](https://github.com/DurdeuVlad/itemgraph/issues/31) still has an
-   unresolved acceptance criterion.
+5. M8 closure required [#24](https://github.com/DurdeuVlad/itemgraph/issues/24)
+   and [#31](https://github.com/DurdeuVlad/itemgraph/issues/31) to have no
+   unresolved acceptance criterion; both are closed and milestone #4 is closed
+   as of 2026-10-06.
 
 References: [GriefLogger feature overview](https://daqem.com/projects/grieflogger),
 [item usage](https://daqem.com/projects/grieflogger/wiki/player-actions/item-usage),
@@ -1013,4 +1027,6 @@ adds no dependency on the GriefLogger runtime and does not copy its code. Focuse
 are the validation boundary for this change. The complete NeoForge and Fabric unit/GameTest
 batch passed on 2026-10-05; exact results are recorded in `docs/TEST_PLAN.md` under
 “M8 milestone batch, 2026-10-05”. Locale resolution is implemented under #136 and included in
-that batch. Refreshed normal-scale UI evidence for the new chat companion remains open under #146.
+that batch. Refreshed normal-scale UI evidence for the new chat companion was
+tracked under #146 (closed 2026-10-05); the paired captures are in
+`docs/test-evidence/m8-flow-browser/`.

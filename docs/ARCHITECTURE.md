@@ -1,8 +1,26 @@
 # Architecture
 
+**Audience:** contributors and maintainers. This is the implementation
+contract — every statement is load-bearing, and the doc is deliberately kept
+as a single source for rules other docs link to.
+
 ## Purpose
 
 ItemGraph reconstructs plausible movement of Minecraft items and stack quantities through inventories over time.
+
+## How to navigate this document
+
+| Question | Section |
+| --- | --- |
+| Which module owns what, and what may it not import? | [Loader boundary](#loader-boundary-032) |
+| What do nodes, observations, and inferred edges mean? | [Conceptual model](#conceptual-model) |
+| How are drops bridged to pickups, and what is scored? | [Correlation: ground bridging](#correlation-ground-bridging-phase-5) |
+| Why do commands not lag the server? | [Query execution](#query-execution-off-thread-reported-back-on-thread-phase-6) |
+| What do `[OBSERVED]`/`[INFERRED]` result lines mean? | [Query output: the labelling convention](#query-output-the-labelling-convention-phase-6) |
+| How is quantity conserved and its lifecycle tracked? | [Quantity-Flow Allocation Ledger](#quantity-flow-allocation-ledger-phase-7) |
+| What is captured natively today? | [Native Container & Ground Observation](#native-container--ground-observation-m5-020) through [Expanded Query UX](#expanded-query-ux) |
+| What must never run on the server thread? | [Threading model](#threading-model) and [Performance constraints](#performance-constraints) |
+| Which data does ItemGraph own vs. borrow read-only? | [Data ownership](#data-ownership) |
 
 ## Loader boundary (0.3.2)
 
@@ -16,8 +34,8 @@ neoforge adapter┘
 
 - `core/` contains Java-only domain records (`CanonicalItem`, `CorrelationResult`, and `NodeType`) and loader-neutral ports. It must not import Minecraft, Brigadier, Fabric, NeoForge, SQLite, or JDBC packages. `verifyCoreArchitecture` enforces that source boundary.
 - `common/` contains code shared by both mod jars. It compiles against Minecraft 1.21.1 with Mojang mappings and may use game APIs, but it must not import Fabric or NeoForge APIs. `verifySharedLoaderBoundary` enforces that boundary. ItemGraph-owned SQLite/MySQL/MariaDB persistence and migrations, including UUID-keyed name history derived from native `PLAYER_JOIN` evidence, are shared runtime components here. The optional GriefLogger read-only migration adapter is disabled by default.
-- `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its standard jar includes SQLite and MariaDB Connector/J as nested Fabric jars; its compatible jar replaces the metadata, requires GriefLogger, and strips only the nested SQLite jar.
-- `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its standard jar bundles SQLite and MariaDB Connector/J; its compatible jar requires GriefLogger, keeps MariaDB Connector/J, and omits the Jar-in-Jar SQLite module.
+- `fabric/` owns Fabric metadata, config-file loading, Fabric Loader discovery, Fabric server lifecycle/command registration, and its Modrinth loader metadata. Its jar includes SQLite and MariaDB Connector/J as nested Fabric jars and declares the GriefLogger mod a hard conflict (`breaks`).
+- `neoforge/` owns `@Mod`, NeoForge config, NeoForge event listeners, NeoForge metadata, and Jar-in-Jar packaging. Its jar bundles SQLite and MariaDB Connector/J and declares the GriefLogger mod `incompatible`.
 
 `RuntimeInformationPort` is declared in `core` and is implemented by both loader composition roots. `ItemGraphCommands` and API validation use this port for the mod version and installed-mod lookup instead of calling either loader's discovery API. Both adapters initialize the shared runtime with platform-owned config paths, server registry access, and server lifecycle callbacks.
 
@@ -81,7 +99,7 @@ into the shared ledger. Both loaders
 share the read-only `FlowBrowserService` for coordinate inspection; GriefLogger ingestion
 remains optional and read-only on both loaders.
 
-The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers, with `grieflogger-compatible` appended only to the temporary coexistence jars that require GriefLogger `1.2.10-1.21.1`.
+The root `build` task runs both loader builds, both jar verifiers, and the core/shared boundary checks. Release files use explicit `fabric` or `neoforge` classifiers; the temporary `grieflogger-compatible` coexistence jars were retired once ItemGraph declared the GriefLogger mod incompatible on both loaders.
 
 The architecture is designed around four requirements:
 
@@ -373,6 +391,18 @@ DTOs. Its callback opens or updates `FlowBrowserMenu` only on the server thread.
 uses vanilla `MenuType.GENERIC_9x6`; its server-side click handler never delegates item
 movement to `ChestMenu`, and every GUI action rechecks permission level 2.
 
+While a page or detail request is in flight, `FlowBrowserService.markMenuLoading` mutates
+the open menu's slots in place — the `SimpleContainer` update syncs to the client without
+replacing `player.containerMenu`, so the completion callback's expected-menu check still
+applies. The page label gains `browser.loading_suffix` and the paging arrows are swapped for
+grey glass panes; `BrowserSession.loading` continues to gate the underlying actions, so the
+greyed controls cannot dispatch. `dispatchData` applies the same five-second deadline as
+text queries, so a stuck query cancels rather than wedging the menu. A rejected, failed,
+stale, or timed-out load calls `restoreMenuAfterFailedLoad`, which clears the flag and
+re-renders the still-current page when the original menu is still open; because the failure
+consumer can run off the server thread while the executor shuts down, the re-render half is
+gated on the server thread and the flag reset is the only guaranteed effect off it.
+
 ### Prior art
 
 This pattern was checked against real mods before being adopted rather than derived from
@@ -403,10 +433,17 @@ the RCON response buffer immediately afterward. Entity-less server-thread source
 receive a synchronous “query accepted” response; completed query lines are written to the
 server log instead of a response buffer that has already been returned.
 
-Player-originated queries have the same five-second per-statement timeout and cancellation
-behavior, but no total wall-clock deadline across a callback that executes several statements.
-A JDBC driver that does not honor statement timeout or cancellation can still occupy the single
-worker; the 64-entry queue remains bounded and rejects additional requests.
+Player-originated queries announce acceptance in chat, then have the same five-second
+per-statement timeout and cancellation behavior. Their dispatcher deadline is a wall-clock
+bound measured from dispatch over queue wait plus execution: a timeout after the query
+body begins is reported as a query timeout, while a timeout before that is reported as a
+queue wait — the internal JDBC cancellation text never reaches the caller. Entity-less
+sources have no dispatcher deadline, only the per-statement JDBC timeout, so a callback
+that executes several statements is not bounded as a whole. A result whose permission is
+revoked before delivery is replaced by an explicit permission-revoked failure on every
+delivery path. A JDBC driver that does not honor statement timeout or cancellation can
+still occupy the single worker; the 64-entry queue remains bounded and rejects additional
+requests.
 
 ### Preview mod-integration API worker
 
@@ -518,7 +555,7 @@ Every allocation is strictly bounded by evidenced capacity, enforcing quantity c
 
 ### ItemEntity Continuity Tracking
 Authoritative Minecraft `ItemEntity` UUIDs are tracked only after the entity is confirmed in the level.
-- `ItemEntityEventListener` records successful toss/death drops after `ItemEntity.isAddedToLevel()` becomes true, and records pickups from `ItemEntityPickupEvent.Post` or a verified partial stack delta.
+- `ItemEntityEventListener` records successful toss/death drops once a world-accepted `ItemEntity` settles — `onGround()`, near-zero delta movement, removal (last known position), or TTL expiry — so the `DROP_ITEM`/`DEATH_DROP` GROUND endpoint is the entity's rest position, not its eye-height spawn position (issue #166). Pickups record from `ItemEntityPickupEvent.Post` or a verified partial stack delta; a pickup that overtakes a still-pending drop emits the drop at the pickup position, which is the same GROUND node the pickup records.
 - A canceled toss is `DROP_CANCELLED` to UNKNOWN; canceled death drops are `DEATH_DROP_CANCELLED` attempt evidence with no destination. Neither is a ground transfer.
 - `ItemEntityTracker.findMatchingDropEntity` returns an exact UUID only when one candidate fits the spatial/time query.
 - Persisted in `ig_observations.item_entity_uuid` (schema V8).
@@ -604,12 +641,18 @@ ItemGraph JDBC connection.
 
 ### Ground movement
 - `ItemTossEvent` and `LivingDropsEvent` create bounded pending-drop entries. The
-  listener records `DROP_ITEM`/`DEATH_DROP` as player → GROUND only after the
-  `ItemEntity` reports `isAddedToLevel()`. A canceled toss is `DROP_CANCELLED` to UNKNOWN;
+  listener records `DROP_ITEM`/`DEATH_DROP` as player → GROUND once the `ItemEntity`
+  has joined the level and settles — `onGround()`, near-zero delta movement, removal
+  (last known position), or TTL expiry — so the drop endpoint is the entity's rest
+  position, matching the GROUND node its later pickup records (issue #166). An
+  entity removed before ever joining the level stays `DROP_UNRESOLVED`/
+  `DEATH_DROP_UNRESOLVED` to UNKNOWN. A canceled toss is `DROP_CANCELLED` to UNKNOWN;
   a canceled death-drop is `DEATH_DROP_CANCELLED` with no destination. Neither claims
   ground movement or receives an `item_entity_uuid`.
 - `ItemEntityPickupEvent.Post` → `PICKUP_ITEM` (GROUND → player) with the *actually picked
   up* quantity (`originalStack - currentStack`, so partial pickups never inflate quantity).
+  A pickup that overtakes a still-pending drop emits the drop at the pickup position
+  first — the same GROUND node the pickup row records.
   The `ItemEntityTracker` returns an exact UUID only when the spatial/time match is unique.
 - **Partial-pickup gap (NeoForge 21.1.248)**: `ItemEntity.playerTouch` gates `Post`
   on `Inventory.add()` returning true, but `Inventory.addItem` returns false when
@@ -624,10 +667,15 @@ ItemGraph JDBC connection.
   absorb) and all entries expire after 1s under a 512-entry bound.
 - Fabric normal player drops and pickups use server-only hooks in
   `ServerPlayerMixin`, `ServerLevelMixin`, and `ItemEntityMixin`. A returned
-  drop entity is recorded only when `ServerLevel.addFreshEntity` returns true,
-  with its returned stack count and UUID. Pickup records the exact before/after
-  stack-count delta, including partial absorption, and maps the ground endpoint
-  through the same `GROUND` persistence branch. Drops observed while
+  drop entity is queued only when `ServerLevel.addFreshEntity` returns true,
+  with its returned stack count and UUID; an `END_SERVER_TICK` resolver then
+  emits `DROP_ITEM`/`DEATH_DROP` at the settle position — `onGround()`,
+  near-zero delta movement, removal (last known position), or TTL expiry —
+  matching the NeoForge pending-drop contract and the GROUND node a later
+  pickup records (issue #166). A pickup that overtakes a still-pending drop
+  emits the drop at the pickup position first. Pickup records the exact
+  before/after stack-count delta, including partial absorption, and maps the
+  ground endpoint through the same `GROUND` persistence branch. Drops observed while
   `ServerPlayer.isDeadOrDying()` are labeled `DEATH_DROP`; custom death-event
   additions and automated non-player item movement remain unimplemented until a
   loader-native hook can prove their source and destination.
@@ -735,16 +783,63 @@ ItemGraph JDBC connection.
 - NeoForge's `InspectionListener` handles `PlayerInteractEvent.RightClickBlock` at `HIGHEST`
   priority and left-click starts; Fabric's `FabricNativeAuditEventListener` applies the same
   selection through `UseBlockCallback` and `AttackBlockCallback`.
+- A consumed right-click produces more packets than the block-use itself: the client also
+  sends the off-hand `useItemOn` and, when its predicted result was not consuming, a
+  separate item-use packet. `InspectionListener` consumes `RightClickItem` and off-hand
+  `RightClickBlock` while inspection is on; Fabric does the same through `UseItemCallback`
+  and the off-hand half of `UseBlockCallback`, so a held bucket, ender pearl, or off-hand
+  item can never mutate the inspected scene. The revocation-detecting click clears the
+  mode before its twin packets arrive, so every consume path calls
+  `InspectionService.markInteractionConsumed` — a five-tick marker that keeps the twins
+  consumable after the mode is already off.
+- Entity right-clicks are consumed under the same enabled-or-marker rule:
+  `InspectionListener` cancels `EntityInteract` and `EntityInteractSpecific` (with
+  `InteractionResult.FAIL`, not the default `PASS`, so the client does not retry
+  further interactions) at `HIGHEST` priority, and Fabric returns `FAIL` from
+  `UseEntityCallback`. Entity left-clicks (attacks) are consumed the same way —
+  NeoForge cancels `AttackEntityEvent` at `HIGHEST` and Fabric returns `FAIL`
+  from `AttackEntityCallback` at `ServerPlayer.attack` HEAD — so a predicted
+  hit cannot damage, knock back, or pop the inspected entity. The denial
+  remains audit evidence — NeoForge's LOWEST
+  entity handlers record `INTERACT_ENTITY_DENIED` for a canceled interact and
+  `ATTACK_ENTITY_DENIED` for a canceled attack, and Fabric records the same
+  rows from its callbacks — so armor-stand equipping, shearing, milking,
+  leashing, name tags, and attacks cannot mutate the scene. On Fabric
+  the listener-recorded denial also sets
+  `EntityInteractionEvidence.markListenerRecordedDenial`, which suppresses the
+  `FabricUseEntityCallbackAudit` decorator's second, misattributed denial row
+  for the same packet; `AttackEntityCallback` has no aggregate decorator, so
+  the listener records the attack denial exactly once. Consumed entity
+  interactions and attacks resync `containerMenu` plus
+  the target's pairing state — `ClientboundSetEntityDataPacket` (skipped when
+  all values are default), `ClientboundSetEquipmentPacket` for living entities,
+  `ClientboundSetEntityLinkPacket` for leashables, and
+  `ClientboundSetPassengersPacket` — so predicted armor-stand equipment,
+  shearing, leashes, mounts, damage, and knockback revert to server truth.
+  Accepted (non-denied) entity attacks record no separate event: `KILL_ENTITY`
+  covers kills only, and non-lethal damage evidence remains entity-lifecycle
+  extension scope tracked as issue #56.
 - A right-click whose target block entity implements `Container` calls the shared
   `FlowBrowserService.openContainer` with the exact dimension and coordinates. Either half
-  of a valid double chest resolves to the canonical anchor used by container capture. Only
-  an accepted query consumes the click and prevents the normal container GUI and held-item
-  use path. A rejected query preserves ordinary container interaction.
-- Left-clicks call the bounded exact-position audit-history query. Non-container
+  of a valid double chest resolves to the canonical anchor used by container capture. An
+  accepted query consumes the click and prevents the normal container GUI and held-item
+  use path; a click that detects a revoked `itemgraph.command.inspect` grant is also
+  consumed. A rejected query preserves ordinary container interaction.
+- Left-clicks call the bounded exact-position audit-history query once per dig:
+  Fabric's `AttackBlockCallback` mixin already filters to `START_DESTROY_BLOCK`
+  (`fabric-events-interaction-v0` `ServerPlayerInteractionManagerMixin` ignores
+  STOP/ABORT), matching NeoForge's `Action.START` filter — one dispatch per
+  left-click on both loaders, never one per action packet. Non-container
   right-clicks also query block history: supported functional blocks select the clicked
-  block, while ordinary blocks select the adjacent block on the clicked face. A rejected
-  query preserves normal Minecraft interaction. Every route requires current permission
-  level 2 and keeps its result private to the player.
+  block, while ordinary blocks select the adjacent block on the clicked face. When a
+  block-history request is not accepted, a missing `itemgraph.audit` grant consumes the
+  click — a denied inspection must not break blocks or toggle functional blocks — while
+  transient rejections (a full queue or an unavailable database) preserve normal
+  Minecraft interaction. Rejected container right-clicks always preserve ordinary
+  container interaction so a missing `itemgraph.gui` grant still opens the chest. Every
+  route requires `itemgraph.command` and `itemgraph.command.inspect` on the click; the
+  block-history route also requires `itemgraph.audit`, and the container flow route
+  requires `itemgraph.gui` plus `itemgraph.audit`. Results stay private to the player.
   The Fabric disconnect callback clears that player's inspection state; server stop clears
   any remaining state. This follows Fabric's documented callback contract: listeners run
   until one returns a non-`PASS` `InteractionResult` ([Fabric 1.21.1 event guide](https://github.com/FabricMC/fabric-docs/blob/main/versions/1.21.1/develop/events.md)).
@@ -753,7 +848,10 @@ ItemGraph JDBC connection.
   `SimpleContainer`, so its Open/Close lifecycle cannot create a block-entity-backed watch.
 - Inactive/disabled inspection returns `PASS`-equivalent vanilla behavior: the event remains
   uncancelled and the normal interaction pipeline proceeds. While inspection is enabled,
-  non-container right-clicks use the block-history route described above.
+  non-container right-clicks use the block-history route described above. If the
+  `itemgraph.command.inspect` grant is revoked while the mode is enabled, the click that
+  detects the revocation disables the mode, notifies the player, and is consumed
+  (`FAIL`-equivalent on Fabric, canceled on NeoForge) rather than falling through.
 
 ### Expanded Query UX
 - `/ig trace player <playerName>`: reconstructs all item transfers, container events, and ground movements involving a player.
@@ -766,11 +864,11 @@ ItemGraph JDBC connection.
 
 ## Transformation Lineage (Phase 9)
 
-Item transformations (identity shifts) are tracked in `ig_item_transformations`:
-- Records transitions linking source fingerprint to result fingerprint (`ANVIL_RENAME`, `ANVIL_REPAIR`, `CRAFT`, `SMELT`).
-- Captured via `TransformationEventListener` from anvil, crafting, and smelting result transitions.
-- Persisted asynchronously via `InternalObservationService` with a memory-bounded queue (10,000 capacity).
-- Surfaced chronologically in item trace timelines as `[TRANSFORMATION <type> <- <source>]` hops.
+Item transformations with known inputs and results are tracked in `ig_item_transformations`:
+- Current lineage links source and result fingerprints for `ANVIL_RENAME` and `ANVIL_REPAIR`.
+- Craft and smelt result-take events are stored in `ig_audit_events` as `CRAFT_OUTPUT_UNRESOLVED` and `SMELT_OUTPUT_UNRESOLVED`; the output is recorded, inputs are unknown, and no trace edge is created.
+- Legacy `CRAFT` and `SMELT` transformation rows remain readable but are classified historical-only and excluded from trace lineage.
+- Evidence is persisted asynchronously through `InternalObservationService` and its bounded queue.
 
 ## Database Invariant Auditing & Diagnostics (Phase 10)
 
@@ -844,8 +942,8 @@ ItemGraph owns:
 **JDBC driver provisioning**: `sqlite-jdbc` is bundled in the ItemGraph jar via
 `jarJar` (version range `[3.40.0.0,4.0.0.0)`, prefer `3.46.1.0`) and MariaDB
 Connector/J `3.5.7` is bundled for both MySQL and MariaDB network storage. Production
-boots standalone and the dedicated GriefLogger-compatible artifact removes only the
-SQLite copy so GriefLogger remains the sole provider of `org.sqlite.*`. Dev
+boots standalone; GriefLogger is declared incompatible because its own embedded
+SQLite cannot be deduplicated by JarJar, so `org.sqlite.*` can never be shared. Dev
 runs launch the mod from `build/classes`, so the project's jarJar contents never
 materialize — `build.gradle` adds the driver to `additionalRuntimeClasspath` only when
 no jar in `run/mods` embeds `sqlite-jdbc` (adding it unconditionally alongside such a

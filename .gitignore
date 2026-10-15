@@ -6,6 +6,7 @@ logs/
 *.iws
 *.iml
 .idea/
+.vscode/
 out/
 .DS_Store
 run/

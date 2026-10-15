@@ -2,6 +2,8 @@ package com.itemgraph.gametest;
 
 import com.itemgraph.audit.AuditReport;
 import com.itemgraph.audit.AuditService;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.itemgraph.db.DatabaseDialect;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.ingest.InternalObservationService;
@@ -38,7 +40,7 @@ public final class ItemGraphReplayReportFixture {
             "SHOOT_ITEM", new ExpectedEvent("minecraft:arrow", 1),
             "CONSUME_ITEM", new ExpectedEvent("minecraft:apple", 1),
             "BREAK_ITEM", new ExpectedEvent("minecraft:wooden_sword", 1));
-    private static final Map<String, Integer> EXPECTED_TRANSFORMATION_ACTION_COUNTS = Map.of("CRAFT", 1);
+    private static final Map<String, Integer> EXPECTED_TRANSFORMATION_ACTION_COUNTS = Map.of();
     private static final Map<String, Integer> EXPECTED_AUDIT_ACTION_COUNTS = Map.ofEntries(
             Map.entry("PLAYER_JOIN", 3),
             Map.entry("PLAYER_QUIT", 1),
@@ -50,13 +52,15 @@ public final class ItemGraphReplayReportFixture {
             Map.entry("KILL_ENTITY", 1),
             Map.entry("INTERACT_ENTITY", 3),
             Map.entry("INTERACT_ENTITY_COMPLETED", 2),
-            Map.entry("INTERACT_ENTITY_UNRESOLVED", 1));
+            Map.entry("INTERACT_ENTITY_UNRESOLVED", 1),
+            Map.entry("CRAFT_OUTPUT_UNRESOLVED", 1));
     private static final Map<String, Integer> EXPECTED_AUDIT_SUBJECT_COUNTS = Map.of(
             "minecraft:water", 1,
             "minecraft:diamond_block", 1,
             "minecraft:chest", 1,
             "minecraft:cow", 2,
-            "minecraft:armor_stand", 5);
+            "minecraft:armor_stand", 5,
+            "minecraft:book", 1);
     private static final Map<ExpectedActionSubject, Integer> EXPECTED_AUDIT_ACTION_SUBJECT_COUNTS = Map.of(
             new ExpectedActionSubject("BREAK_BLOCK", "minecraft:water"), 1,
             new ExpectedActionSubject("PLACE_BLOCK", "minecraft:diamond_block"), 1,
@@ -65,7 +69,8 @@ public final class ItemGraphReplayReportFixture {
             new ExpectedActionSubject("INTERACT_ENTITY", "minecraft:cow"), 1,
             new ExpectedActionSubject("INTERACT_ENTITY", "minecraft:armor_stand"), 2,
             new ExpectedActionSubject("INTERACT_ENTITY_COMPLETED", "minecraft:armor_stand"), 2,
-            new ExpectedActionSubject("INTERACT_ENTITY_UNRESOLVED", "minecraft:armor_stand"), 1);
+            new ExpectedActionSubject("INTERACT_ENTITY_UNRESOLVED", "minecraft:armor_stand"), 1,
+            new ExpectedActionSubject("CRAFT_OUTPUT_UNRESOLVED", "minecraft:book"), 1);
 
     private ItemGraphReplayReportFixture() { }
 
@@ -305,7 +310,8 @@ public final class ItemGraphReplayReportFixture {
                 FROM ig_item_transformations transformation
                 JOIN ig_nodes player ON player.id = transformation.player_node_id
                 JOIN ig_item_fingerprints result ON result.id = transformation.result_fingerprint_id
-                WHERE transformation.id > ? AND transformation.transformation_type = 'CRAFT'
+                WHERE transformation.id > ?
+                  AND transformation.transformation_type IN ('ANVIL_RENAME', 'ANVIL_REPAIR')
                   AND player.owner_uuid IN (%s)
                 ORDER BY transformation.timestamp_ms, transformation.id
                 """.formatted(String.join(",", java.util.Collections.nCopies(actorAliases.size(), "?")));
@@ -342,14 +348,14 @@ public final class ItemGraphReplayReportFixture {
     private static List<ReplayEvent> readAuditEvents(long priorAuditId, Map<String, String> actorAliases,
                                                     BlockPos successfulWaterPickupPos) {
         String sql = """
-                SELECT id, event_type, timestamp_ms, player_uuid, level_id, x, y, z, subject_id
+                SELECT id, event_type, timestamp_ms, player_uuid, level_id, x, y, z, subject_id, raw_data
                 FROM ig_audit_events
                 WHERE id > ? AND source_type = 'ITEMGRAPH_INTERNAL'
                   AND player_uuid IN (%s)
-                  AND event_type IN ('PLAYER_JOIN', 'PLAYER_QUIT', 'CHAT_MESSAGE', 'COMMAND_ATTEMPT',
+                AND event_type IN ('PLAYER_JOIN', 'PLAYER_QUIT', 'CHAT_MESSAGE', 'COMMAND_ATTEMPT',
                                      'BREAK_BLOCK', 'PLACE_BLOCK', 'INTERACT_BLOCK_ATTEMPT', 'KILL_ENTITY',
                                      'INTERACT_ENTITY', 'INTERACT_ENTITY_COMPLETED',
-                                     'INTERACT_ENTITY_UNRESOLVED')
+                                     'INTERACT_ENTITY_UNRESOLVED', 'CRAFT_OUTPUT_UNRESOLVED')
                   -- Exclude the direct-call guard probe with a synthetic lava-bucket result.
                   AND (event_type <> 'BREAK_BLOCK' OR
                        (subject_id = 'minecraft:water' AND x = ? AND y = ? AND z = ?))
@@ -377,16 +383,34 @@ public final class ItemGraphReplayReportFixture {
                     }
                     String unresolvedReason = "INTERACT_ENTITY_UNRESOLVED".equals(action)
                             ? "ENTITY_INTERACTION_METHOD_PASSED" : null;
+                    Integer quantity = null;
+                    String itemId = null;
+                    String evidenceClass = "observed";
+                    String compatibilityTable;
+                    if ("CRAFT_OUTPUT_UNRESOLVED".equals(action)) {
+                        JsonObject raw = JsonParser.parseString(rows.getString("raw_data")).getAsJsonObject();
+                        JsonObject output = raw.getAsJsonObject("observed_output");
+                        if (output == null || !output.has("item_id") || !output.has("quantity")) {
+                            throw new IllegalStateException("craft replay event has no observed output stack");
+                        }
+                        itemId = output.get("item_id").getAsString();
+                        quantity = output.get("quantity").getAsInt();
+                        evidenceClass = "unresolved";
+                        unresolvedReason = "TRANSFORMATION_INPUTS_NOT_OBSERVED";
+                        compatibilityTable = "items";
+                    } else {
+                        compatibilityTable = switch (action) {
+                            case "PLAYER_JOIN", "PLAYER_QUIT" -> "sessions";
+                            case "CHAT_MESSAGE" -> "chats";
+                            case "COMMAND_ATTEMPT" -> "commands";
+                            default -> "blocks";
+                        };
+                    }
                     result.add(new ReplayEvent(rows.getLong("id"), rows.getLong("timestamp_ms"), action,
-                            "observed", null, null, rows.getString("subject_id"), dimension,
+                            evidenceClass, quantity, itemId, rows.getString("subject_id"), dimension,
                             (int) Math.floor(xValue.doubleValue()), (int) Math.floor(yValue.doubleValue()),
                             (int) Math.floor(zValue.doubleValue()), actorRef, "ig_audit_events", action,
-                            switch (action) {
-                                case "PLAYER_JOIN", "PLAYER_QUIT" -> "sessions";
-                                case "CHAT_MESSAGE" -> "chats";
-                                case "COMMAND_ATTEMPT" -> "commands";
-                                default -> "blocks";
-                            }, unresolvedReason));
+                            compatibilityTable, unresolvedReason));
                 }
                 return result;
             }

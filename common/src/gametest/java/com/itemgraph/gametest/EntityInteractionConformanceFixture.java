@@ -1,5 +1,6 @@
 package com.itemgraph.gametest;
 
+import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.query.AuditEventDetail;
 import com.itemgraph.audit.EventTaxonomy;

@@ -33,6 +33,9 @@ import java.util.UUID;
  * <p>0.2.0: Also writes {@code ITEMGRAPH_INTERNAL} observations so ItemGraph captures
  * drop and pickup movement even when GriefLogger is not installed. Drop observations are
  * emitted only after the ItemEntity is confirmed in the level; canceled tosses remain UNKNOWN.
+ * The ground endpoint is recorded when the entity settles ({@code onGround}, near-zero
+ * velocity, removal, or TTL expiry) rather than at spawn, so the node keys to the
+ * "item lying in the world" position the pickup side uses — not the eye-level spawn point.
  *
  * <p>Partial pickups: {@code ItemEntityPickupEvent.Post} is documented to fire "if part
  * of the item was picked up", but {@code ItemEntity.playerTouch} gates it on
@@ -49,8 +52,9 @@ public class ItemEntityEventListener {
 
     private static final long PENDING_PICKUP_TTL_MS = 1000;
     private static final int PENDING_PICKUP_MAX = 512;
-    private static final long PENDING_DROP_TTL_MS = 1000;
+    private static final long PENDING_DROP_TTL_MS = 5000;
     private static final int PENDING_DROP_MAX = 512;
+    private static final double DROP_SETTLE_SPEED_SQR = 0.0025;
 
     private static final class PendingDrop {
         final ItemEntity entity;
@@ -65,6 +69,7 @@ public class ItemEntityEventListener {
         final com.itemgraph.canon.CanonicalItem canonical;
         final long timestampMs;
         final long expiresAtMs;
+        boolean observedAdded;
 
         PendingDrop(ItemEntity entity, String actionType, UUID playerUuid, String playerName,
                     String level, double playerX, double playerY, double playerZ,
@@ -403,11 +408,22 @@ public class ItemEntityEventListener {
         Iterator<Map.Entry<UUID, PendingDrop>> it = pendingDrops.entrySet().iterator();
         while (it.hasNext()) {
             PendingDrop pending = it.next().getValue();
-            if (pending.entity.isAddedToLevel()) {
+            ItemEntity entity = pending.entity;
+            if (!pending.observedAdded) {
+                if (!entity.isAddedToLevel()) {
+                    if (entity.isRemoved() || nowMs >= pending.expiresAtMs) {
+                        emitUnresolvedDrop(pending, "entity_not_added_to_level");
+                        it.remove();
+                    }
+                    continue;
+                }
+                pending.observedAdded = true;
+            }
+            if (entity.isRemoved()
+                    || entity.onGround()
+                    || entity.getDeltaMovement().lengthSqr() <= DROP_SETTLE_SPEED_SQR
+                    || nowMs >= pending.expiresAtMs) {
                 emitConfirmedDrop(pending);
-                it.remove();
-            } else if (nowMs >= pending.expiresAtMs) {
-                emitUnresolvedDrop(pending, "entity_not_added_to_level");
                 it.remove();
             }
         }

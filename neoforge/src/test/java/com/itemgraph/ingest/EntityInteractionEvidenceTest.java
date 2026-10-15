@@ -195,6 +195,44 @@ class EntityInteractionEvidenceTest {
     }
 
     @Test
+    void listenerRecordedDenialSuppressesTheAggregateDecoratorRow() {
+        // ItemGraph's own UseEntityCallback listener records its denial itself;
+        // the flag must suppress the decorator's duplicate for exactly one call.
+        ServerLevel level = mock(ServerLevel.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ArmorStand stand = mock(ArmorStand.class);
+        UUID playerId = UUID.randomUUID();
+        when(player.level()).thenReturn(level);
+        when(player.getUUID()).thenReturn(playerId);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerId, "Alex"));
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(stand.level()).thenReturn(level);
+        when(stand.getUUID()).thenReturn(UUID.randomUUID());
+        doReturn(EntityType.ARMOR_STAND).when(stand).getType();
+        when(stand.blockPosition()).thenReturn(BlockPos.ZERO);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            EntityInteractionEvidence.markListenerRecordedDenial();
+            EntityInteractionEvidence.recordFabricCallbackResult(
+                    EntityInteractionEvidence.captureFabricCallbackContext(
+                            player, stand, InteractionHand.MAIN_HAND, ItemStack.EMPTY),
+                    InteractionResult.FAIL);
+            // The flag is consumed: the next un-flagged denial records normally.
+            EntityInteractionEvidence.recordFabricCallbackResult(
+                    EntityInteractionEvidence.captureFabricCallbackContext(
+                            player, stand, InteractionHand.MAIN_HAND, ItemStack.EMPTY),
+                    InteractionResult.FAIL);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY_DENIED", captured.getValue().eventType());
+    }
+
+    @Test
     void missingTargetUuidDoesNotProduceAMisleadingPlaceholder() {
         ServerLevel level = mock(ServerLevel.class);
         ServerPlayer player = mock(ServerPlayer.class);

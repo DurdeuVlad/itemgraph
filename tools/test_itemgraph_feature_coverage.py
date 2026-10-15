@@ -104,15 +104,19 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
         })
         craft_event = copy.deepcopy(event)
         craft_event.update({
-            "event_key": "replay-craft-0",
+            "event_key": "replay-craft_output_unresolved-0",
             "sequence": 8,
-            "action": "CRAFT",
+            "action": "CRAFT_OUTPUT_UNRESOLVED",
+            "evidence_class": "unresolved",
+            "quantity": 1,
             "item_id": "minecraft:book",
+            "subject_id": "minecraft:book",
             "occurred_at_ms": 1790870400007,
-            "source_table": "ig_item_transformations",
-            "source_action_id": "CRAFT",
+            "source_table": "ig_audit_events",
+            "source_action_id": "CRAFT_OUTPUT_UNRESOLVED",
             "compatibility_table": "items",
             "compatibility_action_id": 4,
+            "unresolved_reason": "TRANSFORMATION_INPUTS_NOT_OBSERVED",
         })
         kill_event = copy.deepcopy(entity_event)
         kill_event.update({
@@ -139,7 +143,7 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
                 "total_observations": 1,
                 "total_edges": 0,
                 "total_allocations": 0,
-                "total_transformations": 1,
+                "total_transformations": 0,
                 "over_allocated_observations": 0,
                 "invalid_edge_allocations": 0,
                 "invalid_edge_temporal": 0,
@@ -166,7 +170,7 @@ class ItemGraphFeatureCoverageTests(unittest.TestCase):
         self.assertEqual("native_only", output["runtime_mode"])
         add_item = next(row for row in output["actions"] if row["action"] == "ADD_ITEM")
         self.assertEqual("observed-in-replay", add_item["coverage_status"])
-        craft = next(row for row in output["actions"] if row["action"] == "CRAFT")
+        craft = next(row for row in output["actions"] if row["action"] == "CRAFT_OUTPUT_UNRESOLVED")
         self.assertEqual("observed-in-replay", craft["coverage_status"])
         self.assertEqual(1, add_item["runtime_evidence_count"])
         self.assertTrue(all(row["coverage_status"] in {"observed-in-replay", "not-observed-in-replay"}
