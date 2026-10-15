@@ -110,6 +110,21 @@ class GriefLoggerMigrationTest {
     }
 
     @Test
+    void blankConfiguredPathIsRejectedBeforeAnyDetection(@TempDir Path dir) {
+        Path gameDir = dir.resolve("game");
+        Path configDir = dir.resolve("config");
+
+        for (boolean[] flags : new boolean[][]{
+                {true, true, true}, {true, true, false}, {false, true, true}, {false, false, true}}) {
+            IllegalArgumentException failure = org.junit.jupiter.api.Assertions.assertThrows(
+                    IllegalArgumentException.class,
+                    () -> GriefLoggerMigration.decide(flags[0], flags[1], flags[2], "", gameDir, configDir));
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    "general.grieflogger_database_path must not be blank", failure.getMessage());
+        }
+    }
+
+    @Test
     void useMysqlFalseOrMissingIsNotLiveMySql(@TempDir Path dir) throws Exception {
         Path configDir = dir.resolve("config");
         assertFalse(GriefLoggerMigration.readsUseMysql(configDir));

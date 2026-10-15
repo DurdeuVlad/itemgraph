@@ -35,6 +35,9 @@ public final class GriefLoggerMigration {
     public static Decision decide(boolean integrationEnabled, boolean autoMigrateAllowed,
                                   boolean modDetected, String configuredPath,
                                   Path gameDir, Path configDir) {
+        if (configuredPath == null || configuredPath.isBlank()) {
+            throw new IllegalArgumentException("general.grieflogger_database_path must not be blank");
+        }
         boolean autoDetected = !integrationEnabled && autoMigrateAllowed && modDetected;
         boolean enabled = integrationEnabled || autoDetected;
         Path databasePath = resolveSourcePath(configuredPath, modDetected, gameDir, configDir);
