@@ -10,7 +10,8 @@
       "com.itemgraph.fabric.gametest.CommandPacketGameTests",
     "com.itemgraph.fabric.gametest.ContainerBreakGameTests",
       "com.itemgraph.fabric.gametest.OperationalQueueGameTests",
-      "com.itemgraph.fabric.gametest.AdminMutationGameTests"
+      "com.itemgraph.fabric.gametest.AdminMutationGameTests",
+      "com.itemgraph.fabric.gametest.WorldEventGameTests"
     ]
   }
 }

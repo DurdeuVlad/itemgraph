@@ -35,9 +35,7 @@ public final class ItemMovementConformanceFixture {
     public static void assertPersisted(GameTestHelper helper, long priorObservationId,
                                        List<List<String>> priorRows, String playerUuid,
                                        BlockPos containerPos, String expectedItemEntityUuid) {
-        List<List<String>> currentRows = snapshotRows();
-        helper.assertTrue(currentRows.containsAll(priorRows),
-                "item movement replay must not mutate or remove earlier quantity evidence");
+        EntityInteractionConformanceFixture.assertQuantityObservationsUnchanged(helper, priorRows);
 
         assertOnlyMovementObservations(helper, priorObservationId, playerUuid);
         Map<String, MovementRow> rows = readMovementRows(priorObservationId, playerUuid);

@@ -510,6 +510,88 @@ class InternalObservationServiceTest {
     }
 
     @Test
+    void captureStartedBeforeDatabaseInitializationPersistsStartupEvidence() throws Exception {
+        DatabaseManager.getInstance().close();
+        service.stop();
+        service.clear();
+        service.setEvidenceSpoolPathForTests(null);
+        DatabaseSettings settings = DatabaseSettings.sqlite(tempDir.resolve("itemgraph.db"));
+        DatabaseManager.getInstance().prepareSettings(settings);
+        Path spoolPath = tempDir.resolve("itemgraph-pending-evidence.json");
+        InternalAuditEvent recovered = new InternalAuditEvent(
+                4567L, "WORLD_EFFECT_UNRESOLVED", null, null, "minecraft:overworld",
+                0, 64, 0, "minecraft:fire", "recovered-before-start", null);
+        PendingEvidenceSpool.write(spoolPath, new PendingEvidenceSpool.Snapshot(
+                List.of(), List.of(), List.of(recovered)));
+
+        service.start();
+        java.lang.reflect.Field spoolPathField = InternalObservationService.class.getDeclaredField("evidenceSpoolPath");
+        spoolPathField.setAccessible(true);
+        assertEquals(spoolPath.toAbsolutePath(),
+                spoolPathField.get(service), "early admission must use the staged database's recovery directory");
+        assertTrue(service.submitAuditEvent(new InternalAuditEvent(
+                5678L, "WORLD_EFFECT_UNRESOLVED", null, null, "minecraft:overworld",
+                1, 64, 2, "minecraft:water", "startup-before-database", null)),
+                "bounded evidence intake must accept startup events before JDBC initialization completes");
+
+        long recoveryDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getCaptureState() == InternalObservationService.CaptureState.RECOVERY_LOADING
+                && System.nanoTime() < recoveryDeadline) {
+            Thread.sleep(10);
+        }
+        assertNotEquals(InternalObservationService.CaptureState.RECOVERY_LOADING, service.getCaptureState(),
+                "the worker must finish reading the old spool before database initialization");
+        assertFalse(DatabaseManager.getInstance().isInitialized(),
+                "spool replay must not lazily open JDBC before the lifecycle callback");
+        assertThrows(SQLException.class, DatabaseManager.getInstance()::getConnection,
+                "early recovery persistence must wait for lifecycle-owned database initialization");
+
+        initializeTopologyDatabase();
+        service.onServerTick();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (service.getTotalPersisted() < 2 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(2, service.getTotalPersisted(),
+                "the worker must persist recovered and newly accepted startup evidence after database initialization");
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT detail FROM ig_audit_events WHERE event_type='WORLD_EFFECT_UNRESOLVED' ORDER BY timestamp_ms");
+             ResultSet result = statement.executeQuery()) {
+            assertTrue(result.next());
+            assertEquals("recovered-before-start", result.getString(1));
+            assertTrue(result.next());
+            assertEquals("startup-before-database", result.getString(1));
+            assertFalse(result.next());
+        }
+        assertFalse(java.nio.file.Files.exists(spoolPath),
+                "the recovered primary spool is removed only after both records are durable");
+    }
+
+    @Test
+    void networkHeartbeatRetriesAfterStartupInitializationFailure() throws Exception {
+        DatabaseManager database = DatabaseManager.getInstance();
+        int closedPort;
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+            closedPort = probe.getLocalPort();
+        }
+        DatabaseSettings settings = DatabaseSettings.mysqlMariaDb(
+                "127.0.0.1", closedPort, "itemgraph", "itemgraph", "", 250, false);
+        database.prepareSettings(settings);
+
+        Method heartbeat = InternalObservationService.class.getDeclaredMethod("runDatabaseHeartbeat");
+        heartbeat.setAccessible(true);
+        heartbeat.invoke(service);
+        assertEquals(0, service.getTotalDatabaseHeartbeatFailures(),
+                "the heartbeat must wait for the lifecycle's first database attempt");
+
+        database.initialize(settings);
+        assertFalse(database.isStartupInitializationPending());
+        heartbeat.invoke(service);
+        assertEquals(1, service.getTotalDatabaseHeartbeatFailures(),
+                "after startup failure the heartbeat must retry network initialization");
+    }
+
+    @Test
     void failedRecoveryLoadClosesAdmissionAndPreservesOriginalFile() throws Exception {
         initializeTopologyDatabase();
         Path spoolPath = tempDir.resolve("pending-evidence.json");

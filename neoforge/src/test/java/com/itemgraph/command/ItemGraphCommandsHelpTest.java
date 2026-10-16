@@ -61,8 +61,52 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
+    void eachPublishedHelpTopicIsDiscoverableIncludingWorldCauses() {
+        assertTrue(CommandHelp.TOPIC_NAMES.contains("lookup world"));
+        for (String topic : CommandHelp.TOPIC_NAMES) {
+            assertNotNull(CommandHelp.topicLines(topic), "suggested topic has no help body: " + topic);
+        }
+        assertNotNull(CommandHelp.topicLines("lookup world"));
+    }
+
+    @Test
+    void statusPutsAnActionBeforeDiagnosticsWithoutTreatingCountersAsHealthScores() {
+        assertTrue(ItemGraphCommands.statusActionLine(
+                com.itemgraph.ingest.InternalObservationService.CaptureState.RECOVERY_BLOCKED,
+                true, 0, false, false).contains("Preserve recovery files"));
+        assertTrue(ItemGraphCommands.statusActionLine(
+                com.itemgraph.ingest.InternalObservationService.CaptureState.ACTIVE,
+                false, 0, false, false).contains("Check database settings and logs"));
+        assertTrue(ItemGraphCommands.statusActionLine(
+                com.itemgraph.ingest.InternalObservationService.CaptureState.ACTIVE,
+                true, 0, false, false).contains("confirm capture was active"));
+        assertTrue(ItemGraphCommands.statusActionLine(
+                com.itemgraph.ingest.InternalObservationService.CaptureState.DISABLED_BY_CONFIG,
+                false, 5, true, true).contains("Native capture is off"));
+        assertTrue(ItemGraphCommands.statusActionLine(
+                com.itemgraph.ingest.InternalObservationService.CaptureState.STOPPED,
+                false, 5, true, true).contains("restore the capture worker"));
+        assertTrue(ItemGraphCommands.statusActionLine(
+                com.itemgraph.ingest.InternalObservationService.CaptureState.RECOVERY_LOADING,
+                false, 5, true, true).contains("Wait for recovery loading"));
+        assertTrue(ItemGraphCommands.statusActionLine(
+                com.itemgraph.ingest.InternalObservationService.CaptureState.ACTIVE,
+                true, 1, true, true).contains("Evidence was rejected or lost"));
+        assertTrue(ItemGraphCommands.statusActionLine(
+                com.itemgraph.ingest.InternalObservationService.CaptureState.ACTIVE,
+                true, 0, true, true).contains("failed source-ingestion cycle"));
+        assertTrue(ItemGraphCommands.statusActionLine(
+                com.itemgraph.ingest.InternalObservationService.CaptureState.ACTIVE,
+                true, 0, false, true).contains("failed correlation pass"));
+    }
+
+    @Test
     void commandOverviewFitsNarrowMinecraftChatAndRoutesByTask() {
         List<String> overview = CommandHelp.overviewLines();
+        assertTrue(overview.getFirst().contains("/ig trace item"),
+                "the first-time overview must lead with the most common investigation task");
+        assertTrue(overview.size() <= 5,
+                "first-time help should fit the existing five-line overview layout");
         assertTrue(String.join(" ", overview).contains("/ig help journeys"));
         assertTrue(String.join(" ", overview).contains("Required: itemgraph.command"));
         assertTrue(overview.stream().allMatch(line -> line.length() <= 80),
@@ -104,12 +148,14 @@ class ItemGraphCommandsHelpTest {
         List<String> journeyLines = CommandHelp.topicLines("journeys");
         String journeys = String.join("\n", journeyLines);
         assertTrue(journeys.contains("/ig event <observationId>"));
-        assertTrue(journeys.contains("Admin/creative outcome UUIDs use /ig event event:<uuid>"));
+        assertTrue(journeys.contains("/ig event event:<uuid>"));
+        assertTrue(journeys.contains("Outcome UUID: /ig event event:<uuid>"));
         assertFalse(journeys.contains("copy event:<uuid> from /ig trace"));
         assertTrue(journeys.contains("/ig explain <edgeId>"));
-        assertTrue(journeys.contains("/ig help journeys near"));
+        assertTrue(journeys.contains("/ig lookup near"));
         assertTrue(journeys.contains("/ig help journeys filters"));
-        assertTrue(journeys.contains("Player paging: /ig page 2; console near returns one page."));
+        assertTrue(journeys.contains("/ig page 2"));
+        assertTrue(journeys.contains("More: /ig help journeys <task>"));
         String longestLine = journeyLines.stream().max(java.util.Comparator.comparingInt(String::length)).orElse("");
         assertTrue(longestLine.length() <= 80,
                 () -> "journey help line exceeds narrow Minecraft chat width (" + longestLine.length() + "): " + longestLine);
@@ -163,6 +209,10 @@ class ItemGraphCommandsHelpTest {
                 "/ig help lookup provenance")) {
             assertTrue(filterHelp.contains(detail), "lookup filters help is missing: " + detail);
         }
+        assertJourneyTopic("lookup world", "EXPLOSION_BLOCK_CHANGE", "PISTON_BLOCK_MOVE",
+                "PISTON_BLOCK_ATTEMPT", "FLUID_BLOCK_CHANGE", "FIRE_BLOCK_CHANGE",
+                "ENDERMAN_BLOCK_MOVE", "FALLING_BLOCK_CHANGE", "WORLD_EFFECT_ATTEMPT",
+                "WORLD_EFFECT_UNRESOLVED", "itemgraph.command.lookup", "itemgraph.audit");
         AuditLookupFilters exampleFilters = AuditLookupFilters.parse(
                 "action.break_block radius.50 time.1h", 1_000L);
         assertEquals(50.0, exampleFilters.radiusBlocks(),
@@ -176,6 +226,16 @@ class ItemGraphCommandsHelpTest {
         for (String required : requiredText) {
             assertTrue(content.contains(required), () -> topic + " is missing: " + required);
         }
+        String longestLine = lines.stream().max(java.util.Comparator.comparingInt(String::length)).orElse("");
+        assertTrue(longestLine.length() <= 80,
+                () -> topic + " has a line wider than 80 chars: " + longestLine);
+        assertTrue(lines.size() <= 12,
+                () -> topic + " exceeds 12 chat messages including shared permission guidance");
+    }
+
+    private static void assertTopicFits(String topic) {
+        List<String> lines = CommandHelp.topicLines(topic);
+        assertNotNull(lines, "missing help topic " + topic);
         String longestLine = lines.stream().max(java.util.Comparator.comparingInt(String::length)).orElse("");
         assertTrue(longestLine.length() <= 80,
                 () -> topic + " has a line wider than 80 chars: " + longestLine);
@@ -282,6 +342,44 @@ class ItemGraphCommandsHelpTest {
                 "a unified filter can also return the sensitive item-flow observation");
         assertFalse(ItemGraphCommands.requiresAuditPermission(List.of("PLAYER_JOIN")));
 
+        com.itemgraph.audit.EventTaxonomy.definitions().stream()
+                .filter(definition -> definition.privacy()
+                        == com.itemgraph.audit.EventTaxonomy.PrivacyClass.SENSITIVE_LOCATION)
+                .forEach(definition -> assertTrue(
+                        ItemGraphCommands.requiresAuditPermission(definition.id()),
+                        definition.id() + " is SENSITIVE_LOCATION and must require itemgraph.audit"));
+        ItemGraphCommands.AuditPageSession itemFlowSession = new ItemGraphCommands.AuditPageSession(
+                java.util.UUID.randomUUID(), "ADD_ITEM", null, com.itemgraph.query.QueryWindow.unbounded(), 20,
+                null, null, null, null, null, null, null, "item flow lookup", System.currentTimeMillis());
+        assertTrue(itemFlowSession.requiresAuditPermission(), "taxonomy-backed sessions keep item-flow audit access");
+        assertTrue(ItemGraphCommands.pagePermissionsFor(itemFlowSession).contains(ItemGraphPermissions.AUDIT));
+        assertTrue(ItemGraphCommands.locationPermissionNodes(itemFlowSession, ItemGraphPermissions.PAGE)
+                .contains(ItemGraphPermissions.AUDIT));
+
+        for (String sensitiveEvent : List.of(
+                "PLACE_BLOCK", "BREAK_BLOCK", "CONTAINER_BREAK_COMPLETED", "CONTAINER_BREAK_UNRESOLVED",
+                "INTERACT_BLOCK", "INTERACT_BLOCK_ATTEMPT", "INTERACT_ENTITY", "INTERACT_ENTITY_COMPLETED",
+                "INTERACT_ENTITY_DENIED", "INTERACT_ENTITY_UNRESOLVED",
+                "EXPLOSION_BLOCK_CHANGE", "PISTON_BLOCK_MOVE", "PISTON_BLOCK_ATTEMPT",
+                "WORLD_EFFECT_ATTEMPT", "FLUID_BLOCK_CHANGE", "FIRE_BLOCK_CHANGE",
+                "ENDERMAN_BLOCK_MOVE", "FALLING_BLOCK_CHANGE", "WORLD_EFFECT_UNRESOLVED",
+                "KILL_ENTITY", "PROJECTILE_SPAWN_ACCEPTED",
+                "CRAFT", "SMELT", "ANVIL_RENAME", "ANVIL_REPAIR")) {
+            assertEquals(List.of(ItemGraphPermissions.LOOKUP, ItemGraphPermissions.AUDIT),
+                    ItemGraphCommands.lookupPermissionsForType(sensitiveEvent), sensitiveEvent);
+            assertTrue(ItemGraphCommands.requiresAuditPermission(List.of(sensitiveEvent)), sensitiveEvent);
+            ItemGraphCommands.AuditPageSession worldSession = new ItemGraphCommands.AuditPageSession(
+                    java.util.UUID.randomUUID(), sensitiveEvent, null,
+                    com.itemgraph.query.QueryWindow.unbounded(), 20, null,
+                    null, null, null, null, null, null, "world event lookup",
+                    ItemGraphPermissions.LOOKUP, ItemGraphCommands.requiresAuditPermission(sensitiveEvent),
+                    System.currentTimeMillis());
+            assertTrue(ItemGraphCommands.pagePermissionsFor(worldSession)
+                    .contains(ItemGraphPermissions.AUDIT), sensitiveEvent + " page permission");
+            assertTrue(ItemGraphCommands.locationPermissionNodes(worldSession, ItemGraphPermissions.PAGE)
+                    .contains(ItemGraphPermissions.AUDIT), sensitiveEvent + " location permission");
+        }
+
         ItemGraphCommands.AuditPageSession session = new ItemGraphCommands.AuditPageSession(
                 java.util.UUID.randomUUID(), "COMMAND_ATTEMPT", null,
                 com.itemgraph.query.QueryWindow.unbounded(), 20, null,
@@ -319,6 +417,16 @@ class ItemGraphCommandsHelpTest {
                 "ig lookup chat_message",
                 "itemgraph lookup player Alex COMMAND_ATTEMPT",
                 "ig lookup near minecraft:overworld 0 64 0 5 COMMAND_EXECUTED",
+                "ig lookup EXPLOSION_BLOCK_CHANGE",
+                "ig lookup near minecraft:overworld 0 64 0 5 EXPLOSION_BLOCK_CHANGE",
+                "ig lookup KILL_ENTITY",
+                "ig lookup near minecraft:overworld 0 64 0 5 PROJECTILE_SPAWN_ACCEPTED",
+                "ig lookup PLACE_BLOCK",
+                "ig lookup near minecraft:overworld 0 64 0 5 BREAK_BLOCK",
+                "ig lookup INTERACT_BLOCK",
+                "ig lookup CONTAINER_BREAK_COMPLETED",
+                "ig lookup INTERACT_BLOCK_ATTEMPT",
+                "ig lookup INTERACT_ENTITY_COMPLETED",
                 "ig lookup filters action.chat_message radius.5",
                 "ig lookup action.command_attempt radius.5",
                 "ig lookup BREAK_BLOCK",
@@ -339,6 +447,33 @@ class ItemGraphCommandsHelpTest {
                             || failure.getValue().getString().contains("itemgraph.audit"),
                     command + " failure text: " + failure.getValue().getString());
             verify(source, never()).sendSuccess(any(), anyBoolean());
+        }
+
+        ServerPlayer filteredPlayer = mock(ServerPlayer.class);
+        when(filteredPlayer.getUUID()).thenReturn(UUID.randomUUID());
+        CommandSourceStack filteredSource = sourceForPlayer(filteredPlayer);
+        for (String command : List.of(
+                "ig lookup filters action.explosion_block_change radius.5",
+                "ig lookup action.explosion_block_change radius.5",
+                "ig lookup filters action.kill_entity radius.5",
+                "ig lookup action.projectile_spawn_accepted radius.5",
+                "ig lookup filters action.craft radius.5",
+                "ig lookup action.craft_item radius.5",
+                "ig lookup filters action.smelt radius.5",
+                "ig lookup action.anvil_rename radius.5",
+                "ig lookup filters action.anvil_repair radius.5",
+                "ig lookup action.add_item radius.5",
+                "ig lookup filters action.remove_item radius.5",
+                "ig lookup action.hopper_insert radius.5",
+                "ig lookup filters action.death_drop radius.5",
+                "ig lookup action.add_item_ender radius.5")) {
+            assertEquals(0, dispatcher.execute(command, filteredSource), command);
+            ArgumentCaptor<Component> failure = ArgumentCaptor.forClass(Component.class);
+            verify(filteredSource).sendFailure(failure.capture());
+            assertTrue(failure.getValue().getString().contains("itemgraph.audit"),
+                    command + " failure text: " + failure.getValue().getString());
+            verify(filteredSource, never()).sendSuccess(any(), anyBoolean());
+            clearInvocations(filteredSource);
         }
 
         UUID ownerId = UUID.randomUUID();
@@ -432,7 +567,7 @@ class ItemGraphCommandsHelpTest {
 
         assertEquals(1, dispatcher.execute("itemgraph", source));
         String overview = String.join("\n", successes);
-        assertTrue(overview.contains("Trace: /ig trace item <query>"));
+        assertTrue(overview.contains("tasks: /ig help journeys"));
         assertTrue(overview.contains("/ig help journeys"));
         assertTrue(overview.contains("/ig help commands"));
         assertTrue(overview.contains("/ig inspect on"));
@@ -450,7 +585,7 @@ class ItemGraphCommandsHelpTest {
 
         successes.clear();
         assertEquals(1, dispatcher.execute("ig", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("Trace: /ig trace item <query>")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("tasks: /ig help journeys")));
         assertTrue(successes.stream().anyMatch(line -> line.contains("/ig help commands")));
     }
 
@@ -634,6 +769,38 @@ class ItemGraphCommandsHelpTest {
     }
 
     @Test
+    void parserOnlyCommandCorpusParsesAgainstRegisteredCommandTree() throws Exception {
+        Path root = Path.of("").toAbsolutePath();
+        while (root != null && !Files.exists(root.resolve("docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt"))) {
+            root = root.getParent();
+        }
+        assertNotNull(root, "test process must be able to locate the parser-only command corpus");
+        List<String> examples = Files.readAllLines(root.resolve(
+                        "docs/test-evidence/m9-admin-ux/quick-start-command-corpus.txt")).stream()
+                .map(String::strip)
+                .filter(line -> line.startsWith("/ig "))
+                .map(line -> line.substring(1))
+                .toList();
+        assertFalse(examples.isEmpty(), "parser-only corpus must contain /ig syntax examples");
+
+        CommandDispatcher<CommandSourceStack> dispatcher = dispatcher();
+        CommandSourceStack source = source();
+        for (String example : examples) {
+            assertParsedCompletely(dispatcher.parse(example, source), "parser-only example /" + example);
+        }
+    }
+
+    @Test
+    void sharedHelpPermissionLineNamesTheRequiredRootNode() {
+        assertTrue(String.join("\n", CommandHelp.overviewLines()).contains("Required: itemgraph.command"),
+                "the primary /ig help screen must name the required root node");
+        for (String topic : List.of("event", "explain", "trace", "gui")) {
+            assertTrue(String.join("\n", CommandHelp.topicLines(topic)).contains("Every /ig command needs itemgraph.command"),
+                    "the /ig help " + topic + " permission recipe must include the root node");
+        }
+    }
+
+    @Test
     void lookupHelpUsesTheSharedAuditEventCatalog() {
         String lookupHelp = String.join("\n", CommandHelp.topicLines("lookup"));
 
@@ -689,13 +856,42 @@ class ItemGraphCommandsHelpTest {
         List<String> successes = captureSuccesses(source);
 
         assertEquals(1, dispatcher.execute("itemgraph help", source));
-        assertTrue(successes.stream().anyMatch(line -> line.contains("Trace: /ig trace item <query>")));
+        assertTrue(successes.stream().anyMatch(line -> line.contains("tasks: /ig help journeys")));
 
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help commands", source));
         String commandsHelp = String.join("\n", successes);
         assertTrue(commandsHelp.contains("/ig help guide"));
         assertTrue(commandsHelp.contains("/ig ingest history"));
+
+        successes.clear();
+        assertEquals(1, dispatcher.execute("itemgraph help lookup world", source));
+        String worldHelp = String.join("\n", successes);
+        assertTrue(worldHelp.contains("EXPLOSION_BLOCK_CHANGE"));
+        assertTrue(worldHelp.contains("itemgraph.audit"));
+        assertTrue(worldHelp.contains("No row proves item quantity"));
+        assertTopicFits("lookup world");
+
+        successes.clear();
+        assertEquals(1, dispatcher.execute("itemgraph help lookup lifecycle", source));
+        String lifecycleHelp = String.join("\n", successes);
+        assertTrue(lifecycleHelp.contains("KILL_ENTITY"));
+        assertTrue(lifecycleHelp.contains("Throw/shoot are attempts"));
+        assertFalse(lifecycleHelp.contains("loot-generation"));
+        assertTrue(lifecycleHelp.contains("itemgraph.command.lookup"));
+        assertTrue(lifecycleHelp.contains("itemgraph.command +"));
+        assertTopicFits("lookup lifecycle");
+
+        successes.clear();
+        assertEquals(1, dispatcher.execute("itemgraph help lookup transformations", source));
+        String transformationHelp = String.join("\n", successes);
+        assertTrue(transformationHelp.contains("action.craft"));
+        assertTrue(transformationHelp.contains("no lineage edge"));
+        assertTrue(transformationHelp.contains("trades are not captured yet"));
+        assertTrue(transformationHelp.contains("grindstone"));
+        assertTrue(transformationHelp.contains("itemgraph.audit"));
+        assertTrue(transformationHelp.contains("itemgraph.command +"));
+        assertTopicFits("lookup transformations");
 
         successes.clear();
         assertEquals(1, dispatcher.execute("itemgraph help guide", source));

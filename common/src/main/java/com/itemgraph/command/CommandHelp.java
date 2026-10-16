@@ -20,7 +20,7 @@ public final class CommandHelp {
             "journeys inspect", "journeys trace", "journeys near", "journeys filters",
             "goto",
             "lookup", "lookup near", "lookup page", "lookup player", "lookup filters", "lookup provenance",
-            "lookup admin", "lookup lifecycle", "lookup transformations",
+            "lookup admin", "lookup world", "lookup lifecycle", "lookup transformations",
             "page",
             "trace", "trace item", "trace player", "trace container",
             "gui", "gui item", "gui player", "gui container", "inspect");
@@ -148,15 +148,14 @@ public final class CommandHelp {
                 "[ItemGraph] Dotted nodes do not inherit; grant each named permission.",
                 "[ItemGraph] Matrix/provider behavior: docs/SECURITY_AND_PERMISSIONS.md."));
         topics.put("journeys", List.of(
-                "[ItemGraph] Inspect: /ig help journeys inspect; trace: /ig help journeys trace.",
-                "[ItemGraph] Nearby: /ig help journeys near; filtered: /ig help journeys filters.",
-                "[ItemGraph] Trace observation IDs use /ig event <observationId>.",
-                "[ItemGraph] Inferred edge IDs use /ig explain <edgeId>.",
-                "[ItemGraph] Admin/creative outcome UUIDs use /ig event event:<uuid>.",
-                "[ItemGraph] Player paging: /ig page 2; console near returns one page.",
-                "[ItemGraph] Direct event pages have no nearby scope: /ig lookup page.",
-                "[ItemGraph] Roles: /ig help guide; exact nodes: /ig help permissions.",
-                "[ItemGraph] Example: /ig help journeys"));
+                "[ItemGraph] Inspect: /ig inspect on; click blocks or containers.",
+                "[ItemGraph] Trace: /ig trace item <query>; /ig help journeys trace.",
+                "[ItemGraph] Nearby: /ig lookup near; /ig help journeys filters.",
+                "[ItemGraph] Raw: /ig event <observationId>; edge: /ig explain <edgeId>.",
+                "[ItemGraph] Outcome UUID: /ig event event:<uuid>; page: /ig page 2.",
+                "[ItemGraph] Details: /ig help journeys inspect/trace/near/filters.",
+                "[ItemGraph] Roles: /ig help guide; access: /ig help permissions.",
+                "[ItemGraph] More: /ig help journeys <task>; Example: /ig help journeys trace."));
         topics.put("journeys inspect", List.of(
                 "[ItemGraph] Start: /ig inspect on; left-click blocks or right-click containers.",
                 "[ItemGraph] History is raw audit events; some rows are UNRESOLVED.",
@@ -230,7 +229,8 @@ public final class CommandHelp {
                 "[ItemGraph] Results are native OBSERVED evidence from ig_audit_events; limit defaults to 20 and is capped at 100.",
                 "[ItemGraph] /ig lookup near clamps radius to 1..1024 blocks and requires an exact dimension id.",
                 "[ItemGraph] Pages are 1-based; offsets are capped at 10,000 rows.",
-                "[ItemGraph] Focused help: /ig help lookup admin; /ig help lookup lifecycle.",
+                "[ItemGraph] Focused help: /ig help lookup admin; /ig help lookup world.",
+                "[ItemGraph] Also: /ig help lookup lifecycle; /ig help lookup transformations.",
                 "[ItemGraph] Transformations: /ig help lookup transformations.",
                 "[ItemGraph] Example: /ig lookup BREAK_BLOCK 50 120");
         topics.put("lookup", lookup);
@@ -239,6 +239,18 @@ public final class CommandHelp {
                 "[ItemGraph] dimension: exact resource location; x/y/z: block coordinates; radius is clamped to 1..1024 blocks.",
                 "[ItemGraph] Results are native OBSERVED audit events in the selected cube. The read-only query runs asynchronously.",
                 "[ItemGraph] Example: /ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 50 1440"));
+        topics.put("lookup world", List.of(
+                "[ItemGraph] Query with /ig lookup near, exact world, coordinates, event type.",
+                "[ItemGraph] Types: EXPLOSION_BLOCK_CHANGE, PISTON_BLOCK_MOVE.",
+                "[ItemGraph] Also: PISTON_BLOCK_ATTEMPT, FLUID_BLOCK_CHANGE, FIRE_BLOCK_CHANGE.",
+                "[ItemGraph] Also: ENDERMAN_BLOCK_MOVE, FALLING_BLOCK_CHANGE.",
+                "[ItemGraph] Coverage: WORLD_EFFECT_ATTEMPT, WORLD_EFFECT_UNRESOLVED.",
+                "[ItemGraph] Perms: itemgraph.command + itemgraph.command.lookup.",
+                "[ItemGraph] Protected coordinates also need itemgraph.audit.",
+                "[ItemGraph] Changes, attempts, and coverage gaps stay separate.",
+                "[ItemGraph] No row proves item quantity or a nearby player's action.",
+                "[ItemGraph] Example: FIRE_BLOCK_CHANGE.",
+                "[ItemGraph] Try: /ig lookup near minecraft:overworld 0 0 0 1 FIRE_BLOCK_CHANGE"));
         topics.put("lookup admin", List.of(
                 "[ItemGraph] Query ADMIN_ITEM_COMMAND_EFFECT; use near for coordinates.",
                 "[ItemGraph] Other outcomes: ADMIN_ITEM_COMMAND_ATTEMPT,",

@@ -149,7 +149,7 @@ requires `itemgraph.audit` in addition to the command's own node.
 
 | Moderator role | Additional exact nodes | Verify safely |
 | --- | --- | --- |
-| Ordinary event lookup | `itemgraph.command.lookup` | Every command also needs `itemgraph.command`. Chat/command, staff/admin/creative, and sensitive-location events (including block/container and entity/projectile events) also need `itemgraph.audit`. In a test world, verify `/ig lookup PLAYER_JOIN 10 60` succeeds and a moderator without audit permission cannot query `KILL_ENTITY`. |
+| Ordinary event lookup | `itemgraph.command.lookup` | Every command also needs `itemgraph.command`. Chat/command, staff/admin/creative, and sensitive-location events (including block/container, entity/projectile, and world/environment events) also need `itemgraph.audit`. In a test world, verify `/ig lookup PLAYER_JOIN 10 60` succeeds and a moderator without audit permission cannot query `KILL_ENTITY`. |
 | Flow investigation | `itemgraph.trace`, `itemgraph.event`, `itemgraph.explain`, `itemgraph.audit`; add `itemgraph.command.lookup` and `itemgraph.command.page` to continue a saved lookup | Run `/ig trace item "minecraft:stone" 10 60`; open an observation with `/ig event <observationId>` or an inferred edge with `/ig explain <edgeId>`. |
 | Block inspector | `itemgraph.command.inspect`; add `itemgraph.audit` for block-history results | Run `/ig inspect status`, then `/ig inspect on` in a test world. Block-history clicks need audit permission. |
 | Container flow browser | `itemgraph.command.inspect`, `itemgraph.gui`, `itemgraph.audit` | A player must run `/ig inspect on` and right-click a supported container; the GUI is player-only and read-only. |
@@ -171,6 +171,9 @@ parent inheritance.
 | What item movement involved this player? | `/ig trace player <playerName> [limit] [sinceMinutes]` | Item movements through player inventory endpoints. Duplicate player nodes are shown as candidates. |
 | What item flow touched this container? | `/ig trace container <x> <y> <z> [limit] [sinceMinutes]` | A trace for container nodes at those coordinates. Use `/ig gui container` when dimension disambiguation or visual paging is useful. |
 | What blocks, commands, or interactions were recorded nearby? | `/ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]` | Native observed audit events in a bounded cube. |
+| What changed due to an explosion, piston, fluid, fire, Enderman, or falling block? | Use `/ig help lookup world` for event IDs, then run `/ig lookup near <dimension> <x> <y> <z> <radius> <eventType> [limit] [sinceMinutes]`. | World-cause events require `itemgraph.command.lookup` and `itemgraph.audit`. Results distinguish observed block-state changes, no-effect attempts, and incomplete coverage. They do not prove item quantity or a nearby player's action. |
+| What entity kill or accepted projectile spawn was recorded? | `/ig help lookup lifecycle`, then `/ig lookup KILL_ENTITY 50 1440` or `/ig lookup PROJECTILE_SPAWN_ACCEPTED 50 1440` | Both event types require `itemgraph.command.lookup` and `itemgraph.audit` because they expose sensitive coordinates. `THROW_ITEM` and `SHOOT_ITEM` are attempts; an attempt does not prove a projectile spawned or hit. Entity spawn/despawn and projectile impact are not covered. |
+| What item left a player on death? | `/ig trace player <playerName> 50 1440` | The item-flow timeline may contain `DEATH_DROP` observations. It records item movement, not the killer, cause of death, or loot attribution. Requires `itemgraph.trace` and `itemgraph.audit`. |
 | What craft or smelt result was taken? | `/ig lookup CRAFT_OUTPUT_UNRESOLVED 50 1440` or `SMELT_OUTPUT_UNRESOLVED` | Requires `itemgraph.command` + `itemgraph.command.lookup` + `itemgraph.audit`. Shows the observed result item, output count, fingerprint, event ID, and `TRANSFORMATION_INPUTS_NOT_OBSERVED`; it does not prove the recipe or create a trace edge. `/ig event event:<evidence-uuid>` opens its detail. Legacy `CRAFT`/`SMELT` rows are unresolved and excluded from trace lineage. Anvil rename/repair remains a separate transition; trades, enchanting, brewing, smithing, grindstone, and loot are not covered. |
 | What did a staff item command attempt or change? | `/ig lookup near <dimension> <x> <y> <z> 32 ADMIN_ITEM_COMMAND_EFFECT 50 1440` (repeat with `ADMIN_ITEM_COMMAND_ATTEMPT`, `ADMIN_ITEM_COMMAND_FAILURE`, or `ADMIN_ITEM_COMMAND_UNRESOLVED`) | Staff-private event outcomes near the coordinates. The command record keeps the root and outcome, not selector expressions or command arguments. To inspect an item's fingerprint flow separately, run `/ig trace item "<item-id>" 50 1440`; this needs `itemgraph.trace` + `itemgraph.audit` and does not associate the item with a specific command or actor. A console command actor can remain `UNKNOWN`. If the item query lists several fingerprints, choose the matching fingerprint ID and run `/ig trace item "id:<fingerprint-id>" 50 1440`; this follows one fingerprint and does not combine component variants. |
 | What creative inventory or block action was recorded? | `/ig lookup near <dimension> <x> <y> <z> 32 CREATIVE_SLOT_EFFECT 50 1440` or `/ig lookup near <dimension> <x> <y> <z> 32 CREATIVE_BLOCK_RESULT 50 1440` | Staff-private action outcomes. Use `CREATIVE_SLOT_ATTEMPT`, `CREATIVE_BLOCK_ATTEMPT`, or `CREATIVE_BLOCK_UNRESOLVED` to check other outcomes. These records do not themselves prove a quantity change. |
@@ -202,7 +205,7 @@ For complete first-time routes, use the journey topics: `/ig help journeys inspe
 `/ig help journeys trace`, `/ig help journeys near`, or
 `/ig help journeys filters`. Each journey states the permission nodes, result
 meaning, next command, and checks for an empty result. The focused routes
-`/ig help lookup admin`, `/ig help lookup lifecycle`, and
+`/ig help lookup admin`, `/ig help lookup world`, `/ig help lookup lifecycle`, and
 `/ig help lookup transformations` cover those event families.
 `/ig help goto` explains that `[Go to ...]` is an in-game click action; do not type its token.
 
@@ -372,11 +375,15 @@ Unified lookup rows have source-prefixed IDs — use the right ID form for each:
 
 An empty query means no matching row exists in the evidence ItemGraph has stored for that
 query. It does not establish that nothing happened. Check the capture start time, event
-type, permissions, dimension, and target first. Current known limits include explosion
-and other environmental causes, Enderman causes, moving blocks, entity/projectile lifecycle
-and impact outcomes, item-entity merge/removal, zero-net container sessions where items
-are taken and returned before close, and arbitrary modded backpacks or inventories without
-an adapter. Container GUI evidence is a net change over the
+type, permissions, dimension, and target first. World/environment causes — explosions,
+pistons and other moving blocks, fluids, fire, Enderman block movement, and falling
+blocks — are captured on
+both loaders on the current development branch but not yet in a released JAR. Current
+known limits include arbitrary modded entity-caused placement (no shared authoritative
+result API exists in the pinned loaders), entity/projectile lifecycle and impact outcomes,
+item-entity merge/removal, zero-net container sessions where items are taken and returned
+before close, and arbitrary modded backpacks or inventories without an adapter. Container
+GUI evidence is a net change over the
 open/close session, not a record of each click. The feature status and evidence boundary
 are listed in [Feature parity inventory](FEATURE_PARITY_INVENTORY.md).
 
@@ -428,7 +435,7 @@ restart. ItemGraph validates this before opening its database and renders text
 on the server, so vanilla clients do not need the mod or network access. Missing
 keys fall back to English. Core query/detail/audit labels, inspection responses,
 flow-browser rows, controls, help entry text and navigation labels have translated
-entries. The explicit English fallback inventory currently contains 174 authored
+entries. The explicit English fallback inventory currently contains 203 authored
 source phrases, including detailed help topics. See
 [`CONFIGURATION.md`](CONFIGURATION.md) for exact evidence limits: the checked-in
 GriefLogger 1.2.10-1.21.1 artifact has no locale inventory, while the three
@@ -449,8 +456,8 @@ listed boundary; `Planned` means there is no user-facing implementation to use y
 | Fine-grained command permissions | `/ig help permissions`; [security and permissions](SECURITY_AND_PERMISSIONS.md) | Shipped | Exact per-surface nodes, explicit deny, level-2 fallback, and async/menu rechecks. |
 | Runtime, database, queues, and worker status | `/ig status` | Shipped | `itemgraph.command`; starts with a safe next step for a reported stop or warns that no stop still does not prove capture coverage, then labeled diagnostic counters; no calibrated health score; database-only counts can be unavailable; read-only. |
 | Database invariants and quantity audit | `/ig audit` | Shipped | `itemgraph.command` + `itemgraph.audit`; async, read-only. |
-| Native audit-event lookup | `/ig lookup <eventType>`, `near`, `player`, `page` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; protected message/command events also require `itemgraph.audit`; async, max 100 rows/page. |
-| Item transformations | `/ig help lookup transformations`; exact event lookup for output-only craft/smelt | Partial (#57, #162) | Craft/smelt results require `itemgraph.command` + `itemgraph.command.lookup` + `itemgraph.audit` and report output evidence as `UNRESOLVED`; they do not create lineage. Legacy `CRAFT`/`SMELT` rows are excluded from traces. Anvil rename/repair remains separate lineage. Trade, enchanting, brewing, smithing, grindstone, and loot remain planned. |
+| Native audit-event lookup | `/ig lookup <eventType>`, `near`, `player`, `page` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; `SENSITIVE_LOCATION` taxonomy rows—including block/container/entity interactions and world causes—plus private message/command rows require `itemgraph.audit`; async, max 100 rows/page. |
+| World and environment causes | `/ig help lookup world`; `/ig lookup near ... <eventType>` | In review (#55; no released JAR yet) | Requires `itemgraph.command.lookup` + `itemgraph.audit`; captures explosion, piston, fluid, fire, Enderman, and falling-block state changes, no-effect attempts, and unresolved coverage; no player or item-quantity inference. See [world-event capture](WORLD_EVENT_CAPTURE.md). |
 | Native audit events for one stored player name | `/ig lookup player <playerName> <eventType> [limit] [sinceMinutes]` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; protected event types also require `itemgraph.audit`; exact stored-name match. |
 | Admin item-command outcomes | `/ig help lookup admin`; `/ig lookup ADMIN_ITEM_COMMAND_EFFECT 50 1440` | Shipped | `itemgraph.command` + `itemgraph.command.lookup` + `itemgraph.audit`; the help topic names attempt/failure/unresolved alternatives. Records do not expose command arguments or selector values; item flow must be queried separately. |
 | Creative inventory/block outcomes | `/ig lookup near <dimension> <x> <y> <z> 32 CREATIVE_SLOT_EFFECT 50 1440`; quantity: `/ig lookup filters action.creative_item_create radius.32 time.24h` | Shipped | Audit lookup requires `itemgraph.command.lookup` + `itemgraph.audit`; quantity filters are player-only. Outcome records do not by themselves prove a quantity change. |
@@ -458,10 +465,11 @@ listed boundary; `Planned` means there is no user-facing implementation to use y
 | Craft, smelt, and anvil transformations | `/ig help lookup transformations`; `/ig lookup filters action.craft radius.32 time.24h` | Partial | `itemgraph.command` + `itemgraph.command.lookup` + `itemgraph.audit`; player-only radius filter. Repeat with `action.smelt`, `action.anvil_rename`, or `action.anvil_repair`. Craft/smelt are output-only unresolved evidence with no lineage edge; matching fingerprints do not prove one physical item. Other stations are tracked by #57. |
 | Broken-container slot-removal observations | `/ig lookup near <dimension> <x> <y> <z> 16 CONTAINER_BREAK_COMPLETED`; then `/ig trace container <x> <y> <z> 50 1440` | Partial | Lookup: `itemgraph.command.lookup` + `itemgraph.audit`; trace: `itemgraph.trace` + `itemgraph.audit`. Also query `CONTAINER_BREAK_UNRESOLVED`. Slot removals can identify source container but destination/recipient stays `UNKNOWN`. |
 | Continue the issuing player's saved lookup | `/ig page <page> [session]` | Shipped | `itemgraph.command` + `itemgraph.command.page` + the originating lookup permission; protected sessions retain `itemgraph.audit`; private 30-minute session. |
-| Unified action/user/item/time/radius lookup | `/ig lookup action... radius...` or `/ig lookup filters ...` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; player-only because radius is centered on the issuing player; require `itemgraph.audit` when filters can include protected events; max five filters. Time is relative (`time.1h`); absolute `after`/`before`/`between` and component predicates are not implemented. Console admins can use `/ig lookup near` with explicit dimension and coordinates. |
+| Unified action/user/item/time/radius lookup | `/ig lookup action... radius...` or `/ig lookup filters ...` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; player-only because radius is centered on the issuing player; `SENSITIVE_LOCATION` evidence requires `itemgraph.audit`; max five filters. Time is relative (`time.1h`); absolute `after`/`before`/`between` and component predicates are not implemented. Console admins can use `/ig lookup near` with explicit dimension and coordinates. |
 | Imported legacy-row provenance lookup | `/ig lookup provenance ...` | Shipped | `itemgraph.command` + `itemgraph.command.lookup`; imported `chats`/`commands` sources also require `itemgraph.audit`. |
 | Raw item-observation details | `/ig event <observationId>` or `/ig event event:<uuid>` | Shipped | `itemgraph.command` + `itemgraph.event` + `itemgraph.audit`; numeric IDs open observations; UUIDs open related observation, transformation, or unresolved evidence; read-only. |
 | Inference explanation and evidence links | `/ig explain <edgeId>` | Shipped | `itemgraph.command` + `itemgraph.explain` + `itemgraph.audit`; confidence is deterministic. |
+| Bounded incident export and sharing | No command is shipped; tracked by #37 | Planned | ItemGraph does not currently provide an incident export/share action. Keep full graph data in operator-controlled storage; #37 must deliver bounded redaction, verification, permissions, and the operator recipe before this is available. |
 | Item, player, and container chronology | `/ig trace item|player|container ...` | Shipped | `itemgraph.command` + `itemgraph.trace` + `itemgraph.audit`; async, read-only, capped at 100 hops. |
 | Vanilla menu flow browser | `/ig gui item|player|container ...` | Shipped | `itemgraph.command` + `itemgraph.gui` + `itemgraph.audit`; player-only, read-only, up to nine entries/page (also capped by `query.max_page_size`). Numbered chat entries map left-to-right to the first menu row; hovering an entry labels its exact menu slot and shows selectable details. Page controls are below. See [menu](test-evidence/m8-flow-browser/page-1-menu.png), [row labels](test-evidence/m8-flow-browser/page-1-companion.png), and [detail](test-evidence/m8-flow-browser/observation-detail.png) screenshots. |
 | In-world block history and container flow inspection | `/ig inspect [on|off|status]` | Shipped | `itemgraph.command` + `itemgraph.command.inspect`; protected audit evidence also requires `itemgraph.audit`. |

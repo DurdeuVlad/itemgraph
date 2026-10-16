@@ -1428,7 +1428,7 @@ public class InternalObservationService {
     private void runDatabaseHeartbeat() {
         DatabaseManager database = DatabaseManager.getInstance();
         com.itemgraph.db.DatabaseSettings settings = database.getSettings();
-        if (settings == null || !settings.isNetworkBackend()) {
+        if (settings == null || !settings.isNetworkBackend() || database.isStartupInitializationPending()) {
             return;
         }
         try {

@@ -16,6 +16,13 @@
     "CreativeSlotMutationMixin",
     "CommandDispatchCleanupMixin",
     "ProjectileMixin",
+    "ExplosionMixin",
+    "PistonBaseBlockMixin",
+    "FlowingFluidMixin",
+    "FireBlockMixin",
+    "EndermanTakeBlockGoalMixin",
+    "EndermanLeaveBlockGoalMixin",
+    "FallingBlockEntityMixin",
     "BucketItemMixin",
     "BucketItemAccessor",
     "ServerLevelMixin"

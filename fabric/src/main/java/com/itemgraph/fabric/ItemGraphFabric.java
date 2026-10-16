@@ -77,8 +77,12 @@ public final class ItemGraphFabric implements ModInitializer {
                 FABRIC.getConfigDir().resolve("itemgraph").resolve("lib"));
         config.operationalSettings().apply();
         CorrelationEngine.setDefaultWindowSeconds(config.groundBridgeMaxSeconds());
-        DatabaseManager.getInstance().initialize(config.databaseSettings());
+        DatabaseManager.getInstance().prepareSettings(config.databaseSettings());
+        // World-generation work can submit evidence while database setup is
+        // in progress. Open the bounded queue first; the worker retries until
+        // the database becomes available and persists accepted startup events.
         InternalObservationService.getInstance().start();
+        DatabaseManager.getInstance().initialize(config.databaseSettings());
         IngestionService.getInstance().setAdapter(new GriefLoggerAdapter(
                 migration.databasePath(), migration.enabled(), migration.autoDetected()));
         IngestionService.getInstance().start();

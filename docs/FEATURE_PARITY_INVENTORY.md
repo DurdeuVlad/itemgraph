@@ -1,8 +1,8 @@
 # GriefLogger and ItemGraph Feature Inventory
 
-**Reviewed:** 2026-10-06
+**Reviewed:** 2026-10-10
 
-**ItemGraph snapshot:** `main`, `c3e9bc969882724582ab9ac722f159384094f36a`
+**ItemGraph snapshot:** PR #130 branch `codex/issue55-world-causes-pr` rebased onto current `main`. This reviewed snapshot includes #55 world/environment capture and pre-world-load admission on both loaders; the PR remains unmerged and unreleased pending CI.
 
 **GriefLogger target:** published `1.2.10-1.21.1` Fabric and NeoForge artifacts, pinned in [`docs/grieflogger-fixtures/1.2.10-1.21.1.json`](grieflogger-fixtures/1.2.10-1.21.1.json)
 **GriefLogger source reviewed:** ref `26.2`, commit [`d315098b3f37317a5cddfbd75086f4f912f16a83`](https://github.com/DAQEM/GriefLogger/commit/d315098b3f37317a5cddfbd75086f4f912f16a83)
@@ -53,7 +53,7 @@ The official feature pages describe block actions, item usage, player sessions, 
 
 ## ItemGraph feature inventory
 
-This section was independently inventoried by a read-only subagent against the exact ItemGraph snapshot listed above and reconciled with the production source, current parity documents, test plan and open issues.
+This section was independently inventoried by a read-only reviewer against the ItemGraph worktree snapshot listed above and reconciled with the production source, current parity documents, test plan and open issues. The snapshot includes the current #55 implementation changes; do not treat unmerged worktree behavior as a released feature.
 
 ### Implemented capabilities
 
@@ -94,7 +94,7 @@ Closed since the previous review (2026-10-04): #24 and #31 (command/lookup/inspe
 | Measured staging budgets: idle baseline, third-party adapter workload, real moderator-query tick impact, stalled-JDBC shutdown bound | [#32](https://github.com/DurdeuVlad/itemgraph/issues/32) | Open; no open PR. Synthetic CI/local measurements are regression evidence, not staging-derived production budgets. Blocks #58 optimization selection and the #71 cutover gate. |
 | Shared event taxonomy and reason-code contract | [#35](https://github.com/DurdeuVlad/itemgraph/issues/35) | Open tracker; owns the taxonomy vocabulary and cannot close until #55, #56, and #57 are delivered or carry explicit unsupported dispositions. |
 | Exact modded inventory/automation endpoints | [#34](https://github.com/DurdeuVlad/itemgraph/issues/34) | Open; draft PR #123. Vanilla capability coverage does not establish arbitrary backpack, faction or third-party inventory adapters. |
-| World/environmental causes: explosions, fire/fluids, pistons, Enderman, falling blocks, non-player placement | [#55](https://github.com/DurdeuVlad/itemgraph/issues/55) | Open; draft PR #130. Exact-release fixture proves `PlaceBlockEvent` writer class presence only; non-player placement and actor-owner attribution remain unverified for 1.21.1 and are classified research-only until #71's byte-level classification resolves them. |
+| World/environmental causes: explosions, fire/fluids, pistons, Enderman, falling blocks | [#55](https://github.com/DurdeuVlad/itemgraph/issues/55) | Implemented on draft PR #130 (this branch) on both loaders for explosion changes, piston moves/attempts, fluid/fire changes, Enderman take/place, and falling blocks; merge, CI, and issue acceptance remain open. Events preserve attempts, observed changes, and unresolved causes separately; they do not infer a nearby player or create item quantity. Non-player placement actor attribution in GriefLogger's exact release remains research-only per #71. |
 | Entity/projectile lifecycle: spawn/removal/death, impact, item-entity merge/despawn | [#56](https://github.com/DurdeuVlad/itemgraph/issues/56) | Open; no open PR. #73/#75 attempt and interaction-outcome evidence is prerequisite, not lifecycle coverage. |
 | Item-processing/economy transformations: trades, enchanting, brewing, smithing, grindstone, loot | [#57](https://github.com/DurdeuVlad/itemgraph/issues/57) | Open; no open PR. Anvil rename/repair lineage is delivered; craft/smelt stay output-only unresolved evidence (#162/#163 closed). |
 | Cross-loader integration contracts and adapter fixtures | [#36](https://github.com/DurdeuVlad/itemgraph/issues/36) | Open; draft PR #124 (stacked on #123). NeoForge preview API exists; the published cross-loader contract is not complete. |

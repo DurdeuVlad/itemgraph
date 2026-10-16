@@ -35,27 +35,31 @@ class ItemGraphStatusSecurityTest {
         String previousLocale = com.itemgraph.i18n.ItemGraphLanguage.getLocale();
         com.itemgraph.i18n.ItemGraphLanguage.setLocale("en_us");
         try {
-            assertTrue(ItemGraphCommands.statusActionLine(false, InternalObservationService.CaptureState.ACTIVE, 0)
-                    .contains("DB disconnected"));
-            assertTrue(ItemGraphCommands.statusActionLine(true, InternalObservationService.CaptureState.RECOVERY_BLOCKED, 0)
-                    .contains("Recovery blocked"));
-            assertTrue(ItemGraphCommands.statusActionLine(true, InternalObservationService.CaptureState.RECOVERY_LOADING, 0)
-                    .contains("Wait before reading queue totals"));
-            assertTrue(ItemGraphCommands.statusActionLine(true, InternalObservationService.CaptureState.STOPPED, 0)
-                    .contains("Capture stopped"));
-            assertTrue(ItemGraphCommands.statusActionLine(true, InternalObservationService.CaptureState.ACTIVE, 3)
-                    .contains("Records dropped"));
-            String active = ItemGraphCommands.statusActionLine(true,
-                    InternalObservationService.CaptureState.ACTIVE, 0);
-            assertTrue(active.contains("coverage is not proven"));
+            assertTrue(ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.ACTIVE, false, 0, false, false)
+                    .contains("Check database settings and logs"));
+            assertTrue(ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.RECOVERY_BLOCKED, true, 0, false, false)
+                    .contains("Preserve recovery files"));
+            assertTrue(ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.RECOVERY_LOADING, true, 0, false, false)
+                    .contains("Wait for recovery loading"));
+            assertTrue(ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.STOPPED, true, 0, false, false)
+                    .contains("restore the capture worker"));
+            assertTrue(ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.ACTIVE, true, 3, false, false)
+                    .contains("Evidence was rejected or lost"));
+            assertTrue(ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.ACTIVE, true, 0, true, false)
+                    .contains("failed source-ingestion cycle"));
+            assertTrue(ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.ACTIVE, true, 0, false, true)
+                    .contains("failed correlation pass"));
+            String active = ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.ACTIVE,
+                    true, 0, false, false);
+            assertTrue(active.contains("confirm capture was active"));
             assertFalse(active.contains("healthy"), "status must not invent an unmeasured health score");
             assertTrue(List.of(
-                            ItemGraphCommands.statusActionLine(false, InternalObservationService.CaptureState.ACTIVE, 0),
-                            ItemGraphCommands.statusActionLine(true, InternalObservationService.CaptureState.RECOVERY_BLOCKED, 0),
-                            ItemGraphCommands.statusActionLine(true, InternalObservationService.CaptureState.RECOVERY_LOADING, 0),
-                            ItemGraphCommands.statusActionLine(true, InternalObservationService.CaptureState.STOPPED, 0),
-                            ItemGraphCommands.statusActionLine(true, InternalObservationService.CaptureState.DISABLED_BY_CONFIG, 0),
-                            ItemGraphCommands.statusActionLine(true, InternalObservationService.CaptureState.ACTIVE, 3),
+                            ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.ACTIVE, false, 0, false, false),
+                            ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.RECOVERY_BLOCKED, true, 0, false, false),
+                            ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.RECOVERY_LOADING, true, 0, false, false),
+                            ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.STOPPED, true, 0, false, false),
+                            ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.DISABLED_BY_CONFIG, true, 0, false, false),
+                            ItemGraphCommands.statusActionLine(InternalObservationService.CaptureState.ACTIVE, true, 3, false, false),
                             active)
                     .stream().allMatch(line -> line.length() <= 80),
                     "action guidance should fit narrow Minecraft chat");
@@ -68,19 +72,20 @@ class ItemGraphStatusSecurityTest {
     void statusActionMessagesHaveDutchAndTraditionalChineseTranslations() {
         String previousLocale = com.itemgraph.i18n.ItemGraphLanguage.getLocale();
         Set<String> actionKeys = Set.of(
-                "status.action.db_disconnected", "status.action.recovery_blocked",
+                "status.action.database_disconnected", "status.action.recovery_blocked",
                 "status.action.recovery_loading", "status.action.capture_stopped",
-                "status.action.capture_disabled", "status.action.dropped_records",
-                "status.action.no_stop_reported");
+                "status.action.capture_disabled", "status.action.dropped",
+                "status.action.ingestion_failed", "status.action.correlation_failed",
+                "status.action.verify_coverage");
         try {
             for (String locale : List.of("nl_nl", "zh_tw")) {
                 com.itemgraph.i18n.ItemGraphLanguage.setLocale(locale);
                 Set<String> missing = com.itemgraph.i18n.ItemGraphLanguage.keyFallbackInventory(locale);
                 assertTrue(java.util.Collections.disjoint(missing, actionKeys),
                         () -> locale + " is missing status action translations: " + missing);
-                String action = ItemGraphCommands.statusActionLine(true,
-                        InternalObservationService.CaptureState.ACTIVE, 0);
-                assertFalse(action.contains("No reported DB/capture stop"),
+                String action = ItemGraphCommands.statusActionLine(
+                        InternalObservationService.CaptureState.ACTIVE, true, 0, false, false);
+                assertFalse(action.contains("No stop reported"),
                         () -> locale + " unexpectedly fell back to English: " + action);
             }
         } finally {
@@ -140,6 +145,7 @@ class ItemGraphStatusSecurityTest {
         assertEquals(0, dispatcher.execute("ig status", source));
 
         assertTrue(successes.size() > 1, "runtime diagnostics must still print when database statistics are unavailable");
+        assertTrue(successes.get(0).contains("ACTION:"), "status must lead with its actionable next step");
         String status = String.join("\n", successes);
         assertTrue(status.contains("backend=sqlite"));
         assertTrue(status.contains("schemaVersion=0"));

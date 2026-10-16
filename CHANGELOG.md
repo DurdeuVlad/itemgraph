@@ -8,6 +8,24 @@ The project follows a simple pre-1.0 development changelog model.
 
 ### Added
 
+- **World and environmental causes (#55):** both loaders now record confirmed
+  explosion, piston, fluid, fire, Enderman block-movement, and falling-block
+  state changes into ItemGraph-owned storage. Bounded snapshots preserve
+  confirmed deltas and emit classified unresolved evidence when coverage is
+  partial or callbacks fail. Blocked piston results are recorded as
+  `PISTON_BLOCK_ATTEMPT` attempts separately from direct state deltas, and
+  fire/fluid writes that return without a block-type change persist as
+  `WORLD_EFFECT_ATTEMPT` with `outcome=UNCHANGED`. Throws with no confirmed
+  block delta remain `WORLD_EFFECT_UNRESOLVED`. Enderman rows carry typed
+  actor identity (`entity:<type> id=<uuid>`) separate from owner-provenance
+  status, and audit rows render world/entity actor kinds instead of an
+  unknown-player label. Events never invent player actors or item
+  quantities; sensitive-location rows enforce `itemgraph.audit` through the
+  taxonomy-driven lookup gate. The shared `EventTaxonomy` advances to
+  `4.1.0` for the new event contract. NeoForge stages world-event capture
+  at `ServerAboutToStartEvent` and Fabric opens capture before database
+  initialization in `SERVER_STARTING`, so startup world events stay queued
+  until the persistence worker can flush them.
 - **GriefLogger coexistence and automatic migration** (issue #203). ItemGraph
   and GriefLogger can now run on the same server: the SQLite driver ships as an
   opaque `META-INF/iglibs/` resource loaded in a private, platform-parented
