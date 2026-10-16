@@ -276,14 +276,14 @@ public final class CommandHelp {
                 "[ItemGraph] Craft/smelt output only; input is unknown; no lineage edge.",
                 "[ItemGraph] Types: CRAFT_OUTPUT_UNRESOLVED, SMELT_OUTPUT_UNRESOLVED.",
                 "[ItemGraph] Example: /ig lookup CRAFT_OUTPUT_UNRESOLVED 50 1440",
-                "[ItemGraph] Detail: /ig event event:<evidence-uuid>.",
                 "[ItemGraph] Filters: action.craft, action.smelt, action.anvil_rename/repair.",
                 "[ItemGraph] Rename/repair: /ig trace item <item-id>; /ig help journeys trace.",
                 "[ItemGraph] Lookup: itemgraph.command + itemgraph.command.lookup +",
                 "[ItemGraph] itemgraph.audit.",
                 "[ItemGraph] Trace follow-up needs itemgraph.trace + itemgraph.audit.",
-                "[ItemGraph] Legacy CRAFT/SMELT is unresolved; trades are not captured yet:",
-                "[ItemGraph] enchanting, brewing, smithing, grindstone, and loot."));
+                "[ItemGraph] Captured: trade, enchanting, brewing, smithing,",
+                "[ItemGraph] grindstone, loot; craft/smelt output stays unresolved.",
+                "[ItemGraph] Legacy CRAFT/SMELT is unresolved output-only evidence."));
         topics.put("lookup page", List.of(
                 "[ItemGraph] Syntax: /ig lookup page <page> <eventType> [limit] [sinceMinutes]",
                 "[ItemGraph] page is 1-based; limit defaults to 20 and is capped at 100; sinceMinutes is omitted for all history.",

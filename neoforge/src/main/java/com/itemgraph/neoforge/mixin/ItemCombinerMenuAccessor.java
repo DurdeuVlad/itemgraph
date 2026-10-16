@@ -1,0 +1,17 @@
+package com.itemgraph.neoforge.mixin;
+
+import net.minecraft.world.Container;
+import net.minecraft.world.inventory.ContainerLevelAccess;
+import net.minecraft.world.inventory.ItemCombinerMenu;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.gen.Accessor;
+
+/** Exposes the shared item-combiner input container and level access. */
+@Mixin(ItemCombinerMenu.class)
+public interface ItemCombinerMenuAccessor {
+    @Accessor("inputSlots")
+    Container itemgraph$getInputSlots();
+
+    @Accessor("access")
+    ContainerLevelAccess itemgraph$getAccess();
+}

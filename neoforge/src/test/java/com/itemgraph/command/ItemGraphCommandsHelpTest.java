@@ -202,7 +202,7 @@ class ItemGraphCommandsHelpTest {
         assertJourneyTopic("lookup transformations", "action.craft", "action.smelt", "action.anvil_rename",
                 "itemgraph.command + itemgraph.command.lookup +", "itemgraph.audit.",
                 "Trace follow-up needs itemgraph.trace + itemgraph.audit",
-                "/ig help journeys trace", "trades are not captured yet");
+                "/ig help journeys trace", "Captured: trade");
         String filterHelp = String.join("\n", CommandHelp.topicLines("lookup filters"));
         for (String detail : List.of("observation#N -> /ig event N", "other source IDs stay inline",
                 "Event detail: itemgraph.event + itemgraph.audit", "Pages: itemgraph.command.page",
@@ -817,7 +817,7 @@ class ItemGraphCommandsHelpTest {
         assertTrue(help.contains("itemgraph.command.lookup"));
         assertTrue(help.contains("itemgraph.audit"));
         assertTrue(help.contains("Legacy CRAFT/SMELT is unresolved"));
-        assertTrue(help.contains("trades are not captured yet"));
+        assertTrue(help.contains("Captured: trade"));
         assertTrue(help.contains("enchanting, brewing, smithing"));
     }
 
@@ -887,7 +887,7 @@ class ItemGraphCommandsHelpTest {
         String transformationHelp = String.join("\n", successes);
         assertTrue(transformationHelp.contains("action.craft"));
         assertTrue(transformationHelp.contains("no lineage edge"));
-        assertTrue(transformationHelp.contains("trades are not captured yet"));
+        assertTrue(transformationHelp.contains("Captured: trade"));
         assertTrue(transformationHelp.contains("grindstone"));
         assertTrue(transformationHelp.contains("itemgraph.audit"));
         assertTrue(transformationHelp.contains("itemgraph.command +"));

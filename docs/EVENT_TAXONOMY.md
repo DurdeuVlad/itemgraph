@@ -91,7 +91,8 @@ event coverage or full GriefLogger parity.
 | Projectile lifecycle | `PROJECTILE_LAUNCH`, `PROJECTILE_IMPACT` | Launch is the authoritative fresh-spawn of a projectile (owner captured when the event supplies it); impact uses NeoForge `ProjectileImpactEvent` and Fabric's `hitTargetOrDeflectSelf` dispatch — the game's own impact boundary on each loader. `quantity=NONE`; `SENSITIVE_LOCATION`. |
 | Item-entity lifecycle | `ITEM_ENTITY_SPAWN`, `ITEM_ENTITY_DESPAWN` | Item-entity join/removal with the exact observed stack count (`SIGNED_DELTA`). Merge removes the source entity as a `DISCARDED` despawn; pickup removal is captured by the pickup path. Spawn cause is unknown unless a death-drop scope supplies the victim. `SENSITIVE_LOCATION`. |
 | World/environment | `EXPLOSION_BLOCK_CHANGE`, `PISTON_BLOCK_MOVE`, `PISTON_BLOCK_ATTEMPT`, `WORLD_EFFECT_ATTEMPT`, `FLUID_BLOCK_CHANGE`, `FIRE_BLOCK_CHANGE`, `ENDERMAN_BLOCK_MOVE`, `FALLING_BLOCK_CHANGE`, `WORLD_EFFECT_UNRESOLVED` | Confirmed explosion, piston, fluid, fire, Enderman, and falling-block changes use bounded before/after block-state deltas. `PISTON_BLOCK_ATTEMPT` records a piston result with no observed state delta, while `WORLD_EFFECT_ATTEMPT` preserves a boolean world-write result that returned false. Both use `GAME_CALLBACK_ATTEMPT` reliability and make no state-delta claim. Incomplete callback results, candidate coverage, and queue rejection use unresolved rows. All use `quantity=NONE`, `SENSITIVE_LOCATION`, and require `itemgraph.audit` for lookup. |
-| Item processing | `CRAFT_OUTPUT_UNRESOLVED`, `SMELT_OUTPUT_UNRESOLVED` | A player took a craft/smelt result; output fingerprint/count and event metadata are observed, but input stacks are not. `UNRESOLVED`, `TRANSFORMATION_INPUTS_NOT_OBSERVED`, `quantity=UNKNOWN`; no lineage edge. |
+| Item processing | `CRAFT_OUTPUT_UNRESOLVED`, `SMELT_OUTPUT_UNRESOLVED`, `TRANSFORMATION_UNRESOLVED` | A player took a craft/smelt result; output fingerprint/count and event metadata are observed, but input stacks are not. `UNRESOLVED`, `TRANSFORMATION_INPUTS_NOT_OBSERVED`, `quantity=UNKNOWN`; no lineage edge. `TRANSFORMATION_UNRESOLVED` preserves a station effect whose transformation evidence could not be persisted (queue rejection or callback failure) with `TRANSFORMATION_EVIDENCE_NOT_SUBMITTED`. |
+| Transformation | `TRADE`, `ENCHANTING`, `BREWING`, `SMITHING`, `GRINDSTONE`, `LOOT_GENERATION` | Issue #57 station effects on the transformation surface: trades via NeoForge `TradeWithVillagerEvent` / Fabric `MerchantResultSlot.onTake` (offer costA/costB/result + merchant entity); enchanting via NeoForge `PlayerEnchantItemEvent` / Fabric `EnchantmentMenu.clickMenuButton` (pre/post item + lapis delta + applied enchantments); brewing via shared `BrewingStandBlockEntity.doBrew` mixin (NeoForge `PotionBrewEvent.Post` lacks level/position); smithing via shared `SmithingMenu.onTake` mixin (no documented take event exists); grindstone via NeoForge `GrindstoneEvent.OnTakeItem` / Fabric `GrindstoneMenu$4.onTake` (NeoForge's output endpoint is unobserved — `unobserved_output`, never fabricated); loot-table generation via shared `LootTable.getRandomItemsRaw` wrapper (all contexts — block/entity/fishing/chest/barter — with loot-table id from `Registries.LOOT_TABLE` reverse lookup and context actor). Cancelled operations persist `outcome=CANCELLED` with `TRANSFORMATION_CANCELLED`; unobserved inputs/outputs stay explicit rather than guessed. `SENSITIVE_LOCATION`. |
 
 The item-flow and transformation action IDs are cataloged on their own storage
 surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,
@@ -125,8 +126,12 @@ Issue #55 world-cause definitions are implemented on Fabric and NeoForge; see
 [`WORLD_EVENT_CAPTURE.md`](WORLD_EVENT_CAPTURE.md) for capture limits and
 remaining acceptance evidence. Issue #56 lifecycle definitions are implemented
 on both loaders with the fresh-spawn/removal/impact boundaries described above.
-Issue #57 remains `PLANNED` until its loader adapters, success/cancel/partial/unsupported
-fixtures, and acceptance checks establish support.
+Issue #57 transformation definitions are implemented on both loaders: trades,
+enchanting, brewing, smithing, grindstone, and loot-table generation record
+observed input/output endpoints through the shared `TransformationEvidence`
+builder, with `TRANSFORMATION_UNRESOLVED` fallback for queue rejection or
+callback failure and `TRANSFORMATION_CANCELLED`/`TRANSFORMATION_INPUTS_NOT_OBSERVED`
+for incomplete or hidden endpoints.
 
 Planned definitions are classified `UNRESOLVED` with
 `UNRESOLVED_CAUSE` reliability. Audit-event definitions always use
