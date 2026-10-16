@@ -158,6 +158,13 @@ public final class ContainerBreakConformanceFixture {
                     .thenWaitUntil(() -> helper.assertTrue(hasBreakRows(auditWatermark, observationWatermark,
                                 playerUuid, emptyPos, singlePos, doubleLeft, oneStackPos, missingActorPos),
                         "bounded asynchronous worker did not persist both container-break evidence groups"))
+                .thenWaitUntil(() -> helper.assertTrue(service.getQueueSize() == 0,
+                        "all accepted container-break evidence must drain from bounded queues"
+                                + " (queue=" + service.getQueueSize()
+                                + " backpressure=" + service.getNativeCaptureBackpressureQueueSize()
+                                + " enqueued=" + service.getTotalEnqueued()
+                                + " persisted=" + service.getTotalPersisted()
+                                + " dropped=" + service.getTotalDropped() + ")"))
                 .thenExecute(() -> {
                     helper.assertValueEqual(0, service.getQueueSize(),
                             "all accepted container-break evidence must drain from bounded queues");

@@ -11,10 +11,13 @@ import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.fml.loading.LoadingModList;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.minecraft.server.Bootstrap;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
@@ -54,7 +57,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void explicitInspectDenialClearsActiveInspectionAndDoesNotOpenHistory() {
+    void explicitInspectDenialDisablesModeNotifiesAndConsumesClick() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);
@@ -65,11 +68,14 @@ class InspectionListenerTest {
         AtomicInteger opens = new AtomicInteger();
         InspectionListener inspector = new InspectionListener(service,
                 (p, targetLevel, pos) -> { opens.incrementAndGet(); return 1; });
+        PlayerInteractEvent.LeftClickBlock event = leftClick(player, CONTAINER_POS);
 
-        inspector.onLeftClickBlock(leftClick(player, CONTAINER_POS));
+        inspector.onLeftClickBlock(event);
 
         assertFalse(service.isEnabled(playerUuid));
+        assertTrue(event.isCanceled(), "the revocation-detecting click must not break the inspected block");
         assertEquals(0, opens.get(), "the explicit node denial must win even when vanilla level 2 is present");
+        verify(player).sendSystemMessage(any(net.minecraft.network.chat.Component.class));
     }
 
     @Test
@@ -201,7 +207,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void permissionLossDisablesModeWithoutSuppressingVanillaInteraction() {
+    void permissionLossDisablesModeNotifiesAndConsumesDetectionClick() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = player(playerUuid, false);
@@ -215,9 +221,79 @@ class InspectionListenerTest {
             return 1;
         }).onRightClickBlock(event);
 
-        assertFalse(event.isCanceled());
+        assertTrue(event.isCanceled(), "the revocation-detecting click is consumed so nothing mutates unexpectedly");
+        assertEquals(InteractionResult.FAIL, event.getCancellationResult());
         assertFalse(service.isEnabled(playerUuid));
         assertEquals(0, opens.get());
+        var notice = org.mockito.ArgumentCaptor.forClass(net.minecraft.network.chat.Component.class);
+        verify(player).sendSystemMessage(notice.capture());
+        assertTrue(notice.getValue().getString().contains("permission was revoked"),
+                "the revocation notice must explain why inspection stopped");
+    }
+
+    @Test
+    void deniedAuditLeftClickIsConsumedAndPreservesTheBlock() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+        AtomicInteger opens = new AtomicInteger();
+        PlayerInteractEvent.LeftClickBlock event = leftClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> {
+            opens.incrementAndGet();
+            return 0;
+        }).onLeftClickBlock(event);
+
+        assertTrue(event.isCanceled(), "a stable permission denial must not let the click break the block");
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void deniedAuditNonContainerRightClickIsConsumed() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getBlockEntity(CONTAINER_POS)).thenReturn(mock(BlockEntity.class));
+        when(level.getBlockState(CONTAINER_POS)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        when(player.level()).thenReturn(level);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+        AtomicInteger opens = new AtomicInteger();
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> {
+            opens.incrementAndGet();
+            return 0;
+        }).onRightClickBlock(event);
+
+        assertTrue(event.isCanceled(), "a denied non-container right-click must not toggle or place");
+        assertEquals(InteractionResult.FAIL, event.getCancellationResult());
+        assertEquals(1, opens.get());
+    }
+
+    @Test
+    void deniedAuditContainerRightClickPreservesVanillaAccess() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = serverLevelWithContainer(CONTAINER_POS);
+        when(player.level()).thenReturn(level);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+        AtomicInteger opens = new AtomicInteger();
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, CONTAINER_POS);
+
+        listener(service, (openingPlayer, openingLevel, clickedPos) -> {
+            opens.incrementAndGet();
+            return 0;
+        }).onRightClickBlock(event);
+
+        assertFalse(event.isCanceled(), "rejected container right-clicks still open the chest normally");
+        assertEquals(1, opens.get());
     }
 
     @Test
@@ -292,7 +368,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void rejectedNonContainerRightClickPreservesGameplay() {
+    void transientlyRejectedNonContainerRightClickPreservesGameplay() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);
@@ -309,7 +385,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void offHandInspectionClickDoesNotOpenHistoryOrCancelInteraction() {
+    void offHandInspectionClickIsConsumedWithoutOpeningHistory() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);
@@ -320,8 +396,107 @@ class InspectionListenerTest {
 
         listener(service, (p, l, pos) -> { opens.incrementAndGet(); return 1; }).onRightClickBlock(event);
 
+        // The off-hand twin of an inspection click must not place or use the
+        // off-hand item, but it must not open a second history view either.
+        assertTrue(event.isCanceled());
+        assertEquals(0, opens.get());
+    }
+
+    @Test
+    void offHandClickFallsThroughWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = serverLevelWithContainer(CONTAINER_POS);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.RightClickBlock event = rightClick(player, InteractionHand.OFF_HAND, CONTAINER_POS);
+        AtomicInteger opens = new AtomicInteger();
+
+        listener(service, (p, l, pos) -> { opens.incrementAndGet(); return 1; }).onRightClickBlock(event);
+
         assertFalse(event.isCanceled());
         assertEquals(0, opens.get());
+    }
+
+    @Test
+    void rightClickItemIsConsumedWhileInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        when(player.blockPosition()).thenReturn(CONTAINER_POS);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        PlayerInteractEvent.RightClickItem event =
+                new PlayerInteractEvent.RightClickItem(player, InteractionHand.MAIN_HAND);
+
+        listener(service, (p, l, pos) -> 1).onRightClickItem(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(InteractionResult.FAIL, event.getCancellationResult());
+        verify(player.containerMenu).sendAllDataToRemote();
+    }
+
+    @Test
+    void rightClickItemPassesWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        when(player.blockPosition()).thenReturn(CONTAINER_POS);
+        PlayerInteractEvent.RightClickItem event =
+                new PlayerInteractEvent.RightClickItem(player, InteractionHand.MAIN_HAND);
+
+        listener(service, (p, l, pos) -> 1).onRightClickItem(event);
+
+        assertFalse(event.isCanceled());
+    }
+
+    @Test
+    void rightClickItemTwinIsConsumedAfterRevocationClearedTheMode() {
+        // The revocation-detecting block click clears the mode before its twin
+        // item-use packet arrives, so the consumed-interaction marker — not
+        // isEnabled — must still consume the twin.
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getGameTime()).thenReturn(100L);
+        when(player.level()).thenReturn(level);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.INSPECT));
+        InspectionListener inspector = listener(service, (p, l, pos) -> 1);
+        inspector.onRightClickBlock(rightClick(player, CONTAINER_POS));
+
+        when(player.blockPosition()).thenReturn(CONTAINER_POS);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        PlayerInteractEvent.RightClickItem twin =
+                new PlayerInteractEvent.RightClickItem(player, InteractionHand.MAIN_HAND);
+        inspector.onRightClickItem(twin);
+
+        assertFalse(service.isEnabled(playerUuid));
+        assertTrue(twin.isCanceled());
+    }
+
+    @Test
+    void rightClickItemPassesAfterConsumedMarkerExpires() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getGameTime()).thenReturn(0L);
+        when(player.level()).thenReturn(level);
+        service.markInteractionConsumed(playerUuid, 0L);
+
+        // A packet arriving well past the twin-packet window is an unrelated use.
+        when(level.getGameTime()).thenReturn(0L + InspectionService.CONSUMED_PACKET_WINDOW_TICKS + 1);
+        when(player.blockPosition()).thenReturn(CONTAINER_POS);
+        PlayerInteractEvent.RightClickItem event =
+                new PlayerInteractEvent.RightClickItem(player, InteractionHand.MAIN_HAND);
+        listener(service, (p, l, pos) -> 1).onRightClickItem(event);
+
+        assertFalse(event.isCanceled());
     }
 
     @Test
@@ -342,7 +517,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void rejectedOrdinaryBlockFallbackPreservesGameplay() {
+    void transientlyRejectedOrdinaryBlockFallbackPreservesGameplay() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);
@@ -383,7 +558,7 @@ class InspectionListenerTest {
     }
 
     @Test
-    void rejectedLeftClickPreservesBlockBreaking() {
+    void transientlyRejectedLeftClickPreservesBlockBreaking() {
         UUID playerUuid = UUID.randomUUID();
         service.setEnabled(playerUuid, true);
         ServerPlayer player = permittedPlayer(playerUuid);
@@ -449,6 +624,180 @@ class InspectionListenerTest {
         Field pendingClicks = ContainerSessionListener.class.getDeclaredField("pendingClicks");
         pendingClicks.setAccessible(true);
         assertTrue(((Map<?, ?>) pendingClicks.get(sessionListener)).isEmpty());
+    }
+
+    @Test
+    void entityInteractIsConsumedWhileInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        PlayerInteractEvent.EntityInteract event =
+                new PlayerInteractEvent.EntityInteract(player, InteractionHand.MAIN_HAND, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onEntityInteract(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(InteractionResult.FAIL, event.getCancellationResult());
+        verify(player.containerMenu).sendAllDataToRemote();
+        verify(player.connection, atLeastOnce())
+                .send(any(net.minecraft.network.protocol.Packet.class));
+    }
+
+    @Test
+    void entityInteractDenialSkipsEntityDataPacketWhenDataIsAllDefault() {
+        // getNonDefaultValues() is null when every data value is at its default
+        // (item frames, minecarts); the packet must not be constructed.
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        Entity target = entityTarget();
+        when(target.getEntityData().getNonDefaultValues()).thenReturn(null);
+        PlayerInteractEvent.EntityInteract event =
+                new PlayerInteractEvent.EntityInteract(player, InteractionHand.MAIN_HAND, target);
+
+        listener(service, (p, l, pos) -> 1).onEntityInteract(event);
+
+        assertTrue(event.isCanceled());
+        verify(player.connection, never())
+                .send(any(net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket.class));
+        verify(player.connection)
+                .send(any(net.minecraft.network.protocol.game.ClientboundSetPassengersPacket.class));
+    }
+
+    @Test
+    void entityInteractPassesWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        PlayerInteractEvent.EntityInteract event =
+                new PlayerInteractEvent.EntityInteract(player, InteractionHand.MAIN_HAND, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onEntityInteract(event);
+
+        assertFalse(event.isCanceled());
+    }
+
+    @Test
+    void entityInteractSpecificOffHandIsConsumedWhileInspecting() {
+        // Armor-stand equipping arrives as INTERACT_AT and can target the off
+        // hand; both must be consumed.
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        PlayerInteractEvent.EntityInteractSpecific event =
+                new PlayerInteractEvent.EntityInteractSpecific(
+                        player, InteractionHand.OFF_HAND, entityTarget(), Vec3.ZERO);
+
+        listener(service, (p, l, pos) -> 1).onEntityInteractSpecific(event);
+
+        assertTrue(event.isCanceled());
+        assertEquals(InteractionResult.FAIL, event.getCancellationResult());
+    }
+
+    @Test
+    void entityInteractTwinIsConsumedAfterRevocationClearedTheMode() {
+        // A revocation-detecting block click clears the mode before a paired
+        // entity packet arrives; the consumed-interaction marker must still
+        // consume it.
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getGameTime()).thenReturn(100L);
+        when(player.level()).thenReturn(level);
+        service.markInteractionConsumed(playerUuid, 100L);
+        assertFalse(service.isEnabled(playerUuid));
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        PlayerInteractEvent.EntityInteract event =
+                new PlayerInteractEvent.EntityInteract(player, InteractionHand.MAIN_HAND, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onEntityInteract(event);
+
+        assertTrue(event.isCanceled());
+    }
+
+    @Test
+    void entityAttackIsConsumedWhileInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        service.setEnabled(playerUuid, true);
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        AttackEntityEvent event = new AttackEntityEvent(player, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onAttackEntity(event);
+
+        assertTrue(event.isCanceled());
+        verify(player.containerMenu).sendAllDataToRemote();
+        verify(player.connection, atLeastOnce())
+                .send(any(net.minecraft.network.protocol.Packet.class));
+    }
+
+    @Test
+    void entityAttackPassesWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(player.level()).thenReturn(level);
+        AttackEntityEvent event = new AttackEntityEvent(player, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onAttackEntity(event);
+
+        assertFalse(event.isCanceled());
+    }
+
+    @Test
+    void entityAttackTwinIsConsumedAfterRevocationClearedTheMode() {
+        // A revocation-detecting click clears the mode before a paired attack
+        // packet arrives; the consumed-interaction marker must still consume it.
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = permittedPlayer(playerUuid);
+        Level level = mock(Level.class);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.getGameTime()).thenReturn(100L);
+        when(player.level()).thenReturn(level);
+        service.markInteractionConsumed(playerUuid, 100L);
+        assertFalse(service.isEnabled(playerUuid));
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        AttackEntityEvent event = new AttackEntityEvent(player, entityTarget());
+
+        listener(service, (p, l, pos) -> 1).onAttackEntity(event);
+
+        assertTrue(event.isCanceled());
+    }
+
+    private Entity entityTarget() {
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(CONTAINER_POS);
+        net.minecraft.network.syncher.SynchedEntityData data =
+                mock(net.minecraft.network.syncher.SynchedEntityData.class);
+        when(data.getNonDefaultValues()).thenReturn(java.util.List.of());
+        when(target.getEntityData()).thenReturn(data);
+        when(target.getPassengers()).thenReturn(java.util.List.of());
+        return target;
     }
 
     private InspectionListener listener(InspectionService inspections, InspectionListener.BlockHistoryOpener opener) {

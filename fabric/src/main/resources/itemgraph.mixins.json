@@ -29,6 +29,13 @@
     "ResultSlotMixin",
     "FurnaceResultSlotMixin",
     "AnvilMenuMixin",
+    "ExplosionMixin",
+    "PistonBaseBlockMixin",
+    "FlowingFluidMixin",
+    "FireBlockMixin",
+    "EndermanTakeBlockGoalMixin",
+    "EndermanLeaveBlockGoalMixin",
+    "FallingBlockEntityMixin",
     "ItemCombinerMenuAccessor"
   ]
 }

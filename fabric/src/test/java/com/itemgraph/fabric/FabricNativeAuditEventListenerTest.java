@@ -18,8 +18,9 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -65,6 +66,11 @@ class FabricNativeAuditEventListenerTest {
     void clearInspectionState() {
         inspections.clear();
         ItemGraphPermissions.setChecker(null);
+        FabricNativeAuditEventListener.clearPendingDrops();
+        // A denied handleEntityUse leaves denialRecordedByListener set until the
+        // next aggregate callback drains it — drain so no later test loses a row.
+        com.itemgraph.ingest.EntityInteractionEvidence.recordFabricCallbackResult(
+                null, InteractionResult.PASS);
     }
 
     @Test
@@ -462,7 +468,7 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void offHandBlockUseDoesNotInspectOrRecordGameplayEvidence() {
+    void offHandBlockUseIsConsumedWhileInspectingWithoutRecordingEvidence() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -478,13 +484,13 @@ class FabricNativeAuditEventListenerTest {
                     player, level, InteractionHand.OFF_HAND, BlockPos.ZERO, Direction.UP);
         }
 
-        assertEquals(InteractionResult.PASS, result);
+        assertEquals(InteractionResult.FAIL, result);
         assertEquals(0, opens.get());
         verifyNoInteractions(service);
     }
 
     @Test
-    void rejectedOrdinaryBlockFallbackPreservesGameplay() {
+    void transientlyRejectedOrdinaryBlockFallbackPreservesGameplay() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -503,7 +509,7 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void rejectedBlockInspectionPreservesGameplay() {
+    void transientlyRejectedBlockInspectionPreservesGameplay() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -520,7 +526,7 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void rejectedLeftClickInspectionPreservesBlockBreaking() {
+    void transientlyRejectedLeftClickInspectionPreservesBlockBreaking() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, true);
@@ -550,14 +556,56 @@ class FabricNativeAuditEventListenerTest {
     }
 
     @Test
-    void FabricInspectionPermissionLossDisablesMode() {
+    void FabricInspectionPermissionLossDisablesModeNotifiesAndConsumes() {
         UUID playerUuid = UUID.randomUUID();
         inspections.setEnabled(playerUuid, true);
         ServerPlayer player = playerWithPermission(playerUuid, false);
 
-        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, l, pos) -> 1, player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
         assertFalse(inspections.isEnabled(playerUuid));
+        verify(player).sendSystemMessage(any());
+    }
+
+    @Test
+    void deniedAuditNonContainerUseIsConsumed() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(mock(BlockEntity.class));
+        when(level.getBlockState(BlockPos.ZERO)).thenReturn(Blocks.CRAFTING_TABLE.defaultBlockState());
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> 0, player, level, BlockPos.ZERO, Direction.UP));
+    }
+
+    @Test
+    void rejectedContainerUsePreservesVanillaAccessOnAnyRejection() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+
+        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> 0, player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
+    }
+
+    @Test
+    void deniedAuditLeftClickIsConsumed() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.AUDIT));
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.tryOpenLeftClickInspection(
+                inspections, (p, l, pos) -> { opens.incrementAndGet(); return 0; },
+                player, mock(ServerLevel.class), BlockPos.ZERO);
+
+        assertEquals(InteractionResult.FAIL, result, "a stable permission denial must not let the click break the block");
+        assertEquals(1, opens.get());
     }
 
     @Test
@@ -568,12 +616,333 @@ class FabricNativeAuditEventListenerTest {
         AtomicInteger opens = new AtomicInteger();
         ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.INSPECT));
 
-        assertNull(FabricNativeAuditEventListener.tryOpenInspection(
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.tryOpenInspection(
                 inspections, (p, level, pos) -> { opens.incrementAndGet(); return 1; },
                 player, serverLevelWithContainer(), BlockPos.ZERO, Direction.UP));
 
         assertFalse(inspections.isEnabled(playerUuid));
         assertEquals(0, opens.get(), "the named inspect denial must override vanilla operator status");
+        verify(player).sendSystemMessage(any());
+    }
+
+    @Test
+    void offHandBlockUseIsConsumedWhileInspectingWithoutOpeningHistory() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        AtomicInteger opens = new AtomicInteger();
+
+        InteractionResult result = FabricNativeAuditEventListener.handleBlockUse(
+                inspections, (p, l, pos) -> { opens.incrementAndGet(); return 1; },
+                player, level, InteractionHand.OFF_HAND, BlockPos.ZERO, Direction.UP);
+
+        // The off-hand twin of an inspection click must not place or use the
+        // off-hand item, but it must not open a second history view either.
+        assertEquals(InteractionResult.FAIL, result);
+        assertEquals(0, opens.get());
+    }
+
+    @Test
+    void offHandBlockUsePassesWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+
+        assertEquals(InteractionResult.PASS, FabricNativeAuditEventListener.handleBlockUse(
+                inspections, (p, l, pos) -> 1,
+                player, serverLevelWithContainer(), InteractionHand.OFF_HAND, BlockPos.ZERO, Direction.UP));
+    }
+
+    @Test
+    void itemUseIsConsumedWhileInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.handleItemUse(
+                inspections, player, mock(ServerLevel.class), InteractionHand.MAIN_HAND).getResult());
+        verify(player.containerMenu).sendAllDataToRemote();
+    }
+
+    @Test
+    void itemUsePassesWhenNotInspecting() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+
+        assertEquals(InteractionResult.PASS, FabricNativeAuditEventListener.handleItemUse(
+                inspections, player, mock(ServerLevel.class), InteractionHand.MAIN_HAND).getResult());
+    }
+
+    @Test
+    void itemUseTwinIsConsumedAfterRevocationClearedTheMode() {
+        // The revocation-detecting block click clears the mode before its twin
+        // item-use packet arrives, so the consumed-interaction marker — not
+        // isEnabled — must still consume the twin.
+        UUID playerUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        ServerLevel level = serverLevelWithContainer();
+        when(level.getGameTime()).thenReturn(100L);
+        ItemGraphPermissions.setChecker((source, node) -> !node.equals(ItemGraphPermissions.INSPECT));
+
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.tryOpenInspection(
+                inspections, (p, l, pos) -> 1, player, level, BlockPos.ZERO, Direction.UP));
+        assertFalse(inspections.isEnabled(playerUuid));
+
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        assertEquals(InteractionResult.FAIL, FabricNativeAuditEventListener.handleItemUse(
+                inspections, player, level, InteractionHand.MAIN_HAND).getResult());
+    }
+
+    @Test
+    void itemUsePassesAfterConsumedMarkerExpires() {
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        inspections.markInteractionConsumed(playerUuid, 0L);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.getGameTime()).thenReturn(InspectionService.CONSUMED_PACKET_WINDOW_TICKS + 1L);
+
+        assertEquals(InteractionResult.PASS, FabricNativeAuditEventListener.handleItemUse(
+                inspections, player, level, InteractionHand.MAIN_HAND).getResult());
+    }
+
+    @Test
+    void entityUseIsDeniedWhileInspectingAndRecordsDeniedEvidence() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(new BlockPos(3, 70, 4));
+        when(target.getUUID()).thenReturn(targetUuid);
+        doReturn(EntityType.PIG).when(target).getType();
+        {
+            net.minecraft.network.syncher.SynchedEntityData data =
+                    mock(net.minecraft.network.syncher.SynchedEntityData.class);
+            when(data.getNonDefaultValues()).thenReturn(java.util.List.of());
+            when(target.getEntityData()).thenReturn(data);
+        }
+        when(target.getPassengers()).thenReturn(java.util.List.of());
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityUse(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.FAIL, result);
+        verify(player.containerMenu).sendAllDataToRemote();
+        verify(player.connection, org.mockito.Mockito.atLeastOnce())
+                .send(any(net.minecraft.network.protocol.Packet.class));
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        var event = captured.getValue();
+        assertEquals("INTERACT_ENTITY_DENIED", event.eventType());
+        assertEquals("minecraft:pig", event.subjectId());
+        assertEquals("outcome=canceled hand=main_hand target_uuid=" + targetUuid
+                + " target_support=callback_only target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT"
+                + " completion=callback=use_entity reason=INSPECTION_MODE"
+                + " held_item=minecraft:air held_count=0"
+                + " held_fingerprint=26e56ae8962a68034262aa43a61146e23dba92566718b4880f921a0c006748d6",
+                event.detail());
+    }
+
+    @Test
+    void entityUsePassesWhenNotInspecting() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(new BlockPos(3, 70, 4));
+        when(target.getUUID()).thenReturn(UUID.randomUUID());
+        doReturn(EntityType.PIG).when(target).getType();
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityUse(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.PASS, result);
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("INTERACT_ENTITY", captured.getValue().eventType());
+    }
+
+    @Test
+    void entityUseTwinIsDeniedAfterRevocationClearedTheMode() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(level.getGameTime()).thenReturn(100L);
+        inspections.markInteractionConsumed(playerUuid, 100L);
+        assertFalse(inspections.isEnabled(playerUuid));
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(new BlockPos(3, 70, 4));
+        when(target.getUUID()).thenReturn(UUID.randomUUID());
+        doReturn(EntityType.PIG).when(target).getType();
+        {
+            net.minecraft.network.syncher.SynchedEntityData data =
+                    mock(net.minecraft.network.syncher.SynchedEntityData.class);
+            when(data.getNonDefaultValues()).thenReturn(java.util.List.of());
+            when(target.getEntityData()).thenReturn(data);
+        }
+        when(target.getPassengers()).thenReturn(java.util.List.of());
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityUse(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.FAIL, result);
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertTrue(captured.getValue().detail().contains("reason=INSPECTION_WINDOW"));
+    }
+
+    @Test
+    void entityAttackIsDeniedWhileInspectingAndRecordsDeniedEvidence() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        UUID targetUuid = UUID.randomUUID();
+        inspections.setEnabled(playerUuid, true);
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        Entity target = attackTarget(targetUuid);
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityAttack(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.FAIL, result);
+        verify(player.containerMenu).sendAllDataToRemote();
+        verify(player.connection, org.mockito.Mockito.atLeastOnce())
+                .send(any(net.minecraft.network.protocol.Packet.class));
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        var event = captured.getValue();
+        assertEquals("ATTACK_ENTITY_DENIED", event.eventType());
+        assertEquals("minecraft:pig", event.subjectId());
+        assertEquals("outcome=canceled hand=main_hand target_uuid=" + targetUuid
+                + " target_support=callback_only target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT"
+                + " completion=callback=attack_entity reason=INSPECTION_MODE"
+                + " held_item=minecraft:air held_count=0"
+                + " held_fingerprint=26e56ae8962a68034262aa43a61146e23dba92566718b4880f921a0c006748d6",
+                event.detail());
+    }
+
+    @Test
+    void entityAttackPassesWhenNotInspecting() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        ServerLevel level = mock(ServerLevel.class);
+        Entity target = attackTarget(UUID.randomUUID());
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityAttack(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.PASS, result);
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void entityAttackTwinIsDeniedAfterRevocationClearedTheMode() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = playerWithPermission(playerUuid, true);
+        when(player.getGameProfile()).thenReturn(new com.mojang.authlib.GameProfile(playerUuid, "Alex"));
+        when(player.getItemInHand(InteractionHand.MAIN_HAND)).thenReturn(ItemStack.EMPTY);
+        player.containerMenu = mock(net.minecraft.world.inventory.AbstractContainerMenu.class);
+        player.connection = mock(net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(level.getGameTime()).thenReturn(100L);
+        inspections.markInteractionConsumed(playerUuid, 100L);
+        assertFalse(inspections.isEnabled(playerUuid));
+        Entity target = attackTarget(UUID.randomUUID());
+
+        InternalObservationService service = mock(InternalObservationService.class);
+        InteractionResult result;
+        try (MockedStatic<InternalObservationService> mocked = mockStatic(InternalObservationService.class)) {
+            mocked.when(InternalObservationService::getInstance).thenReturn(service);
+            result = FabricNativeAuditEventListener.handleEntityAttack(
+                    inspections, player, level, InteractionHand.MAIN_HAND, target);
+        }
+
+        assertEquals(InteractionResult.FAIL, result);
+        ArgumentCaptor<InternalObservationService.InternalAuditEvent> captured =
+                ArgumentCaptor.forClass(InternalObservationService.InternalAuditEvent.class);
+        verify(service).submitAuditEvent(captured.capture());
+        assertEquals("ATTACK_ENTITY_DENIED", captured.getValue().eventType());
+        assertTrue(captured.getValue().detail().contains("reason=INSPECTION_WINDOW"));
+    }
+
+    private Entity attackTarget(UUID targetUuid) {
+        Entity target = mock(Entity.class);
+        when(target.blockPosition()).thenReturn(new BlockPos(3, 70, 4));
+        when(target.getUUID()).thenReturn(targetUuid);
+        doReturn(EntityType.PIG).when(target).getType();
+        net.minecraft.network.syncher.SynchedEntityData data =
+                mock(net.minecraft.network.syncher.SynchedEntityData.class);
+        when(data.getNonDefaultValues()).thenReturn(java.util.List.of());
+        when(target.getEntityData()).thenReturn(data);
+        when(target.getPassengers()).thenReturn(java.util.List.of());
+        return target;
     }
 
     private ServerPlayer playerWithPermission(UUID uuid, boolean permitted) {
@@ -1077,6 +1446,7 @@ class FabricNativeAuditEventListenerTest {
         when(player.getY()).thenReturn(2.0);
         when(player.getZ()).thenReturn(3.0);
         when(itemEntity.isRemoved()).thenReturn(false);
+        when(itemEntity.onGround()).thenReturn(true);
         when(itemEntity.getItem()).thenReturn(stack);
         when(itemEntity.getX()).thenReturn(4.0);
         when(itemEntity.getY()).thenReturn(5.0);
@@ -1088,6 +1458,7 @@ class FabricNativeAuditEventListenerTest {
             FabricNativeAuditEventListener.beginPlayerDeathCapture(player);
             FabricNativeAuditEventListener.onItemEntityAdded(itemEntity, true);
             FabricNativeAuditEventListener.finishPlayerDeathCapture(player);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
         }
 
         ArgumentCaptor<InternalObservationService.InternalObservation> captured =
@@ -1096,5 +1467,190 @@ class FabricNativeAuditEventListenerTest {
         assertEquals("DEATH_DROP", captured.getValue().actionType());
         assertEquals(2, captured.getValue().amount());
         assertEquals(entityUuid.toString(), captured.getValue().itemEntityUuid());
+    }
+
+    private static ServerPlayer mockDropPlayer(UUID playerUuid) {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(player.level()).thenReturn(level);
+        when(level.isClientSide()).thenReturn(false);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.getUUID()).thenReturn(playerUuid);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerUuid, "Alex"));
+        when(player.getX()).thenReturn(1.0);
+        when(player.getY()).thenReturn(2.0);
+        when(player.getZ()).thenReturn(3.0);
+        return player;
+    }
+
+    private static ItemEntity mockFallingDrop(UUID entityUuid, ItemStack stack,
+                                              double x, double y, double z) {
+        ItemEntity entity = mock(ItemEntity.class);
+        when(entity.getUUID()).thenReturn(entityUuid);
+        when(entity.getItem()).thenReturn(stack);
+        when(entity.isRemoved()).thenReturn(false);
+        when(entity.onGround()).thenReturn(false);
+        when(entity.getDeltaMovement()).thenReturn(new net.minecraft.world.phys.Vec3(0, -0.4, 0));
+        when(entity.getX()).thenReturn(x);
+        when(entity.getY()).thenReturn(y);
+        when(entity.getZ()).thenReturn(z);
+        return entity;
+    }
+
+    private static void queueServerPlayerDrop(ServerPlayer player, ItemEntity entity, ItemStack stack) {
+        FabricNativeAuditEventListener.beginItemDropCapture(player);
+        FabricNativeAuditEventListener.onItemEntityAdded(entity, true);
+        FabricNativeAuditEventListener.finishItemDropCapture(player, entity, stack);
+    }
+
+    private static ArgumentCaptor<InternalObservationService.InternalObservation> submitCaptor() {
+        return ArgumentCaptor.forClass(InternalObservationService.InternalObservation.class);
+    }
+
+    @Test
+    void airborneDropWaitsForSettleBeforeRecordingGroundMovement() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        UUID playerUuid = UUID.randomUUID();
+        ServerPlayer player = mockDropPlayer(playerUuid);
+        UUID entityUuid = UUID.randomUUID();
+        ItemStack stack = new ItemStack(Items.DIAMOND, 5);
+        ItemEntity entity = mockFallingDrop(entityUuid, stack, 15.0, 65.0, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, entity, stack);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
+            verifyNoInteractions(service);
+
+            when(entity.onGround()).thenReturn(true);
+            when(entity.getY()).thenReturn(64.0);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service).submit(captured.capture());
+        assertEquals("DROP_ITEM", captured.getValue().actionType());
+        assertEquals("GROUND", captured.getValue().targetType());
+        assertEquals(64.0, captured.getValue().targetY(),
+                "a settled drop must record the rest position, not the spawn position");
+        assertEquals(entityUuid.toString(), captured.getValue().itemEntityUuid());
+    }
+
+    @Test
+    void removedPendingDropEmitsConfirmedAtLastPosition() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mockDropPlayer(UUID.randomUUID());
+        ItemStack stack = new ItemStack(Items.DIAMOND, 5);
+        ItemEntity entity = mockFallingDrop(UUID.randomUUID(), stack, 15.0, 65.0, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, entity, stack);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
+            verifyNoInteractions(service);
+
+            when(entity.isRemoved()).thenReturn(true);
+            when(entity.getY()).thenReturn(64.0);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis());
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service).submit(captured.capture());
+        assertEquals("DROP_ITEM", captured.getValue().actionType());
+        assertEquals(64.0, captured.getValue().targetY(),
+                "an absorbed or merged drop must confirm at its last known position");
+    }
+
+    @Test
+    void pendingDropTtlExpiryEmitsConfirmedAtFallbackPosition() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mockDropPlayer(UUID.randomUUID());
+        ItemStack stack = new ItemStack(Items.DIAMOND, 5);
+        ItemEntity entity = mockFallingDrop(UUID.randomUUID(), stack, 15.0, 65.0, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, entity, stack);
+            FabricNativeAuditEventListener.resolvePendingDrops(System.currentTimeMillis() + 6000);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service).submit(captured.capture());
+        assertEquals("DROP_ITEM", captured.getValue().actionType(),
+                "a drop that never reports a resting state must still confirm at TTL fallback");
+        assertEquals(65.0, captured.getValue().targetY());
+    }
+
+    @Test
+    void pickupOvertakingPendingDropEmitsDropAndPickupAtSameGroundPosition() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mockDropPlayer(UUID.randomUUID());
+        ItemStack stack = new ItemStack(Items.DIAMOND, 4);
+        ItemEntity entity = mockFallingDrop(UUID.randomUUID(), stack, 15.0, 64.7, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, entity, stack);
+            FabricNativeAuditEventListener.onItemPickedUp(player, entity, stack, 0);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service, times(2)).submit(captured.capture());
+        assertEquals(List.of("DROP_ITEM", "PICKUP_ITEM"),
+                captured.getAllValues().stream()
+                        .map(InternalObservationService.InternalObservation::actionType).toList(),
+                "the overtaken drop must emit before its pickup at the shared rest position");
+        assertEquals(captured.getAllValues().get(0).targetX(), captured.getAllValues().get(1).x());
+        assertEquals(captured.getAllValues().get(0).targetY(), captured.getAllValues().get(1).y());
+        assertEquals(captured.getAllValues().get(0).targetZ(), captured.getAllValues().get(1).z());
+    }
+
+    @Test
+    void requeuedEntityUuidEmitsUnresolvedForReplacedPendingDrop() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        InternalObservationService service = mock(InternalObservationService.class);
+        ServerPlayer player = mockDropPlayer(UUID.randomUUID());
+        ItemStack stack = new ItemStack(Items.DIAMOND, 5);
+        UUID sharedUuid = UUID.randomUUID();
+        ItemEntity first = mockFallingDrop(sharedUuid, stack, 15.0, 65.0, -20.0);
+        ItemEntity second = mockFallingDrop(sharedUuid, stack, 15.0, 65.0, -20.0);
+        CanonicalItem canonical = new CanonicalItem("minecraft:diamond", "fp-diamond", null, null, null);
+
+        try (MockedStatic<InternalObservationService> observations = mockStatic(InternalObservationService.class);
+             MockedStatic<ItemCanonicalizer> canonicalizer = mockStatic(ItemCanonicalizer.class)) {
+            observations.when(InternalObservationService::getInstance).thenReturn(service);
+            canonicalizer.when(() -> ItemCanonicalizer.canonicalizeStack(stack)).thenReturn(canonical);
+            queueServerPlayerDrop(player, first, stack);
+            queueServerPlayerDrop(player, second, stack);
+        }
+
+        ArgumentCaptor<InternalObservationService.InternalObservation> captured = submitCaptor();
+        verify(service).submit(captured.capture());
+        assertEquals("DROP_UNRESOLVED", captured.getValue().actionType());
+        assertEquals("UNKNOWN", captured.getValue().targetType());
+        assertTrue(new String(captured.getValue().rawData(), java.nio.charset.StandardCharsets.UTF_8)
+                        .contains("pending_entity_reused"),
+                "the replaced pending drop must record why its ground endpoint stayed unknown");
     }
 }

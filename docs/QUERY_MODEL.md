@@ -1,5 +1,8 @@
 # Query Model
 
+**Audience:** moderators and server admins. This is the command reference; for
+task-first recipes start with the [admin quick start](ADMIN_QUICK_START.md).
+
 ## Goals
 
 The ItemGraph query interface should let moderators answer:
@@ -11,6 +14,32 @@ The ItemGraph query interface should let moderators answer:
 - Why does ItemGraph think two observations are connected?
 
 The interface must be useful without dumping thousands of events into chat.
+
+## How to read this document
+
+- [Implemented surface](#implemented-surface-phases-610) is the exact command
+  grammar accepted today — nothing outside it parses.
+- [Arguments](#arguments) defines each placeholder once.
+- [Query design notes](#query-design-notes) documents per-command behavior;
+  entries explicitly labelled **Implemented** are live, and filters shown
+  without that label are design ideas.
+- [Time filters](#time-filters), [item matching modes](#item-matching-modes),
+  and [result representation](#result-representation) each list what is and is
+  not implemented — the "not implemented" lists are boundaries, not plans.
+
+A first incident usually follows this shape:
+
+```text
+/ig status                                   # confirm capture is active
+/ig trace item "minecraft:netherite_helmet" 20 1440   # follow one item type
+/ig event 8812                               # open one observation's detail
+/ig explain 9931                             # open one inferred edge's reasons
+```
+
+An empty result only means no stored row matched — check capture start time,
+event support, dimension, time range, and permissions before treating it as
+evidence that nothing happened. The `event`/`explain` arguments are the
+`observation#`/`edge#` IDs printed inside the query output.
 
 ## Command root
 
@@ -56,8 +85,8 @@ Everything below this heading and above "Not yet implemented" is live.
 `/itemgraph` is the full root; `/ig` is a redirect to the same node, so every form works
 under either name. Bare `/itemgraph` and bare `/ig` show a short task-first command
 overview. `/ig help commands` is a compact task hub pointing to detailed topics, and
-`/ig help <topic>` shows exact routes and one detailed topic; an unknown topic fails with the valid topic
-list. The root requires `itemgraph.command`; each command checks its named leaf permission
+`/ig help <topic>` shows exact routes and one detailed topic; an unknown topic fails with up to five
+closest topic suggestions and a pointer to `/ig help commands`. The root requires `itemgraph.command`; each command checks its named leaf permission
 and, for protected evidence, `itemgraph.audit` as listed in
 `docs/SECURITY_AND_PERMISSIONS.md`. When a permission provider has no explicit decision,
 ItemGraph falls back to vanilla permission level 2. An explicit provider denial blocks
@@ -120,13 +149,18 @@ worker's writer connection. The shared worker accepts at most 64 waiting queries
 requests receive an explicit queue-full failure. Full rationale and prior art:
 "Query execution: off-thread, reported back on-thread" in `docs/ARCHITECTURE.md`.
 
-A player command returns success as soon as the query is *accepted*; the answer arrives a
-tick or two later. Entity-less commands dispatched on the server thread, including vanilla
-RCON, receive an acceptance message and write completed results to the server log because the
-RCON response buffer is returned with the command. Entity-less off-thread callers can receive
-results synchronously within the five-second buffer timeout. Player queries have a five-second
-SQLite cancellation deadline as well: the progress handler interrupts a selective scan so
-the single query worker cannot be monopolized by one lookup.
+A player command returns success as soon as the query is *accepted* and tells the player so;
+the answer arrives a tick or two later. Entity-less commands dispatched on the server
+thread, including vanilla RCON, receive an acceptance message and write completed results
+to the server log because the RCON response buffer is returned with the command. Entity-less
+off-thread callers can receive results synchronously within the five-second buffer timeout.
+Player queries have a five-second SQLite cancellation deadline measured from dispatch: when
+the deadline fires mid-execution the failure says the query timed out, and when it fires
+before the query body begins — while queued or still opening its connection — the failure
+says it waited too long in the queue — never the raw JDBC cancellation text. The progress handler interrupts a
+selective scan so the single query worker cannot be monopolized by one lookup. If the
+originating permission is revoked before delivery, the completed result is replaced by an
+explicit permission-revoked failure on every async path.
 
 `/ig inspect` changes only per-player volatile state and returns immediately. A left-click
 uses the bounded query worker for an exact-position audit-history page. Right-clicking a
@@ -134,7 +168,9 @@ block entity implementing `Container` opens the vanilla flow browser and queries
 container item-flow timeline. Either half of a valid double chest resolves to the same
 canonical anchor used by container capture. Other right-clicks open the audit-history view:
 supported functional blocks select the clicked block, and ordinary blocks select the
-adjacent block on the clicked face. A rejected query does not consume the gameplay click.
+adjacent block on the clicked face. A query rejected for a missing grant consumes the
+click — except container right-clicks, which preserve vanilla interaction — while a
+transient rejection does not consume the click.
 The inspector excludes rows with a schema V19 supersession link, while ordinary lookup
 shows those immutable rows with the replacement break ID and reason.
 
@@ -211,7 +247,23 @@ exact UTC timestamp, and recorded endpoints. Raw NBT and component serialization
 included. Console output stays plain text. Recorded spatial endpoints may add a `[Go to ...]`
 action that works only for the requesting player through a short-lived, one-use token; the
 token stores the exact permission nodes for the originating query and checks them again on
-click. The target dimension must currently be loaded, and all target coordinates must be finite.
+click. The link's hover discloses that it teleports only the clicker. At most eight links
+are rendered; when more distinct locations were recorded a closing line reports how many
+were not shown. The target dimension must currently be loaded, and all target coordinates
+must be finite.
+
+**Chat density is a deliberate trade-off (recorded limit).** Each result row is its own
+chat message, so a `limit=100` lookup produces ~101 lines plus up to eight `[Go to ...]`
+link lines and the `[Previous]/[Next]` action row. There is no compact mode: per-row
+hovers carry evidence identity and must not be stripped to save lines. If flooding
+becomes a complaint, the designated remedy is a summary mode (count + top N + a
+"page for more" prompt), not thinner rows.
+
+`/ig page` continues a live in-player lookup session and therefore requires a player
+entity — it fails with `page.player_required` for console or RCON sources. Saved-session
+continuation is the only player-gated paging path: console/RCON can still fetch a page
+directly via `/ig lookup page <page> <eventType>` (rows go to the server log) or re-run
+the originating query with a tighter `limit` or narrower filters.
 
 ### Not-found handling
 
@@ -274,15 +326,29 @@ off`, and `/ig inspect status` are deterministic forms.
 
 While active, a server-side right-click on a block whose block entity implements `Container`
 opens that exact dimension/position in the read-only browser. After the browser query is
-accepted, the normal container screen and held-item use path do not run. If the bounded
-query queue rejects the request, vanilla interaction remains intact. Left-clicking any block
-continues to open that block's exact-position paginated audit-history view in chat.
+accepted, the normal container screen and held-item use path do not run. Left-clicking any
+block continues to open that block's exact-position paginated audit-history view in chat.
 Right-clicking a non-container block opens block history too: supported functional blocks
-select the clicked block; ordinary blocks select the block on the clicked face. If that
-query is rejected, vanilla interaction remains intact. The mode is per player UUID,
-requires `itemgraph.command` and `itemgraph.command.inspect` on command and click, and
-clears on logout and server stop. An unset node falls back to vanilla permission level 2;
-an explicit provider denial blocks access. Opening ItemGraph's menu is not recorded as a
+select the clicked block; ordinary blocks select the block on the clicked face. When an
+inspection request is not accepted, the outcome depends on the cause and the target: a
+missing downstream grant (`itemgraph.audit` for block history, `itemgraph.gui` for
+containers) is a stable denial that is already reported in chat, so the click is consumed
+and cannot break blocks or toggle functional blocks — except container
+right-clicks, which always fall through so a denied flow request still opens the chest
+normally. Transient rejections (a full query queue or an unavailable database) preserve
+vanilla interaction for every target. If `itemgraph.command.inspect` itself is revoked
+while the mode is on, the click that detects it disables inspection, tells the player the
+permission was revoked, and is consumed. Consumption covers the whole click: the off-hand
+`useItemOn` and the item-use twin packet are consumed while the mode is on or within five
+ticks of a consumed click, so held or off-hand items are never used on the inspected
+scene. Entity right-clicks are consumed the same way and recorded as denied
+`INTERACT_ENTITY_DENIED` evidence, so armor-stand equipping, shearing, milking,
+and name tags cannot mutate the scene either. Entity left-clicks (attacks) are
+likewise consumed and recorded as `ATTACK_ENTITY_DENIED` evidence, so a
+predicted hit cannot damage or pop the inspected entity. The mode is per player UUID, requires
+`itemgraph.command` and `itemgraph.command.inspect` on command and click, and clears on
+logout and server stop. An unset node falls back to vanilla permission level 2; an explicit
+provider denial blocks access. Opening ItemGraph's menu is not recorded as a
 container-transfer observation.
 
 ### View an observation

@@ -65,13 +65,46 @@ public final class ItemGraphFabric implements ModInitializer {
             throw new IllegalStateException("Could not load config/itemgraph.properties", e);
         }
         ItemCanonicalizer.setRegistryAccess(server.registryAccess());
+        boolean griefLoggerDetected = FABRIC.isModLoaded("grieflogger");
+        var migration = com.itemgraph.ingest.GriefLoggerMigration.decide(
+                config.griefLoggerIntegrationEnabled(),
+                config.griefLoggerAutoMigrate(),
+                griefLoggerDetected,
+                config.griefLoggerDatabasePathRaw(),
+                FABRIC.getGameDir(),
+                FABRIC.getConfigDir());
+        com.itemgraph.db.SqliteJdbc.initialize(
+                FABRIC.getConfigDir().resolve("itemgraph").resolve("lib"));
         config.operationalSettings().apply();
         CorrelationEngine.setDefaultWindowSeconds(config.groundBridgeMaxSeconds());
-        DatabaseManager.getInstance().initialize(config.databaseSettings());
+        DatabaseManager.getInstance().prepareSettings(config.databaseSettings());
+        // World-generation work can submit evidence while database setup is
+        // in progress. Open the bounded queue first; the worker retries until
+        // the database becomes available and persists accepted startup events.
         InternalObservationService.getInstance().start();
+        DatabaseManager.getInstance().initialize(config.databaseSettings());
         IngestionService.getInstance().setAdapter(new GriefLoggerAdapter(
-                config.griefLoggerDatabasePath(), config.griefLoggerIntegrationEnabled()));
+                migration.databasePath(), migration.enabled(), migration.autoDetected()));
         IngestionService.getInstance().start();
+        if (migration.enabled()
+                && java.nio.file.Files.isRegularFile(migration.databasePath())) {
+            LOGGER.info("GriefLogger source found at {} — queuing read-only historical import; "
+                    + "incremental sync follows on the ingestion worker", migration.databasePath());
+            IngestionService.getInstance().requestHistoricalImportAsync();
+        }
+        if (migration.liveMySql()) {
+            LOGGER.warn("GriefLogger is configured with useMysql=true; its live rows are in MySQL, "
+                    + "which ItemGraph cannot import. Only the stale on-disk SQLite file at {} is read.",
+                    migration.databasePath());
+        }
+        LOGGER.info("GriefLogger source integration: {}", migration.enabled()
+                ? migration.autoDetected()
+                    ? "ENABLED (GriefLogger mod detected; read-only auto-migration from "
+                        + migration.databasePath() + ")"
+                    : "ENABLED (read-only migration sync/import)"
+                : griefLoggerDetected
+                    ? "DISABLED (GriefLogger present but auto-migration/integration is off in config)"
+                    : "DISABLED by default; ItemGraph using native capture and owned storage");
         ItemGraphApiLifecycle.start(server);
     }
 
@@ -79,6 +112,7 @@ public final class ItemGraphFabric implements ModInitializer {
         ItemGraphCommands.clearPageSessions();
         ItemGraphApiLifecycle.stop(server);
         FabricContainerSessionListener.flushAll();
+        FabricNativeAuditEventListener.clearPendingDrops();
         com.itemgraph.command.InspectionService.getInstance().clear();
         // Wait for the importer to terminate before closing the database it writes to.
         IngestionService.getInstance().stop();

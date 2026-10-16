@@ -6,34 +6,349 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+### Added
+
+- **World and environmental causes (#55):** both loaders now record confirmed
+  explosion, piston, fluid, fire, Enderman block-movement, and falling-block
+  state changes into ItemGraph-owned storage. Bounded snapshots preserve
+  confirmed deltas and emit classified unresolved evidence when coverage is
+  partial or callbacks fail. Blocked piston results are recorded as
+  `PISTON_BLOCK_ATTEMPT` attempts separately from direct state deltas, and
+  fire/fluid writes that return without a block-type change persist as
+  `WORLD_EFFECT_ATTEMPT` with `outcome=UNCHANGED`. Throws with no confirmed
+  block delta remain `WORLD_EFFECT_UNRESOLVED`. Enderman rows carry typed
+  actor identity (`entity:<type> id=<uuid>`) separate from owner-provenance
+  status, and audit rows render world/entity actor kinds instead of an
+  unknown-player label. Events never invent player actors or item
+  quantities; sensitive-location rows enforce `itemgraph.audit` through the
+  taxonomy-driven lookup gate. The shared `EventTaxonomy` advances to
+  `4.1.0` for the new event contract. NeoForge stages world-event capture
+  at `ServerAboutToStartEvent` and Fabric opens capture before database
+  initialization in `SERVER_STARTING`, so startup world events stay queued
+  until the persistence worker can flush them.
+- **GriefLogger coexistence and automatic migration** (issue #203). ItemGraph
+  and GriefLogger can now run on the same server: the SQLite driver ships as an
+  opaque `META-INF/iglibs/` resource loaded in a private, platform-parented
+  classloader (`com.itemgraph.db.SqliteJdbc`), so no `org.sqlite.*` class sits
+  on ItemGraph's module or classpath to collide with the copy inside the
+  GriefLogger jar. NeoForge declares GriefLogger `type="optional"` with
+  `ordering="AFTER"`; Fabric lists it under `suggests`. When the GriefLogger
+  mod is detected at server start, ItemGraph enables the read-only source
+  bridge automatically (`grieflogger_auto_migrate`, default `true`), resolves
+  the source to GriefLogger's real `config/grieflogger/database.db`, queues
+  the historical import once, and keeps polling new rows on the existing
+  60-second ingestion worker — no restart-with-removed-jar dance required.
+  Set `grieflogger_auto_migrate=false` to run both mods with the bridge off,
+  or keep `grieflogger_integration_enabled=true` for a retained database after
+  the mod is removed. A GriefLogger `useMysql=true` configuration logs a
+  warning since only the on-disk SQLite file is importable. `/ig status`
+  reports the auto-detected migration state. Query cancellation no longer
+  binds `org.sqlite.*` types — the dispatcher interrupts timed-out queries
+  through JDBC `Statement.cancel()` plus a reflective connection interrupt.
+- **Opt-in automation adapter contract** (issue #34): `AutomationEndpoint`
+  provides restart-stable opaque inventory identities derived from mod,
+  dimension, position, slot policy, and side, plus opt-in Fabric
+  `FabricTransferStorageAdapter` and NeoForge `NeoForgeItemHandlerAdapter`
+  implementations. They preserve native transfer results, record exact
+  committed quantities, and suppress simulations and rollbacks. Fabric overflow
+  omits the whole transaction; source mod identity is checked against its
+  registered handle, and caller-created endpoints cannot add a location to the
+  opaque reference. Rejected transfers, zero movement, and impossible quantity
+  claims emit no movement evidence. Explicit `QUEUE_FULL` responses retry the
+  same event identity at most three times through a 128-entry bounded worker
+  queue; other outcomes are not replayed. This is in-memory retry only, and
+  pending retries can be interrupted by process shutdown. Vanilla hopper
+  transfers emit bounded endpoint-unknown net deltas on both loaders
+  (`HOPPER_INSERT`/`HOPPER_EXTRACT`); NeoForge `IItemHandler` capability deltas
+  persist as `CAPABILITY_INSERT`/`CAPABILITY_EXTRACT` at the changed endpoint,
+  and committed adapter-API transfers persist as `TRANSFER_ITEM`. All three
+  automation action IDs are now classified in `EventTaxonomy` instead of
+  rendering unclassified. Both loaders record accepted default-behavior
+  dispenser/dropper outputs (`DISPENSER_DROP`/`DROPPER_DROP`) with source,
+  item, amount, ground endpoint, and entity UUID. Snapshot bounds use
+  overflow-safe arithmetic, and unreadable prior hopper snapshots suppress
+  paired deltas. NeoForge adapters accept mod-owned opaque inventory IDs for
+  item-handler providers without deriving identity from an `ItemStack`.
+  Cross-loader test consumers move stacks through Fabric Transfer API and
+  NeoForge item-capability adapters between portable and shulker-like storage
+  and assert both persisted endpoint deltas. These are vanilla/API fixtures,
+  not third-party backpack integrations. Arbitrary modded inventories still
+  require an exercised supported adapter. Bounded queue saturation and
+  concurrent rejection tests verify the 128-entry queue and visible
+  `QUEUE_FULL`. Native hopper/dispenser captures use an additional 1,024-entry
+  bounded backpressure queue on the same database worker; `/ig status` reports
+  pending rows and explicit exhaustion, and shutdown flushes both queues.
+  Saturation tests verify native capture retention and persistence after the
+  primary 10,000-entry observation queue fills.
+
+### Changed
+
+- **Default `grieflogger_database_path` resolution.** The default value
+  `database.db` now resolves to `config/grieflogger/database.db` (where
+  GriefLogger actually writes) whenever the mod is detected or the file
+  exists, instead of `<game directory>/database.db`. Explicitly configured
+  paths are unchanged.
+- **Ingestion schema gate.** No change: a GriefLogger source file that exists
+  but lacks the supported schema continues to be skipped after one log line
+  per disappearance.
+
+## [0.4.0-beta.2] — 2026-10-10
+
+Second public beta of the ItemGraph 0.4 line. Ships the inspection-mode
+consumption and async-query feedback fixes, the Fabric drop settle-position
+correction, the promised retirement of the `-grieflogger-compatible`
+artifacts (only the two standard jars are published), and the M11
+reader-facing documentation rewrite.
+
+### Added
+
+- **Entity attacks are consumed in inspection mode** (issue #187). While
+  `/ig inspect` is active — or inside the five-tick consumed-packet window —
+  entity left-clicks are denied before damage runs, so a predicted hit can no
+  longer damage, knock back, or pop the inspected entity. The denial is audit
+  evidence: `ATTACK_ENTITY_DENIED` records carry the target UUID, hand, and
+  held-item fingerprint on both loaders. NeoForge cancels `AttackEntityEvent`
+  at `HIGHEST` priority and its LOWEST audit handler attributes the denial to
+  `INSPECTION_MODE`, `INSPECTION_WINDOW`, or `LOADER_CALLBACK_CANCELED`;
+  Fabric returns `FAIL` from `AttackEntityCallback` at `ServerPlayer.attack`
+  HEAD. Denied attacks resync the held stacks plus the target's pairing state
+  the same way denied interactions do. Accepted non-lethal attacks still
+  record no separate event; that evidence gap is issue #56's lifecycle scope.
+- **Inspection packet coverage** (issue #178). A consumed or denied inspection
+  right-click now consumes its whole packet set: the off-hand `useItemOn` and
+  the item-use twin (`RightClickItem` on NeoForge, `UseItemCallback` on
+  Fabric) can no longer place blocks, throw pearls, or use food on the
+  inspected scene — including the revocation-detecting click whose twin
+  arrives after the mode cleared (`InspectionService.markInteractionConsumed`).
+- **Entity interactions are consumed in inspection mode** (issue #185). While
+  `/ig inspect` is active, entity right-clicks — armor-stand equipping,
+  shearing, milking, leashing, name tags — are denied and consumed instead of
+  mutating the scene. The denied attempt is still audit evidence:
+  `INTERACT_ENTITY_DENIED` records carry the target UUID, hand, and held-item
+  fingerprint on both loaders. NeoForge cancels `EntityInteract` /
+  `EntityInteractSpecific` at `HIGHEST` priority with `InteractionResult.FAIL`;
+  Fabric returns `FAIL` from `UseEntityCallback`, which covers both `interact`
+  and `interactAt` packets; the listener-recorded denial suppresses the
+  aggregate callback decorator's duplicate denial row. The same five-tick
+  consumed-interaction marker covers entity packets that arrive just after the
+  mode cleared, and consumed interactions resync the held stacks plus the
+  target's entity data so client-predicted state reverts to server truth.
+- **Copy and affordance polish** (UX audit F6+F7+F10). `/ig inspect on` now
+  repeats the disable hint from the toggle path; `[Go to ...]` links disclose
+  their teleport consequence on hover; result sets past the eight-link cap
+  end with a "…N more locations not shown" line; and an unknown `/ig help`
+  topic suggests the closest topic names instead of dumping all 36.
+- **Player-facing async query feedback** (UX audit F1+F2+F4). `/ig` text
+  queries now acknowledge acceptance in chat; the dispatcher's five-second
+  deadline is reported as a query timeout or a queue wait instead of leaking
+  JDBC cancellation text; and a permission revoked before delivery replaces
+  the result with an explicit notice on every async path.
+- **Documented accepted UX limits** (UX audit F8+F9, issue #177).
+  `docs/QUERY_MODEL.md` now records the one-line-per-row chat-density
+  trade-off (with the designated summary-mode remedy) and that `/ig page`
+  requires a player entity for saved-session continuation — console/RCON
+  sources can still page directly via `/ig lookup page`.
+  `docs/CONFIGURATION.md` records the localization scope precisely: 217
+  catalog keys per locale but only the nine `source.*` hover labels are
+  translated — help topic bodies and overview lines ship English under
+  `nl_nl`/`zh_tw` by design.
+- **Visible flow-browser loading state** (UX audit F5). While a page turn or
+  detail open is in flight, the open flow-browser menu now shows the pending
+  state: the page label gains the `(loading)` suffix and the paging arrows are
+  greyed out, so controls no longer look live while clicks are gated. GUI data
+  queries now share the five-second deadline used by text queries, and a
+  rejected, failed, stale, or timed-out load restores the previous page rather
+  than leaving the menu stuck greyed. The `browser.loading_suffix` catalog
+  value now carries its intended leading space via a `\ ` escape.
+
 ### Fixed
 
-- **Complete admin permission recipes (#153):** `/ig help permissions` now states the root requirement and root-only status/help access, gives separate copyable grants for lookup, trace, event detail, explanations, inspection/history, direct and inspector container views, audit, ingest, and optional import, and documents the extra audit node for chat/command provenance. It explains explicit denies, level-2 fallback, non-inheriting dotted nodes, and points to the exact command matrix without inventing provider-specific grant syntax. No mod version bump or distributable jar.
+- **Fabric drops record the entity's rest position, not its spawn position**
+  (issue #166). `finishItemDropCapture` read the `ItemEntity` coordinates at
+  `ServerPlayer.drop` return — eye height plus throw offset — so a dropped-
+  then-recovered stack produced `DROP_ITEM` and `PICKUP_ITEM` rows on GROUND
+  nodes one block apart and the correlation bridge's node-equality filter
+  could never pair them. Fabric now queues a bounded pending drop like the
+  NeoForge listener and emits at the settle position (`onGround`, near-zero
+  delta movement, removal at last known position, or TTL expiry); a pickup
+  that overtakes a still-pending drop emits it at the shared pickup position,
+  and death-drop replays and deferred `/give` ground outputs settle the same
+  way. Fabric drop/pickup rows now also feed `ItemEntityTracker` so the
+  entity-UUID continuity match that NeoForge already uses can rank Fabric
+  candidates. Evicted or requeued pending entries stay
+  `DROP_UNRESOLVED`/`DEATH_DROP_UNRESOLVED` to UNKNOWN with the eviction
+  reason — never a fabricated ground transfer.
+- **Inspection-mode denial and revocation handling** (`docs/UX_AUDIT.md` finding F3).
+  On both NeoForge and Fabric, a click that detects a revoked
+  `itemgraph.command.inspect` grant now disables inspection, reports "Inspection
+  disabled: the itemgraph.command.inspect permission was revoked.", and is consumed
+  instead of falling through to vanilla — previously that click could break the
+  block being inspected. Requests denied for a missing downstream grant
+  (`itemgraph.audit`, or `itemgraph.gui` on containers) are now consumed for
+  left-clicks and non-container right-clicks so a denied inspection never mutates
+  the scene; container right-clicks still fall through so vanilla chest access is
+  preserved, and transient rejections (queue full, database unavailable) still
+  preserve ordinary interaction.
 
-- **Honest craft and smelt evidence (#162):** result-slot callbacks now preserve the observed output stack, quantity, fingerprint, actor, position, and event UUID as protected `UNRESOLVED` audit evidence. They no longer invent ingredient fingerprints or create false trace edges. Long modded display metadata is safely truncated without changing the fingerprint. Legacy `CRAFT`/`SMELT` rows are historical-only unresolved evidence and no longer display a source-to-result arrow. The differential profile and replay normalizer recognize the new output-only event; expensive M9 replay/load/export checks remain deferred to milestone closeout. Help and the quick start explain the lookup and limits. No mod version bump or distributable jar.
-- **First-time admin help/status UX (#153):** `/ig help commands` is a compact task hub with topic continuation; focused lookup topics cover admin item commands, entity/projectile lifecycle, and supported transformations. Journey help defines OBSERVED, INFERRED, AMBIGUOUS, UNRESOLVED, and PROVENANCE_ONLY with source-correct follow-up paths and exact grants. Filtered lookup distinguishes `observation#N` IDs accepted by `/ig event N` from audit, transformation, and imported references that remain inline; trace/explain, GUI, and saved-page requirements are explicit. Sensitive-location and staff-activity lookup types enforce `itemgraph.audit` from the shared event taxonomy, including saved pages and filtered lookups. Section 4 demonstrates only a short read-only path; broad parser cases live in an explicitly non-executable test corpus so placeholder IDs and stateful/import commands are not presented as a runnable incident. Incident export remains marked unavailable until #37 ships. No version bump or distributable jar.
-- **Projectile location privacy (taxonomy 4.0.0):** `THROW_ITEM` and `SHOOT_ITEM` expose player coordinates, so direct, paged, and filtered audit queries now require `itemgraph.audit`, as `KILL_ENTITY` and accepted projectile spawns already do. Taxonomy major version reflects the stricter privacy contract; ItemGraph remains 0.3.2 and no distributable jar is built.
-- **Issue #33 command-to-item evidence links:** admin and creative outcomes now list bounded UUIDs for accepted item observations, transformations, and unresolved before/after audit records. `/ig event event:<uuid>` opens each evidence type under the existing event and audit permissions; transformation details distinguish the affected player/entity from the command actor. Outcomes say `LINKED`, `PARTIAL_LINK_LIST`, `UNRESOLVED_EVIDENCE_RECORDED`, or `NO_ITEM_EVIDENCE_RECORDED` according to the captured records. Mod version remains 0.3.2; no distributable jar is built.
-- **Flow-browser row labels (#146):** display only the observed action or transformation kind in the numbered companion; internal parent, break, and evidence UUIDs remain out of the concise event label. Numbered companion entries map left-to-right to the first menu row, and each selectable item hover names its exact slot. Known transformation-related fingerprints use their item icon. The admin guide explains how to map entries to slots and read hovered detail-page fields. No version bump or distributable jar.
+### Added
+
+- **Admin-facing UX audit** (`docs/UX_AUDIT.md`). Flux-UX review of the `/ig`
+  command tree, in-game help, async query feedback, flow browser, in-world
+  inspection, permission denials, paging/location actions, localization, and
+  the operator docs. Records ten findings with implementation evidence —
+  including silent acceptance/timeout/revocation gaps in the async query path
+  and an inspect-mode revocation fall-through — plus a prioritized follow-up
+  backlog. No behavior changes.
+
+### Changed
+
+- **Reader-facing documentation reorganized around audiences** (issues
+  #191–#195). `docs/WRITING.md` records the writing contract: named
+  audiences, define-before-use, validator-pinned literals, and the protected
+  evidence-ledger list. The README and admin quick start now lead with
+  install, capture verification, and incident-to-command routing for
+  first-time admins; the evidence, query, taxonomy, permission,
+  configuration, GriefLogger-migration, and API docs name their audience and
+  front-load reading maps or checklists; the contributor docs gain
+  navigation signposts; and `/ig help commands` labels each route with the
+  question it answers (`ITEM LOST?`, `CHEST?`, `NEARBY?`, `WHY LINKED?`).
+  No command, permission, event, or schema contract changed.
+
+### Removed
+
+- **GriefLogger-compatible artifact variants retired.** ItemGraph replaces
+  GriefLogger and no longer ships `-grieflogger-compatible` jars or declares
+  the GriefLogger mod a usable companion. Both loaders now declare the
+  GriefLogger mod a hard conflict (NeoForge `type="incompatible"`, Fabric
+  `breaks`), store listings mark the relation `incompatible`, and releases
+  publish only the two standard jars. Migration path: remove the GriefLogger
+  mod jar, keep its `database.db`, and use the unchanged opt-in read-only
+  import (`grieflogger_integration_enabled` + `grieflogger_database_path`).
+
+## [0.4.0-beta.1] — 2026-10-06
+
+First public beta of the ItemGraph 0.4 line. The standalone GriefLogger
+1.2.10-1.21.1 feature-parity milestone (M8) is complete on both loaders, and
+this release also carries the M9 admin UX, named-permission, privacy, and
+reliability work delivered since 0.3.2. Four artifacts are published:
+standard and `-grieflogger-compatible` jars for NeoForge and Fabric. The
+`-grieflogger-compatible` jars are the last coexistence artifacts — they are
+deprecated, and from the next release ItemGraph ships only the standard jars
+and declares itself incompatible with the GriefLogger mod. Prefer the
+standard jar and remove the GriefLogger mod; keep its `database.db` file for
+the optional read-only import. ItemGraph is pre-1.0 and this build is a beta:
+the native-only production cutover (M10, issues #71/#72) and the open M9
+extension issues are explicitly not claimed here.
+
+### Upgrade notes
+
+- The database migrates automatically from schema V12 to V21 on first start.
+  Back up `itemgraph.db` (or the configured network database) before
+  upgrading; migrations run in order and preserve existing evidence.
+- Named `itemgraph.*` permission nodes are new; operator level 2 remains the
+  fallback, so existing servers keep working unchanged. Delegated permission
+  setups must additionally grant `itemgraph.audit` for `/ig event`,
+  `/ig explain`, `/ig trace`, the flow browser, and location-sensitive
+  lookups (kills, projectile throws/shots, chat and command provenance) —
+  these queries are now denied without it.
+- New optional language setting (`general.language` on NeoForge, `language`
+  on Fabric) selects server-side `en_us`, `nl_nl`, or `zh_tw` message text;
+  clients need no ItemGraph assets.
+- The event taxonomy is version 4.0.0; integrations reading ItemGraph event
+  IDs should review `docs/EVENT_TAXONOMY.md` before upgrading.
+
+### For beta testers
+
+Install on a test server, not production. ItemGraph is server-side; players
+need no mod. Use the standard jar and remove the GriefLogger mod jar if the
+server still runs it — ItemGraph replaces it, and this beta's
+`-grieflogger-compatible` jars are the last coexistence artifacts. To keep
+GriefLogger history, retain its `database.db` file for the import in step 10.
+Fabric also needs Fabric API; NeoForge 21.1.x needs no extra dependency.
+First start migrates the database to schema V21 (automatic; back up first).
+
+Worth exercising, roughly in order:
+
+1. `/ig` with no arguments — a five-line task overview. Follow
+   `/ig help commands`, `/ig help journeys`, `/ig help permissions`.
+2. Give a non-op test account only `itemgraph.command`: help and
+   `/ig status` should work; `/ig lookup` should fail with the exact missing
+   node named.
+3. Drop an item and pick it up (NeoForge): `/ig trace item diamond` should
+   show player → ground → player, and `/ig explain <edgeId>` prints the
+   deterministic evidence behind the inferred edge.
+4. `/give` yourself an item — the outcome appears as admin-mutation audit
+   evidence with linked item observation IDs (`/ig event event:<uuid>`).
+5. Fill a chest, then break it: `/ig inspect` on the position should show
+   per-slot contents removed by the break.
+6. `/ig inspect on`, click blocks and double chests — one paged timeline per
+   position; `/ig inspect off` when done.
+7. `/ig status` leads with an ACTION line; `/ig audit` reports invariant
+   health (`HEALTHY` when satisfied).
+8. `/ig lookup` accepts the direct GriefLogger filter form
+   (`action`, `user`, `radius`, `time`, `include`/`exclude`, `page`), e.g.
+   `/ig lookup action.remove_item user.<name> radius.10 time.1h`.
+9. Set `general.language` (NeoForge) or `language` (Fabric) to `nl_nl` or
+   `zh_tw` and restart — chat text localizes server-side.
+10. Optional: point `grieflogger_database_path` at a copy of a real
+    GriefLogger SQLite database with `grieflogger_integration_enabled=true`
+    and confirm historical rows surface in lookups (import is read-only).
+
+Known boundaries — not bugs, tracked under open issues:
+
+- Fabric drop→pickup ground bridging still keys to spawn position; the
+  NeoForge fix is shipped, Fabric follows under #166.
+- Modded inventories/hopper-adjacent adapters beyond vanilla coverage (#34),
+  world/environmental causes (#55), entity/projectile lifecycle detail (#56),
+  trade/enchant/brew/smith/loot transformations (#57), `/ig export` (#37),
+  first-class ambiguous/unresolved query surfaces (#44), and
+  component-aware/absolute-time filters (#45) are open M9 work.
+- Craft/smelt records keep output-only UNRESOLVED evidence by design (#162).
+- `zh_cn` is not a selectable locale (#136 scope was en_us/nl_nl/zh_tw).
+- CI performance numbers are regression evidence, not production budgets;
+  staging-derived budgets are open under #32/#58.
+
+Reporting: open a GitHub bug report with `0.4.0-beta.1` as the version, your
+loader + Minecraft 1.21.1 + Java versions, the smallest reproduction that
+shows the problem, and sanitized `/ig status` or command output. Do not
+paste real player data, private coordinates, databases, or unredacted logs.
+
+### Fixed
+
+- **Drop ground endpoint at rest position (#166, NeoForge):** drop
+  observations now record the `GROUND` node where the item entity settles —
+  on-ground, near-zero velocity, removal, or a five-second cap — instead of
+  the eye-height spawn point. Same-spot drop→pickup pairs now share one
+  ground node, so the entity-UUID continuity path ranks the real pickup
+  (live-verified at confidence 0.9990 with an `ACTIVE` inferred edge). The
+  equivalent Fabric path keeps the defect; #166 stays open for it.
+- **Complete admin permission recipes (#153):** `/ig help permissions` now states the root requirement and root-only status/help access, gives separate copyable grants for lookup, trace, event detail, explanations, inspection/history, direct and inspector container views, audit, ingest, and optional import, and documents the extra audit node for chat/command provenance. It explains explicit denies, level-2 fallback, non-inheriting dotted nodes, and points to the exact command matrix without inventing provider-specific grant syntax.
+
+- **Honest craft and smelt evidence (#162):** result-slot callbacks now preserve the observed output stack, quantity, fingerprint, actor, position, and event UUID as protected `UNRESOLVED` audit evidence. They no longer invent ingredient fingerprints or create false trace edges. Long modded display metadata is safely truncated without changing the fingerprint. Legacy `CRAFT`/`SMELT` rows are historical-only unresolved evidence and no longer display a source-to-result arrow. The differential profile and replay normalizer recognize the new output-only event; expensive M9 replay/load/export checks remain deferred to milestone closeout. Help and the quick start explain the lookup and limits.
+- **First-time admin help/status UX (#153):** `/ig help commands` is a compact task hub with topic continuation; focused lookup topics cover admin item commands, entity/projectile lifecycle, and supported transformations. Journey help defines OBSERVED, INFERRED, AMBIGUOUS, UNRESOLVED, and PROVENANCE_ONLY with source-correct follow-up paths and exact grants. Filtered lookup distinguishes `observation#N` IDs accepted by `/ig event N` from audit, transformation, and imported references that remain inline; trace/explain, GUI, and saved-page requirements are explicit. Sensitive-location and staff-activity lookup types enforce `itemgraph.audit` from the shared event taxonomy, including saved pages and filtered lookups. Section 4 demonstrates only a short read-only path; broad parser cases live in an explicitly non-executable test corpus so placeholder IDs and stateful/import commands are not presented as a runnable incident. Incident export remains marked unavailable until #37 ships.
+- **Projectile location privacy (taxonomy 4.0.0):** `THROW_ITEM` and `SHOOT_ITEM` expose player coordinates, so direct, paged, and filtered audit queries now require `itemgraph.audit`, as `KILL_ENTITY` and accepted projectile spawns already do. Taxonomy major version reflects the stricter privacy contract.
+- **Issue #33 command-to-item evidence links:** admin and creative outcomes now list bounded UUIDs for accepted item observations, transformations, and unresolved before/after audit records. `/ig event event:<uuid>` opens each evidence type under the existing event and audit permissions; transformation details distinguish the affected player/entity from the command actor. Outcomes say `LINKED`, `PARTIAL_LINK_LIST`, `UNRESOLVED_EVIDENCE_RECORDED`, or `NO_ITEM_EVIDENCE_RECORDED` according to the captured records.
+- **Flow-browser row labels (#146):** display only the observed action or transformation kind in the numbered companion; internal parent, break, and evidence UUIDs remain out of the concise event label. Numbered companion entries map left-to-right to the first menu row, and each selectable item hover names its exact slot. Known transformation-related fingerprints use their item icon. The admin guide explains how to map entries to slots and read hovered detail-page fields.
 - **Protected evidence query gating:** `/ig event`, `/ig explain`, `/ig trace`, and the flow browser now require `itemgraph.audit` together with their existing leaf permission before any query or candidate lookup. Async delivery, GUI pages/details, menu validity/clicks, and page-derived location tokens retain and recheck the complete permission set, preventing protected observation or inferred-edge metadata from leaking through candidates, counts, errors, or navigation. Explain hover detail is attached only to its inferred summary line; cited observation rows keep their observed wording.
-- **Issue #140 empty-container and unavailable-actor semantics:** an empty successful snapshot now records only its zero-content completion, without an unresolved ground-drop relation. `CONTAINER_BREAK_UNRESOLVED` is taxonomy actor `UNKNOWN`; lookup labels missing player identity `(actor unavailable)` rather than attributing the event to a player. The redacted conformance report and validator now require drop-link outcomes only for nonempty breaks. No version bump or distributable jar.
-- **Status capture and recovery clarity (#155):** `/ig status` now distinguishes disabled capture, active intake, recovery loading, recovery failure, and a stopped worker, and reports an unknown recovery count when the spool has not been read or could not be read. Runtime diagnostics print before asynchronous database statistics, so a failed stats query cannot hide capture and queue state. Help and the admin guide define the state meanings, counter units, reset windows where known, and safe next steps without inventing health thresholds. No version bump or distributable jar.
-- **First-time admin workflows (#156–#158):** `/ig help journeys` links four detailed inspect, trace, nearby-audit, and filtered-lookup topics. Each gives exact permission nodes, evidence meaning, a follow-up command, and safe checks for empty results. Trace observations use numeric IDs; `event:<uuid>` is for related IDs from admin/creative outcome details. Ingest help describes GriefLogger sync as optional and native capture as automatic. The quick start adds complete permission bundles and documents shipped feature boundaries without transient PR/CI status. No version bump or distributable jar.
+- **Issue #140 empty-container and unavailable-actor semantics:** an empty successful snapshot now records only its zero-content completion, without an unresolved ground-drop relation. `CONTAINER_BREAK_UNRESOLVED` is taxonomy actor `UNKNOWN`; lookup labels missing player identity `(actor unavailable)` rather than attributing the event to a player. The redacted conformance report and validator now require drop-link outcomes only for nonempty breaks.
+- **Status capture and recovery clarity (#155):** `/ig status` now distinguishes disabled capture, active intake, recovery loading, recovery failure, and a stopped worker, and reports an unknown recovery count when the spool has not been read or could not be read. Runtime diagnostics print before asynchronous database statistics, so a failed stats query cannot hide capture and queue state. Help and the admin guide define the state meanings, counter units, reset windows where known, and safe next steps without inventing health thresholds.
+- **First-time admin workflows (#156–#158):** `/ig help journeys` links four detailed inspect, trace, nearby-audit, and filtered-lookup topics. Each gives exact permission nodes, evidence meaning, a follow-up command, and safe checks for empty results. Trace observations use numeric IDs; `event:<uuid>` is for related IDs from admin/creative outcome details. Ingest help describes GriefLogger sync as optional and native capture as automatic. The quick start adds complete permission bundles and documents shipped feature boundaries without transient PR/CI status.
 - Unsupported or unknown transformation rows no longer appear as observed item-trace hops. Unified lookup keeps their evidence ID, source/result fingerprints, unresolved reason, and unknown quantity without rendering free-form legacy details that could look like a numeric quantity. Existing raw database rows are unchanged.
-- **Issue #24 right-click inspector:** NeoForge and Fabric now ignore off-hand right-clicks while inspection mode is active and resolve ordinary block clicks to the clicked-face neighbor. ItemGraph keeps its documented clicked-position behavior for functional blocks, and clicked-position support for modded `Container` block entities is an extension; GriefLogger 1.2.10's implementation uses this fallback for functional blocks other than doors and containers. Inspection still consumes the interaction only when ItemGraph accepts the asynchronous history request. Mod version remains 0.3.2; no distributable jar is built.
-- **Issue #24 command packet test timing:** aligned the NeoForge and Fabric GameTest outer limit at 4,000 ticks so fast headless tick progression cannot preempt the fixture's 10-second wall-clock durability deadline. This corrects the CI-only timeout while retaining the bounded failure deadline. Mod version remains 0.3.2; no distributable jar is built.
+- **Issue #24 right-click inspector:** NeoForge and Fabric now ignore off-hand right-clicks while inspection mode is active and resolve ordinary block clicks to the clicked-face neighbor. ItemGraph keeps its documented clicked-position behavior for functional blocks, and clicked-position support for modded `Container` block entities is an extension; GriefLogger 1.2.10's implementation uses this fallback for functional blocks other than doors and containers. Inspection still consumes the interaction only when ItemGraph accepts the asynchronous history request.
+- **Issue #24 command packet test timing:** aligned the NeoForge and Fabric GameTest outer limit at 4,000 ticks so fast headless tick progression cannot preempt the fixture's 10-second wall-clock durability deadline. This corrects the CI-only timeout while retaining the bounded failure deadline.
 - **Issue #32 shutdown durability:** shutdown waits are bounded at 5 seconds graceful plus 5 seconds after interruption for each database worker, 5 seconds for an ItemGraph-owned recovery-file writer, and 1 second for JDBC connection close. Startup replay and shutdown recovery-file I/O run on daemon workers, not the loader lifecycle callback. New events remain bounded in the normal queues during replay, and recovered rows are placed before them. A completed snapshot replays idempotently by `ingest_event_uuid`; corrupt or unsupported primary recovery data is preserved, intake closes, and already-accepted records are saved to an adjacent `.overflow` recovery file without replacing the primary. Both files replay after the primary file is repaired. If the filesystem does not finish a snapshot within its deadline, ItemGraph logs critical evidence risk and counts the outstanding records; a late daemon write may finish only if the process remains alive and the filesystem returns.
 - **Issue #32 performance evidence:** correlation failures returned as result values now increment the failure counter. The MySQL and MariaDB CI probes now execute 20 registered `/ig lookup` commands alongside 20 raw-JDBC readers and 512 submitted events on both loaders, recording callback completion and p95/max latency. CI also enforces a 1,000 ms drain regression budget for the healthy NeoForge SQLite 10,000-event saturation fixture, based on five repeated local measurements.
 - **Issue #32 idle baseline:** CI adds one-second live tick-hook no-input samples for both loaders against SQLite and worker-only samples against MySQL and MariaDB. The validator requires zero queue, persistence, lookup, correlation, rejection, and heartbeat work; reports compare durable observation, audit, and transformation row counts and capture heap at the sample boundary. Network-backend samples do not represent live server ticks or production budgets.
+- **Expired lookup-page cleanup (#24):** following an expired explicit `/ig page <page> <session>` link now removes the player's empty page-session map. Fabric dispatcher coverage exercises both command roots, invalid/expired sessions, cross-player tokens, denied permission, and error-only output; NeoForge page-session regressions remain green.
 
 ### Added
 
 - **Offline server-side localization (#136):** NeoForge `general.language` and Fabric `language` select ItemGraph-owned `en_us`, `nl_nl`, or `zh_tw` resources before database initialization. NeoForge and Fabric reject unsupported values with a `general.language` diagnostic; rendered chat/menu text uses server-side literals, so clients need no ItemGraph assets or network access. English per-key fallback preserves unknown/future messages. The key fallback inventory is empty for `nl_nl` and `zh_tw`; 125 authored source phrases use the tested English fallback, including detailed help topics. Evidence IDs, item IDs/names, timestamps, quantities, evidence-class tokens, and click command payloads remain data values. The exact GriefLogger 1.2.10-1.21.1 fixture has no locale inventory; `en_us`, `nl_nl`, and `zh_tw` are only verified in pinned 26.2 source research, and `zh_cn` is source-only/not selectable.
 
-- **First-use admin workflows (#148–#150):** bare `/ig` now presents a five-message task-first overview; `/ig help guide` opens the server setup guide, `/ig help commands` groups command paths, and `/ig help permissions` documents exact access nodes. The guide puts loader choice, server-only installation, permissions, and safe test-world verification before investigations, then explains query surfaces, confidence, and concrete evidence gaps. README and the local CurseForge draft now agree on platform and permission behavior. No version bump or distributable JAR is built.
+- **First-use admin workflows (#148–#150):** bare `/ig` now presents a five-message task-first overview; `/ig help guide` opens the server setup guide, `/ig help commands` groups command paths, and `/ig help permissions` documents exact access nodes. The guide puts loader choice, server-only installation, permissions, and safe test-world verification before investigations, then explains query surfaces, confidence, and concrete evidence gaps. README and the local CurseForge draft now agree on platform and permission behavior.
 
-- **Structured query chat and scannable flow-browser rows (#138, #146):** query output keeps the stable `QueryFormatter` text while adding bounded hover details and player-only dimension-aware navigation bound to the exact originating permission set. Flow-browser timelines and candidate lists use up to nine rows per page, further capped by `query.max_page_size`, and send numbered companion lines with observed/inferred class, safe identity, event kind, and UTC time where recorded; missing identities and unresolved targets are labeled explicitly. No raw NBT or component payloads are exposed. These authored labels resolve through the selected ItemGraph locale, and evidence values remain data. No version bump or distributable JAR.
-- **Named command permissions (#137):** `/ig` and `/itemgraph` keep vanilla permission level 2 as the fallback, while exact `itemgraph.*` nodes let providers delegate lookup, paging, inspection, traces, events, explanations, audits, GUI browsing, ingest, and import separately. Explicit deny overrides operator status. NeoForge uses registered permission nodes; Fabric embeds Permissions API 0.3.1 without requiring an external permission manager. Async results, inspection clicks, every flow-menu action, and protected audit lookup/page continuations recheck the required node set. Lookup-only access cannot read chat, command, administrative-item, or creative-action audit records. `/ig help permissions` explains delegation. Mod version remains 0.3.2; no distributable jar is built.
+- **Structured query chat and scannable flow-browser rows (#138, #146):** query output keeps the stable `QueryFormatter` text while adding bounded hover details and player-only dimension-aware navigation bound to the exact originating permission set. Flow-browser timelines and candidate lists use up to nine rows per page, further capped by `query.max_page_size`, and send numbered companion lines with observed/inferred class, safe identity, event kind, and UTC time where recorded; missing identities and unresolved targets are labeled explicitly. No raw NBT or component payloads are exposed. These authored labels resolve through the selected ItemGraph locale, and evidence values remain data.
+- **Named command permissions (#137):** `/ig` and `/itemgraph` keep vanilla permission level 2 as the fallback, while exact `itemgraph.*` nodes let providers delegate lookup, paging, inspection, traces, events, explanations, audits, GUI browsing, ingest, and import separately. Explicit deny overrides operator status. NeoForge uses registered permission nodes; Fabric embeds Permissions API 0.3.1 without requiring an external permission manager. Async results, inspection clicks, every flow-menu action, and protected audit lookup/page continuations recheck the required node set. Lookup-only access cannot read chat, command, administrative-item, or creative-action audit records. `/ig help permissions` explains delegation.
 - **Player-broken container contents (#140):** successful Fabric and NeoForge
   player breaks now capture the exact non-empty block-entity slots as per-slot
   `REMOVE_ITEM` evidence with canonical fingerprints and stable parent/child event
@@ -46,7 +361,7 @@ The project follows a simple pre-1.0 development changelog model.
   until an authoritative hook can establish them. The NeoForge result wrapper is
   narrowly scoped to `ServerPlayerGameMode.destroyBlock` because its 1.21.1 break
   event runs before mutation. The additive event IDs advance the independent event
-  taxonomy to 2.1.0; the mod version remains 0.3.2 and no distributable jar is built.
+  taxonomy to 2.1.0.
 
 - **Standalone historical player-name resolution (#31):** native `PLAYER_JOIN`
   evidence now populates ItemGraph's UUID-keyed `ig_player_name_history` table.
@@ -55,8 +370,7 @@ The project follows a simple pre-1.0 development changelog model.
   GriefLogger history remains an optional source. The native-only replay now
   includes redacted `PLAYER_JOIN` signals so CI marks both the sessions and
   usernames categories exercised without exporting names or UUIDs. Names
-  changed during an online session are not captured until a later join. Mod
-  version remains 0.3.2; no distributable jar is built.
+  changed during an online session are not captured until a later join.
 
 - **Issue #31 exact-release action-table replay:** the redacted ItemGraph-only
   NeoForge and Fabric reports now include separate `chats` and `commands`
@@ -66,8 +380,7 @@ The project follows a simple pre-1.0 development changelog model.
   against the pinned release profile and represents all six GriefLogger event
   tables. Chat and command text, player names, UUIDs, absolute world coordinates, and
   database row IDs remain excluded from the reports. Other ItemGraph extensions
-  stay explicitly assigned to their existing issues. Mod version remains 0.3.2;
-  no distributable jar is built.
+  stay explicitly assigned to their existing issues.
 
 - **Issue #31 pickup coordinate rationale:** Documented the loader-specific
   drop hooks used by the replay fixtures. NeoForge's patched two-argument
@@ -75,16 +388,14 @@ The project follows a simple pre-1.0 development changelog model.
   hook. Fabric captures the accepted entity through its three-argument drop
   path. The normalized replay records pickup Y=2 on NeoForge and Y=1 on Fabric;
   the exact fixture-level cause remains unverified because both adapters store
-  block coordinates and the report omits sub-block positions. Mod version
-  remains 0.3.2; no distributable jar is built.
+  block coordinates and the report omits sub-block positions.
 - **Issue #31 replay queue evidence:** NeoForge and Fabric native replay reports
   now include each ingestion queue's export-time depth, fixed capacity, and the
   cumulative server-wide rejected-event counter since service initialization.
   The normalizer rejects over-capacity queue depths, capacity drift, or any
   server-wide rejection since service initialization. Raw report schema is v5
   and normalized comparison schema is v6; this
-  complements the separate 8,000-event peak-backlog/load probe. Mod version
-  remains 0.3.2; no distributable jar is built.
+  complements the separate 8,000-event peak-backlog/load probe.
 - **Issue #31 unresolved historical actions:** GriefLogger action IDs are checked
   against the source table's action map without narrowing; raw payloads and
   unresolved reasons retain larger IDs exactly, so table-
@@ -95,15 +406,13 @@ The project follows a simple pre-1.0 development changelog model.
   complete payload, and component bytes; the projection reports quantity `0`, no
   `subject_id`, `UNRESOLVED`, and the original raw-byte hash. Added an importer
   regression fixture with action ID `999` and malformed component bytes that also
-  verifies the source database remains byte-for-byte unchanged. Mod version remains
-  0.3.2; no distributable jar is built.
+  verifies the source database remains byte-for-byte unchanged.
 - **Issue #31 source contradiction fixtures:** added a machine-readable corpus
   for the required-radius documentation/source difference, GriefLogger's stored
   chat/command rows versus its lookup surface, and newer Ender enum values absent
   from the exact 1.21.1 release writers. CI checks the pinned source identity,
   duplicate-free case IDs, exact owner issues and decisions, and declared
-  Java-method or documentation anchors. Mod
-  version remains 0.3.2; no jar is built.
+  Java-method or documentation anchors.
 - **Issue #31 release-contract coverage inventory:** CI now emits a redacted
   sidecar beside each native-only NeoForge and Fabric replay. Schema v2 lists
   every compatibility-registry action and all eleven exact-release database
@@ -112,14 +421,13 @@ The project follows a simple pre-1.0 development changelog model.
   username-history table as an uncovered standalone query category. The
   report distinguishes unobserved categories from unsupported release writers
   without claiming full runtime parity. Tests and CI do not package
-  distributable mod jars; version remains 0.3.2.
+  distributable mod jars.
 - **Issue #127 native-only default:** NeoForge and Fabric no longer inspect a
   `database.db` file for GriefLogger data during normal operation. Read-only
   source sync and historical import require the explicit
   `grieflogger_integration_enabled=true` setting. Native capture, storage,
   correlation, and queries remain independent, and scheduled native-only ticks
-  do not report the disabled source sync as an error. Mod version remains 0.3.2;
-  no distributable jar is built.
+  do not report the disabled source sync as an error.
 - **Issue #32 operational metrics and queue probes:** `/ig status` reports
   redacted enqueue, persistence, query, correlation, queue-pressure, component
   decode-cache, and heap aggregates. CI emits validated 14-day reports for both
@@ -129,8 +437,7 @@ The project follows a simple pre-1.0 development changelog model.
   probe persists all 10,000 accepted events in bounded worker batches and counts
   one rejected over-capacity event explicitly. Reports contain aggregate values
   without event or player identifiers. The real adapter workloads and
-  staging-derived production budgets remain open under #32. Mod version remains
-  0.3.2; no distributable jar is built.
+  staging-derived production budgets remain open under #32.
 - **Issue #32 report provenance:** performance report fixtures record
   `grieflogger_runtime_state` as `absent`, `present`, or `unavailable` instead
   of treating an uninitialized NeoForge JUnit mod list as proof of absence.
@@ -165,35 +472,6 @@ The project follows a simple pre-1.0 development changelog model.
   versus pick-block undifferentiated, records empty slots as unresolved before/after
   evidence, keeps staff activity private, suppresses raw item-command and `/execute`
   arguments, and contains capture exceptions without changing vanilla results.
-  Version remains 0.3.2; no distributable jar is built.
-
-- **Issue #34 opt-in automation adapter contract:** added `AutomationEndpoint` for
-  restart-stable opaque inventory identities derived from mod, dimension, position,
-  slot policy, and side, plus opt-in Fabric `FabricTransferStorageAdapter` and NeoForge
-  `NeoForgeItemHandlerAdapter` implementations. They preserve native transfer results,
-  record exact committed quantities, and suppress simulations and rollbacks. Fabric
-  overflow omits the whole transaction; source mod identity is checked against its
-  registered handle, and caller-created endpoints cannot add a location to the opaque
-  reference. Rejected transfers, zero movement, and impossible quantity claims emit no
-  movement evidence. Explicit `QUEUE_FULL` responses retry the same event identity at
-  most three times through a 128-entry bounded worker queue; other outcomes are not
-  replayed. This is in-memory retry only, and pending retries can be interrupted by
-  process shutdown. Vanilla hopper transfers emit bounded endpoint-unknown net deltas
-  on NeoForge; both loaders record accepted default-behavior dispenser/dropper outputs
-  with source, item, amount, ground endpoint, and entity UUID. Snapshot bounds use
-  overflow-safe arithmetic, and unreadable prior hopper snapshots suppress paired
-  deltas. NeoForge adapters accept mod-owned opaque inventory IDs for item-handler
-  providers without deriving identity from an `ItemStack`. Cross-loader test consumers
-  move stacks through Fabric Transfer API and NeoForge item-capability adapters between
-  portable and shulker-like storage and assert both persisted endpoint deltas. These are
-  vanilla/API fixtures, not third-party backpack integrations. Arbitrary modded
-  inventories still require an exercised supported adapter. Bounded queue saturation
-  and concurrent rejection tests verify the 128-entry queue and visible `QUEUE_FULL`.
-  Native hopper/dispenser captures use an additional 1,024-entry bounded backpressure
-  queue on the same database worker; `/ig status` reports pending rows and explicit
-  exhaustion, and shutdown flushes both queues. Saturation tests verify native capture
-  retention and persistence after the primary 10,000-entry observation queue fills.
-  No version bump or distributable JAR was produced.
 
 - **Issue #35 shared event taxonomy:** introduced the versioned `EventTaxonomy`
   for native audit, item observation, and transformation IDs. Audit command
@@ -202,15 +480,13 @@ The project follows a simple pre-1.0 development changelog model.
   actor status, privacy class, loader support, evidence-ID contract, aliases,
   and owning issue. #55–#57 event families and stable unresolved reason codes
   are listed as planned until loader adapters and fixtures prove support. This
-  is a taxonomy version only; the ItemGraph mod remains 0.3.2 and no distributable
-  JAR is built.
+  is a taxonomy version only.
 - **Creative transformation evidence boundary:** taxonomy `2.0.0` retains
   `CREATIVE_ITEM_TRANSFORM` for classification but marks it unsupported on both
   loaders with `CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED`. Creative slot packets
   prove separate quantity deltas, not conversion between item fingerprints, so
   the ID retains `UNRESOLVED` evidence with `UNKNOWN` quantity and no longer
-  appears in lookup suggestions. Mod version remains 0.3.2; no distributable
-  JAR is built.
+  appears in lookup suggestions.
 - **Issue #31 native replay reports:** NeoForge and Fabric GameTests export six
   durably verified item movement/projectile rows plus ten allowlisted audit
   events, including `PLACE_BLOCK`, `INTERACT_BLOCK_ATTEMPT`, and `KILL_ENTITY`,
@@ -229,14 +505,13 @@ The project follows a simple pre-1.0 development changelog model.
   count-only summary, preserves subject IDs, and exposes the issue-linked exception gate. Registry
   compatibility version is `m8.12.0`.
   These native-only reports do not claim a GriefLogger comparison or complete
-  #31's paired replay, staging soak, or rollback gates. Mod
-  version remains 0.3.2; no distributable jar is built.
+  #31's paired replay, staging soak, or rollback gates.
 - **Issue #31 parity fixture correction:** the replay report includes only the
   successful source-water bucket pickup among `BREAK_BLOCK` rows. It filters by
   the exact fixture position and `minecraft:water`, excluding the separate
   synthetic water-source/lava-result guard probe, which cannot occur in an actual
   GriefLogger bucket-pickup writer path. The current raw report is schema-v5 and
-  normalized output is schema-v6; mod version remains 0.3.2, and no jar is built.
+  normalized output is schema-v6.
 - **Issue #31 issue-linked differential exceptions:** normalized schema-v6
   keeps every report difference visible, classifies only profile-declared
   native extensions as expected only when their source table also matches the
@@ -244,22 +519,20 @@ The project follows a simple pre-1.0 development changelog model.
   `equivalent` remains false when any difference exists; CI passes
   only when there are no unexplained differences. Quantity, timestamp,
   endpoint, privacy, and evidence-class mismatches remain unexplained. Registry
-  compatibility version is `m8.12.0`; mod version remains 0.3.2, and no jar is
-  built.
+  compatibility version is `m8.12.0`.
 - **Issue #30 queue flush cadence:** both loader configs now expose
   `ingestion.queue_frequency_ticks` / `queue_frequency_ticks`, defaulting to 20
   and accepting 1–100 ticks to match GriefLogger's `queueFrequency`. Both server
   end-tick adapters signal the bounded background writer; queue submissions still
   do no database work on the server thread. ItemGraph raw evidence retention stays
   indefinite. Added live queue-flush GameTests to both loaders' registered CI
-  suites. Mod version remains 0.3.2; no distributable jar is built.
+  suites.
 - **Issue #24 Fabric inspector command execution:** `FabricItemGraphCommandsParityTest`
   now executes both command roots through enabled, already-enabled, status,
   disabled, already-disabled, and toggle-back states, asserting the per-player
   state and exact chat receipts. Permission-denied execution emits no success
   receipt and does not enable inspection. This is dispatcher-level coverage;
-  it does not replace the pending vanilla-client command replay. Mod version
-  remains 0.3.2; no distributable jar is built.
+  it does not replace the pending vanilla-client command replay.
 - **Issue #27 bucket fluid removal evidence:** NeoForge and Fabric now record a
   `BREAK_BLOCK` audit row when a server bucket pickup successfully removes a
   source fluid block. Both hooks wrap `BucketPickup.pickupBlock`, require a
@@ -267,7 +540,7 @@ The project follows a simple pre-1.0 development changelog model.
   use the returned bucket's contained fluid for the fluid block ID. They write
   no item quantity observation. Shared loader GameTests verify the durable row
   and quantity ledger boundary. Registry compatibility version is
-  `m8.9.0`; mod version remains 0.3.2, and no distributable jar is built.
+  `m8.9.0`.
 - **Issue #27 action registry and exact-release writer matrix:** registry
   `m8.8.0` now records the pinned source enum and ID for all 18 GriefLogger
   actions plus the exact `1.2.10-1.21.1` writer result. CI rejects malformed
@@ -276,7 +549,7 @@ The project follows a simple pre-1.0 development changelog model.
   compatible at the attempt-only boundary proven by #74; `INTERACT_ENTITY`
   has no action ID or writer in the target release and remains a separately
   labeled ItemGraph extension per #75. Ender actions remain `unsupported-no-writer`
-  per #76. ItemGraph mod version remains 0.3.2; no distributable jar is built.
+  per #76.
 - **Issue #27 projectile runtime conformance:** NeoForge and Fabric GameTests
   now call the real `Projectile.shootFromRotation` and `ServerLevel.addFreshEntity`
   boundaries for one snowball and one arrow. Read-only SQLite assertions require
@@ -285,8 +558,7 @@ The project follows a simple pre-1.0 development changelog model.
   distinct accepted-spawn evidence, and no
   extra quantity rows for the test player or mutation of prior quantity rows.
   The test uses embedded mock players and does not establish vanilla-client
-  transport or bow-ammunition accounting. Mod version remains 0.3.2; no
-  distributable jar is built.
+  transport or bow-ammunition accounting.
 - **Issue #27 item movement runtime conformance:** both loader GameTests now
   exercise real chest-menu quick-moves and player inventory removal/drop/pickup.
   The shared read-only SQLite fixture requires exactly one `ADD_ITEM`, `REMOVE_ITEM`,
@@ -300,10 +572,9 @@ The project follows a simple pre-1.0 development changelog model.
   player regardless of action/source, and verifies prior quantity rows remain
   unchanged. Ground evidence coordinates may differ by one block across the
   server tick. The remaining #27 writer actions still need paired runtime
-  fixtures. Mod version remains 0.3.2; no distributable jar
-  is built.
+  fixtures.
 - **Issue #75 cross-loader interaction evidence:** non-armor-stand callbacks now carry stable `target_support=callback_only` and `target_support_reason=ENTITY_CLASS_UNSUPPORTED_FOR_RESULT` metadata, while armor-stand rows identify their supported method-result boundary. Callback-level denied/unresolved outcomes remain recorded where observed. NeoForge and Fabric isolated server GameTests send entity-use packets through each loader's server handler for unsupported-entity attempts and armor-stand boot equip/unequip. They separately call inherited `ArmorStand.interact` to verify its `PASS` return hook and persisted unresolved method result. Both tests compare the complete `ig_observations` row snapshots before and after, and check the same normalized audit query and `QueryFormatter` output used by `/ig lookup`. CI runs both loader GameTests without creating distributable mod jars.
-- **Issue #76 Ender action compatibility:** the release fixture validator now checksum-verifies both published 1.2.10-1.21.1 jars and finds no Ender action constant field references outside `ItemAction.class`; its `values()` calls are limited to the generic `Actions` catalog and the enum's own `fromId` decoder, and the only external `fromId` caller is `ItemHistory.<init>` reconstructing stored rows. The registry marks both GriefLogger actions `unsupported-no-writer` using `NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE`; existing ItemGraph session net deltas stay labeled as `ITEMGRAPH_INTERNAL` extensions. Regression coverage checks duplicate opens, reconnects, partial signed counts, atomic queue rejection/retry including orderly shutdown under one shared five-second retry deadline, opaque component redaction, no-net sessions, and restart persistence. Registry compatibility version is `m8.7.0`; ItemGraph mod version stays 0.3.2.
+- **Issue #76 Ender action compatibility:** the release fixture validator now checksum-verifies both published 1.2.10-1.21.1 jars and finds no Ender action constant field references outside `ItemAction.class`; its `values()` calls are limited to the generic `Actions` catalog and the enum's own `fromId` decoder, and the only external `fromId` caller is `ItemHistory.<init>` reconstructing stored rows. The registry marks both GriefLogger actions `unsupported-no-writer` using `NO_WRITER_IN_EXACT_1_2_10_1_21_1_RELEASE`; existing ItemGraph session net deltas stay labeled as `ITEMGRAPH_INTERNAL` extensions. Regression coverage checks duplicate opens, reconnects, partial signed counts, atomic queue rejection/retry including orderly shutdown under one shared five-second retry deadline, opaque component redaction, no-net sessions, and restart persistence. Registry compatibility version is `m8.7.0`.
 - **Issue #24 command contract:** `/ig` and `/itemgraph` expose the same level-2 command tree; GriefLogger's published direct `name.value` lookup syntax, six filter names and one-letter aliases, required cubic radius, five-filter limit, AND combination, ten-row page default, per-player pages, and page navigation are covered across NeoForge and Fabric tests. The selected published-doc radius requirement is explicit because GriefLogger 26.2 source accepts no-radius lookup. Output retains ItemGraph evidence labels and provenance; `/gl` and `/grieflogger` remain unregistered.
 - **Issue #24 lookup filter boundary coverage:** Fabric and NeoForge now parse an exactly-five-filter valid lookup and execute both `/ig` and `/itemgraph` error cases through both direct and `lookup filters` forms for missing radius, malformed and invalid radius tokens, unknown and duplicate filters, include/exclude conflicts, and a sixth filter. Both roots return the same exact single failure before query output; runtime behavior is unchanged.
 - **Historical user filter completion (#24):** `/ig lookup user.<name>` suggestions now include distinct names from imported GriefLogger `users` and `usernames` reference rows as well as online players. ItemGraph reads its own preserved provenance rows asynchronously through the bounded read-only query worker, caches the result for 30 seconds, and skips malformed payloads. Read-only queries now instrument JDBC statements with a five-second timeout and cancellation; SQLite keeps its progress-handler and connection-interrupt support.
@@ -346,8 +617,7 @@ The project follows a simple pre-1.0 development changelog model.
   `query.max_page_size=101` and `general.database_port=0` fail before database
   initialization and remain unchanged in TOML. This closes the reproduced
   `database_port=0` to `1` normalization gap; full invalid-config matrix
-  coverage across both loaders remains open. No mod version bump or
-  distributable jar was produced.
+  coverage across both loaders remains open.
 - **Issue #30 Fabric numeric config parity:** Fabric now validates all seven
   documented integer settings, including database port and connection timeout
   even when SQLite is selected. Unit coverage accepts both endpoints and
@@ -389,7 +659,7 @@ The project follows a simple pre-1.0 development changelog model.
   preserving direct GriefLogger filter syntax while allowing NeoForge and Fabric
   operators to receive the command tree without a disconnect. Connected-player
   staging replays verified one durable throw and shoot row plus one accepted
-  spawn audit row for each loader; no release artifact or version bump was made.
+  spawn audit row for each loader.
 - **One storage contract for SQLite and MySQL/MariaDB:** ItemGraph now exposes
   validated backend settings on NeoForge and Fabric, runs the shared migrations
   and JDBC queries through one dialect layer, preserves SQLite partial-dedup
@@ -446,10 +716,6 @@ The project follows a simple pre-1.0 development changelog model.
   compare the producer UUID across both evidence tables and probe deterministic
   salted IDs when a distinct event collides, preserving paired observation and
   audit rows even when their raw payload details differ.
-
-### Fixed
-
-- **Expired lookup-page cleanup (#24):** following an expired explicit `/ig page <page> <session>` link now removes the player's empty page-session map. Fabric dispatcher coverage exercises both command roots, invalid/expired sessions, cross-player tokens, denied permission, and error-only output; NeoForge page-session regressions remain green.
 
 ## [0.3.2] — 2026-09-28
 

@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "4.0.0";
+    public static final String VERSION = "4.1.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -300,6 +300,8 @@ public final class EventTaxonomy {
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 75);
         audit(entries, "INTERACT_ENTITY_UNRESOLVED", "entity_interaction", EvidenceClass.UNRESOLVED,
                 SourceReliability.UNRESOLVED_CAUSE, ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 75);
+        audit(entries, "ATTACK_ENTITY_DENIED", "entity_interaction", SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 187);
         audit(entries, "KILL_ENTITY", "entity_lifecycle", SourceReliability.AUTHORITATIVE_GAME_RESULT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "THROW_ITEM", "projectile", SourceReliability.GAME_CALLBACK_ATTEMPT,
@@ -308,6 +310,25 @@ public final class EventTaxonomy {
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
         audit(entries, "PROJECTILE_SPAWN_ACCEPTED", "projectile", SourceReliability.AUTHORITATIVE_GAME_RESULT,
                 ActorStatus.PLAYER, PrivacyClass.SENSITIVE_LOCATION, 27);
+        audit(entries, "EXPLOSION_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "PISTON_BLOCK_MOVE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "PISTON_BLOCK_ATTEMPT", "world_environment", SourceReliability.GAME_CALLBACK_ATTEMPT,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "WORLD_EFFECT_ATTEMPT", "world_environment", SourceReliability.GAME_CALLBACK_ATTEMPT,
+                ActorStatus.WORLD, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "FLUID_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.WORLD, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "FIRE_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.WORLD, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "ENDERMAN_BLOCK_MOVE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.ENTITY, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "FALLING_BLOCK_CHANGE", "world_environment", SourceReliability.DIRECT_STATE_DELTA,
+                ActorStatus.ENTITY, PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "WORLD_EFFECT_UNRESOLVED", "world_environment", EvidenceClass.UNRESOLVED,
+                SourceReliability.UNRESOLVED_CAUSE, ActorStatus.UNKNOWN,
+                PrivacyClass.SENSITIVE_LOCATION, 55);
 
         // Canonical action names and user-facing aliases shared by audit,
         // observation, and transformation lookup parsing.
@@ -347,6 +368,23 @@ public final class EventTaxonomy {
         action(entries, "HOPPER_EXTRACT", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
         action(entries, "DISPENSER_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
         action(entries, "DROPPER_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
+        // CAPABILITY_* rows are emitted only by the NeoForge IItemHandler
+        // wrapper; Fabric keeps them queryable for imported or mirrored data.
+        // A capability delta never identifies its caller or remote endpoint.
+        add(entries, "CAPABILITY_INSERT", "automation", Surface.ITEM_OBSERVATION,
+                EvidenceClass.OBSERVED, SourceReliability.DIRECT_STATE_DELTA,
+                EndpointSemantics.SOURCE_AND_DESTINATION, QuantitySemantics.SIGNED_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
+                HISTORICAL_ONLY, IMPLEMENTED, 34);
+        add(entries, "CAPABILITY_EXTRACT", "automation", Surface.ITEM_OBSERVATION,
+                EvidenceClass.OBSERVED, SourceReliability.DIRECT_STATE_DELTA,
+                EndpointSemantics.SOURCE_AND_DESTINATION, QuantitySemantics.SIGNED_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
+                HISTORICAL_ONLY, IMPLEMENTED, 34);
+        // TRANSFER_ITEM is the persisted action for committed adapter-API
+        // transfers; the remote endpoint stays UNKNOWN when the native API
+        // does not expose it.
+        action(entries, "TRANSFER_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
         action(entries, "DEATH_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 56, "entity_lifecycle");
         action(entries, "ADD_ITEM_ENDER", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 76, "ender_inventory");
         action(entries, "REMOVE_ITEM_ENDER", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 76, "ender_inventory");
@@ -377,14 +415,6 @@ public final class EventTaxonomy {
 
         // Planned child-issue entries are intentionally not exposed as supported
         // lookup actions until loader adapters and reproducible fixtures exist.
-        planned(entries, Surface.AUDIT_EVENT, "EXPLOSION_BLOCK_CHANGE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "FLUID_BLOCK_CHANGE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "FIRE_BLOCK_CHANGE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "PISTON_BLOCK_MOVE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "ENDERMAN_BLOCK_MOVE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "FALLING_BLOCK_CHANGE", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "DISPENSER_EFFECT", "world_environment", QuantitySemantics.UNKNOWN, 55);
-        planned(entries, Surface.AUDIT_EVENT, "DROPPER_EFFECT", "world_environment", QuantitySemantics.UNKNOWN, 55);
         planned(entries, Surface.AUDIT_EVENT, "ENTITY_SPAWN", "entity_lifecycle", QuantitySemantics.NONE, 56);
         planned(entries, Surface.AUDIT_EVENT, "ENTITY_DESPAWN", "entity_lifecycle", QuantitySemantics.NONE, 56);
         planned(entries, Surface.AUDIT_EVENT, "ENTITY_KILL", "entity_lifecycle", QuantitySemantics.NONE, 56);
@@ -460,10 +490,11 @@ public final class EventTaxonomy {
                                 QuantitySemantics quantity, int ownerIssue) {
         LoaderSupport pending = new LoaderSupport(LoaderStatus.PLANNED,
                 "IMPLEMENTATION_PENDING_ISSUE_" + ownerIssue);
-        add(entries, id, family, surface, EvidenceClass.OBSERVED,
-                SourceReliability.AUTHORITATIVE_GAME_RESULT,
+        add(entries, id, family, surface, EvidenceClass.UNRESOLVED,
+                SourceReliability.UNRESOLVED_CAUSE,
                 plannedEndpoints(family),
-                quantity, ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
+                surface == Surface.AUDIT_EVENT ? QuantitySemantics.NONE : quantity,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
                 pending, pending, ownerIssue);
     }
 

@@ -13,13 +13,17 @@ import com.itemgraph.command.ItemGraphCommands;
 import com.itemgraph.command.ItemGraphPermissions;
 import com.itemgraph.command.BlockInspectionTargets;
 import com.itemgraph.command.FlowBrowserService;
+import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.query.AuditEventQueryService;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import com.mojang.brigadier.ParseResults;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.commands.CommandSourceStack;
@@ -27,10 +31,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.ChatType;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -57,6 +63,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -74,6 +82,14 @@ public final class FabricNativeAuditEventListener {
     private static final int MAX_DETAIL_LENGTH = 16_384;
     private static final int MAX_DROP_CAPTURE_DEPTH = 32;
     private static final ThreadLocal<Deque<DropCapture>> PENDING_PLAYER_DROPS = new ThreadLocal<>();
+    private static final long PENDING_DROP_TTL_MS = 5000;
+    private static final int PENDING_DROP_MAX = 512;
+    private static final double DROP_SETTLE_SPEED_SQR = 0.0025;
+    // Server-thread only: queued from player drop callbacks, resolved from the
+    // END_SERVER_TICK hook. Every enqueue site already proved addFreshEntity
+    // acceptance, so unlike the NeoForge listener no added-to-level wait phase
+    // is needed — the entity is airborne-and-added or already settled.
+    private static final Map<UUID, PendingDrop> PENDING_DROPS = new LinkedHashMap<>();
     private static final int MAX_HOPPER_CAPTURE_DEPTH = 16;
     private static final int MAX_HOPPER_CAPTURE_POSITIONS = 7;
     private static final int MAX_HOPPER_CAPTURE_SLOTS = 512;
@@ -87,6 +103,19 @@ public final class FabricNativeAuditEventListener {
     private record ContainerBreakAttempt(ContainerBreakCapture.Snapshot snapshot) { }
 
     private record DropCapture(Set<ItemEntity> addedEntities, String actionType) {
+    }
+
+    /**
+     * A world-accepted item drop whose GROUND endpoint must be recorded where
+     * the entity settles — not at the spawn position the drop call returns —
+     * so a same-position pickup shares its ground node. Mirrors the NeoForge
+     * ItemEntityEventListener contract (issue #166).
+     */
+    private record PendingDrop(ItemEntity entity, String actionType, UUID playerUuid,
+                               String playerName, String level,
+                               double playerX, double playerY, double playerZ,
+                               int amount, CanonicalItem canonical,
+                               long timestampMs, long expiresAtMs) {
     }
 
     private record HopperSite(StackTraceElement caller, int stackDepth) {
@@ -154,6 +183,14 @@ public final class FabricNativeAuditEventListener {
                                             net.minecraft.world.InteractionHand hand, BlockPos pos,
                                             Direction face) {
         if (hand != net.minecraft.world.InteractionHand.MAIN_HAND) {
+            // The off-hand twin of a consumed click must not place or use the
+            // off-hand item on the inspected block.
+            if (player != null && inspections != null
+                    && (inspections.isEnabled(player.getUUID())
+                            || inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()))) {
+                inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+                return InteractionResult.FAIL;
+            }
             return InteractionResult.PASS;
         }
         InteractionResult inspectionResult = tryOpenInspection(
@@ -230,19 +267,34 @@ public final class FabricNativeAuditEventListener {
             }
             if (!ItemGraphPermissions.canUse(serverPlayer.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
                 InspectionService.getInstance().clear(serverPlayer.getUUID());
-                return InteractionResult.PASS;
+                notifyInspectionRevoked(serverPlayer);
+                return InteractionResult.FAIL;
             }
             InteractionResult inspectionResult = tryOpenLeftClickInspection(
                     InspectionService.getInstance(), FabricNativeAuditEventListener::openBlockHistory,
                     serverPlayer, serverLevel, pos);
             return inspectionResult == null ? InteractionResult.PASS : inspectionResult;
         });
+        UseItemCallback.EVENT.register((player, level, hand) -> {
+            if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
+                return handleItemUse(InspectionService.getInstance(), serverPlayer, serverLevel, hand);
+            }
+            return InteractionResultHolder.pass(player.getItemInHand(hand));
+        });
         UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
             if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
-                recordEntityInteractionAttempt(serverPlayer, serverLevel, hand, entity);
+                return handleEntityUse(InspectionService.getInstance(), serverPlayer, serverLevel, hand, entity);
             }
             return InteractionResult.PASS;
         });
+        AttackEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
+            if (player instanceof ServerPlayer serverPlayer && level instanceof ServerLevel serverLevel) {
+                return handleEntityAttack(InspectionService.getInstance(), serverPlayer, serverLevel, hand, entity);
+            }
+            return InteractionResult.PASS;
+        });
+        ServerTickEvents.END_SERVER_TICK.register(server ->
+                resolvePendingDrops(System.currentTimeMillis()));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof LivingEntity victim
                     && source.getEntity() instanceof ServerPlayer player) {
@@ -287,8 +339,13 @@ public final class FabricNativeAuditEventListener {
 
     /**
      * Handles the Fabric equivalent of NeoForge's high-priority inspection
-     * listener. All targets use the same exact, mixed-source timeline. A click
-     * is consumed only after the asynchronous read-only request is accepted.
+     * listener. All targets use the same exact, mixed-source timeline. A click is
+     * consumed when its read-only request is accepted, when the request is denied
+     * for a missing permission grant (a stable, already-messaged denial must not
+     * mutate the inspected scene), and when the click itself detects that
+     * {@code itemgraph.command.inspect} was revoked — that click disables the mode,
+     * notifies the player, and is consumed. Transient rejections and all rejected
+     * container right-clicks keep vanilla behavior.
      */
     static InteractionResult tryOpenInspection(InspectionService inspections,
                                                 BlockHistoryOpener blockHistoryOpener,
@@ -314,7 +371,9 @@ public final class FabricNativeAuditEventListener {
         }
         if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
-            return null;
+            inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+            notifyInspectionRevoked(player);
+            return InteractionResult.FAIL;
         }
         BlockPos target = BlockInspectionTargets.resolveRightClickTarget(level, pos, face);
         boolean container = level.getBlockEntity(target) instanceof Container;
@@ -324,10 +383,162 @@ public final class FabricNativeAuditEventListener {
         int accepted = container
                 ? containerFlowOpener.open(player, level, inspectionTarget)
                 : blockHistoryOpener.open(player, level, inspectionTarget);
-        return accepted == 0 ? null : InteractionResult.SUCCESS;
+        if (accepted == 0) {
+            // Container right-clicks always pass so a denied flow request still opens
+            // the chest; a denied non-container request is consumed instead.
+            if (!container && deniedByMissingGrant(player, ItemGraphPermissions.INSPECT, ItemGraphPermissions.AUDIT)) {
+                inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+                return InteractionResult.FAIL;
+            }
+            return null;
+        }
+        inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+        return InteractionResult.SUCCESS;
     }
 
-    /** Left-click inspection applies to every block; consume breaking only after the query is accepted. */
+    /**
+     * The Fabric equivalent of NeoForge's {@code RightClickItem} handling: while
+     * inspection is active — or within
+     * {@link InspectionService#CONSUMED_PACKET_WINDOW_TICKS} of a consumed click —
+     * the item-use twin of a right-click must not use the held item (bucket,
+     * ender pearl, food). The marker covers the revocation-detecting click, whose
+     * twin arrives after the mode was already cleared.
+     */
+    static InteractionResultHolder<ItemStack> handleItemUse(
+            InspectionService inspections, ServerPlayer player, ServerLevel level,
+            net.minecraft.world.InteractionHand hand) {
+        if (player == null || hand == null) {
+            return InteractionResultHolder.pass(ItemStack.EMPTY);
+        }
+        ItemStack stack = player.getItemInHand(hand);
+        if (inspections == null || level == null
+                || (!inspections.isEnabled(player.getUUID())
+                        && !inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()))) {
+            return InteractionResultHolder.pass(stack);
+        }
+        // A FAIL result sends nothing by itself; resync so a client that already
+        // predicted the use (pearl thrown, bucket swapped) reverts to server truth.
+        player.containerMenu.sendAllDataToRemote();
+        return InteractionResultHolder.fail(stack);
+    }
+
+    /**
+     * The Fabric equivalent of NeoForge's inspection-mode entity gating: while
+     * inspection is active (or within the twin-packet window of a consumed
+     * click) the entity right-click is denied so armor-stand equipping,
+     * shearing, milking, and other entity interactions cannot mutate the
+     * inspected scene. The denial stays audit evidence — recorded as
+     * {@code INTERACT_ENTITY_DENIED} rather than a plain attempt.
+     */
+    static InteractionResult handleEntityUse(InspectionService inspections,
+                                             ServerPlayer player, ServerLevel level,
+                                             net.minecraft.world.InteractionHand hand, Entity entity) {
+        if (inspections != null && player != null && level != null
+                && (inspections.isEnabled(player.getUUID())
+                        || inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()))) {
+            recordEntityInteractionDenied(player, level, hand, entity,
+                    inspections.isEnabled(player.getUUID()) ? "INSPECTION_MODE" : "INSPECTION_WINDOW");
+            // Mark the consume: a predicted non-consuming entity interact can
+            // emit a useItem twin packet, which must stay covered if the mode
+            // clears first.
+            inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+            resyncDeniedEntity(player, entity);
+            // Set last: the aggregate UseEntityCallback decorator would otherwise
+            // record a second, misattributed INTERACT_ENTITY_DENIED for this
+            // same FAIL — and nothing below can throw between here and return.
+            EntityInteractionEvidence.markListenerRecordedDenial();
+            return InteractionResult.FAIL;
+        }
+        recordEntityInteractionAttempt(player, level, hand, entity);
+        return InteractionResult.PASS;
+    }
+
+    /**
+     * The Fabric equivalent of NeoForge's {@code AttackEntityEvent} gating:
+     * while inspection is active (or within the twin-packet window of a
+     * consumed click) the entity attack is denied so a predicted hit cannot
+     * damage, knock back, or pop the inspected entity. The denial stays audit
+     * evidence — recorded as {@code ATTACK_ENTITY_DENIED}. No aggregate
+     * decorator wraps {@code AttackEntityCallback} (the invoker mixin targets
+     * only {@code UseEntityCallback.<clinit>}), so this listener is the single
+     * denial recorder.
+     */
+    static InteractionResult handleEntityAttack(InspectionService inspections,
+                                                ServerPlayer player, ServerLevel level,
+                                                net.minecraft.world.InteractionHand hand, Entity entity) {
+        if (inspections == null || player == null || level == null || entity == null
+                || (!inspections.isEnabled(player.getUUID())
+                        && !inspections.consumedInteractionRecently(player.getUUID(), level.getGameTime()))) {
+            return InteractionResult.PASS;
+        }
+        recordEntityAttackDenied(player, level, hand, entity,
+                inspections.isEnabled(player.getUUID()) ? "INSPECTION_MODE" : "INSPECTION_WINDOW");
+        inspections.markInteractionConsumed(player.getUUID(), level.getGameTime());
+        resyncDeniedEntity(player, entity);
+        return InteractionResult.FAIL;
+    }
+
+    /**
+     * Reverts the client-predicted interaction on a denied entity click. A
+     * denied interact or attack predicts client-side; resync the held stacks
+     * and the target's visible state so the prediction reverts to server truth.
+     * This mirrors ServerEntity's pairing resync: entity data is nullable when
+     * every value is default, equipment ships all slots (including empty ones
+     * to clear a predicted equip), link/passengers cover predicted leashes and
+     * mounts.
+     */
+    private static void resyncDeniedEntity(ServerPlayer player, Entity entity) {
+        player.containerMenu.sendAllDataToRemote();
+        Entity resyncTarget = entity instanceof net.minecraft.world.entity.boss.EnderDragonPart part
+                ? part.parentMob : entity;
+        java.util.List<net.minecraft.network.syncher.SynchedEntityData.DataValue<?>> dataValues =
+                resyncTarget.getEntityData().getNonDefaultValues();
+        if (dataValues != null) {
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket(
+                    resyncTarget.getId(), dataValues));
+        }
+        if (resyncTarget instanceof net.minecraft.world.entity.LivingEntity living) {
+            java.util.List<com.mojang.datafixers.util.Pair<net.minecraft.world.entity.EquipmentSlot, ItemStack>>
+                    equipment = new java.util.ArrayList<>();
+            for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values()) {
+                equipment.add(com.mojang.datafixers.util.Pair.of(slot, living.getItemBySlot(slot)));
+            }
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket(
+                    resyncTarget.getId(), equipment));
+        }
+        if (resyncTarget instanceof net.minecraft.world.entity.Leashable leashable) {
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityLinkPacket(
+                    resyncTarget, leashable.getLeashHolder()));
+        }
+        player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetPassengersPacket(resyncTarget));
+    }
+
+    static void recordEntityAttackDenied(ServerPlayer player, ServerLevel level,
+                                         net.minecraft.world.InteractionHand hand, Entity entity,
+                                         String reason) {
+        submit("ATTACK_ENTITY_DENIED", player, level, entity.blockPosition(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
+                EntityInteractionEvidence.canceledAttemptDetails(
+                        entity, hand, player.getItemInHand(hand),
+                        "callback=attack_entity reason=" + reason));
+    }
+
+    static void recordEntityInteractionDenied(ServerPlayer player, ServerLevel level,
+                                              net.minecraft.world.InteractionHand hand, Entity entity,
+                                              String reason) {
+        submit("INTERACT_ENTITY_DENIED", player, level, entity.blockPosition(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
+                EntityInteractionEvidence.canceledAttemptDetails(
+                        entity, hand, player.getItemInHand(hand),
+                        "callback=use_entity reason=" + reason));
+    }
+
+    /**
+     * Left-click inspection applies to every block. The click is consumed when the
+     * query is accepted, when it is denied for a missing grant (a denied inspection
+     * must not break the block), and when it detects grant revocation; transient
+     * rejections keep vanilla breaking.
+     */
     static InteractionResult tryOpenLeftClickInspection(InspectionService inspections,
                                                           BlockHistoryOpener blockHistoryOpener,
                                                           ServerPlayer player,
@@ -339,9 +550,29 @@ public final class FabricNativeAuditEventListener {
         }
         if (!ItemGraphPermissions.canUse(player.createCommandSourceStack(), ItemGraphPermissions.INSPECT)) {
             inspections.clear(player.getUUID());
-            return null;
+            notifyInspectionRevoked(player);
+            return InteractionResult.FAIL;
         }
-        return blockHistoryOpener.open(player, level, pos) == 0 ? null : InteractionResult.SUCCESS;
+        if (blockHistoryOpener.open(player, level, pos) == 0) {
+            return deniedByMissingGrant(player, ItemGraphPermissions.INSPECT, ItemGraphPermissions.AUDIT)
+                    ? InteractionResult.FAIL : null;
+        }
+        return InteractionResult.SUCCESS;
+    }
+
+    /**
+     * Whether an unaccepted inspection request failed on a missing permission grant rather
+     * than a transient rejection. The route's whole node set is re-checked — not only the
+     * downstream grant — so a grant revoked between the listener check and the dispatch
+     * still reads as a stable denial.
+     */
+    private static boolean deniedByMissingGrant(ServerPlayer player, String... permissionNodes) {
+        return !ItemGraphPermissions.canUseAll(player.createCommandSourceStack(), permissionNodes);
+    }
+
+    private static void notifyInspectionRevoked(ServerPlayer player) {
+        player.sendSystemMessage(Component.literal(ItemGraphLanguage.text("inspect.disabled_revoked",
+                "[ItemGraph] Inspection disabled: the itemgraph.command.inspect permission was revoked.")));
     }
 
     private static int openBlockHistory(ServerPlayer player, ServerLevel level, BlockPos pos) {
@@ -570,7 +801,7 @@ public final class FabricNativeAuditEventListener {
                 continue;
             }
             ItemStack stack = itemEntity.getItem();
-            onItemDropped(capture.player, itemEntity,
+            queuePendingDrop(capture.player, itemEntity,
                     stack == null ? ItemStack.EMPTY : stack.copy(), "DEATH_DROP");
         }
     }
@@ -635,46 +866,153 @@ public final class FabricNativeAuditEventListener {
         if (capture == null || !capture.addedEntities().contains(itemEntity)) {
             return null;
         }
-        onItemDropped(player, itemEntity, originalStack, capture.actionType());
+        queuePendingDrop(player, itemEntity, originalStack, capture.actionType());
         return capture.actionType();
     }
 
-    /** Records a drop only after ServerPlayer.drop and addFreshEntity both succeed. */
+    /**
+     * Records a drop immediately, bypassing settle deferral. Only test and
+     * admin-replay paths call this directly; every production drop site
+     * (ServerPlayer.drop finish, player-death capture, deferred /give replay)
+     * queues through {@link #queuePendingDrop} so the GROUND endpoint records
+     * where the entity settles, matching the pickup endpoint (issue #166).
+     */
     public static void onItemDropped(ServerPlayer player, ItemEntity itemEntity, ItemStack originalStack) {
-        onItemDropped(player, itemEntity, originalStack, "DROP_ITEM");
+        PendingDrop pending = capturePendingDrop(player, itemEntity, originalStack, "DROP_ITEM");
+        if (pending != null) {
+            emitConfirmedDrop(pending);
+        }
     }
 
-    private static void onItemDropped(ServerPlayer player, ItemEntity itemEntity,
-                                      ItemStack originalStack, String actionType) {
+    /**
+     * Captures the immutable drop record. Death drops mark the open death
+     * capture at capture time (not emit time) so a ServerPlayer.drop queue
+     * cannot be re-queued by finishPlayerDeathCapture at the die() return.
+     */
+    private static PendingDrop capturePendingDrop(ServerPlayer player, ItemEntity itemEntity,
+                                                  ItemStack originalStack, String actionType) {
         if (AdminMutationCapture.captureCreativeDrop(player, itemEntity, true)) {
-            return;
+            return null;
         }
         // Defer same-player drops until the wrapped GiveCommand call returns its
         // entity identity; reentrant drops are replayed as ordinary evidence.
         if (AdminMutationCapture.deferGiveDropSafely(player, itemEntity, originalStack)) {
-            return;
+            return null;
         }
         if (player == null || itemEntity == null || originalStack == null || originalStack.isEmpty()
                 || actionType == null || player.level().isClientSide() || itemEntity.isRemoved()) {
-            return;
+            return null;
         }
         ItemStack entityStack = itemEntity.getItem();
         if (entityStack == null || entityStack.isEmpty()) {
-            return;
+            return null;
         }
         int amount = entityStack.getCount();
         if (amount <= 0) {
-            return;
+            return null;
         }
         CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(originalStack);
-        boolean submitted = recordItemObservation(actionType, player.getUUID().toString(), player.getGameProfile().getName(),
-                player.level().dimension().location().toString(),
-                player.getX(), player.getY(), player.getZ(),
-                itemEntity.getX(), itemEntity.getY(), itemEntity.getZ(),
-                "GROUND", canonical, amount, itemEntity.getUUID().toString());
-        if (submitted && "DEATH_DROP".equals(actionType)) {
+        long now = System.currentTimeMillis();
+        if ("DEATH_DROP".equals(actionType)) {
             markDeathEntityRecorded(itemEntity);
         }
+        return new PendingDrop(itemEntity, actionType, player.getUUID(),
+                player.getGameProfile().getName(),
+                player.level().dimension().location().toString(),
+                player.getX(), player.getY(), player.getZ(),
+                amount, canonical, now, now + PENDING_DROP_TTL_MS);
+    }
+
+    /**
+     * Defers the drop's GROUND endpoint until the entity settles. A drop read
+     * at ServerPlayer.drop's return still carries the eye-height spawn offset,
+     * which lands the same entity one block above the GROUND node its pickup
+     * records — and CorrelationEngine's pickup bridge hard-filters on node
+     * equality, so the spawn-position read could never bridge (issue #166).
+     */
+    private static void queuePendingDrop(ServerPlayer player, ItemEntity itemEntity,
+                                         ItemStack originalStack, String actionType) {
+        PendingDrop pending = capturePendingDrop(player, itemEntity, originalStack, actionType);
+        if (pending == null) {
+            return;
+        }
+        PendingDrop replaced = PENDING_DROPS.remove(itemEntity.getUUID());
+        if (replaced != null) {
+            emitUnresolvedDrop(replaced, "pending_entity_reused");
+        }
+        if (PENDING_DROPS.size() >= PENDING_DROP_MAX) {
+            PendingDrop evicted = PENDING_DROPS.remove(PENDING_DROPS.keySet().iterator().next());
+            if (evicted != null) {
+                emitUnresolvedDrop(evicted, "pending_capacity");
+            }
+        }
+        PENDING_DROPS.put(itemEntity.getUUID(), pending);
+    }
+
+    /**
+     * Emits the confirmed drop once per server tick the entity reaches a
+     * resting state — onGround, near-zero delta movement, removed
+     * (absorbed/merged/picked before settling; last known position), or TTL
+     * expiry. Mirrors ItemEntityEventListener.resolvePendingDrops on NeoForge.
+     */
+    static void resolvePendingDrops(long nowMs) {
+        if (PENDING_DROPS.isEmpty()) {
+            return;
+        }
+        Iterator<Map.Entry<UUID, PendingDrop>> it = PENDING_DROPS.entrySet().iterator();
+        while (it.hasNext()) {
+            PendingDrop pending = it.next().getValue();
+            ItemEntity entity = pending.entity();
+            if (entity.isRemoved()
+                    || entity.onGround()
+                    || entity.getDeltaMovement().lengthSqr() <= DROP_SETTLE_SPEED_SQR
+                    || nowMs >= pending.expiresAtMs()) {
+                emitConfirmedDrop(pending);
+                it.remove();
+            }
+        }
+    }
+
+    /**
+     * A pickup that overtakes a still-pending drop emits it at the pickup
+     * position — the entity's actual rest endpoint and the same GROUND node
+     * the pickup observation records (issue #166).
+     */
+    static void confirmPendingDrop(UUID entityUuid) {
+        PendingDrop pending = PENDING_DROPS.remove(entityUuid);
+        if (pending != null) {
+            emitConfirmedDrop(pending);
+        }
+    }
+
+    private static void emitConfirmedDrop(PendingDrop pending) {
+        ItemEntity entity = pending.entity();
+        com.itemgraph.tracker.ItemEntityTracker.getInstance().recordDrop(
+                entity.getUUID(), pending.playerUuid(), pending.level(),
+                (int) Math.floor(entity.getX()), (int) Math.floor(entity.getY()),
+                (int) Math.floor(entity.getZ()),
+                pending.canonical().itemId(), pending.amount(), pending.timestampMs());
+        recordItemObservation(pending.actionType(), pending.playerUuid().toString(), pending.playerName(),
+                pending.level(), pending.playerX(), pending.playerY(), pending.playerZ(),
+                entity.getX(), entity.getY(), entity.getZ(),
+                "GROUND", pending.canonical(), pending.amount(), entity.getUUID().toString());
+    }
+
+    private static void emitUnresolvedDrop(PendingDrop pending, String reason) {
+        String actionType = "DEATH_DROP".equals(pending.actionType())
+                ? "DEATH_DROP_UNRESOLVED" : "DROP_UNRESOLVED";
+        byte[] rawData = ("{\"capture\":\"drop_attempt\",\"resolution\":\"unknown_destination\",\"reason\":\""
+                + reason + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+                pending.timestampMs(), actionType, pending.playerUuid().toString(), pending.playerName(),
+                pending.level(), pending.playerX(), pending.playerY(), pending.playerZ(),
+                pending.level(), null, null, null, "UNKNOWN",
+                pending.canonical().itemId(), rawData, pending.canonical(), pending.amount(), null));
+    }
+
+    /** Drops all queued drops; test isolation and server-stop hygiene only. */
+    static void clearPendingDrops() {
+        PENDING_DROPS.clear();
     }
 
     /** Replays non-command item entities deferred until the wrapped /give drop returned. */
@@ -683,7 +1021,7 @@ public final class FabricNativeAuditEventListener {
         if (deferredDrops == null) return;
         for (AdminMutationCapture.DeferredGiveDrop deferred : deferredDrops) {
             if (!deferred.accepted()) continue;
-            onItemDropped(deferred.player(), deferred.entity(), deferred.stack(), "DROP_ITEM");
+            queuePendingDrop(deferred.player(), deferred.entity(), deferred.stack(), "DROP_ITEM");
         }
     }
 
@@ -711,9 +1049,18 @@ public final class FabricNativeAuditEventListener {
         if (amount <= 0) {
             return;
         }
+        // A pickup that overtakes a still-pending drop emits it here, at the
+        // entity's rest position, so the pair shares one GROUND node.
+        confirmPendingDrop(itemEntity.getUUID());
         CanonicalItem canonical = ItemCanonicalizer.canonicalizeStack(originalStack);
+        String level = player.level().dimension().location().toString();
+        com.itemgraph.tracker.ItemEntityTracker.getInstance().recordPickup(
+                itemEntity.getUUID(), player.getUUID(), level,
+                (int) Math.floor(itemEntity.getX()), (int) Math.floor(itemEntity.getY()),
+                (int) Math.floor(itemEntity.getZ()),
+                canonical.itemId(), amount, System.currentTimeMillis());
         recordItemObservation("PICKUP_ITEM", player.getUUID().toString(), player.getGameProfile().getName(),
-                player.level().dimension().location().toString(),
+                level,
                 itemEntity.getX(), itemEntity.getY(), itemEntity.getZ(),
                 player.getX(), player.getY(), player.getZ(),
                 "GROUND", canonical, amount, itemEntity.getUUID().toString());

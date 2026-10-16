@@ -196,6 +196,10 @@ Keep these files current:
 - `docs/IMPLEMENTATION_PLAN.md`
 - `docs/BRANDING.md`
 
+Reader-facing docs follow the writing contract in `docs/WRITING.md`
+(audience naming, define-before-use, pinned validator literals, and the
+protected evidence-ledger list).
+
 Important decisions must not exist only in chat history.
 
 # MVP

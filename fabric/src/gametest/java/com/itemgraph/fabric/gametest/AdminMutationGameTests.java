@@ -170,6 +170,19 @@ public final class AdminMutationGameTests implements FabricGameTest {
                             helper.assertTrue(result.getInt(1) == 1,
                                     "unrelated player drop must reach durable storage before verification");
                         }
+                        try (var deferredStatement = connection.prepareStatement(
+                                "SELECT COUNT(*) FROM ig_observations obs "
+                                        + "JOIN ig_nodes source ON source.id = obs.node_id WHERE obs.id > ? "
+                                        + "AND source.owner_uuid = ? AND obs.action_type = 'DROP_ITEM'")) {
+                            deferredStatement.setQueryTimeout(5);
+                            deferredStatement.setLong(1, observationWatermark);
+                            deferredStatement.setString(2, player.getUUID().toString());
+                            try (var result = deferredStatement.executeQuery()) {
+                                result.next();
+                                helper.assertTrue(result.getInt(1) == 1,
+                                        "queued reentrant drop must settle and reach durable storage before verification");
+                            }
+                        }
                         try (var rejectionStatement = connection.createStatement();
                              var result = rejectionStatement.executeQuery("SELECT COUNT(*) FROM ig_audit_events "
                                      + "WHERE event_type = 'ADMIN_ITEM_COMMAND_UNRESOLVED' "

@@ -341,8 +341,18 @@ history, so ItemGraph deliberately keeps clicked-position behavior for its
 built-in functional blocks; this is a documented-contract extension to the
 release implementation. ItemGraph also keeps clicked-position support for
 modded `Container` block entities. Unlike GriefLogger,
-ItemGraph consumes a click only after its bounded asynchronous history request
-is accepted, so queue rejection leaves the normal game interaction available.
+ItemGraph consumes a click after its bounded asynchronous history request
+is accepted or when the request is denied for a missing grant — a denied
+inspection must not break or toggle blocks — while transient rejection
+(queue full, database unavailable) leaves the normal game interaction
+available and rejected container right-clicks keep vanilla chest access.
+Consumed clicks also consume the off-hand `useItemOn` and item-use twin
+packets, so held or off-hand items cannot mutate the inspected scene.
+Entity right-clicks are also consumed (denied and recorded as
+`INTERACT_ENTITY_DENIED` evidence), so armor-stand equipping, shearing, milking,
+leashing, and name tags cannot mutate it either. Entity left-clicks (attacks)
+are consumed under the same rule and recorded as `ATTACK_ENTITY_DENIED`
+evidence (#187), so a predicted hit cannot damage or pop the inspected entity.
 `InspectionListenerTest` and `FabricNativeAuditEventListenerTest` cover these
 branches locally. Those automated tests do not prove client rendering or packet
 transport. The MC Pilot runs below verify selected connected-client inspector
@@ -504,13 +514,15 @@ classified as a strict ItemGraph extension to preserve vanilla-client support.
 
 This is a separate deployment procedure, not an M8 feature-parity test.
 ItemGraph feature conformance is researched and tested locally with ItemGraph
-alone. Any later operator decision to retire the compatible artifacts requires
-the separate approval and deployment evidence below.
-Until then, the standard and compatible loader jars remain distinct so an
-operator can choose a dependency-safe migration path. After cutover, the
-standard ItemGraph jar is the only supported runtime artifact; GriefLogger is
-not a runtime dependency. The read-only importer remains available for a
-checksummed historical database when an operator explicitly configures it.
+alone. The operator decision has since been taken: ItemGraph replaces
+GriefLogger outright, so the `-grieflogger-compatible` artifacts were retired
+and the standard jar is the only supported runtime artifact. GriefLogger is
+not a runtime dependency, but the mods can coexist: ItemGraph isolates its
+SQLite driver (`META-INF/iglibs/`, private classloader) and declares the mod
+`optional`/`AFTER` on NeoForge and `suggests` on Fabric, then migrates the
+source database read-only when detected. The read-only importer also remains
+available for a checksummed historical database when an operator explicitly
+configures it.
 
 1. Before cutover, stop the staging server and make an immutable, checksummed
    copy of the GriefLogger database. ItemGraph may read the source during the

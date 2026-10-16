@@ -20,7 +20,7 @@ public final class CommandHelp {
             "journeys inspect", "journeys trace", "journeys near", "journeys filters",
             "goto",
             "lookup", "lookup near", "lookup page", "lookup player", "lookup filters", "lookup provenance",
-            "lookup admin", "lookup lifecycle", "lookup transformations",
+            "lookup admin", "lookup world", "lookup lifecycle", "lookup transformations",
             "page",
             "trace", "trace item", "trace player", "trace container",
             "gui", "gui item", "gui player", "gui container", "inspect");
@@ -61,8 +61,48 @@ public final class CommandHelp {
         return List.copyOf(withPermission);
     }
 
-    static String validTopicsText() {
-        return String.join(", ", TOPIC_NAMES);
+    /**
+     * Returns up to five topic names nearest to the typed value — substring matches first,
+     * then names within a small edit distance — so an unknown-topic message can point at
+     * recovery candidates instead of dumping every topic.
+     */
+    static String closestTopicsText(String topic) {
+        String normalized = normalize(topic);
+        if (normalized.isEmpty()) {
+            return "";
+        }
+        List<String> substring = TOPIC_NAMES.stream()
+                .filter(name -> name.contains(normalized) || normalized.contains(name))
+                .limit(5)
+                .toList();
+        if (!substring.isEmpty() || normalized.length() < 4) {
+            return String.join(", ", substring);
+        }
+        return TOPIC_NAMES.stream()
+                .map(name -> Map.entry(name, editDistance(name, normalized)))
+                .filter(entry -> entry.getValue() <= 3)
+                .sorted(Map.Entry.comparingByValue())
+                .limit(5)
+                .map(Map.Entry::getKey)
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    private static int editDistance(String a, String b) {
+        int[] costs = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) {
+            costs[j] = j;
+        }
+        for (int i = 1; i <= a.length(); i++) {
+            costs[0] = i;
+            int previous = i - 1;
+            for (int j = 1; j <= b.length(); j++) {
+                int current = costs[j];
+                costs[j] = Math.min(Math.min(costs[j - 1] + 1, costs[j] + 1),
+                        previous + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1));
+                previous = current;
+            }
+        }
+        return costs[b.length()];
     }
 
     private static String normalize(String topic) {
@@ -78,12 +118,12 @@ public final class CommandHelp {
                 "[ItemGraph] Start with an admin question; use /ig help commands to find a command or /ig help <topic> for exact syntax.",
                 "[ItemGraph] Example: /ig help trace item"));
         topics.put("commands", List.of(
-                "[ItemGraph] ITEM: /ig trace item diamond; /ig help trace item.",
-                "[ItemGraph] GUI: /ig gui item stone; /ig help gui; /ig gui container.",
-                "[ItemGraph] PLAYER: /ig trace player <playerName>; /ig help trace player.",
-                "[ItemGraph] CONTAINER: /ig trace container; /ig help trace container.",
-                "[ItemGraph] AUDIT: /ig lookup near; /ig help lookup; /ig inspect.",
-                "[ItemGraph] EVIDENCE: /ig event <observationId>; /ig explain <edgeId>.",
+                "[ItemGraph] ITEM LOST? /ig trace item diamond; /ig help trace item.",
+                "[ItemGraph] BROWSE: /ig gui item stone; /ig help gui; /ig gui container.",
+                "[ItemGraph] PLAYER? /ig trace player <playerName>; /ig help trace player.",
+                "[ItemGraph] CHEST? /ig trace container; /ig help trace container.",
+                "[ItemGraph] NEARBY? /ig lookup near; /ig help lookup; /ig inspect.",
+                "[ItemGraph] WHY LINKED? /ig event <observationId>; /ig explain <edgeId>.",
                 "[ItemGraph] PAGES: /ig page <page>; /ig goto <token> is click-only.",
                 "[ItemGraph] OPS: /ig status; /ig audit; /ig ingest history; /ig ingest now.",
                 "[ItemGraph] Example: /ig help trace item; /ig help <topic>; /ig help guide."));
@@ -108,15 +148,14 @@ public final class CommandHelp {
                 "[ItemGraph] Dotted nodes do not inherit; grant each named permission.",
                 "[ItemGraph] Matrix/provider behavior: docs/SECURITY_AND_PERMISSIONS.md."));
         topics.put("journeys", List.of(
-                "[ItemGraph] Inspect: /ig help journeys inspect; trace: /ig help journeys trace.",
-                "[ItemGraph] Nearby: /ig help journeys near; filtered: /ig help journeys filters.",
-                "[ItemGraph] Trace observation IDs use /ig event <observationId>.",
-                "[ItemGraph] Inferred edge IDs use /ig explain <edgeId>.",
-                "[ItemGraph] Admin/creative outcome UUIDs use /ig event event:<uuid>.",
-                "[ItemGraph] Player paging: /ig page 2; console near returns one page.",
-                "[ItemGraph] Direct event pages have no nearby scope: /ig lookup page.",
-                "[ItemGraph] Roles: /ig help guide; exact nodes: /ig help permissions.",
-                "[ItemGraph] Example: /ig help journeys"));
+                "[ItemGraph] Inspect: /ig inspect on; click blocks or containers.",
+                "[ItemGraph] Trace: /ig trace item <query>; /ig help journeys trace.",
+                "[ItemGraph] Nearby: /ig lookup near; /ig help journeys filters.",
+                "[ItemGraph] Raw: /ig event <observationId>; edge: /ig explain <edgeId>.",
+                "[ItemGraph] Outcome UUID: /ig event event:<uuid>; page: /ig page 2.",
+                "[ItemGraph] Details: /ig help journeys inspect/trace/near/filters.",
+                "[ItemGraph] Roles: /ig help guide; access: /ig help permissions.",
+                "[ItemGraph] More: /ig help journeys <task>; Example: /ig help journeys trace."));
         topics.put("journeys inspect", List.of(
                 "[ItemGraph] Start: /ig inspect on; left-click blocks or right-click containers.",
                 "[ItemGraph] History is raw audit events; some rows are UNRESOLVED.",
@@ -166,7 +205,7 @@ public final class CommandHelp {
                 "[ItemGraph] Radius needs player; console uses /ig lookup near; empty ≠ proof."));
         topics.put("guide", List.of(
                 "[ItemGraph] Admin quick start: https://github.com/DurdeuVlad/itemgraph/blob/main/docs/ADMIN_QUICK_START.md",
-                "[ItemGraph] Example: open the guide before configuring access or running the first capture check."));
+                "[ItemGraph] Example: read it before granting permissions or your first capture check."));
         topics.put("status", List.of(
                 "[ItemGraph] Syntax: /ig status",
                 "[ItemGraph] ACTION reports DB/capture state and a safe next step when known.",
@@ -190,7 +229,8 @@ public final class CommandHelp {
                 "[ItemGraph] Results are native OBSERVED evidence from ig_audit_events; limit defaults to 20 and is capped at 100.",
                 "[ItemGraph] /ig lookup near clamps radius to 1..1024 blocks and requires an exact dimension id.",
                 "[ItemGraph] Pages are 1-based; offsets are capped at 10,000 rows.",
-                "[ItemGraph] Focused help: /ig help lookup admin; /ig help lookup lifecycle.",
+                "[ItemGraph] Focused help: /ig help lookup admin; /ig help lookup world.",
+                "[ItemGraph] Also: /ig help lookup lifecycle; /ig help lookup transformations.",
                 "[ItemGraph] Transformations: /ig help lookup transformations.",
                 "[ItemGraph] Example: /ig lookup BREAK_BLOCK 50 120");
         topics.put("lookup", lookup);
@@ -199,6 +239,18 @@ public final class CommandHelp {
                 "[ItemGraph] dimension: exact resource location; x/y/z: block coordinates; radius is clamped to 1..1024 blocks.",
                 "[ItemGraph] Results are native OBSERVED audit events in the selected cube. The read-only query runs asynchronously.",
                 "[ItemGraph] Example: /ig lookup near minecraft:overworld 120 64 -30 32 BREAK_BLOCK 50 1440"));
+        topics.put("lookup world", List.of(
+                "[ItemGraph] Query with /ig lookup near, exact world, coordinates, event type.",
+                "[ItemGraph] Types: EXPLOSION_BLOCK_CHANGE, PISTON_BLOCK_MOVE.",
+                "[ItemGraph] Also: PISTON_BLOCK_ATTEMPT, FLUID_BLOCK_CHANGE, FIRE_BLOCK_CHANGE.",
+                "[ItemGraph] Also: ENDERMAN_BLOCK_MOVE, FALLING_BLOCK_CHANGE.",
+                "[ItemGraph] Coverage: WORLD_EFFECT_ATTEMPT, WORLD_EFFECT_UNRESOLVED.",
+                "[ItemGraph] Perms: itemgraph.command + itemgraph.command.lookup.",
+                "[ItemGraph] Protected coordinates also need itemgraph.audit.",
+                "[ItemGraph] Changes, attempts, and coverage gaps stay separate.",
+                "[ItemGraph] No row proves item quantity or a nearby player's action.",
+                "[ItemGraph] Example: FIRE_BLOCK_CHANGE.",
+                "[ItemGraph] Try: /ig lookup near minecraft:overworld 0 0 0 1 FIRE_BLOCK_CHANGE"));
         topics.put("lookup admin", List.of(
                 "[ItemGraph] Query ADMIN_ITEM_COMMAND_EFFECT; use near for coordinates.",
                 "[ItemGraph] Other outcomes: ADMIN_ITEM_COMMAND_ATTEMPT,",
@@ -337,7 +389,7 @@ public final class CommandHelp {
                 "[ItemGraph] The command and each supported click enforce the same permission check. /ig inspect toggles; /ig inspect on enables; /ig inspect off disables; /ig inspect status reports without changing.",
                 "[ItemGraph] Toggle, status, and click recognition require itemgraph.command.inspect. Block history reads eventType=all and also requires itemgraph.audit; the container flow browser separately requires itemgraph.gui and itemgraph.audit.",
                 "[ItemGraph] While enabled, left-click inspects that block; right-click a Container opens its flow browser; a right-click on a non-container opens paginated block history (ordinary blocks target the block on the clicked face).",
-                "[ItemGraph] The click is consumed only after the read-only request is accepted, so held items are not used and inspection is not transfer evidence. State clears on logout and server stop.",
+                "[ItemGraph] An accepted request consumes the click. A request denied for a missing grant, and a click that detects a revoked inspect permission, is also consumed — denied clicks never break, toggle, or place/use held items — while transient rejections and rejected container right-clicks keep vanilla behavior. Entity right-clicks are denied and recorded as denied evidence, so armor stands, shearing, milking, and name tags cannot mutate the scene. Inspection is not transfer evidence. State clears on logout and server stop.",
                 "[ItemGraph] Example: /ig inspect on");
         topics.put("inspect", inspect);
         return Map.copyOf(topics);

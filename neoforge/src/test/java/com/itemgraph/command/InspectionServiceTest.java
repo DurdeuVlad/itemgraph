@@ -48,6 +48,34 @@ class InspectionServiceTest {
     }
 
     @Test
+    void consumedInteractionMarkerSurvivesPlayerClearButExpiresAfterWindow() {
+        UUID player = UUID.randomUUID();
+        service.markInteractionConsumed(player, 100L);
+
+        // clear(uuid) must not drop the marker: the revocation-detecting click
+        // clears the mode and its twin packets still have to be consumed.
+        service.clear(player);
+        assertTrue(service.consumedInteractionRecently(player, 100L));
+        assertTrue(service.consumedInteractionRecently(
+                player, 100L + InspectionService.CONSUMED_PACKET_WINDOW_TICKS));
+        assertFalse(service.consumedInteractionRecently(
+                player, 100L + InspectionService.CONSUMED_PACKET_WINDOW_TICKS + 1));
+    }
+
+    @Test
+    void consumedInteractionMarkerIsScopedByPlayerAndResetByClearAll() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        service.markInteractionConsumed(first, 100L);
+
+        assertTrue(service.consumedInteractionRecently(first, 100L));
+        assertFalse(service.consumedInteractionRecently(second, 100L));
+
+        service.clear();
+        assertFalse(service.consumedInteractionRecently(first, 100L));
+    }
+
+    @Test
     void clearRemovesOnePlayerAndClearAllRemovesEveryPlayer() {
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();

@@ -4,6 +4,7 @@ import com.itemgraph.audit.AuditReport;
 import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.i18n.ItemGraphLanguage;
 import com.itemgraph.audit.AuditService;
+import com.itemgraph.audit.EventTaxonomy;
 import com.itemgraph.correlation.CorrelationResult;
 import com.itemgraph.db.DatabaseManager;
 import com.itemgraph.ingest.IngestionResult;
@@ -83,7 +84,23 @@ public final class ItemGraphCommands {
             "craft_item", "break_item", "consume_item", "throw_item", "shoot_item",
             "add_item_ender", "remove_item_ender");
     private static final Set<String> AUDIT_ONLY_LOOKUP_TYPES = Set.of(
-            "CHAT_MESSAGE", "COMMAND_ATTEMPT", "COMMAND_EXECUTED");
+            "CHAT_MESSAGE", "COMMAND_ATTEMPT", "COMMAND_EXECUTED",
+            // Block and entity interaction rows expose protected world coordinates.
+            "PLACE_BLOCK", "BREAK_BLOCK", "CONTAINER_BREAK_COMPLETED", "CONTAINER_BREAK_UNRESOLVED",
+            "INTERACT_BLOCK", "INTERACT_BLOCK_ATTEMPT", "INTERACT_ENTITY",
+            "INTERACT_ENTITY_COMPLETED", "INTERACT_ENTITY_DENIED", "INTERACT_ENTITY_UNRESOLVED",
+            // Entity and accepted-projectile rows expose sensitive world positions.
+            "KILL_ENTITY", "PROJECTILE_SPAWN_ACCEPTED",
+            // Transformation results expose player, item fingerprints, and coordinates.
+            "CRAFT", "SMELT", "ANVIL_RENAME", "ANVIL_REPAIR",
+            // World-cause rows expose sensitive block positions, including unresolved coverage.
+            "EXPLOSION_BLOCK_CHANGE", "PISTON_BLOCK_MOVE", "PISTON_BLOCK_ATTEMPT",
+            "WORLD_EFFECT_ATTEMPT", "FLUID_BLOCK_CHANGE", "FIRE_BLOCK_CHANGE",
+            "ENDERMAN_BLOCK_MOVE", "FALLING_BLOCK_CHANGE", "WORLD_EFFECT_UNRESOLVED");
+    private static final Set<String> TAXONOMY_SENSITIVE_LOOKUP_TYPES = EventTaxonomy.definitions().stream()
+            .filter(definition -> definition.privacy() == EventTaxonomy.PrivacyClass.SENSITIVE_LOCATION)
+            .map(EventTaxonomy.Definition::id)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
     private static volatile RuntimeInformationPort runtimeInformation = new RuntimeInformationPort() {
         @Override public String modVersion() { return "unknown"; }
         @Override public boolean isModLoaded(String modId) { return false; }
@@ -112,8 +129,7 @@ public final class ItemGraphCommands {
                         String filterDescription, long createdAtMs) {
             this(sessionId, eventType, playerName, window, limit, levelId, centerX, centerY, centerZ, radius,
                     exactPositions, filters, filterDescription, ItemGraphPermissions.LOOKUP,
-                    eventType == null || "all".equalsIgnoreCase(eventType)
-                            || AUDIT_ONLY_LOOKUP_TYPES.contains(eventType.toUpperCase(java.util.Locale.ROOT)),
+                    ItemGraphCommands.requiresAuditPermission(eventType),
                     createdAtMs);
         }
     }
@@ -266,7 +282,7 @@ public final class ItemGraphCommands {
                 .filter(node -> node.levelId() != null && node.x() != null && node.y() != null && node.z() != null)
                 .filter(node -> Double.isFinite(node.x()) && Double.isFinite(node.y()) && Double.isFinite(node.z()))
                 .map(node -> new QueryDispatcher.LocationAction(node.levelId(), node.x(), node.y(), node.z()))
-                .distinct().limit(8).toList();
+                .distinct().toList();
     }
 
     private static List<QueryDispatcher.LocationAction> locationsForHops(TraceResult result) {
@@ -605,8 +621,13 @@ public final class ItemGraphCommands {
         String topic = StringArgumentType.getString(ctx, "topic");
         List<String> lines = CommandHelp.topicLines(topic);
         if (lines == null) {
+            String closest = CommandHelp.closestTopicsText(topic);
+            if (closest.isEmpty()) {
+                closest = ItemGraphLanguage.text("help.no_close_topics", "none");
+            }
             source.sendFailure(Component.literal(ItemGraphLanguage.text("help.unknown_topic",
-                    "[ItemGraph] Unknown help topic ''{0}''. Valid topics: {1}", topic, CommandHelp.validTopicsText())));
+                    "[ItemGraph] Unknown help topic '{0}'. Closest topics: {1}. Use /ig help commands to list every topic.",
+                    topic, closest)));
             return 0;
         }
         lines.forEach(line -> source.sendSuccess(() -> Component.literal(ItemGraphLanguage.sourceText(line)), false));
@@ -959,7 +980,7 @@ public final class ItemGraphCommands {
         boolean changed = InspectionService.getInstance().setEnabled(player.getUUID(), enabled);
         ctx.getSource().sendSuccess(() -> Component.literal(enabled
                 ? changed
-                        ? ItemGraphLanguage.text("inspect.enabled", "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history.")
+                        ? ItemGraphLanguage.text("inspect.enabled", "[ItemGraph] Inspection enabled. Left-click blocks or right-click blocks and containers to view read-only history; use /ig inspect off to disable.")
                         : ItemGraphLanguage.text("inspect.already_enabled", "[ItemGraph] Inspection is already enabled.")
                 : changed
                         ? ItemGraphLanguage.text("inspect.disabled", "[ItemGraph] Inspection disabled.")
@@ -1333,6 +1354,7 @@ public final class ItemGraphCommands {
         }
         String normalized = eventType.toUpperCase(java.util.Locale.ROOT);
         if (AUDIT_ONLY_LOOKUP_TYPES.contains(normalized)
+                || TAXONOMY_SENSITIVE_LOOKUP_TYPES.contains(normalized)
                 || normalized.startsWith("ADMIN_ITEM_COMMAND_")
                 || normalized.startsWith("CREATIVE_SLOT_")
                 || normalized.startsWith("CREATIVE_BLOCK_")
@@ -1537,7 +1559,9 @@ public final class ItemGraphCommands {
         String glStatus = !sourceAdapter.isIntegrationEnabled()
                 ? ItemGraphLanguage.text("status.source_disabled", "DISABLED (native-only; enable the GriefLogger integration in ItemGraph config to opt in)")
                 : sourceAdapter.isSupportedSchemaAvailable()
-                    ? ItemGraphLanguage.text("status.source_available", "ENABLED (read-only source available)")
+                    ? sourceAdapter.isAutoDetected()
+                        ? ItemGraphLanguage.text("status.source_auto", "ENABLED (GriefLogger detected; read-only auto-migration)")
+                        : ItemGraphLanguage.text("status.source_available", "ENABLED (read-only source available)")
                     : ItemGraphLanguage.text("status.source_unavailable", "ENABLED (read-only source unavailable)");
 
         DatabaseManager db = DatabaseManager.getInstance();
@@ -1550,8 +1574,9 @@ public final class ItemGraphCommands {
         InternalObservationService internalObs = InternalObservationService.getInstance();
         ItemEntityTracker entityTracker = ItemEntityTracker.getInstance();
         long capabilityQueueRejections = ContainerInteractionTracker.getInstance().getTotalCapabilityQueueRejections();
-        source.sendSuccess(() -> Component.literal(statusActionLine(dbConnected,
-                internalObs.getCaptureState(), internalObs.getTotalDropped())), false);
+        source.sendSuccess(() -> Component.literal(statusActionLine(internalObs.getCaptureState(), dbConnected,
+                internalObs.getTotalDropped(), lastResult != null && !lastResult.success(),
+                lastCorrelation != null && !lastCorrelation.success())), false);
         source.sendSuccess(() -> Component.literal(ItemGraphLanguage.text("status.summary",
                 "[ItemGraph] version={0} griefLogger={1} db={2} backend={3} schemaVersion={4} maxPageSize={5} databaseConnectionTimeoutMs={6} useIndexes={7}",
                 modVersion, glStatus, ItemGraphLanguage.text(dbConnected ? "status.connected" : "status.disconnected",
@@ -1614,35 +1639,39 @@ public final class ItemGraphCommands {
         });
     }
 
-    static String statusActionLine(boolean dbConnected,
-                                   InternalObservationService.CaptureState captureState,
-                                   long droppedRecords) {
-        if (!dbConnected) {
-            return ItemGraphLanguage.text("status.action.db_disconnected",
-                    "[ItemGraph] ACTION: DB disconnected. Check config/logs; preserve DB files.");
-        }
+    static String statusActionLine(InternalObservationService.CaptureState captureState, boolean dbConnected,
+                                   long dropped, boolean ingestionFailed, boolean correlationFailed) {
+        String key;
+        String fallback;
         if (captureState == InternalObservationService.CaptureState.RECOVERY_BLOCKED) {
-            return ItemGraphLanguage.text("status.action.recovery_blocked",
-                    "[ItemGraph] ACTION: Recovery blocked. Preserve recovery files; inspect logs.");
+            key = "status.action.recovery_blocked";
+            fallback = "[ItemGraph] ACTION: Preserve recovery files and logs; follow the recovery guide.";
+        } else if (captureState == InternalObservationService.CaptureState.DISABLED_BY_CONFIG) {
+            key = "status.action.capture_disabled";
+            fallback = "[ItemGraph] ACTION: Native capture is off; enable it to record new events.";
+        } else if (captureState == InternalObservationService.CaptureState.STOPPED) {
+            key = "status.action.capture_stopped";
+            fallback = "[ItemGraph] ACTION: Check startup errors; restore the capture worker first.";
+        } else if (captureState == InternalObservationService.CaptureState.RECOVERY_LOADING) {
+            key = "status.action.recovery_loading";
+            fallback = "[ItemGraph] ACTION: Wait for recovery loading before reading queue totals.";
+        } else if (!dbConnected) {
+            key = "status.action.database_disconnected";
+            fallback = "[ItemGraph] ACTION: Check database settings and logs; preserve recovery files.";
+        } else if (dropped > 0) {
+            key = "status.action.dropped";
+            fallback = "[ItemGraph] ACTION: Evidence was rejected or lost; preserve logs; investigate.";
+        } else if (ingestionFailed) {
+            key = "status.action.ingestion_failed";
+            fallback = "[ItemGraph] ACTION: Review the failed source-ingestion cycle in the logs.";
+        } else if (correlationFailed) {
+            key = "status.action.correlation_failed";
+            fallback = "[ItemGraph] ACTION: Review the failed correlation pass; paths may be missing.";
+        } else {
+            key = "status.action.verify_coverage";
+            fallback = "[ItemGraph] ACTION: No stop reported; confirm capture was active and supported.";
         }
-        if (captureState == InternalObservationService.CaptureState.RECOVERY_LOADING) {
-            return ItemGraphLanguage.text("status.action.recovery_loading",
-                    "[ItemGraph] ACTION: Recovery loading. Wait before reading queue totals.");
-        }
-        if (captureState == InternalObservationService.CaptureState.STOPPED) {
-            return ItemGraphLanguage.text("status.action.capture_stopped",
-                    "[ItemGraph] ACTION: Capture stopped. Check logs before trusting new evidence.");
-        }
-        if (captureState == InternalObservationService.CaptureState.DISABLED_BY_CONFIG) {
-            return ItemGraphLanguage.text("status.action.capture_disabled",
-                    "[ItemGraph] ACTION: Capture disabled by config; results use stored evidence.");
-        }
-        if (droppedRecords > 0) {
-            return ItemGraphLanguage.text("status.action.dropped_records",
-                    "[ItemGraph] ACTION: Records dropped; check logs; results may be incomplete.");
-        }
-        return ItemGraphLanguage.text("status.action.no_stop_reported",
-                "[ItemGraph] ACTION: No reported DB/capture stop; coverage is not proven.");
+        return ItemGraphLanguage.text(key, fallback);
     }
 
     static List<String> runtimeStatusLines(

@@ -1,7 +1,6 @@
 package com.itemgraph.gametest;
 
 import com.itemgraph.db.DatabaseManager;
-import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -41,32 +40,33 @@ public final class VanillaDispenserConformanceFixture {
         helper.assertTrue(blockEntity instanceof DispenserBlockEntity,
                 "placed dispenser/dropper block entity is missing");
         DispenserBlockEntity dispenser = (DispenserBlockEntity) blockEntity;
+        String replayName = REPLAY_ITEM_NAME + " " + expectedAction;
         ItemStack replayStack = new ItemStack(Items.NETHER_STAR, 1);
-        replayStack.set(DataComponents.CUSTOM_NAME, Component.literal(REPLAY_ITEM_NAME));
+        replayStack.set(DataComponents.CUSTOM_NAME, Component.literal(replayName));
         dispenser.setItem(0, replayStack);
         Set<java.util.UUID> preexistingItemEntities = helper.getLevel().getEntitiesOfClass(ItemEntity.class,
-                        new AABB(sourcePos).inflate(3))
+                        new AABB(sourcePos).inflate(8))
                 .stream().map(ItemEntity::getUUID).collect(Collectors.toUnmodifiableSet());
         helper.assertTrue(helper.getLevel().setBlock(sourcePos.north(), Blocks.REDSTONE_BLOCK.defaultBlockState(), 3),
                 "could not power vanilla dispenser fixture");
 
         helper.runAtTickTime(FIRST_DISPENSE_CHECK_TICK, () -> awaitDispense(
                 helper, dispenser, sourcePos, preexistingItemEntities, priorObservationId, expectedAction,
-                FIRST_DISPENSE_CHECK_TICK));
+                replayName, FIRST_DISPENSE_CHECK_TICK));
     }
 
     private static void awaitDispense(GameTestHelper helper, DispenserBlockEntity dispenser, BlockPos sourcePos,
                                       Set<java.util.UUID> preexistingItemEntities, long priorObservationId,
-                                      String expectedAction, int tick) {
+                                      String expectedAction, String replayName, int tick) {
         List<ItemEntity> spawned = helper.getLevel().getEntitiesOfClass(ItemEntity.class,
-                        new AABB(sourcePos).inflate(3))
+                        new AABB(sourcePos).inflate(8))
                 .stream().filter(entity -> entity.getItem().is(Items.NETHER_STAR)
                         && entity.getItem().get(DataComponents.CUSTOM_NAME) != null
-                        && REPLAY_ITEM_NAME.equals(entity.getItem().get(DataComponents.CUSTOM_NAME).getString())
+                        && replayName.equals(entity.getItem().get(DataComponents.CUSTOM_NAME).getString())
                         && !preexistingItemEntities.contains(entity.getUUID())).toList();
         if (spawned.isEmpty() && tick < MAX_DISPENSE_WAIT_TICKS) {
             helper.runAtTickTime(tick + 1, () -> awaitDispense(helper, dispenser, sourcePos,
-                    preexistingItemEntities, priorObservationId, expectedAction, tick + 1));
+                    preexistingItemEntities, priorObservationId, expectedAction, replayName, tick + 1));
             return;
         }
         helper.assertTrue(spawned.size() == 1,
@@ -92,10 +92,6 @@ public final class VanillaDispenserConformanceFixture {
                                                 AtomicReference<CompletableFuture<List<Observation>>> pending) {
         helper.runAtTickTime(tick, () -> {
             if (pending.get() == null) {
-                if (InternalObservationService.getInstance().getQueueSize() != 0) {
-                    retry(helper, priorId, action, source, entityUuid, tick, pending);
-                    return;
-                }
                 pending.set(CompletableFuture.supplyAsync(() -> readObservations(
                         priorId, action, source, entityUuid)));
             }

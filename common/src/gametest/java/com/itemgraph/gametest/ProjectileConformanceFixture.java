@@ -50,9 +50,7 @@ public final class ProjectileConformanceFixture {
      */
     public static void assertPersisted(GameTestHelper helper, Watermark prior, String playerUuid,
                                        List<List<String>> priorQuantityRows) {
-        List<List<String>> currentQuantityRows = EntityInteractionConformanceFixture.snapshotQuantityObservations();
-        helper.assertTrue(currentQuantityRows.containsAll(priorQuantityRows),
-                "projectile replay must not mutate or remove earlier quantity evidence");
+        EntityInteractionConformanceFixture.assertQuantityObservationsUnchanged(helper, priorQuantityRows);
 
         List<ObservationRow> observations = readProjectileObservations(prior.observationId(), playerUuid);
         helper.assertValueEqual(2, observations.size(),

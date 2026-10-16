@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QueryCancellationJdbcTest {
     @Test
@@ -41,6 +42,46 @@ class QueryCancellationJdbcTest {
         assertEquals(1, cancelCalls.get());
         org.junit.jupiter.api.Assertions.assertFalse(cancellation.finish());
         assertThrows(SQLException.class, statement::executeQuery);
+    }
+
+    @Test
+    void cancelsARunningSqliteQueryThroughTheIsolatedDriver() throws Exception {
+        com.itemgraph.db.SqliteJdbc.initialize(java.nio.file.Path.of("build", "iglibs-test"));
+        java.sql.Connection raw = com.itemgraph.db.SqliteJdbc.connect(
+                "jdbc:sqlite::memory:", new java.util.Properties());
+        try {
+            QueryDispatcher.QueryCancellation cancellation = new QueryDispatcher.QueryCancellation();
+            cancellation.attach(raw);
+            java.sql.Connection instrumented = cancellation.instrument(raw);
+            Thread canceller = new Thread(() -> {
+                try {
+                    Thread.sleep(150);
+                } catch (InterruptedException ignored) {
+                }
+                cancellation.cancel();
+            });
+            long started = System.currentTimeMillis();
+            canceller.start();
+            SQLException thrown = assertThrows(SQLException.class, () -> {
+                try (java.sql.Statement stmt = instrumented.createStatement();
+                     java.sql.ResultSet rs = stmt.executeQuery(
+                             "WITH RECURSIVE counter(x) AS ("
+                                     + "SELECT 1 UNION ALL SELECT x + 1 FROM counter LIMIT 2000000000"
+                                     + ") SELECT COUNT(*) FROM counter c1 JOIN counter c2 ON c2.x < 200")) {
+                    rs.next();
+                }
+            });
+            assertTrue(System.currentTimeMillis() - started < 30_000,
+                    "the running query must abort promptly, not finish the Cartesian count");
+            assertTrue(thrown.getMessage() == null
+                            || thrown.getMessage().toLowerCase(java.util.Locale.ROOT)
+                                    .contains("interrupt")
+                            || thrown.getMessage().toLowerCase(java.util.Locale.ROOT)
+                                    .contains("cancel"),
+                    "expected an interrupt-style abort, got: " + thrown.getMessage());
+        } finally {
+            raw.close();
+        }
     }
 
     @Test

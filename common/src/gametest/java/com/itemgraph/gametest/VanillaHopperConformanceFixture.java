@@ -1,7 +1,6 @@
 package com.itemgraph.gametest;
 
 import com.itemgraph.db.DatabaseManager;
-import com.itemgraph.ingest.InternalObservationService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.item.ItemStack;
@@ -51,10 +50,6 @@ public final class VanillaHopperConformanceFixture {
                                   BlockPos hopperPos, int tick,
                                   AtomicReference<CompletableFuture<List<Row>>> pending) {
         helper.runAtTickTime(tick, () -> {
-            if (InternalObservationService.getInstance().getQueueSize() != 0) {
-                retry(helper, priorId, sourcePos, hopperPos, tick, pending);
-                return;
-            }
             if (pending.get() == null) {
                 pending.set(CompletableFuture.supplyAsync(() -> readRows(priorId, sourcePos, hopperPos)));
             }
@@ -101,10 +96,28 @@ public final class VanillaHopperConformanceFixture {
                               BlockPos hopperPos, int tick,
                               AtomicReference<CompletableFuture<List<Row>>> pending) {
         if (tick >= 100) {
-            helper.fail("vanilla hopper evidence did not become durable within 100 GameTest ticks");
+            helper.fail("vanilla hopper evidence did not become durable within 100 GameTest ticks; "
+                    + "persistedActions=" + persistedActions(priorId));
             return;
         }
         awaitRows(helper, priorId, sourcePos, hopperPos, tick + 1, pending);
+    }
+
+    private static String persistedActions(long priorId) {
+        try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
+             var statement = connection.prepareStatement(
+                     "SELECT action_type, COUNT(*) FROM ig_observations WHERE id > ? GROUP BY action_type")) {
+            statement.setLong(1, priorId);
+            try (var rows = statement.executeQuery()) {
+                List<String> actions = new ArrayList<>();
+                while (rows.next()) {
+                    actions.add(rows.getString(1) + "x" + rows.getInt(2));
+                }
+                return actions.toString();
+            }
+        } catch (SQLException failure) {
+            return "unreadable:" + failure;
+        }
     }
 
     private static long observationWatermark() {

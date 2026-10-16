@@ -14,6 +14,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
@@ -43,6 +44,7 @@ public class ItemGraph {
         com.itemgraph.api.ItemGraphApiLifecycle.setRuntimeInformation(runtimeInformation);
 
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
+        NeoForge.EVENT_BUS.addListener(this::onServerAboutToStart);
         NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener(this::onServerStopped);
@@ -69,25 +71,61 @@ public class ItemGraph {
         ItemGraphCommands.register(event.getDispatcher());
     }
 
-    private void onServerStarting(ServerStartingEvent event) {
-        ItemCanonicalizer.setRegistryAccess(event.getServer().registryAccess());
+    private void onServerAboutToStart(ServerAboutToStartEvent event) {
+        prepareCaptureStartup(event.getServer());
+        // Open bounded intake before the server starts loading worlds. In
+        // particular, world-generation events can arrive while JDBC setup is
+        // still running in the later ServerStarting callback.
+        com.itemgraph.ingest.InternalObservationService.getInstance().start();
+    }
+
+    private void prepareCaptureStartup(net.minecraft.server.MinecraftServer server) {
+        ItemCanonicalizer.setRegistryAccess(server.registryAccess());
         var operationalSettings = ItemGraphConfig.operationalSettings();
         com.itemgraph.command.CommandHelp.initializeMessages();
         com.itemgraph.i18n.ItemGraphLanguage.setLocale(ItemGraphConfig.language());
-        var databaseSettings = ItemGraphConfig.databaseSettings();
-        var griefLoggerIntegrationEnabled = ItemGraphConfig.griefLoggerIntegrationEnabled();
-        var griefLoggerDatabasePath = ItemGraphConfig.griefLoggerDatabasePath();
         operationalSettings.apply();
         CorrelationEngine.setDefaultWindowSeconds(ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.get());
+        DatabaseManager.getInstance().prepareSettings(ItemGraphConfig.databaseSettings());
+    }
+
+    private void onServerStarting(ServerStartingEvent event) {
+        var databaseSettings = ItemGraphConfig.databaseSettings();
+        boolean griefLoggerDetected = net.neoforged.fml.ModList.get().isLoaded("grieflogger");
+        var migration = com.itemgraph.ingest.GriefLoggerMigration.decide(
+                ItemGraphConfig.griefLoggerIntegrationEnabled(),
+                ItemGraphConfig.griefLoggerAutoMigrate(),
+                griefLoggerDetected,
+                ItemGraphConfig.griefLoggerDatabasePathRaw(),
+                net.neoforged.fml.loading.FMLPaths.GAMEDIR.get(),
+                net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get());
+        com.itemgraph.db.SqliteJdbc.initialize(
+                net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get().resolve("itemgraph").resolve("lib"));
         DatabaseManager.getInstance().initialize(databaseSettings);
-        com.itemgraph.ingest.InternalObservationService.getInstance().start();
         com.itemgraph.ingest.IngestionService.getInstance().setAdapter(
-                new com.itemgraph.ingest.GriefLoggerAdapter(griefLoggerDatabasePath, griefLoggerIntegrationEnabled));
+                new com.itemgraph.ingest.GriefLoggerAdapter(
+                        migration.databasePath(), migration.enabled(), migration.autoDetected()));
         com.itemgraph.ingest.IngestionService.getInstance().start();
         com.itemgraph.api.ItemGraphApiLifecycle.start(event.getServer());
-        LOGGER.info("GriefLogger source integration: {}", griefLoggerIntegrationEnabled
-                ? "ENABLED (read-only migration sync/import)"
-                : "DISABLED by default; ItemGraph using native capture and owned storage");
+        if (migration.enabled()
+                && java.nio.file.Files.isRegularFile(migration.databasePath())) {
+            LOGGER.info("GriefLogger source found at {} — queuing read-only historical import; "
+                    + "incremental sync follows on the ingestion worker", migration.databasePath());
+            com.itemgraph.ingest.IngestionService.getInstance().requestHistoricalImportAsync();
+        }
+        if (migration.liveMySql()) {
+            LOGGER.warn("GriefLogger is configured with useMysql=true; its live rows are in MySQL, "
+                    + "which ItemGraph cannot import. Only the stale on-disk SQLite file at {} is read.",
+                    migration.databasePath());
+        }
+        LOGGER.info("GriefLogger source integration: {}", migration.enabled()
+                ? migration.autoDetected()
+                    ? "ENABLED (GriefLogger mod detected; read-only auto-migration from "
+                        + migration.databasePath() + ")"
+                    : "ENABLED (read-only migration sync/import)"
+                : griefLoggerDetected
+                    ? "DISABLED (GriefLogger present but auto-migration/integration is off in config)"
+                    : "DISABLED by default; ItemGraph using native capture and owned storage");
     }
 
     private void onServerStopping(ServerStoppingEvent event) {

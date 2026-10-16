@@ -1,5 +1,14 @@
 # ItemGraph configuration reference
 
+**Audience:** server operators. Every key below has its NeoForge TOML path,
+Fabric properties key, default, accepted range, and reload requirement in the
+tables; the prose sections explain the behavior behind groups of keys.
+
+**Most servers need no configuration at all** — the defaults use a local
+SQLite file, enable native capture, and keep raw evidence indefinitely. Touch
+these keys only when you need a network database, the GriefLogger migration
+bridge, a different message language, or non-default queue/index behavior.
+
 All ItemGraph settings are read while the server starts. Restart the server after
 editing either the NeoForge server config or Fabric's
 `config/itemgraph.properties`; `/reload` does not reload ItemGraph settings.
@@ -28,8 +37,9 @@ initialization logs also identify the selected backend.
 | Network DB TLS mode | `general.database_ssl_mode` | `database_ssl_mode` | string / `disable` | `disable`, `trust`, `verify-ca`, `verify-full` | Restart |
 | Network DB timeout | `general.database_connection_timeout_ms` | `database_connection_timeout_ms` | integer / `5000` | `[250,120000]` milliseconds | Restart |
 | Optional indexes | `storage.use_indexes` | `use_indexes` | boolean / `true` | `true` or `false`; migration-owned unique and required foreign-key indexes remain | Restart |
-| GriefLogger source integration | `general.grieflogger_integration_enabled` | `grieflogger_integration_enabled` | boolean / `false` | `false` keeps native-only operation and does not probe a source database; `true` enables read-only migration sync/import | Restart |
-| GriefLogger source path | `general.grieflogger_database_path` | `grieflogger_database_path` | string / `database.db` | Required and non-empty when source integration is enabled; ignored in native-only mode; source remains read-only | Restart |
+| GriefLogger source integration | `general.grieflogger_integration_enabled` | `grieflogger_integration_enabled` | boolean / `false` | `false` keeps native-only operation and does not probe a source database (unless auto-migration below detects the mod); `true` enables read-only migration sync/import | Restart |
+| GriefLogger auto-migration | `general.grieflogger_auto_migrate` | `grieflogger_auto_migrate` | boolean / `true` | When the GriefLogger mod is detected at server start, `true` enables the read-only bridge, resolves the source to `config/grieflogger/database.db`, and queues the historical import; `false` leaves coexistence untouched | Restart |
+| GriefLogger source path | `general.grieflogger_database_path` | `grieflogger_database_path` | string / `database.db` | The default `database.db` auto-resolves to `config/grieflogger/database.db` when the mod is detected or the file exists; set an explicit path otherwise; source remains read-only | Restart |
 | Ground bridge window | `correlation.ground_bridge_max_seconds` | `ground_bridge_max_seconds` | integer / `300` | `[1,86400]` seconds | Restart |
 
 ## Operations and forensic retention
@@ -56,6 +66,18 @@ the English source string. `zh_cn` is not supported by ItemGraph. It is present
 only in the pinned GriefLogger 26.2 source research, not in ItemGraph's shipped
 locale set. The exact GriefLogger 1.2.10-1.21.1 release fixture has no locale
 inventory, so no exact-release locale compatibility claim is made.
+
+Localization coverage is deliberately partial (recorded scope). All 217 catalog
+keys are present and validated in each of `en_us`, `nl_nl`, and `zh_tw`, but the
+nine `source.<sha256>` hover/action-label keys (Evidence, Item, Canonical metadata
+fingerprint, Event, UTC time, Origin, Destination, Previous, Next) are the only
+translated `sourceText` phrases: the 36 `/ig help` topic bodies, the five-line
+command overview, and the permission recipes resolve to their English source
+strings under `nl_nl`/`zh_tw`. This is intentional — fallback stays readable
+English and clients need no assets. `ItemGraphLanguage.sourceFallbackInventory`
+returns the exact untranslated phrase set if coverage is ever extended; the
+overview plus the `journeys` and `permissions` topics are the natural first
+candidates.
 
 The raw evidence retention value is a safety invariant, not a purge scheduler.
 ItemGraph preserves raw observations and audit events indefinitely. During

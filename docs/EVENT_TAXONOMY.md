@@ -1,5 +1,10 @@
 # ItemGraph Event Taxonomy
 
+**Audience:** contributors and moderators checking which event types exist.
+The tables below answer two different questions — "what can I query today?"
+and "what is registered but not captured yet?" — and mixing them up produces
+false expectations about coverage.
+
 ## Purpose and authority
 
 `com.itemgraph.audit.EventTaxonomy` is the shared runtime catalog for stable
@@ -19,7 +24,7 @@ an unknown taxonomy classification, not the `UNRESOLVED` evidence class.
 
 ## Versioning
 
-The taxonomy version is `4.0.0` (`EventTaxonomy.VERSION`) and is independent of
+The taxonomy version is `4.1.0` (`EventTaxonomy.VERSION`) and is independent of
 the ItemGraph mod version and GriefLogger registry version.
 
 - Increment the major taxonomy version when an existing ID is removed, renamed,
@@ -36,6 +41,15 @@ means the query surface may return preserved/imported rows but there is no
 current native writer. A planned definition is not evidence that a runtime
 listener exists; only `IMPLEMENTED` means the current loader adapter and its
 fixtures establish capture support.
+
+Support status legend — where each state appears in this document:
+
+| Status | Where it lives | What a reader may assume |
+| --- | --- | --- |
+| Implemented on both loaders | [Current native audit IDs](#current-native-audit-ids) table (except the two historical-only rows it names) | Queryable today; native writer exists |
+| `HISTORICAL_ONLY` | Same table, rows explicitly labelled | Past/imported rows may exist; no current capture |
+| `PLANNED` | [Planned child issue families](#planned-child-issue-families) table | A registered ID with no adapter; never proof of coverage |
+| `UNSUPPORTED` | Named inline (for example `CREATIVE_ITEM_TRANSFORM`) | Classifiable for compatibility; excluded from suggestions |
 
 ## Definition fields
 
@@ -71,14 +85,16 @@ event coverage or full GriefLogger parity.
 | Player session | `PLAYER_JOIN`, `PLAYER_QUIT` | Server-reported player lifecycle; player activity. |
 | Chat and commands | `CHAT_MESSAGE`, `COMMAND_ATTEMPT`, `COMMAND_EXECUTED` | Callback attempt or execution receipt; player activity may contain private text. |
 | Block actions | `PLACE_BLOCK`, `BREAK_BLOCK`, `INTERACT_BLOCK`, `INTERACT_BLOCK_ATTEMPT` | `PLACE_BLOCK` uses NeoForge's cancellable `EntityPlaceEvent`; `BREAK_BLOCK` uses NeoForge's cancellable `BreakEvent`, documented as a player attempt. The shared taxonomy conservatively labels both as attempts across loaders. [NeoForge 1.21.1 `EntityPlaceEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.EntityPlaceEvent.html), [NeoForge 1.21.1 `BreakEvent`](https://nekoyue.github.io/ForgeJavaDocs-NG/javadoc/1.21.x-neoforge/net/neoforged/neoforge/event/level/BlockEvent.BreakEvent.html). Both are player-attributed at a sensitive world location. |
-| Entity interaction | `INTERACT_ENTITY`, `INTERACT_ENTITY_COMPLETED`, `INTERACT_ENTITY_DENIED`, `INTERACT_ENTITY_UNRESOLVED` | Attempt, method/callback result, or explicit unresolved boundary; no quantity claim. |
+| Entity interaction | `INTERACT_ENTITY`, `INTERACT_ENTITY_COMPLETED`, `INTERACT_ENTITY_DENIED`, `INTERACT_ENTITY_UNRESOLVED`, `ATTACK_ENTITY_DENIED` | Attempt, method/callback result, denied interact or attack, or explicit unresolved boundary; no quantity claim. |
 | Entity/projectile | `KILL_ENTITY`, `THROW_ITEM`, `SHOOT_ITEM`, `PROJECTILE_SPAWN_ACCEPTED` | Captured player/entity event boundary; projectile attempt and accepted spawn remain distinct. Every current row includes exact world coordinates and uses `SENSITIVE_LOCATION`, so audit lookup, filtering, and saved pages require `itemgraph.audit`. |
+| World/environment | `EXPLOSION_BLOCK_CHANGE`, `PISTON_BLOCK_MOVE`, `PISTON_BLOCK_ATTEMPT`, `WORLD_EFFECT_ATTEMPT`, `FLUID_BLOCK_CHANGE`, `FIRE_BLOCK_CHANGE`, `ENDERMAN_BLOCK_MOVE`, `FALLING_BLOCK_CHANGE`, `WORLD_EFFECT_UNRESOLVED` | Confirmed explosion, piston, fluid, fire, Enderman, and falling-block changes use bounded before/after block-state deltas. `PISTON_BLOCK_ATTEMPT` records a piston result with no observed state delta, while `WORLD_EFFECT_ATTEMPT` preserves a boolean world-write result that returned false. Both use `GAME_CALLBACK_ATTEMPT` reliability and make no state-delta claim. Incomplete callback results, candidate coverage, and queue rejection use unresolved rows. All use `quantity=NONE`, `SENSITIVE_LOCATION`, and require `itemgraph.audit` for lookup. |
 | Item processing | `CRAFT_OUTPUT_UNRESOLVED`, `SMELT_OUTPUT_UNRESOLVED` | A player took a craft/smelt result; output fingerprint/count and event metadata are observed, but input stacks are not. `UNRESOLVED`, `TRANSFORMATION_INPUTS_NOT_OBSERVED`, `quantity=UNKNOWN`; no lineage edge. |
 
 The item-flow and transformation action IDs are cataloged on their own storage
 surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,
 `PICKUP_ITEM`, `THROW_ITEM`, `SHOOT_ITEM`, `BREAK_ITEM`, `CONSUME_ITEM`,
 `HOPPER_INSERT`, `HOPPER_EXTRACT`, `DISPENSER_DROP`, `DROPPER_DROP`,
+`CAPABILITY_INSERT`, `CAPABILITY_EXTRACT`, `TRANSFER_ITEM`,
 `DEATH_DROP`, `ADD_ITEM_ENDER`,
 `REMOVE_ITEM_ENDER`, legacy `CRAFT` / `SMELT`, `ANVIL_RENAME`, and
 `ANVIL_REPAIR`. Craft/smelt outputs use `CRAFT_OUTPUT_UNRESOLVED` and
@@ -86,6 +102,13 @@ surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,
 observe complete inputs. Their result fingerprints and output counts are kept
 in raw audit evidence; the unknown input is not a fingerprint or trace edge.
 Legacy craft/smelt transformations are historical-only and unresolved. The
+automation IDs prove a signed delta at the changed endpoint only:
+`CAPABILITY_INSERT`/`CAPABILITY_EXTRACT` are emitted by the NeoForge
+`IItemHandler` wrapper (Fabric keeps them queryable for imported rows) and
+never identify the caller or remote endpoint; `TRANSFER_ITEM` is the adapter-API
+committed-transfer action and leaves the remote endpoint `UNKNOWN` when the
+native API does not expose it. A generic capability or transfer delta does not
+prove a hopper transfer. The
 code-level definitions identify issue ownership and the exact surface for each ID.
 
 `CREATIVE_ITEM_TRANSFORM` remains classifiable for forward compatibility but is
@@ -93,7 +116,7 @@ code-level definitions identify issue ownership and the exact surface for each I
 `CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED`. Creative slot packets prove separate
 before/after quantity deltas; they do not prove a transformation between the
 two fingerprints. The ID is therefore excluded from query suggestions. This
-support correction increments the taxonomy major version while preserving the
+support correction was introduced in taxonomy `2.0.0` while preserving the
 stable identifier.
 Unified lookup continues to show the legacy row and its source/result
 fingerprints, but omits its free-form legacy details so an old numeric string
@@ -102,15 +125,22 @@ IDs with an implemented native writer on both loaders; shared queries have no
 loader provenance. Unknown, malformed, and unsupported IDs remain queryable
 evidence without becoming observed movement hops.
 
-## Planned child issue families
+## Event family roadmap
 
-These definitions are deliberately `PLANNED` on Fabric and NeoForge until a
-loader adapter, success/cancel/partial/unsupported fixtures, and the child
-issue's acceptance checks establish otherwise.
+Issue #55 world-cause definitions are implemented on Fabric and NeoForge; see
+[`WORLD_EVENT_CAPTURE.md`](WORLD_EVENT_CAPTURE.md) for capture limits and
+remaining acceptance evidence. Issues #56 and #57 remain `PLANNED` until their
+loader adapters, success/cancel/partial/unsupported fixtures, and acceptance
+checks establish support.
+
+Planned definitions are classified `UNRESOLVED` with
+`UNRESOLVED_CAUSE` reliability. Audit-event definitions always use
+`quantity=NONE`; a planned event cannot be rendered as an observed transfer or
+contribute item quantity before an authoritative writer exists.
 
 | Issue | IDs | Acceptance focus |
 | --- | --- | --- |
-| [#55](https://github.com/DurdeuVlad/itemgraph/issues/55) | `EXPLOSION_BLOCK_CHANGE`, `FLUID_BLOCK_CHANGE`, `FIRE_BLOCK_CHANGE`, `PISTON_BLOCK_MOVE`, `ENDERMAN_BLOCK_MOVE`, `FALLING_BLOCK_CHANGE`, `DISPENSER_EFFECT`, `DROPPER_EFFECT` | Authoritative world cause, before/after state, endpoint, cancellation/partial outcome, stable unresolved reason. |
+| [#55](https://github.com/DurdeuVlad/itemgraph/issues/55) | World cause families above are implemented on both loaders; see [`WORLD_EVENT_CAPTURE.md`](WORLD_EVENT_CAPTURE.md) for capture limits and remaining acceptance evidence. | Authoritative world cause, before/after state, endpoint, cancellation/partial outcome, stable unresolved reason. |
 | [#56](https://github.com/DurdeuVlad/itemgraph/issues/56) | `ENTITY_SPAWN`, `ENTITY_DESPAWN`, `ENTITY_KILL`, `PROJECTILE_LAUNCH`, `PROJECTILE_IMPACT`, `ITEM_ENTITY_SPAWN`, `ITEM_ENTITY_DESPAWN` | Separate attempt/result/lifecycle; use UUID only when supplied by the event; do not treat it as item identity. |
 | [#57](https://github.com/DurdeuVlad/itemgraph/issues/57) | `TRADE`, `ENCHANTING`, `BREWING`, `SMITHING`, `GRINDSTONE`, `LOOT_GENERATION` | Explicit input/output or unknown inputs; failed/cancelled/partial operations remain distinct. |
 

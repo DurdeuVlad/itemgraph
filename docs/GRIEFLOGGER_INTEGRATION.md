@@ -1,38 +1,85 @@
 # GriefLogger Integration
 
+**Audience:** server operators migrating from GriefLogger, and maintainers
+checking the read-only boundary. If you only need the migration path, use the
+checklist below; the rest of the document is the design and evidence contract.
+
+## Migration checklist
+
+1. Confirm the source version. GriefLogger `1.2.10-1.21.1` is the tested
+   compatibility scope; other versions are rejected cleanly rather than
+   mis-imported.
+2. Install the standard ItemGraph jar for the loader — beside GriefLogger or
+   after removing it; both work because the SQLite driver is isolated (see
+   "Artifact selection and SQLite isolation" below). Start the server once.
+3. With GriefLogger still installed, ItemGraph detects it at server start and,
+   while `grieflogger_auto_migrate=true` (the default), automatically enables
+   the read-only bridge, queues the one-time historical import, and keeps
+   polling new rows on the ingestion worker. No config change is required.
+4. With GriefLogger already removed, **keep its `database.db` file**
+   (GriefLogger writes it to `config/grieflogger/`) and enable the bridge:
+   NeoForge `general.grieflogger_integration_enabled=true`,
+   Fabric `grieflogger_integration_enabled=true`. The default
+   `grieflogger_database_path` value `database.db` auto-resolves to
+   `config/grieflogger/database.db`; set an explicit path only when the file
+   lives elsewhere. Restart, then run `/ig ingest history` if the automatic
+   import was not already queued at startup.
+5. Verify with `/ig status`: check the source line, the latest import status,
+   and imported/opaque row counts. `FAILED` means committed partial data
+   exists, not a clean zero-row import. Queries over imported rows need a
+   completed sync/import.
+6. Rollback note: disabling the bridge keys (`grieflogger_integration_enabled`
+   and `grieflogger_auto_migrate`) stops new source reads; already imported
+   rows remain in ItemGraph's own database as provenance evidence.
+
 ## Purpose
 
 ItemGraph is the standalone product and native-only operation is the default.
-GriefLogger's database is used only by the optional read-only migration bridge,
-which is disabled until explicitly enabled in ItemGraph configuration.
+GriefLogger's database is used only by the optional read-only migration bridge.
+The bridge turns on automatically when the GriefLogger mod is detected
+(`grieflogger_auto_migrate=true`) and can also be enabled explicitly for a
+retained database file after the mod is removed.
 
 ## Supported modes
 
 | GriefLogger installation | ItemGraph behavior |
 |---|---|
-| Default, GriefLogger absent or present | ItemGraph records native evidence into its own database. It does not probe `database.db` or perform any GriefLogger database reads. |
-| Explicit migration mode | Set `general.grieflogger_integration_enabled=true` in NeoForge or `grieflogger_integration_enabled=true` in Fabric and configure `grieflogger_database_path`. ItemGraph then polls supported `items` and `containers` rows read-only; `/ig ingest history` separately imports the documented legacy tables. |
+| Default, GriefLogger absent | ItemGraph records native evidence into its own database. It does not probe `database.db` or perform any GriefLogger database reads. |
+| GriefLogger installed alongside | Detected at server start. With `grieflogger_auto_migrate=true` (default) ItemGraph enables the read-only bridge, resolves the source to `config/grieflogger/database.db`, queues the historical import once, and keeps polling new rows on the 60-second ingestion cycle — all without touching GriefLogger's database for writes. Set `grieflogger_auto_migrate=false` to run both mods with the bridge off. |
+| Explicit migration mode (GriefLogger removed, file retained) | Set `general.grieflogger_integration_enabled=true` in NeoForge or `grieflogger_integration_enabled=true` in Fabric and point `grieflogger_database_path` at a retained `database.db` file; the default value already resolves to `config/grieflogger/database.db`. ItemGraph then polls supported `items` and `containers` rows read-only and queues the documented legacy-table import at startup; `/ig ingest history` re-queues it manually. |
+
+When GriefLogger's own `grieflogger-server.toml` sets `useMysql=true`, its live
+rows are in MySQL — ItemGraph cannot read that backend and logs a warning; only
+the stale on-disk SQLite file, if present, is imported.
+
+Every released GriefLogger version shares the same 11-table SQLite schema, so
+one capability contract accepts all of them; [GriefLogger schema
+versions](GRIEFLOGGER_SCHEMA_VERSIONS.md) documents the cross-version evidence
+and the discovery/WAL caveats for automatic import.
 
 Native capture, ItemGraph-owned storage, correlation, and native queries work in
 either mode. The migration bridge is not needed for normal ItemGraph operation;
 legacy-source queries require that source evidence be imported or synchronized.
 
-## Artifact selection and SQLite module compatibility
+## Artifact selection and SQLite isolation
 
-The standard `itemgraph-<version>.jar` bundles `org.xerial:sqlite-jdbc` and
-MariaDB Connector/J with NeoForge Jar-in-Jar and keeps GriefLogger optional. GriefLogger
-`1.2.10-1.21.1` packages `org.sqlite.*` in its main mod module; when both standard
-artifacts load, Java module resolution sees two modules exporting `org.sqlite.util`
-and aborts server startup. Jar-in-Jar version negotiation cannot remove classes
-embedded in GriefLogger's main JAR.
+ItemGraph coexists with GriefLogger on the same server. The reason the pair
+used to conflict was the SQLite driver: each mod bundled `org.sqlite.*`,
+GriefLogger inside its main mod jar and ItemGraph via Jar-in-Jar (NeoForge) or
+a nested jar (Fabric), so Java module resolution saw the package twice and
+aborted startup. ItemGraph now ships `sqlite-jdbc` as an opaque resource at
+`META-INF/iglibs/sqlite-jdbc-<version>.jar` and loads it in a private,
+platform-parented classloader (`com.itemgraph.db.SqliteJdbc`) — no
+`org.sqlite.*` class ever sits on ItemGraph's module or classpath, so nothing
+collides with the copy inside the GriefLogger jar. Metadata reflects the
+supported pairing: NeoForge declares GriefLogger `type="optional"` with
+`ordering="AFTER"` (so GriefLogger creates `config/grieflogger/database.db`
+before ItemGraph's start-up check), and Fabric lists it under `suggests`.
 
-For servers running GriefLogger `1.2.10-1.21.1`, use
-`itemgraph-<version>-grieflogger-compatible.jar`. It omits ItemGraph's SQLite
-Jar-in-Jar dependency, keeps ItemGraph's MariaDB Connector/J driver, uses GriefLogger's SQLite classes, and declares that exact
-GriefLogger version as required in `META-INF/neoforge.mods.toml`. Do not install
-both ItemGraph artifacts together. CI builds and structurally verifies both; the
-release workflow attaches both to GitHub Releases and publishes each CurseForge
-file with matching dependency metadata.
+The earlier `-grieflogger-compatible` artifacts (which omitted ItemGraph's
+SQLite copy and required GriefLogger `1.2.10-1.21.1`) were retired after
+`0.4.0-beta.1`; no later release ships them — the standard jar now works in
+both layouts.
 
 ItemGraph-owned storage can use SQLite (the default) or MySQL/MariaDB through the
 same migration and query contract. NeoForge exposes `general.database_backend`,
