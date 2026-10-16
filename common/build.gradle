@@ -2,11 +2,32 @@ plugins {
     id 'fabric-loom' version '1.10.5'
 }
 
+configurations {
+    // Raw driver jar embedded at META-INF/iglibs/ and loaded in a private
+    // classloader by com.itemgraph.db.SqliteJdbc so org.sqlite.* never sits on
+    // the mod classpath; that is what lets GriefLogger (which embeds the same
+    // package in its main jar) coexist with ItemGraph. Transitive deps (slf4j)
+    // must not leak into the embedded lib dir.
+    sqliteBundle {
+        transitive = false
+    }
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${rootProject.minecraft_version}"
     mappings loom.officialMojangMappings()
     implementation project(':core')
-    compileOnly 'org.xerial:sqlite-jdbc:3.46.1.0'
+    sqliteBundle "org.xerial:sqlite-jdbc:${rootProject.sqlite_jdbc_version}"
+}
+
+tasks.named('processResources', ProcessResources) {
+    inputs.property 'sqlite_jdbc_version', rootProject.sqlite_jdbc_version
+    filesMatching('META-INF/iglibs/libs.properties') {
+        expand sqlite_jdbc_version: rootProject.sqlite_jdbc_version
+    }
+    from({ configurations.sqliteBundle }) {
+        into 'META-INF/iglibs'
+    }
 }
 
 loom {

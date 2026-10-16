@@ -92,16 +92,41 @@ public class ItemGraph {
 
     private void onServerStarting(ServerStartingEvent event) {
         var databaseSettings = ItemGraphConfig.databaseSettings();
-        var griefLoggerIntegrationEnabled = ItemGraphConfig.griefLoggerIntegrationEnabled();
-        var griefLoggerDatabasePath = ItemGraphConfig.griefLoggerDatabasePath();
+        boolean griefLoggerDetected = net.neoforged.fml.ModList.get().isLoaded("grieflogger");
+        var migration = com.itemgraph.ingest.GriefLoggerMigration.decide(
+                ItemGraphConfig.griefLoggerIntegrationEnabled(),
+                ItemGraphConfig.griefLoggerAutoMigrate(),
+                griefLoggerDetected,
+                ItemGraphConfig.griefLoggerDatabasePathRaw(),
+                net.neoforged.fml.loading.FMLPaths.GAMEDIR.get(),
+                net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get());
+        com.itemgraph.db.SqliteJdbc.initialize(
+                net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get().resolve("itemgraph").resolve("lib"));
         DatabaseManager.getInstance().initialize(databaseSettings);
         com.itemgraph.ingest.IngestionService.getInstance().setAdapter(
-                new com.itemgraph.ingest.GriefLoggerAdapter(griefLoggerDatabasePath, griefLoggerIntegrationEnabled));
+                new com.itemgraph.ingest.GriefLoggerAdapter(
+                        migration.databasePath(), migration.enabled(), migration.autoDetected()));
         com.itemgraph.ingest.IngestionService.getInstance().start();
         com.itemgraph.api.ItemGraphApiLifecycle.start(event.getServer());
-        LOGGER.info("GriefLogger source integration: {}", griefLoggerIntegrationEnabled
-                ? "ENABLED (read-only migration sync/import)"
-                : "DISABLED by default; ItemGraph using native capture and owned storage");
+        if (migration.enabled()
+                && java.nio.file.Files.isRegularFile(migration.databasePath())) {
+            LOGGER.info("GriefLogger source found at {} — queuing read-only historical import; "
+                    + "incremental sync follows on the ingestion worker", migration.databasePath());
+            com.itemgraph.ingest.IngestionService.getInstance().requestHistoricalImportAsync();
+        }
+        if (migration.liveMySql()) {
+            LOGGER.warn("GriefLogger is configured with useMysql=true; its live rows are in MySQL, "
+                    + "which ItemGraph cannot import. Only the stale on-disk SQLite file at {} is read.",
+                    migration.databasePath());
+        }
+        LOGGER.info("GriefLogger source integration: {}", migration.enabled()
+                ? migration.autoDetected()
+                    ? "ENABLED (GriefLogger mod detected; read-only auto-migration from "
+                        + migration.databasePath() + ")"
+                    : "ENABLED (read-only migration sync/import)"
+                : griefLoggerDetected
+                    ? "DISABLED (GriefLogger present but auto-migration/integration is off in config)"
+                    : "DISABLED by default; ItemGraph using native capture and owned storage");
     }
 
     private void onServerStopping(ServerStoppingEvent event) {

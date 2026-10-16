@@ -158,7 +158,7 @@ jobs:
           java: |
             21
           dependencies: |
-            grieflogger(incompatible){modrinth:grieflogger}{curseforge:435029}
+            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
 
       - name: Publish Fabric standard build to Modrinth
         id: publish_fabric_modrinth
@@ -180,7 +180,7 @@ jobs:
           java: |
             21
           dependencies: |
-            grieflogger(incompatible){modrinth:grieflogger}{curseforge:435029}
+            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
 
       - name: Publish NeoForge standard build
         id: publish_neoforge
@@ -202,7 +202,7 @@ jobs:
           java: |
             21
           dependencies: |
-            grieflogger(incompatible){modrinth:grieflogger}{curseforge:435029}
+            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
 
       - name: Publish NeoForge standard build to Modrinth
         id: publish_neoforge_modrinth
@@ -224,7 +224,7 @@ jobs:
           java: |
             21
           dependencies: |
-            grieflogger(incompatible){modrinth:grieflogger}{curseforge:435029}
+            grieflogger(optional){modrinth:grieflogger}{curseforge:435029}
 
       - name: Write publication summary
         if: ${{ always() }}
