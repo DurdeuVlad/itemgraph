@@ -80,6 +80,8 @@ class ItemGraphConfigTest {
         assertEquals(List.of("storage", "use_indexes"), ItemGraphConfig.USE_INDEXES.getPath());
         assertEquals(List.of("general", "grieflogger_integration_enabled"),
                 ItemGraphConfig.GRIEFLOGGER_INTEGRATION_ENABLED.getPath());
+        assertEquals(List.of("general", "grieflogger_auto_migrate"),
+                ItemGraphConfig.GRIEFLOGGER_AUTO_MIGRATE.getPath());
         assertEquals(List.of("general", "grieflogger_database_path"), ItemGraphConfig.GRIEFLOGGER_DATABASE_PATH.getPath());
         assertEquals(List.of("correlation", "ground_bridge_max_seconds"), ItemGraphConfig.GROUND_BRIDGE_MAX_SECONDS.getPath());
         assertEquals(List.of("query", "max_page_size"), ItemGraphConfig.MAX_PAGE_SIZE.getPath());
@@ -248,6 +250,7 @@ class ItemGraphConfigTest {
         assertEquals("en_us", config.get(List.of("general", "language")));
         assertEquals("database.db", config.get(List.of("general", "grieflogger_database_path")));
         assertEquals(Boolean.FALSE, config.get(List.of("general", "grieflogger_integration_enabled")));
+        assertEquals(Boolean.TRUE, config.get(List.of("general", "grieflogger_auto_migrate")));
         assertEquals(300, config.getInt(List.of("correlation", "ground_bridge_max_seconds")));
         assertEquals(10, config.getInt(List.of("query", "max_page_size")));
         assertEquals(Boolean.TRUE, config.get(List.of("operations", "server_side_only")));

@@ -20,6 +20,7 @@ public class ItemGraphConfig {
     public static final ModConfigSpec.ConfigValue<Integer> DATABASE_CONNECTION_TIMEOUT_MS;
     public static final ModConfigSpec.ConfigValue<Boolean> USE_INDEXES;
     public static final ModConfigSpec.ConfigValue<Boolean> GRIEFLOGGER_INTEGRATION_ENABLED;
+    public static final ModConfigSpec.ConfigValue<Boolean> GRIEFLOGGER_AUTO_MIGRATE;
     public static final ModConfigSpec.ConfigValue<String> GRIEFLOGGER_DATABASE_PATH;
     public static final ModConfigSpec.ConfigValue<Integer> GROUND_BRIDGE_MAX_SECONDS;
     public static final ModConfigSpec.ConfigValue<Integer> MAX_PAGE_SIZE;
@@ -75,8 +76,14 @@ public class ItemGraphConfig {
         GRIEFLOGGER_INTEGRATION_ENABLED = defineBoolean(
                 BUILDER.comment("Enable optional read-only GriefLogger row sync and explicit historical import; disabled by default"),
                 "grieflogger_integration_enabled", "general.grieflogger_integration_enabled", false);
+        GRIEFLOGGER_AUTO_MIGRATE = defineBoolean(
+                BUILDER.comment("When the GriefLogger mod is installed, enable read-only migration automatically "
+                        + "(incremental sync plus a one-time historical import) without requiring "
+                        + "grieflogger_integration_enabled; set false to run ItemGraph beside GriefLogger untouched"),
+                "grieflogger_auto_migrate", "general.grieflogger_auto_migrate", true);
         GRIEFLOGGER_DATABASE_PATH = defineString(
-                BUILDER.comment("Path to GriefLogger SQLite database; used only when grieflogger_integration_enabled=true"),
+                BUILDER.comment("Path to GriefLogger SQLite database; the default 'database.db' auto-resolves to "
+                        + "config/grieflogger/database.db, where GriefLogger actually writes"),
                 "grieflogger_database_path", "general.grieflogger_database_path", "database.db");
 
         BUILDER.pop();
@@ -214,8 +221,17 @@ public class ItemGraphConfig {
         return resolveGriefLoggerDatabasePath(GRIEFLOGGER_DATABASE_PATH.get(), GRIEFLOGGER_INTEGRATION_ENABLED.get());
     }
 
+    /** Raw configured value; the migration decision resolves the default sentinel itself. */
+    public static String griefLoggerDatabasePathRaw() {
+        return GRIEFLOGGER_DATABASE_PATH.get();
+    }
+
     public static boolean griefLoggerIntegrationEnabled() {
         return GRIEFLOGGER_INTEGRATION_ENABLED.get();
+    }
+
+    public static boolean griefLoggerAutoMigrate() {
+        return GRIEFLOGGER_AUTO_MIGRATE.get();
     }
 
     public static String language() {

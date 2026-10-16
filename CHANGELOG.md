@@ -59,6 +59,36 @@ The project follows a simple pre-1.0 development changelog model.
   failed callback emits `TRANSFORMATION_UNRESOLVED` with
   `TRANSFORMATION_EVIDENCE_NOT_SUBMITTED`. Absent endpoints use the explicit
   `itemgraph:non_item_endpoint` sentinel — never a fabricated stack.
+- **GriefLogger coexistence and automatic migration** (issue #203). ItemGraph
+  and GriefLogger can now run on the same server: the SQLite driver ships as an
+  opaque `META-INF/iglibs/` resource loaded in a private, platform-parented
+  classloader (`com.itemgraph.db.SqliteJdbc`), so no `org.sqlite.*` class sits
+  on ItemGraph's module or classpath to collide with the copy inside the
+  GriefLogger jar. NeoForge declares GriefLogger `type="optional"` with
+  `ordering="AFTER"`; Fabric lists it under `suggests`. When the GriefLogger
+  mod is detected at server start, ItemGraph enables the read-only source
+  bridge automatically (`grieflogger_auto_migrate`, default `true`), resolves
+  the source to GriefLogger's real `config/grieflogger/database.db`, queues
+  the historical import once, and keeps polling new rows on the existing
+  60-second ingestion worker — no restart-with-removed-jar dance required.
+  Set `grieflogger_auto_migrate=false` to run both mods with the bridge off,
+  or keep `grieflogger_integration_enabled=true` for a retained database after
+  the mod is removed. A GriefLogger `useMysql=true` configuration logs a
+  warning since only the on-disk SQLite file is importable. `/ig status`
+  reports the auto-detected migration state. Query cancellation no longer
+  binds `org.sqlite.*` types — the dispatcher interrupts timed-out queries
+  through JDBC `Statement.cancel()` plus a reflective connection interrupt.
+
+### Changed
+
+- **Default `grieflogger_database_path` resolution.** The default value
+  `database.db` now resolves to `config/grieflogger/database.db` (where
+  GriefLogger actually writes) whenever the mod is detected or the file
+  exists, instead of `<game directory>/database.db`. Explicitly configured
+  paths are unchanged.
+- **Ingestion schema gate.** No change: a GriefLogger source file that exists
+  but lacks the supported schema continues to be skipped after one log line
+  per disappearance.
 
 ## [0.4.0-beta.2] — 2026-10-10
 

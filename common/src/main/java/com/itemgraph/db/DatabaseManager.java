@@ -81,10 +81,9 @@ public class DatabaseManager {
                 if (path.getParent() != null) {
                     Files.createDirectories(path.getParent());
                 }
-                Class.forName("org.sqlite.JDBC");
                 String url = "jdbc:sqlite:" + path.toAbsolutePath();
                 LOGGER.info("Connecting to ItemGraph SQLite database at {}", path.toAbsolutePath());
-                raw = DriverManager.getConnection(url);
+                raw = SqliteJdbc.connect(url, new Properties());
                 try (Statement stmt = raw.createStatement()) {
                     stmt.execute("PRAGMA foreign_keys = ON;");
                     stmt.execute("PRAGMA journal_mode = WAL;");
@@ -274,7 +273,8 @@ public class DatabaseManager {
     static Connection openIndependentConnection(DatabaseSettings current, boolean readOnly)
             throws SQLException {
         if (current.backend() == DatabaseSettings.Backend.SQLITE) {
-            Connection connection = DriverManager.getConnection("jdbc:sqlite:" + current.sqlitePath().toAbsolutePath());
+            Connection connection = SqliteJdbc.connect(
+                    "jdbc:sqlite:" + current.sqlitePath().toAbsolutePath(), new Properties());
             try (Statement stmt = connection.createStatement()) {
                 stmt.execute("PRAGMA busy_timeout = " + current.connectionTimeoutMs() + ";");
                 if (readOnly) {
