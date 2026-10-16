@@ -200,7 +200,10 @@ public final class AdminMutationGameTests implements FabricGameTest {
                 .thenExecute(() -> {
                     helper.assertTrue(service.getTotalDropped() == droppedBefore,
                             "over-limit give overflow must not be dropped from the evidence queue");
-                    helper.assertTrue(service.getTotalEnqueued() - enqueuedBefore == 7,
+                    // 7 admin/drop rows + 4 ITEM_ENTITY_SPAWN lifecycle rows for the
+                    // entities this test accepted into the world (overflow, reentrant,
+                    // unrelated, and snapshot-failed drops; rejected entities never spawn).
+                    helper.assertTrue(service.getTotalEnqueued() - enqueuedBefore == 11,
                             "three unresolved give scopes, accepted overflow ground outputs, reentrant and unrelated player drops must be retained");
                     try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
                          var statement = connection.createStatement()) {

@@ -26,6 +26,23 @@ The project follows a simple pre-1.0 development changelog model.
   at `ServerAboutToStartEvent` and Fabric opens capture before database
   initialization in `SERVER_STARTING`, so startup world events stay queued
   until the persistence worker can flush them.
+- **Entity, projectile, and item-entity lifecycle causes (#56):** both loaders
+  now record fresh entity spawns (`ENTITY_SPAWN`), genuine removals
+  (`ENTITY_DESPAWN`), non-player and world-cause kills (`ENTITY_KILL`),
+  projectile launches and impacts (`PROJECTILE_LAUNCH`, `PROJECTILE_IMPACT`),
+  and item-entity join/removal rows carrying the exact observed stack count
+  (`ITEM_ENTITY_SPAWN`, `ITEM_ENTITY_DESPAWN`, `quantity=SIGNED_DELTA`).
+  NeoForge uses `EntityJoinLevelEvent.loadedFromDisk()` and
+  `RemovalReason.shouldDestroy()` so chunk loads and unloads never record
+  spawn/despawn endpoints; Fabric reaches the same boundaries through
+  `addFreshEntity` and a `setRemoved` capture because no Fabric events
+  expose them. Projectile impact uses `ProjectileImpactEvent` on NeoForge
+  and the game's own `hitTargetOrDeflectSelf` dispatch on Fabric. Non-player
+  death drops now flow through the same settle-confirmed pending path as
+  player drops — the dead entity replaces the player actor rather than
+  inventing one — and a canceled drop event emits unresolved evidence.
+  `ENTITY_LIFECYCLE_UNRESOLVED` preserves queue rejections and callback
+  failures with reason codes. `EventTaxonomy` advances to `4.2.0`.
 - **GriefLogger coexistence and automatic migration** (issue #203). ItemGraph
   and GriefLogger can now run on the same server: the SQLite driver ships as an
   opaque `META-INF/iglibs/` resource loaded in a private, platform-parented

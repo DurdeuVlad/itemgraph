@@ -19,7 +19,7 @@ import java.util.Optional;
  * this runtime.</p>
  */
 public final class EventTaxonomy {
-    public static final String VERSION = "4.1.0";
+    public static final String VERSION = "4.2.0";
     public static final String UNCLASSIFIED_EVIDENCE = "UNCLASSIFIED";
 
     public enum Surface { AUDIT_EVENT, ITEM_OBSERVATION, TRANSFORMATION }
@@ -329,6 +329,27 @@ public final class EventTaxonomy {
         audit(entries, "WORLD_EFFECT_UNRESOLVED", "world_environment", EvidenceClass.UNRESOLVED,
                 SourceReliability.UNRESOLVED_CAUSE, ActorStatus.UNKNOWN,
                 PrivacyClass.SENSITIVE_LOCATION, 55);
+        audit(entries, "ENTITY_SPAWN", "entity_lifecycle", SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 56);
+        audit(entries, "ENTITY_DESPAWN", "entity_lifecycle", SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 56);
+        audit(entries, "ENTITY_KILL", "entity_lifecycle", SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 56);
+        audit(entries, "ENTITY_LIFECYCLE_UNRESOLVED", "entity_lifecycle", EvidenceClass.UNRESOLVED,
+                SourceReliability.UNRESOLVED_CAUSE, ActorStatus.UNKNOWN,
+                PrivacyClass.SENSITIVE_LOCATION, 56);
+        audit(entries, "PROJECTILE_LAUNCH", "projectile", SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 56);
+        audit(entries, "PROJECTILE_IMPACT", "projectile", SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 56);
+        add(entries, "ITEM_ENTITY_SPAWN", "entity_lifecycle", Surface.AUDIT_EVENT,
+                EvidenceClass.OBSERVED, SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                EndpointSemantics.ACTOR_AND_TARGET, QuantitySemantics.SIGNED_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, IMPLEMENTED, IMPLEMENTED, 56);
+        add(entries, "ITEM_ENTITY_DESPAWN", "entity_lifecycle", Surface.AUDIT_EVENT,
+                EvidenceClass.OBSERVED, SourceReliability.AUTHORITATIVE_GAME_RESULT,
+                EndpointSemantics.ACTOR_AND_TARGET, QuantitySemantics.SIGNED_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, IMPLEMENTED, IMPLEMENTED, 56);
 
         // Canonical action names and user-facing aliases shared by audit,
         // observation, and transformation lookup parsing.
@@ -396,13 +417,6 @@ public final class EventTaxonomy {
 
         // Planned child-issue entries are intentionally not exposed as supported
         // lookup actions until loader adapters and reproducible fixtures exist.
-        planned(entries, Surface.AUDIT_EVENT, "ENTITY_SPAWN", "entity_lifecycle", QuantitySemantics.NONE, 56);
-        planned(entries, Surface.AUDIT_EVENT, "ENTITY_DESPAWN", "entity_lifecycle", QuantitySemantics.NONE, 56);
-        planned(entries, Surface.AUDIT_EVENT, "ENTITY_KILL", "entity_lifecycle", QuantitySemantics.NONE, 56);
-        planned(entries, Surface.AUDIT_EVENT, "PROJECTILE_LAUNCH", "projectile", QuantitySemantics.UNKNOWN, 56);
-        planned(entries, Surface.AUDIT_EVENT, "PROJECTILE_IMPACT", "projectile", QuantitySemantics.UNKNOWN, 56);
-        planned(entries, Surface.AUDIT_EVENT, "ITEM_ENTITY_SPAWN", "entity_lifecycle", QuantitySemantics.SIGNED_DELTA, 56);
-        planned(entries, Surface.AUDIT_EVENT, "ITEM_ENTITY_DESPAWN", "entity_lifecycle", QuantitySemantics.SIGNED_DELTA, 56);
         planned(entries, Surface.TRANSFORMATION, "TRADE", "item_processing", QuantitySemantics.INPUT_OUTPUT, 57);
         planned(entries, Surface.TRANSFORMATION, "ENCHANTING", "item_processing", QuantitySemantics.INPUT_OUTPUT, 57);
         planned(entries, Surface.TRANSFORMATION, "BREWING", "item_processing", QuantitySemantics.INPUT_OUTPUT, 57);

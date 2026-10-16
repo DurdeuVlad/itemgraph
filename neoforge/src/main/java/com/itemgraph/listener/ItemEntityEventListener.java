@@ -69,12 +69,22 @@ public class ItemEntityEventListener {
         final com.itemgraph.canon.CanonicalItem canonical;
         final long timestampMs;
         final long expiresAtMs;
+        final String victimType;
+        final String victimUuid;
         boolean observedAdded;
 
         PendingDrop(ItemEntity entity, String actionType, UUID playerUuid, String playerName,
                     String level, double playerX, double playerY, double playerZ,
                     int amount, com.itemgraph.canon.CanonicalItem canonical,
                     long timestampMs, long expiresAtMs) {
+            this(entity, actionType, playerUuid, playerName, level, playerX, playerY, playerZ,
+                    amount, canonical, timestampMs, expiresAtMs, null, null);
+        }
+
+        PendingDrop(ItemEntity entity, String actionType, UUID playerUuid, String playerName,
+                    String level, double playerX, double playerY, double playerZ,
+                    int amount, com.itemgraph.canon.CanonicalItem canonical,
+                    long timestampMs, long expiresAtMs, String victimType, String victimUuid) {
             this.entity = entity;
             this.actionType = actionType;
             this.playerUuid = playerUuid;
@@ -87,6 +97,8 @@ public class ItemEntityEventListener {
             this.canonical = canonical;
             this.timestampMs = timestampMs;
             this.expiresAtMs = expiresAtMs;
+            this.victimType = victimType;
+            this.victimUuid = victimUuid;
         }
     }
 
@@ -299,7 +311,11 @@ public class ItemEntityEventListener {
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void onLivingDrops(LivingDropsEvent event) {
         LivingEntity entity = event.getEntity();
-        if (!(entity instanceof Player player) || entity.level().isClientSide()) {
+        if (entity.level().isClientSide()) {
+            return;
+        }
+        if (!(entity instanceof Player player)) {
+            recordNonPlayerDeathDrops(event, entity);
             return;
         }
 
@@ -313,6 +329,57 @@ public class ItemEntityEventListener {
             if (!itemEntity.getItem().isEmpty()) {
                 queuePendingDrop(player, itemEntity, "DEATH_DROP");
             }
+        }
+    }
+
+    /**
+     * Non-player victims drop ground items through the same authoritative
+     * {@link LivingDropsEvent} collection. The dead entity replaces the player
+     * actor; the observation keeps victim type/UUID in raw_data and never
+     * promotes the victim to item identity.
+     */
+    private void recordNonPlayerDeathDrops(LivingDropsEvent event, LivingEntity victim) {
+        String victimType = BuiltInRegistries.ENTITY_TYPE.getKey(victim.getType()).toString();
+        if (event.isCanceled()) {
+            java.util.Map<String, String> metadata = new java.util.TreeMap<>();
+            metadata.put("victim_entity_uuid", victim.getUUID().toString());
+            metadata.put("victim_entity_type", victimType);
+            com.itemgraph.audit.EntityLifecycleCapture.submitUnresolved(
+                    victim.level().dimension().location().toString(),
+                    victim.getX(), victim.getY(), victim.getZ(), victimType,
+                    victim.getUUID().toString(), "living_drops_cancelled",
+                    "ENTITY_CAUSE_NOT_REPORTED", metadata);
+            return;
+        }
+        String level = victim.level().dimension().location().toString();
+        for (ItemEntity itemEntity : event.getDrops()) {
+            ItemStack stack = itemEntity.getItem();
+            if (stack.isEmpty()) {
+                continue;
+            }
+            long now = System.currentTimeMillis();
+            PendingDrop pending = new PendingDrop(
+                    itemEntity,
+                    "DEATH_DROP",
+                    null,
+                    null,
+                    level,
+                    victim.getX(), victim.getY(), victim.getZ(),
+                    stack.getCount(),
+                    com.itemgraph.canon.ItemCanonicalizer.canonicalizeStack(stack),
+                    now,
+                    now + PENDING_DROP_TTL_MS,
+                    victimType,
+                    victim.getUUID().toString());
+            PendingDrop replaced = pendingDrops.remove(itemEntity.getUUID());
+            if (replaced != null) {
+                emitUnresolvedDrop(replaced, "pending_entity_reused");
+            }
+            if (pendingDrops.size() >= PENDING_DROP_MAX) {
+                UUID oldest = pendingDrops.keySet().iterator().next();
+                emitUnresolvedDrop(pendingDrops.remove(oldest), "pending_capacity");
+            }
+            pendingDrops.put(itemEntity.getUUID(), pending);
         }
     }
 
@@ -446,16 +513,22 @@ public class ItemEntityEventListener {
         tracker.recordDrop(
                 itemEntity.getUUID(), pending.playerUuid, pending.level, x, y, z,
                 itemId, pending.amount, pending.timestampMs);
+        byte[] rawData = pending.victimType == null ? null
+                : ("{\"capture\":\"living_drops\",\"victim\":\"" + pending.victimType
+                        + "\",\"victim_uuid\":\"" + pending.victimUuid + "\"}")
+                        .getBytes(StandardCharsets.UTF_8);
         InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
                 pending.timestampMs,
                 pending.actionType,
-                pending.playerUuid.toString(),
+                pending.playerUuid == null ? null : pending.playerUuid.toString(),
                 pending.playerName,
                 pending.level,
                 pending.playerX, pending.playerY, pending.playerZ,
                 pending.level,
                 (double) x, (double) y, (double) z,
                 "GROUND",
+                pending.canonical.itemId(),
+                rawData,
                 pending.canonical,
                 pending.amount,
                 itemEntity.getUUID().toString(),
@@ -491,7 +564,7 @@ public class ItemEntityEventListener {
         InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
                 timestampMs,
                 actionType,
-                playerUuid.toString(),
+                playerUuid == null ? null : playerUuid.toString(),
                 playerName,
                 level,
                 playerX, playerY, playerZ,
