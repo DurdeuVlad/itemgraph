@@ -60,8 +60,11 @@ public final class AdminMutationGameTests implements FabricGameTest {
         helper.assertTrue(helper.getLevel().addFreshEntity(overflowEntity),
                 "over-limit give overflow entity must be accepted by the world before capture");
         FabricNativeAuditEventListener.onItemDropped(player, overflowEntity, overflowStack);
-        ItemEntity reentrantDrop = new ItemEntity(helper.getLevel(), player.getX(), player.getY(),
-                player.getZ(), overflowStack.copy());
+        // Offset the position so the equal stacks cannot merge into one
+        // entity; a merge would discard one entity and add a legitimate but
+        // timing-racy ITEM_ENTITY_DESPAWN row to the enqueue delta.
+        ItemEntity reentrantDrop = new ItemEntity(helper.getLevel(), player.getX() + 4, player.getY(),
+                player.getZ() + 4, overflowStack.copy());
         helper.assertTrue(helper.getLevel().addFreshEntity(reentrantDrop),
                 "same-player equal-stack reentrant drop must be accepted by the world before capture");
         FabricNativeAuditEventListener.onItemDropped(player, reentrantDrop, overflowStack);
@@ -114,8 +117,8 @@ public final class AdminMutationGameTests implements FabricGameTest {
         boolean snapshotFailureDropBegan = AdminMutationCapture.beginGiveDropSafely(player, overflowStack);
         helper.assertTrue(snapshotFailureDropBegan,
                 "snapshot-failed GiveCommand drop must open its exact capture boundary");
-        ItemEntity failedSnapshotDrop = new ItemEntity(helper.getLevel(), player.getX(), player.getY(),
-                player.getZ(), overflowStack.copy());
+        ItemEntity failedSnapshotDrop = new ItemEntity(helper.getLevel(), player.getX() + 8,
+                player.getY(), player.getZ() + 8, overflowStack.copy());
         helper.assertTrue(helper.getLevel().addFreshEntity(failedSnapshotDrop),
                 "snapshot-failed give overflow entity must be accepted by the world before capture");
         FabricNativeAuditEventListener.onItemDropped(player, failedSnapshotDrop, overflowStack);
@@ -200,8 +203,13 @@ public final class AdminMutationGameTests implements FabricGameTest {
                 .thenExecute(() -> {
                     helper.assertTrue(service.getTotalDropped() == droppedBefore,
                             "over-limit give overflow must not be dropped from the evidence queue");
-                    helper.assertTrue(service.getTotalEnqueued() - enqueuedBefore == 7,
-                            "three unresolved give scopes, accepted overflow ground outputs, reentrant and unrelated player drops must be retained");
+                    // 7 admin/drop rows + 4 ITEM_ENTITY_SPAWN lifecycle rows for the
+                    // entities this test accepted into the world (overflow, reentrant,
+                    // unrelated, and snapshot-failed drops; rejected entities never spawn).
+                    long enqueueDelta = service.getTotalEnqueued() - enqueuedBefore;
+                    helper.assertTrue(enqueueDelta == 11,
+                            "three unresolved give scopes, accepted overflow ground outputs, reentrant and unrelated player drops must be retained; delta="
+                                    + enqueueDelta);
                     try (var connection = DatabaseManager.getInstance().openReadOnlyConnection();
                          var statement = connection.createStatement()) {
                         statement.setQueryTimeout(5);

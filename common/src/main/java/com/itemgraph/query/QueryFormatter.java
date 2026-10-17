@@ -136,7 +136,15 @@ public final class QueryFormatter {
             JsonElement parsed = JsonParser.parseString(detail);
             if (!parsed.isJsonObject() || !parsed.getAsJsonObject().has("actor")) return null;
             var actor = parsed.getAsJsonObject().getAsJsonObject("actor");
-            if (actor == null || !actor.has("kind") || !"ENTITY".equals(actor.get("kind").getAsString())) {
+            if (actor == null || !actor.has("kind")) {
+                return null;
+            }
+            String kind = actor.get("kind").getAsString();
+            if ("WORLD".equals(kind)) {
+                String cause = actor.has("cause") ? actor.get("cause").getAsString() : null;
+                return cause == null ? "world/environment" : "world (" + cause + ")";
+            }
+            if (!"ENTITY".equals(kind)) {
                 return null;
             }
             String type = actor.has("entity_type") ? actor.get("entity_type").getAsString() : "unknown entity";

@@ -21,6 +21,9 @@
     "ServerPlayerMixin",
     "ItemEntityMixin",
     "LivingEntityMixin",
+    "LivingEntityDeathDropMixin",
+    "EntityRemovalMixin",
+    "ProjectileImpactMixin",
     "ItemStackMixin",
     "HopperBlockEntityMixin",
     "DispenserBlockMixin",
@@ -36,6 +39,14 @@
     "EndermanTakeBlockGoalMixin",
     "EndermanLeaveBlockGoalMixin",
     "FallingBlockEntityMixin",
-    "ItemCombinerMenuAccessor"
+    "ItemCombinerMenuAccessor",
+    "EnchantmentMenuAccessor",
+    "GrindstoneMenuAccessor",
+    "MerchantResultSlotMixin",
+    "EnchantmentMenuMixin",
+    "SmithingMenuMixin",
+    "GrindstoneResultSlotMixin",
+    "BrewingStandMixin",
+    "LootTableMixin"
   ]
 }

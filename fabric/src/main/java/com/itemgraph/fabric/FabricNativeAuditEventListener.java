@@ -69,6 +69,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -99,6 +100,8 @@ public final class FabricNativeAuditEventListener {
     private static final StackWalker DEATH_STACK_WALKER = StackWalker.getInstance();
     private static final ThreadLocal<Deque<DeathCapture>> PENDING_PLAYER_DEATHS = new ThreadLocal<>();
     private static final ThreadLocal<Deque<ContainerBreakAttempt>> PENDING_CONTAINER_BREAKS = new ThreadLocal<>();
+    private static final int MAX_DEATH_DROP_SCOPE_DEPTH = 16;
+    private static final ThreadLocal<Deque<LivingEntity>> NON_PLAYER_DEATH_DROP_SCOPES = new ThreadLocal<>();
 
     private record ContainerBreakAttempt(ContainerBreakCapture.Snapshot snapshot) { }
 
@@ -115,7 +118,19 @@ public final class FabricNativeAuditEventListener {
                                String playerName, String level,
                                double playerX, double playerY, double playerZ,
                                int amount, CanonicalItem canonical,
-                               long timestampMs, long expiresAtMs) {
+                               long timestampMs, long expiresAtMs,
+                               String victimType, String victimUuid) {
+        PendingDrop(ItemEntity entity, String actionType, UUID playerUuid, String playerName,
+                    String level, double playerX, double playerY, double playerZ,
+                    int amount, CanonicalItem canonical, long timestampMs, long expiresAtMs) {
+            this(entity, actionType, playerUuid, playerName, level, playerX, playerY, playerZ,
+                    amount, canonical, timestampMs, expiresAtMs, null, null);
+        }
+        PendingDrop withVictim(String victimType, String victimUuid) {
+            return new PendingDrop(entity, actionType, playerUuid, playerName, level,
+                    playerX, playerY, playerZ, amount, canonical, timestampMs, expiresAtMs,
+                    victimType, victimUuid);
+        }
     }
 
     private record HopperSite(StackTraceElement caller, int stackDepth) {
@@ -296,11 +311,36 @@ public final class FabricNativeAuditEventListener {
         ServerTickEvents.END_SERVER_TICK.register(server ->
                 resolvePendingDrops(System.currentTimeMillis()));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
-            if (entity instanceof LivingEntity victim
-                    && source.getEntity() instanceof ServerPlayer player) {
+            if (!(entity instanceof LivingEntity victim) || victim.level().isClientSide()) {
+                return;
+            }
+            if (source.getEntity() instanceof ServerPlayer player) {
                 submit("KILL_ENTITY", player, player.level(), victim.blockPosition(),
                         BuiltInRegistries.ENTITY_TYPE.getKey(victim.getType()).toString(), null);
+                return;
             }
+            // #56: non-player killers and world damage causes get typed actors,
+            // never a fabricated nearest player.
+            Map<String, String> metadata = new TreeMap<>();
+            metadata.put("victim_entity_uuid", victim.getUUID().toString());
+            if (source.type() != null) {
+                metadata.put("damage_type", source.typeHolder().unwrapKey()
+                        .map(key -> key.location().toString()).orElse("unknown"));
+            }
+            Entity killer = source.getEntity();
+            if (killer != null) {
+                metadata.putAll(com.itemgraph.audit.EntityLifecycleCapture.entityActor(
+                        killer.getUUID().toString(),
+                        BuiltInRegistries.ENTITY_TYPE.getKey(killer.getType()).toString()));
+            } else {
+                metadata.putAll(com.itemgraph.audit.EntityLifecycleCapture.worldActor(
+                        metadata.getOrDefault("damage_type", "unknown")));
+            }
+            com.itemgraph.audit.EntityLifecycleCapture.submit("ENTITY_KILL",
+                    victim.level().dimension().location().toString(),
+                    victim.getX(), victim.getY(), victim.getZ(),
+                    BuiltInRegistries.ENTITY_TYPE.getKey(victim.getType()).toString(),
+                    victim.getUUID().toString(), null, "living_death", metadata);
         });
     }
 
@@ -752,6 +792,183 @@ public final class FabricNativeAuditEventListener {
         pending.push(new DropCapture(Collections.newSetFromMap(new IdentityHashMap<>()), actionType));
     }
 
+    /**
+     * Fresh-spawn lifecycle capture (#56). {@code addFreshEntity} is the fresh-spawn
+     * boundary only — chunk-loaded entities never pass through it — so every entity
+     * seen here is an authoritative new spawn. Item entities also queue a victim
+     * death-drop observation when a {@code dropAllDeathLoot} scope is active.
+     */
+    public static void onEntityLifecycleAdded(Entity entity, boolean added) {
+        if (!added || entity == null || entity.level().isClientSide()
+                || entity instanceof ServerPlayer) {
+            return;
+        }
+        String dimension = entity.level().dimension().location().toString();
+        String entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
+        String entityUuid = entity.getUUID().toString();
+        if (entity instanceof ItemEntity itemEntity) {
+            ItemStack stack = itemEntity.getItem();
+            com.itemgraph.audit.EntityLifecycleCapture.submit("ITEM_ENTITY_SPAWN", dimension,
+                    entity.getX(), entity.getY(), entity.getZ(),
+                    stack.isEmpty() ? null : BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                    entityUuid, stack.getCount(),
+                    "entity_join_level", Map.of("subject_entity_type", entityType));
+            LivingEntity victim = activeDeathDropVictim();
+            if (victim != null) {
+                queuePendingDropForVictim(victim, itemEntity, "DEATH_DROP");
+            }
+        } else if (entity instanceof Projectile projectile) {
+            Map<String, String> metadata = new TreeMap<>();
+            Entity owner = projectile.getOwner();
+            if (owner != null) {
+                metadata.put("owner_entity_uuid", owner.getUUID().toString());
+                metadata.put("owner_entity_type",
+                        BuiltInRegistries.ENTITY_TYPE.getKey(owner.getType()).toString());
+            }
+            com.itemgraph.audit.EntityLifecycleCapture.submit("PROJECTILE_LAUNCH", dimension,
+                    entity.getX(), entity.getY(), entity.getZ(),
+                    entityType, entityUuid, null, "entity_join_level", metadata);
+        } else {
+            com.itemgraph.audit.EntityLifecycleCapture.submit("ENTITY_SPAWN", dimension,
+                    entity.getX(), entity.getY(), entity.getZ(),
+                    entityType, entityUuid, null, "entity_join_level", Map.of());
+        }
+    }
+
+    /**
+     * Genuine-removal capture (#56). {@code RemovalReason.shouldDestroy()} keeps
+     * only {@code KILLED}/{@code DISCARDED}; chunk unloads and dimension
+     * transfers are not lifecycle endpoints and record nothing.
+     */
+    public static void onEntityRemoved(Entity entity, Entity.RemovalReason reason) {
+        if (entity == null || entity.level().isClientSide()
+                || entity instanceof ServerPlayer
+                || reason == null || !reason.shouldDestroy()) {
+            return;
+        }
+        String dimension = entity.level().dimension().location().toString();
+        String entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
+        String entityUuid = entity.getUUID().toString();
+        Map<String, String> metadata = new TreeMap<>();
+        metadata.put("removal_reason", reason.name());
+        if (entity instanceof ItemEntity itemEntity) {
+            ItemStack stack = itemEntity.getItem();
+            metadata.put("subject_entity_type", entityType);
+            com.itemgraph.audit.EntityLifecycleCapture.submit("ITEM_ENTITY_DESPAWN", dimension,
+                    entity.getX(), entity.getY(), entity.getZ(),
+                    stack.isEmpty() ? null : BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                    entityUuid, stack.getCount(), "entity_removal", metadata);
+        } else {
+            com.itemgraph.audit.EntityLifecycleCapture.submit("ENTITY_DESPAWN", dimension,
+                    entity.getX(), entity.getY(), entity.getZ(),
+                    entityType, entityUuid, null, "entity_removal", metadata);
+        }
+    }
+
+    /**
+     * Projectile impact capture (#56) at the server's {@code hitTargetOrDeflectSelf}
+     * dispatch — the authoritative impact boundary on Fabric.
+     */
+    public static void onProjectileImpact(Projectile projectile,
+                                           net.minecraft.world.phys.HitResult hit) {
+        if (projectile == null || projectile.level().isClientSide()) {
+            return;
+        }
+        Map<String, String> metadata = new TreeMap<>();
+        metadata.put("impact_type", hit == null ? "MISS" : hit.getType().name());
+        double x = projectile.getX();
+        double y = projectile.getY();
+        double z = projectile.getZ();
+        if (hit instanceof net.minecraft.world.phys.EntityHitResult entityHit
+                && entityHit.getEntity() != null) {
+            Entity target = entityHit.getEntity();
+            metadata.put("target_entity_type",
+                    BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString());
+            metadata.put("target_entity_uuid", target.getUUID().toString());
+            x = target.getX();
+            y = target.getY();
+            z = target.getZ();
+        } else if (hit instanceof net.minecraft.world.phys.BlockHitResult blockHit) {
+            metadata.put("target_pos", blockHit.getBlockPos().toShortString());
+        }
+        Entity owner = projectile.getOwner();
+        if (owner != null) {
+            metadata.put("owner_entity_uuid", owner.getUUID().toString());
+            metadata.put("owner_entity_type",
+                    BuiltInRegistries.ENTITY_TYPE.getKey(owner.getType()).toString());
+        }
+        com.itemgraph.audit.EntityLifecycleCapture.submit("PROJECTILE_IMPACT",
+                projectile.level().dimension().location().toString(), x, y, z,
+                BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString(),
+                projectile.getUUID().toString(), null, "projectile_impact", metadata);
+    }
+
+    /** Opens a non-player {@code dropAllDeathLoot} scope; item spawns inside attribute to the victim. */
+    public static void beginNonPlayerDeathDropScope(LivingEntity victim) {
+        if (victim == null || victim.level().isClientSide() || victim instanceof ServerPlayer) {
+            return;
+        }
+        Deque<LivingEntity> scopes = NON_PLAYER_DEATH_DROP_SCOPES.get();
+        if (scopes == null) {
+            scopes = new ArrayDeque<>();
+            NON_PLAYER_DEATH_DROP_SCOPES.set(scopes);
+        }
+        if (scopes.size() >= MAX_DEATH_DROP_SCOPE_DEPTH) {
+            scopes.clear();
+        }
+        scopes.push(victim);
+    }
+
+    /** Closes the innermost matching death-drop scope. */
+    public static void endNonPlayerDeathDropScope(LivingEntity victim) {
+        Deque<LivingEntity> scopes = NON_PLAYER_DEATH_DROP_SCOPES.get();
+        if (scopes == null || scopes.isEmpty()) {
+            return;
+        }
+        if (scopes.peek() == victim) {
+            scopes.pop();
+        } else {
+            // A skipped RETURN can only desynchronize nesting; clear rather than leak.
+            scopes.remove(victim);
+        }
+        if (scopes.isEmpty()) {
+            NON_PLAYER_DEATH_DROP_SCOPES.remove();
+        }
+    }
+
+    private static LivingEntity activeDeathDropVictim() {
+        Deque<LivingEntity> scopes = NON_PLAYER_DEATH_DROP_SCOPES.get();
+        return scopes == null ? null : scopes.peek();
+    }
+
+    /** Queues a non-player victim drop through the same settle-confirmed pending path. */
+    private static void queuePendingDropForVictim(LivingEntity victim, ItemEntity itemEntity,
+                                                  String actionType) {
+        ItemStack stack = itemEntity.getItem();
+        if (stack == null || stack.isEmpty() || itemEntity.isRemoved()) {
+            return;
+        }
+        String victimType = BuiltInRegistries.ENTITY_TYPE.getKey(victim.getType()).toString();
+        long now = System.currentTimeMillis();
+        PendingDrop pending = new PendingDrop(itemEntity, actionType, null, null,
+                victim.level().dimension().location().toString(),
+                victim.getX(), victim.getY(), victim.getZ(),
+                stack.getCount(), ItemCanonicalizer.canonicalizeStack(stack),
+                now, now + PENDING_DROP_TTL_MS,
+                victimType, victim.getUUID().toString());
+        PendingDrop replaced = PENDING_DROPS.remove(itemEntity.getUUID());
+        if (replaced != null) {
+            emitUnresolvedDrop(replaced, "pending_entity_reused");
+        }
+        if (PENDING_DROPS.size() >= PENDING_DROP_MAX) {
+            PendingDrop evicted = PENDING_DROPS.remove(PENDING_DROPS.keySet().iterator().next());
+            if (evicted != null) {
+                emitUnresolvedDrop(evicted, "pending_capacity");
+            }
+        }
+        PENDING_DROPS.put(itemEntity.getUUID(), pending);
+    }
+
     /** Associates a successful server-level item insertion with the current drop call. */
     public static void onItemEntityAdded(Entity entity, boolean added) {
         if (added && entity instanceof ItemEntity acceptedItem) {
@@ -992,7 +1209,21 @@ public final class FabricNativeAuditEventListener {
                 (int) Math.floor(entity.getX()), (int) Math.floor(entity.getY()),
                 (int) Math.floor(entity.getZ()),
                 pending.canonical().itemId(), pending.amount(), pending.timestampMs());
-        recordItemObservation(pending.actionType(), pending.playerUuid().toString(), pending.playerName(),
+        if (pending.victimType() != null) {
+            // Non-player death drop: the dead entity replaces the player actor.
+            byte[] victimData = ("{\"capture\":\"living_drops\",\"victim\":\"" + pending.victimType()
+                    + "\",\"victim_uuid\":\"" + pending.victimUuid() + "\"}")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
+                    pending.timestampMs(), pending.actionType(), null, null,
+                    pending.level(), pending.playerX(), pending.playerY(), pending.playerZ(),
+                    pending.level(), entity.getX(), entity.getY(), entity.getZ(), "GROUND",
+                    pending.canonical().itemId(), victimData, pending.canonical(), pending.amount(),
+                    entity.getUUID().toString()));
+            return;
+        }
+        recordItemObservation(pending.actionType(),
+                pending.playerUuid() == null ? null : pending.playerUuid().toString(), pending.playerName(),
                 pending.level(), pending.playerX(), pending.playerY(), pending.playerZ(),
                 entity.getX(), entity.getY(), entity.getZ(),
                 "GROUND", pending.canonical(), pending.amount(), entity.getUUID().toString());
@@ -1004,7 +1235,8 @@ public final class FabricNativeAuditEventListener {
         byte[] rawData = ("{\"capture\":\"drop_attempt\",\"resolution\":\"unknown_destination\",\"reason\":\""
                 + reason + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
         InternalObservationService.getInstance().submit(new InternalObservationService.InternalObservation(
-                pending.timestampMs(), actionType, pending.playerUuid().toString(), pending.playerName(),
+                pending.timestampMs(), actionType,
+                pending.playerUuid() == null ? null : pending.playerUuid().toString(), pending.playerName(),
                 pending.level(), pending.playerX(), pending.playerY(), pending.playerZ(),
                 pending.level(), null, null, null, "UNKNOWN",
                 pending.canonical().itemId(), rawData, pending.canonical(), pending.amount(), null));

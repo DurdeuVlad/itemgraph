@@ -29,7 +29,11 @@
     "HopperBlockEntityMixin",
     "DispenserBlockMixin",
     "DropperBlockMixin",
-    "DefaultDispenseItemBehaviorMixin"
+    "DefaultDispenseItemBehaviorMixin",
+    "SmithingMenuMixin",
+    "ItemCombinerMenuAccessor",
+    "BrewingStandMixin",
+    "LootTableMixin"
   ],
   "injectors": {
     "defaultRequire": 1
