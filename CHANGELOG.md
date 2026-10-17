@@ -6,6 +6,8 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-17
+
 ### Added
 
 - **World and environmental causes (#55):** both loaders now record confirmed
