@@ -32,6 +32,7 @@ public final class IdlePerformanceFixture {
                                 + failure);
                         return;
                     }
+                    probe.discardResidualWorldEntities();
                     probe.beginSample(durableRowsBefore);
                 }));
     }
@@ -75,6 +76,32 @@ public final class IdlePerformanceFixture {
                         - unknownBeforeStop));
             }
             return countDurableEvidenceRows();
+        }
+
+        /**
+         * Removes leftover world entities while the observation service is
+         * stopped so earlier GameTest batches cannot legitimately emit
+         * lifecycle or pickup evidence inside the measured idle window.
+         * Discards run on the server thread and produce no rows because the
+         * service is stopped.
+         */
+        private void discardResidualWorldEntities() {
+            java.util.List<net.minecraft.world.entity.Entity> residual = new java.util.ArrayList<>();
+            helper.getLevel().getEntities(
+                            net.minecraft.world.level.entity.EntityTypeTest.forClass(
+                                    net.minecraft.world.entity.Entity.class),
+                            new net.minecraft.world.phys.AABB(-30_000_000, -512, -30_000_000,
+                                    30_000_000, 2048, 30_000_000),
+                            entity -> true)
+                    .forEach(entity -> {
+                        if (!(entity instanceof net.minecraft.server.level.ServerPlayer)) {
+                            residual.add(entity);
+                        }
+                    });
+            residual.forEach(net.minecraft.world.entity.Entity::discard);
+            if (!residual.isEmpty()) {
+                LOGGER.info("Idle probe discarded {} residual world entities before sampling", residual.size());
+            }
         }
 
         private void beginSample(long ledgerRowsBefore) {
