@@ -42,6 +42,12 @@ An empty query result means no matching stored row exists. It does not prove
 nothing happened; the [coverage limits](docs/FEATURE_PARITY_INVENTORY.md) list
 event families that are not yet captured.
 
+ItemGraph records vanilla hopper, dispenser, and dropper movement on both loaders.
+Other mods can opt into exact transfer evidence through the Fabric Transfer API or
+NeoForge `IItemHandler` adapter documented in [the Java API guide](docs/API.md).
+Portable inventories must provide a stable opaque inventory ID. Arbitrary third-party
+inventory calls are not globally intercepted; the owning mod must integrate the adapter.
+
 ## Install
 
 Releases ship exactly two files. Pick the one matching the server's loader —

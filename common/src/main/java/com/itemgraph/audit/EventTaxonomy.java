@@ -389,6 +389,25 @@ public final class EventTaxonomy {
                 27, "item_flow", "consume");
         action(entries, "HOPPER_INSERT", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
         action(entries, "HOPPER_EXTRACT", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
+        action(entries, "DISPENSER_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
+        action(entries, "DROPPER_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
+        // CAPABILITY_* rows are emitted only by the NeoForge IItemHandler
+        // wrapper; Fabric keeps them queryable for imported or mirrored data.
+        // A capability delta never identifies its caller or remote endpoint.
+        add(entries, "CAPABILITY_INSERT", "automation", Surface.ITEM_OBSERVATION,
+                EvidenceClass.OBSERVED, SourceReliability.DIRECT_STATE_DELTA,
+                EndpointSemantics.SOURCE_AND_DESTINATION, QuantitySemantics.SIGNED_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
+                HISTORICAL_ONLY, IMPLEMENTED, 34);
+        add(entries, "CAPABILITY_EXTRACT", "automation", Surface.ITEM_OBSERVATION,
+                EvidenceClass.OBSERVED, SourceReliability.DIRECT_STATE_DELTA,
+                EndpointSemantics.SOURCE_AND_DESTINATION, QuantitySemantics.SIGNED_DELTA,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
+                HISTORICAL_ONLY, IMPLEMENTED, 34);
+        // TRANSFER_ITEM is the persisted action for committed adapter-API
+        // transfers; the remote endpoint stays UNKNOWN when the native API
+        // does not expose it.
+        action(entries, "TRANSFER_ITEM", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 34, "automation");
         action(entries, "DEATH_DROP", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 56, "entity_lifecycle");
         action(entries, "ADD_ITEM_ENDER", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 76, "ender_inventory");
         action(entries, "REMOVE_ITEM_ENDER", Surface.ITEM_OBSERVATION, QuantitySemantics.SIGNED_DELTA, 76, "ender_inventory");

@@ -59,6 +59,7 @@ public class InternalObservationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(InternalObservationService.class);
     private static final InternalObservationService INSTANCE = new InternalObservationService();
     private static final int QUEUE_CAPACITY = 10_000;
+    static final int NATIVE_CAPTURE_BACKPRESSURE_CAPACITY = 1_024;
     private static final int RECOVERY_QUEUE_CAPACITY = QUEUE_CAPACITY * 2 + 1_000;
     private static final int DEFAULT_MAX_BATCH_SIZE = 100;
     private static final long AUDIT_RETRY_INITIAL_BACKOFF_MS = 25L;
@@ -390,7 +391,10 @@ public class InternalObservationService {
     }
 
     private final BlockingQueue<InternalObservation> queue = new LinkedBlockingQueue<>(RECOVERY_QUEUE_CAPACITY);
+    private final BlockingQueue<InternalObservation> nativeCaptureBackpressureQueue =
+            new LinkedBlockingQueue<>(NATIVE_CAPTURE_BACKPRESSURE_CAPACITY);
     private final Object observationQueueLock = new Object();
+    private boolean preferNativeCaptureBackpressureDrain;
     private final BlockingQueue<InternalTransformation> transformationQueue = new LinkedBlockingQueue<>(RECOVERY_QUEUE_CAPACITY);
     private final BlockingQueue<InternalAuditEvent> auditEventQueue = new LinkedBlockingQueue<>(RECOVERY_QUEUE_CAPACITY);
     private final java.util.concurrent.atomic.AtomicInteger auditQueuedRecords = new java.util.concurrent.atomic.AtomicInteger();
@@ -422,6 +426,8 @@ public class InternalObservationService {
     private final java.util.concurrent.atomic.AtomicLong totalEnqueued = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalPersisted = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalDropped = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong nativeCaptureBackpressureExhausted =
+            new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalPersistenceOutcomeUnknown = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalTransformations = new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong totalAuditEvents = new java.util.concurrent.atomic.AtomicLong(0);
@@ -809,6 +815,9 @@ public class InternalObservationService {
 
     private PendingEvidenceSpool.Snapshot snapshotPendingEvidenceLocked() {
         List<InternalObservation> observations = new ArrayList<>(queue);
+        // Weakly-consistent read of the second ingress queue; identical semantics to
+        // the queue snapshot above — contents here are pending evidence too.
+        observations.addAll(nativeCaptureBackpressureQueue);
         List<InternalTransformation> transformations = new ArrayList<>(transformationQueue);
         List<InternalAuditEvent> auditEvents = new ArrayList<>(auditEventQueue);
         observations.addAll(inFlightSnapshot.observations());
@@ -836,6 +845,7 @@ public class InternalObservationService {
     private void clearQueuesAfterSpoolHandoff() {
         synchronized (queueMutationLock) {
             queue.clear();
+            nativeCaptureBackpressureQueue.clear();
             transformationQueue.clear();
             auditEventQueue.clear();
             auditQueuedRecords.set(0);
@@ -884,6 +894,49 @@ public class InternalObservationService {
             return false;
         }
         return submitAll(List.of(obs));
+    }
+
+    /**
+     * Nonblocking ingress for committed native hopper/dispenser evidence. When the
+     * primary observation queue is saturated, retain events in a second bounded
+     * queue drained by the same database worker. Exhaustion is counted explicitly.
+     */
+    public boolean submitNativeCapture(InternalObservation observation) {
+        if (observation == null) {
+            return false;
+        }
+        if (!captureEnabled) {
+            return true;
+        }
+        synchronized (observationQueueLock) {
+            if (!acceptingSubmissions) {
+                // Admission is closed post-stop; reject explicitly like every other
+                // ingress so committed evidence is never silently dropped.
+                recordPostStopRejection(1);
+                return false;
+            }
+            boolean accepted;
+            // The physical queue is oversized for recovery/requeue headroom; new
+            // producer evidence still respects the logical QUEUE_CAPACITY bound.
+            if (nativeCaptureBackpressureQueue.isEmpty()
+                    && queue.size() < QUEUE_CAPACITY && queue.offer(observation)) {
+                accepted = true;
+            } else {
+                accepted = nativeCaptureBackpressureQueue.offer(observation);
+            }
+            if (accepted) {
+                totalEnqueued.incrementAndGet();
+                signalQueuedWork();
+                return true;
+            }
+            long exhausted = nativeCaptureBackpressureExhausted.incrementAndGet();
+            long dropped = totalDropped.incrementAndGet();
+            if (exhausted == 1 || exhausted % 100 == 0) {
+                LOGGER.warn("Native capture backpressure queue is full — rejected committed evidence "
+                                + "({} exhausted total; {} total dropped)", exhausted, dropped);
+            }
+            return false;
+        }
     }
 
     /**
@@ -1110,7 +1163,20 @@ public class InternalObservationService {
     }
 
     public int getQueueSize() {
-        return queue.size() + transformationQueue.size() + auditQueuedRecords.get();
+        return queue.size() + nativeCaptureBackpressureQueue.size()
+                + transformationQueue.size() + auditQueuedRecords.get();
+    }
+
+    public int getNativeCaptureBackpressureQueueSize() {
+        return nativeCaptureBackpressureQueue.size();
+    }
+
+    public int getNativeCaptureBackpressureCapacity() {
+        return NATIVE_CAPTURE_BACKPRESSURE_CAPACITY;
+    }
+
+    public long getNativeCaptureBackpressureExhausted() {
+        return nativeCaptureBackpressureExhausted.get();
     }
 
     private int auditQueueRecordCount() {
@@ -1173,6 +1239,10 @@ public class InternalObservationService {
                 auditQueuedObservations.set(0);
                 inFlightSnapshot = new PendingEvidenceSpool.Snapshot(List.of(), List.of(), List.of());
             }
+            synchronized (observationQueueLock) {
+                nativeCaptureBackpressureQueue.clear();
+                preferNativeCaptureBackpressureDrain = false;
+            }
             synchronized (evidenceSpoolLock) {
                 recoveryEvents.clear();
             }
@@ -1181,6 +1251,7 @@ public class InternalObservationService {
             totalPersisted.set(0);
             totalDropped.set(0);
             totalPersistenceOutcomeUnknown.set(0);
+            nativeCaptureBackpressureExhausted.set(0);
             totalTransformations.set(0);
             totalAuditEvents.set(0);
             totalDatabaseHeartbeats.set(0);
@@ -1217,6 +1288,8 @@ public class InternalObservationService {
                         queueFlushDue.set(true);
                     }
                     if (queueFlushDue.getAndSet(false)) {
+                        drainObservationQueues(obsBatch, maxBatchSize);
+
                         List<InternalTransformation> transBatch = new ArrayList<>(maxBatchSize);
                         List<InternalAuditEvent> auditBatch = new ArrayList<>(maxBatchSize);
                         synchronized (queueMutationLock) {
@@ -1300,7 +1373,8 @@ public class InternalObservationService {
 
                         // A pass is intentionally bounded per queue. Keep the worker running
                         // immediately while any bounded queue still has a backlog.
-                        if (!queue.isEmpty() || !transformationQueue.isEmpty() || !auditEventQueue.isEmpty()) {
+                        if (!queue.isEmpty() || !nativeCaptureBackpressureQueue.isEmpty()
+                                || !transformationQueue.isEmpty() || !auditEventQueue.isEmpty()) {
                             queueFlushDue.set(true);
                             signalQueuedWork();
                         }
@@ -1422,6 +1496,25 @@ public class InternalObservationService {
     private void signalQueuedWork() {
         if (queuedWorkSignalPending.compareAndSet(false, true)) {
             queuedWorkSignals.release();
+        }
+    }
+
+    private void drainObservationQueues(List<InternalObservation> target, int limit) {
+        synchronized (observationQueueLock) {
+            int nativeLimit = Math.max(1, limit / 2);
+            if (preferNativeCaptureBackpressureDrain) {
+                nativeCaptureBackpressureQueue.drainTo(target, nativeLimit);
+                queue.drainTo(target, limit - target.size());
+                if (target.size() < limit) {
+                    nativeCaptureBackpressureQueue.drainTo(target, limit - target.size());
+                }
+            } else {
+                queue.drainTo(target, limit);
+                if (target.size() < limit) {
+                    nativeCaptureBackpressureQueue.drainTo(target, limit - target.size());
+                }
+            }
+            preferNativeCaptureBackpressureDrain = !preferNativeCaptureBackpressureDrain;
         }
     }
 
@@ -1715,11 +1808,11 @@ public class InternalObservationService {
         synchronized (observationQueueLock) {
             synchronized (queueMutationLock) {
                 for (InternalObservation observation : batch) {
-                    if (!queue.offer(observation)) {
+                    if (!queue.offer(observation) && !nativeCaptureBackpressureQueue.offer(observation)) {
                         long dropped = totalDropped.incrementAndGet();
                         OperationalMetrics.getInstance().recordQueueRejection(1);
                         if (dropped == 1 || dropped % 1000 == 0) {
-                            LOGGER.warn("Internal observation queue remained full while retrying; dropped {} ({} dropped total)",
+                            LOGGER.warn("Internal observation queues remained full while retrying; dropped {} ({} dropped total)",
                                     observation.actionType(), dropped);
                         }
                     } else {
@@ -2075,6 +2168,7 @@ public class InternalObservationService {
                         }
                         case "GROUND" -> {
                             // DROP_ITEM / DEATH_DROP: player -> ground
+                            // Dispenser/dropper item entities: exact source container -> ground
                             // PICKUP_ITEM: ground -> player
                             long groundNodeId = nodeManager.getOrCreateGroundNode(
                                     conn, obs.targetLevelName(),
@@ -2082,6 +2176,11 @@ public class InternalObservationService {
                             if ("PICKUP_ITEM".equals(obs.actionType())) {
                                 originNodeId = groundNodeId;
                                 targetNodeId = playerNode(conn, nodeManager, obs);
+                            } else if ("DISPENSER_DROP".equals(obs.actionType())
+                                    || "DROPPER_DROP".equals(obs.actionType())) {
+                                originNodeId = nodeManager.getOrCreateContainerNode(
+                                        conn, obs.levelName(), obs.x(), obs.y(), obs.z());
+                                targetNodeId = groundNodeId;
                             } else {
                                 // DROP_ITEM, DEATH_DROP, THROW_ITEM, SHOOT_ITEM
                                 originNodeId = playerNode(conn, nodeManager, obs);

@@ -78,6 +78,41 @@ The project follows a simple pre-1.0 development changelog model.
   reports the auto-detected migration state. Query cancellation no longer
   binds `org.sqlite.*` types — the dispatcher interrupts timed-out queries
   through JDBC `Statement.cancel()` plus a reflective connection interrupt.
+- **Opt-in automation adapter contract** (issue #34): `AutomationEndpoint`
+  provides restart-stable opaque inventory identities derived from mod,
+  dimension, position, slot policy, and side, plus opt-in Fabric
+  `FabricTransferStorageAdapter` and NeoForge `NeoForgeItemHandlerAdapter`
+  implementations. They preserve native transfer results, record exact
+  committed quantities, and suppress simulations and rollbacks. Fabric overflow
+  omits the whole transaction; source mod identity is checked against its
+  registered handle, and caller-created endpoints cannot add a location to the
+  opaque reference. Rejected transfers, zero movement, and impossible quantity
+  claims emit no movement evidence. Explicit `QUEUE_FULL` responses retry the
+  same event identity at most three times through a 128-entry bounded worker
+  queue; other outcomes are not replayed. This is in-memory retry only, and
+  pending retries can be interrupted by process shutdown. Vanilla hopper
+  transfers emit bounded endpoint-unknown net deltas on both loaders
+  (`HOPPER_INSERT`/`HOPPER_EXTRACT`); NeoForge `IItemHandler` capability deltas
+  persist as `CAPABILITY_INSERT`/`CAPABILITY_EXTRACT` at the changed endpoint,
+  and committed adapter-API transfers persist as `TRANSFER_ITEM`. All three
+  automation action IDs are now classified in `EventTaxonomy` instead of
+  rendering unclassified. Both loaders record accepted default-behavior
+  dispenser/dropper outputs (`DISPENSER_DROP`/`DROPPER_DROP`) with source,
+  item, amount, ground endpoint, and entity UUID. Snapshot bounds use
+  overflow-safe arithmetic, and unreadable prior hopper snapshots suppress
+  paired deltas. NeoForge adapters accept mod-owned opaque inventory IDs for
+  item-handler providers without deriving identity from an `ItemStack`.
+  Cross-loader test consumers move stacks through Fabric Transfer API and
+  NeoForge item-capability adapters between portable and shulker-like storage
+  and assert both persisted endpoint deltas. These are vanilla/API fixtures,
+  not third-party backpack integrations. Arbitrary modded inventories still
+  require an exercised supported adapter. Bounded queue saturation and
+  concurrent rejection tests verify the 128-entry queue and visible
+  `QUEUE_FULL`. Native hopper/dispenser captures use an additional 1,024-entry
+  bounded backpressure queue on the same database worker; `/ig status` reports
+  pending rows and explicit exhaustion, and shutdown flushes both queues.
+  Saturation tests verify native capture retention and persistence after the
+  primary 10,000-entry observation queue fills.
 
 ### Changed
 

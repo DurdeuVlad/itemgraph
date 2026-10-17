@@ -94,6 +94,33 @@ class EventTaxonomyTest {
     }
 
     @Test
+    void vanillaAutomationActionsAreVersionedAndImplementedOnBothLoaders() {
+        for (String action : new String[] {"HOPPER_INSERT", "HOPPER_EXTRACT", "DISPENSER_DROP", "DROPPER_DROP",
+                "TRANSFER_ITEM"}) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(action, Surface.ITEM_OBSERVATION)
+                    .orElseThrow();
+            assertEquals(34, definition.ownerIssue(), action);
+            assertEquals(QuantitySemantics.SIGNED_DELTA, definition.quantity(), action);
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.fabric().status(), action);
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.neoForge().status(), action);
+        }
+    }
+
+    @Test
+    void capabilityActionsAreNeoForgeWrittenAndFabricQueryable() {
+        for (String action : new String[] {"CAPABILITY_INSERT", "CAPABILITY_EXTRACT"}) {
+            EventTaxonomy.Definition definition = EventTaxonomy.find(action, Surface.ITEM_OBSERVATION)
+                    .orElseThrow();
+            assertEquals(34, definition.ownerIssue(), action);
+            assertEquals(QuantitySemantics.SIGNED_DELTA, definition.quantity(), action);
+            assertEquals(LoaderStatus.HISTORICAL_ONLY, definition.fabric().status(), action);
+            assertEquals(LoaderStatus.IMPLEMENTED, definition.neoForge().status(), action);
+            assertEquals(EventTaxonomy.canonicalAction(action.toLowerCase(java.util.Locale.ROOT)).orElseThrow(),
+                    action);
+        }
+    }
+
+    @Test
     void lookupChoicesExcludePlannedEventsAndKeepCurrentTypes() {
         assertTrue(EventTaxonomy.auditLookupTypes().contains("INTERACT_BLOCK_ATTEMPT"));
         assertTrue(EventTaxonomy.auditLookupTypes().contains("COMMAND_EXECUTED"));

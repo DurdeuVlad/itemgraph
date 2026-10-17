@@ -1696,6 +1696,10 @@ public final class ItemGraphCommands {
                             + " containers, " + lastResult.durationMs() + "ms)"),
                     "[ItemGraph] DIAGNOSTIC capture/queue: size=" + internalObs.getQueueSize()
                             + " capacityPerQueue=10000"
+                            + " nativeCaptureBackpressure=" + internalObs.getNativeCaptureBackpressureQueueSize()
+                            + "/" + internalObs.getNativeCaptureBackpressureCapacity()
+                            + " nativeCaptureBackpressureExhausted="
+                            + internalObs.getNativeCaptureBackpressureExhausted()
                             + " idlePollMs=" + internalObs.getQueuePollIntervalMs()
                             + " flushEveryTicks=" + internalObs.getQueueFrequencyTicks()
                             + " maxBatchSize=" + internalObs.getMaxBatchSize()

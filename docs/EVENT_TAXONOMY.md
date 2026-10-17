@@ -97,13 +97,22 @@ event coverage or full GriefLogger parity.
 The item-flow and transformation action IDs are cataloged on their own storage
 surfaces. Current IDs include `ADD_ITEM`, `REMOVE_ITEM`, `DROP_ITEM`,
 `PICKUP_ITEM`, `THROW_ITEM`, `SHOOT_ITEM`, `BREAK_ITEM`, `CONSUME_ITEM`,
-`HOPPER_INSERT`, `HOPPER_EXTRACT`, `DEATH_DROP`, `ADD_ITEM_ENDER`,
+`HOPPER_INSERT`, `HOPPER_EXTRACT`, `DISPENSER_DROP`, `DROPPER_DROP`,
+`CAPABILITY_INSERT`, `CAPABILITY_EXTRACT`, `TRANSFER_ITEM`,
+`DEATH_DROP`, `ADD_ITEM_ENDER`,
 `REMOVE_ITEM_ENDER`, legacy `CRAFT` / `SMELT`, `ANVIL_RENAME`, and
 `ANVIL_REPAIR`. Craft/smelt outputs use `CRAFT_OUTPUT_UNRESOLVED` and
 `SMELT_OUTPUT_UNRESOLVED` on the audit surface because the current hooks cannot
 observe complete inputs. Their result fingerprints and output counts are kept
 in raw audit evidence; the unknown input is not a fingerprint or trace edge.
 Legacy craft/smelt transformations are historical-only and unresolved. The
+automation IDs prove a signed delta at the changed endpoint only:
+`CAPABILITY_INSERT`/`CAPABILITY_EXTRACT` are emitted by the NeoForge
+`IItemHandler` wrapper (Fabric keeps them queryable for imported rows) and
+never identify the caller or remote endpoint; `TRANSFER_ITEM` is the adapter-API
+committed-transfer action and leaves the remote endpoint `UNKNOWN` when the
+native API does not expose it. A generic capability or transfer delta does not
+prove a hopper transfer. The
 code-level definitions identify issue ownership and the exact surface for each ID.
 
 `CREATIVE_ITEM_TRANSFORM` remains classifiable for forward compatibility but is
