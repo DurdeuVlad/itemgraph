@@ -107,7 +107,9 @@ class EventTaxonomyTest {
         assertTrue(EventTaxonomy.auditLookupTypes().contains("PISTON_BLOCK_ATTEMPT"));
         assertFalse(EventTaxonomy.auditLookupTypes().contains("TRADE"));
         assertTrue(EventTaxonomy.unifiedLookupActions().contains("EXPLOSION_BLOCK_CHANGE"));
-        assertTrue(EventTaxonomy.canonicalAction("trade").isEmpty());
+        assertEquals("TRADE", EventTaxonomy.canonicalAction("trade").orElseThrow());
+        assertEquals("TRADE", EventTaxonomy.canonicalAction("villager_trade").orElseThrow());
+        assertEquals("LOOT_GENERATION", EventTaxonomy.canonicalAction("loot").orElseThrow());
         assertTrue(EventTaxonomy.auditLookupTypes().stream().allMatch(id -> {
             return EventTaxonomy.find(id, Surface.AUDIT_EVENT)
                     .map(definition -> definition.queryableOn(EventTaxonomy.Loader.FABRIC)
@@ -214,12 +216,44 @@ class EventTaxonomyTest {
                         && reason.ownerIssue() == 56));
 
         assertTrue(EventTaxonomy.find("TRANSFORMATION_INPUTS_NOT_OBSERVED", Surface.AUDIT_EVENT).isEmpty());
-        EventTaxonomy.Definition trade = EventTaxonomy.find("TRADE", Surface.TRANSFORMATION).orElseThrow();
-        assertEquals(57, trade.ownerIssue());
-        assertEquals(QuantitySemantics.INPUT_OUTPUT, trade.quantity());
-        assertTrue(EventTaxonomy.find("TRADE", Surface.AUDIT_EVENT).isEmpty());
+        for (String id : java.util.List.of("TRADE", "ENCHANTING", "BREWING", "SMITHING", "GRINDSTONE")) {
+            EventTaxonomy.Definition transformation =
+                    EventTaxonomy.find(id, Surface.TRANSFORMATION).orElseThrow();
+            assertEquals(57, transformation.ownerIssue(), id);
+            assertEquals(EvidenceClass.OBSERVED, transformation.evidenceClass(), id);
+            assertEquals(EventTaxonomy.SourceReliability.DIRECT_STATE_DELTA,
+                    transformation.sourceReliability(), id);
+            assertEquals(QuantitySemantics.INPUT_OUTPUT, transformation.quantity(), id);
+            assertEquals(EventTaxonomy.EndpointSemantics.INPUTS_AND_OUTPUTS,
+                    transformation.endpoints(), id);
+            assertEquals(PrivacyClass.SENSITIVE_LOCATION, transformation.privacy(), id);
+            assertEquals(LoaderStatus.IMPLEMENTED, transformation.fabric().status(), id);
+            assertEquals(LoaderStatus.IMPLEMENTED, transformation.neoForge().status(), id);
+            assertTrue(EventTaxonomy.find(id, Surface.AUDIT_EVENT).isEmpty(), id);
+        }
+        EventTaxonomy.Definition loot = EventTaxonomy.find("LOOT_GENERATION", Surface.TRANSFORMATION)
+                .orElseThrow();
+        assertEquals(57, loot.ownerIssue());
+        assertEquals(EvidenceClass.OBSERVED, loot.evidenceClass());
+        assertEquals(QuantitySemantics.UNKNOWN, loot.quantity());
+        assertEquals(EventTaxonomy.ActorStatus.UNKNOWN, loot.actor());
+        assertEquals(LoaderStatus.IMPLEMENTED, loot.fabric().status());
+        assertEquals(LoaderStatus.IMPLEMENTED, loot.neoForge().status());
+        EventTaxonomy.Definition unresolvedTransformation =
+                EventTaxonomy.find("TRANSFORMATION_UNRESOLVED", Surface.AUDIT_EVENT).orElseThrow();
+        assertEquals(57, unresolvedTransformation.ownerIssue());
+        assertEquals(EvidenceClass.UNRESOLVED, unresolvedTransformation.evidenceClass());
+        assertEquals(EventTaxonomy.SourceReliability.UNRESOLVED_CAUSE,
+                unresolvedTransformation.sourceReliability());
+        assertEquals(EventTaxonomy.ActorStatus.UNKNOWN, unresolvedTransformation.actor());
         assertTrue(EventTaxonomy.unresolvedReasonCodes().stream()
                 .anyMatch(reason -> reason.id().equals("TRANSFORMATION_INPUTS_NOT_OBSERVED")
+                        && reason.ownerIssue() == 57));
+        assertTrue(EventTaxonomy.unresolvedReasonCodes().stream()
+                .anyMatch(reason -> reason.id().equals("TRANSFORMATION_EVIDENCE_NOT_SUBMITTED")
+                        && reason.ownerIssue() == 57));
+        assertTrue(EventTaxonomy.unresolvedReasonCodes().stream()
+                .anyMatch(reason -> reason.id().equals("TRANSFORMATION_CANCELLED")
                         && reason.ownerIssue() == 57));
 
         EventTaxonomy.Definition interaction = EventTaxonomy.find("INTERACT_ENTITY_UNRESOLVED",

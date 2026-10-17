@@ -43,6 +43,22 @@ The project follows a simple pre-1.0 development changelog model.
   inventing one — and a canceled drop event emits unresolved evidence.
   `ENTITY_LIFECYCLE_UNRESOLVED` preserves queue rejections and callback
   failures with reason codes. `EventTaxonomy` advances to `4.2.0`.
+- **Item-processing and economy transformations** (issue #57). Trades,
+  enchanting, brewing, smithing, grindstone, and loot-table generation now
+  record observed input/output endpoints through the shared
+  `TransformationEvidence` builder on both loaders. NeoForge uses the
+  documented `TradeWithVillagerEvent`, `PlayerEnchantItemEvent`, and
+  `GrindstoneEvent.OnTakeItem`; brewing, smithing, and loot generation use
+  justified shared mixin boundaries (`BrewingStandBlockEntity.doBrew`,
+  `SmithingMenu.onTake`, `LootTable.getRandomItemsRaw`) because no documented
+  event supplies the required position, inputs, or result. Loot rows carry the
+  table id resolved through `Registries.LOOT_TABLE` plus context actor/block/
+  tool provenance. Cancelled operations persist `outcome=CANCELLED` with
+  `TRANSFORMATION_CANCELLED`; unobserved inputs and NeoForge's unobservable
+  grindstone output stay explicit instead of guessed. A queue-rejected or
+  failed callback emits `TRANSFORMATION_UNRESOLVED` with
+  `TRANSFORMATION_EVIDENCE_NOT_SUBMITTED`. Absent endpoints use the explicit
+  `itemgraph:non_item_endpoint` sentinel — never a fabricated stack.
 - **GriefLogger coexistence and automatic migration** (issue #203). ItemGraph
   and GriefLogger can now run on the same server: the SQLite driver ships as an
   opaque `META-INF/iglibs/` resource loaded in a private, platform-parented

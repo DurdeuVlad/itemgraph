@@ -150,6 +150,8 @@ public final class EventTaxonomy {
                     "The stored transformation predates complete input evidence and cannot establish lineage."),
             new ReasonCode("TRANSFORMATION_CANCELLED", 57,
                     "The transformation operation was cancelled before a successful result."),
+            new ReasonCode("TRANSFORMATION_EVIDENCE_NOT_SUBMITTED", 57,
+                    "A station effect was observed but its transformation evidence could not be persisted."),
             new ReasonCode("CREATIVE_TRANSFORM_CAUSE_NOT_REPORTED", 33,
                     "Creative slot changes do not establish an item transformation cause."),
             new ReasonCode("CONTAINER_SNAPSHOT_INCOMPLETE", 140,
@@ -415,14 +417,30 @@ public final class EventTaxonomy {
                 ActorStatus.PLAYER, PrivacyClass.STAFF_ACTIVITY,
                 CREATIVE_TRANSFORM_UNSUPPORTED, CREATIVE_TRANSFORM_UNSUPPORTED, 33);
 
-        // Planned child-issue entries are intentionally not exposed as supported
-        // lookup actions until loader adapters and reproducible fixtures exist.
-        planned(entries, Surface.TRANSFORMATION, "TRADE", "item_processing", QuantitySemantics.INPUT_OUTPUT, 57);
-        planned(entries, Surface.TRANSFORMATION, "ENCHANTING", "item_processing", QuantitySemantics.INPUT_OUTPUT, 57);
-        planned(entries, Surface.TRANSFORMATION, "BREWING", "item_processing", QuantitySemantics.INPUT_OUTPUT, 57);
-        planned(entries, Surface.TRANSFORMATION, "SMITHING", "item_processing", QuantitySemantics.INPUT_OUTPUT, 57);
-        planned(entries, Surface.TRANSFORMATION, "GRINDSTONE", "item_processing", QuantitySemantics.INPUT_OUTPUT, 57);
-        planned(entries, Surface.TRANSFORMATION, "LOOT_GENERATION", "item_processing", QuantitySemantics.UNKNOWN, 57);
+        // Station effects where at least one item input was not observed keep
+        // the unresolved audit surface instead of pretending completeness.
+        audit(entries, "TRANSFORMATION_UNRESOLVED", "item_processing",
+                EvidenceClass.UNRESOLVED, SourceReliability.UNRESOLVED_CAUSE,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION, 57);
+
+        // Issue #57 promoted transformations: trades, enchanting, brewing,
+        // smithing, grindstone, and loot-table generation record observed
+        // input/output endpoints on both loaders.
+        action(entries, "TRADE", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
+                57, "transformation", "trade", "villager_trade");
+        action(entries, "ENCHANTING", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
+                57, "transformation", "enchanting", "enchant");
+        action(entries, "BREWING", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
+                57, "transformation", "brewing", "brew");
+        action(entries, "SMITHING", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
+                57, "transformation", "smithing");
+        action(entries, "GRINDSTONE", Surface.TRANSFORMATION, QuantitySemantics.INPUT_OUTPUT,
+                57, "transformation", "grindstone");
+        add(entries, "LOOT_GENERATION", "transformation", Surface.TRANSFORMATION,
+                EvidenceClass.OBSERVED, SourceReliability.DIRECT_STATE_DELTA,
+                EndpointSemantics.INPUTS_AND_OUTPUTS, QuantitySemantics.UNKNOWN,
+                ActorStatus.UNKNOWN, PrivacyClass.SENSITIVE_LOCATION,
+                IMPLEMENTED, IMPLEMENTED, 57, "loot_generation", "loot");
 
         return List.copyOf(entries);
     }

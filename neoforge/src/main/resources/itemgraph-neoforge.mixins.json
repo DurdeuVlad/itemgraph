@@ -25,7 +25,11 @@
     "FallingBlockEntityMixin",
     "BucketItemMixin",
     "BucketItemAccessor",
-    "ServerLevelMixin"
+    "ServerLevelMixin",
+    "SmithingMenuMixin",
+    "ItemCombinerMenuAccessor",
+    "BrewingStandMixin",
+    "LootTableMixin"
   ],
   "injectors": {
     "defaultRequire": 1

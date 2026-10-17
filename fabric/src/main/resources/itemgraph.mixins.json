@@ -36,6 +36,14 @@
     "EndermanTakeBlockGoalMixin",
     "EndermanLeaveBlockGoalMixin",
     "FallingBlockEntityMixin",
-    "ItemCombinerMenuAccessor"
+    "ItemCombinerMenuAccessor",
+    "EnchantmentMenuAccessor",
+    "GrindstoneMenuAccessor",
+    "MerchantResultSlotMixin",
+    "EnchantmentMenuMixin",
+    "SmithingMenuMixin",
+    "GrindstoneResultSlotMixin",
+    "BrewingStandMixin",
+    "LootTableMixin"
   ]
 }
