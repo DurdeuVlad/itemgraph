@@ -298,4 +298,38 @@ class TransformationEventListenerTest {
         listener.onItemSmelted(event);
         verifyNoInteractions(mockObservationService);
     }
+
+    @Test
+    void testGrindstoneTakeWithRealContainerAccessDoesNotThrow() {
+        // Regression for the grindstone dupe bug: ContainerLevelAccess.create(...)'s
+        // real evaluate() wraps the callback's return in Optional.of(...), which
+        // throws NullPointerException on a null return. That exception used to
+        // escape onGrindstoneTake, abort NeoForge's GrindstoneEvent.OnTakeItem
+        // dispatch mid-flight, and prevent vanilla's own post-event slot
+        // consumption from running - letting players take a disenchanted copy
+        // without the original ever being consumed. A mocked ContainerLevelAccess
+        // would not catch this: only the real Optional.of(...) contract does.
+        Player player = createMockPlayer(false);
+        ItemStack top = new ItemStack(Items.DIAMOND_SWORD);
+
+        net.minecraft.world.inventory.ContainerLevelAccess access =
+                net.minecraft.world.inventory.ContainerLevelAccess.create(player.level(), net.minecraft.core.BlockPos.ZERO);
+        net.neoforged.neoforge.event.GrindstoneEvent.OnTakeItem event =
+                new net.neoforged.neoforge.event.GrindstoneEvent.OnTakeItem(access, player, top, ItemStack.EMPTY, 5);
+
+        assertDoesNotThrow(() -> listener.onGrindstoneTake(event));
+    }
+
+    @Test
+    void testGrindstoneTakeClientSideIgnored() {
+        Player player = createMockPlayer(true);
+        net.minecraft.world.inventory.ContainerLevelAccess access =
+                net.minecraft.world.inventory.ContainerLevelAccess.create(player.level(), net.minecraft.core.BlockPos.ZERO);
+        net.neoforged.neoforge.event.GrindstoneEvent.OnTakeItem event =
+                new net.neoforged.neoforge.event.GrindstoneEvent.OnTakeItem(
+                        access, player, new ItemStack(Items.DIAMOND_SWORD), ItemStack.EMPTY, 5);
+
+        listener.onGrindstoneTake(event);
+        verifyNoInteractions(mockObservationService);
+    }
 }

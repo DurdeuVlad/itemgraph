@@ -49,12 +49,16 @@ public abstract class GrindstoneResultSlotMixin {
         }
         double[] position = {player.getX(), player.getY(), player.getZ()};
         String[] level = {player.level().dimension().location().toString()};
+        // ContainerLevelAccess.evaluate() wraps the BiFunction's return in
+        // Optional.of(...), which throws NPE on a null return and aborts this
+        // listener mid-dispatch - the return value is unused, any non-null
+        // sentinel is enough.
         menu.itemgraph$getAccess().evaluate((lvl, pos) -> {
             position[0] = pos.getX();
             position[1] = pos.getY();
             position[2] = pos.getZ();
             level[0] = lvl.dimension().location().toString();
-            return null;
+            return Boolean.TRUE;
         });
         // The result slot's onTake clears the inputs; the output stack the
         // player receives is passed as the argument and is fully observable.

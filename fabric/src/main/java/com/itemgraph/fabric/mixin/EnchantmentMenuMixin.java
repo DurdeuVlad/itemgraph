@@ -84,12 +84,16 @@ public abstract class EnchantmentMenuMixin {
         }
         double[] position = {player.getX(), player.getY(), player.getZ()};
         String[] level = {player.level().dimension().location().toString()};
+        // ContainerLevelAccess.evaluate() wraps the BiFunction's return in
+        // Optional.of(...), which throws NPE on a null return and aborts this
+        // listener mid-dispatch - the return value is unused, any non-null
+        // sentinel is enough.
         ((EnchantmentMenuAccessor) this).itemgraph$getAccess().evaluate((lvl, pos) -> {
             position[0] = pos.getX();
             position[1] = pos.getY();
             position[2] = pos.getZ();
             level[0] = lvl.dimension().location().toString();
-            return null;
+            return Boolean.TRUE;
         });
         TransformationCapture.submit("ENCHANTING",
                 player.getUUID().toString(), player.getGameProfile().getName(),

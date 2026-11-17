@@ -6,6 +6,29 @@ The project follows a simple pre-1.0 development changelog model.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-11-17
+
+### Fixed
+
+- **Grindstone/smithing/enchanting item duplication exploit (both loaders):**
+  `TransformationEventListener.onGrindstoneTake` (NeoForge) and the NeoForge
+  `SmithingMenuMixin`, Fabric `EnchantmentMenuMixin`, `GrindstoneResultSlotMixin`,
+  and `SmithingMenuMixin` all called `ContainerLevelAccess.evaluate((lvl, pos)
+  -> { ...; return null; })` to read the station's position for audit evidence.
+  Vanilla's real `ContainerLevelAccess` implementation wraps that return value
+  in `Optional.of(...)`, not `Optional.ofNullable(...)`, so the `null` return
+  threw a `NullPointerException` on every single grindstone take (and every
+  smithing/enchanting use) once ItemGraph 0.4.0 shipped grindstone recording.
+  On NeoForge that exception propagated out through
+  `CommonHooks.onGrindstoneTake` and `EventBus.post()`, aborting
+  `GrindstoneMenu$4.onTake()` before vanilla's own post-take slot consumption
+  ran — letting a player take a disenchanted copy of an item without the
+  original ever being consumed. All five call sites now return a non-null
+  sentinel (`Boolean.TRUE`); the return value was never otherwise used.
+  Regression-tested against a real `ContainerLevelAccess.create(...)` instance
+  (not a mock) so the test exercises the exact `Optional.of` contract that
+  broke in production.
+
 ## [0.4.0] — 2026-10-17
 
 ### Added

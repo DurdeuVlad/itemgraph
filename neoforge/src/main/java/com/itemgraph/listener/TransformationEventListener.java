@@ -195,12 +195,19 @@ public class TransformationEventListener {
         String[] level = {player.level().dimension().location().toString()};
         var access = event.getContainerAccess();
         if (access != null) {
+            // ContainerLevelAccess's evaluate() wraps the BiFunction's return in
+            // Optional.of(...), not Optional.ofNullable(...) - returning null here
+            // throws inside Optional.of and aborts this listener mid-dispatch,
+            // which in turn aborts NeoForge's GrindstoneEvent.OnTakeItem post(),
+            // preventing vanilla's own post-event slot consumption from running
+            // (observed as a grindstone item duplication exploit). The return
+            // value itself is unused here; any non-null sentinel is enough.
             access.evaluate((lvl, pos) -> {
                 position[0] = pos.getX();
                 position[1] = pos.getY();
                 position[2] = pos.getZ();
                 level[0] = lvl.dimension().location().toString();
-                return null;
+                return Boolean.TRUE;
             });
         }
         JsonObject extra = new JsonObject();
